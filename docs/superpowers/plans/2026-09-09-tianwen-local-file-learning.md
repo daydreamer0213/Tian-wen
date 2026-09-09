@@ -92,6 +92,7 @@ export interface ConversationTaskFileUnavailable {
 }
 export interface ConversationFileResult {
   readonly schemaVersion: 'tianwen.conversation-file-result.v1'
+  readonly outputKind: 'files' | 'chat'
   readonly inputsDigest: Sha256Digest
   readonly captureSeq: number
   readonly outputPaths: readonly string[]
@@ -99,6 +100,7 @@ export interface ConversationFileResult {
 }
 export interface ConversationFileMaterial {
   readonly schemaVersion: 'tianwen.conversation-file-material.v1'
+  readonly outputKind: 'files' | 'chat'
   readonly cwd: string
   readonly entries: readonly ConversationFileEntry[]
   readonly outputPaths: readonly string[]
@@ -113,13 +115,18 @@ once per case-insensitive path; repeated reads/writes never replace a preimage.
 The existing private conversation-learning event stores these records; do not
 expose them as public ledger events. The domain validates capture timing, unique
 path/call IDs, total count/bytes, final snapshot exact path coverage and digest,
-nonempty output subset, completion status and local-files admission. All original
+output-kind/output-subset compatibility, completion status and local-files admission. All original
 record shapes and hashes remain unchanged when new fields are absent.
 
-Add `local-files` to the admission mode enum and instructions: only tasks whose
-required effects are bounded local text-file results, without running commands,
-tests, network calls or other external effects. It requires no new user fields.
-Actual native operations decide captured paths, not a model-supplied path list.
+Add `local-files` to the admission mode enum and instructions: bounded local
+text-file work without commands, tests, network calls or other external effects.
+Only local-files admission requires `fileOutputKind: 'files' | 'chat'`, frozen
+before the answer. `files` means an actual file deliverable; `chat` means reading
+local files to answer in chat. Other modes omit this field, and historical
+records keep their original shapes/hashes. The native schema may make the new
+field optional syntactically, but the parser enforces this exact mode-dependent
+rule; never manufacture a default after seeing the answer. No new user fields
+are required. Actual native operations decide captured paths, not a model path list.
 
 Runtime service `TianwenConversationFileObserverService` exposes
 `takeResult(taskId: string): ConversationFileResult | undefined`. It observes
@@ -132,6 +139,8 @@ Concurrent first reads must share the first capture, not append conflicting
 preimages. A work tool outside those native file tools makes the file receipt
 unavailable. Treat Code Mode/composite execution as unsupported for this first
 contract rather than silently overlooking nested effects.
+For a pre-admitted `chat` file task, only actual native read calls are supported;
+write/edit makes learning evidence unavailable while ordinary execution continues.
 Check the task's current consent revision before capture and again before
 appending newly read content. Consent withdrawal discards pending results and
 prevents further capture; it must not interrupt the user's authorized task.
@@ -170,10 +179,19 @@ an actual allowed write retains original bytes while changing the real file,
 and a following turn cannot change the preceding task's captured final content.
 
 `parseConversationFileMaterial` is strict data-only validation: exact fields,
-schema, nonblank absolute cwd, existing bounded entry parser, and a nonempty
-unique output subset using the exact canonical entry paths. It never touches
+schema, outputKind, nonblank absolute cwd, and a nonempty bounded entry list.
+`files` requires a nonempty unique output subset using exact canonical entry
+paths. `chat` requires outputPaths to be empty and at least one non-null input;
+native binding additionally requires at least one real approved successful read
+whose first preimage was captured. No read, failed read, guessed path or capture
+alone is not sufficient. The parser itself never touches
 the filesystem. Native recovery additionally proves that cwd is the recorded
 task root; a synthetic case will have this root supplied by the host in Task 3.
+
+The original `files` request cannot become `chat` merely because the model failed
+to produce a file. Add RED for genuine read-to-chat material, no/failed read,
+chat-with-write exclusion and frozen-kind mismatch, in addition to the file-write
+tests. Real later edits must never rewrite the frozen read input after restart.
 
 ## Task 3: Real native replica execution and persisted output proof
 
@@ -199,12 +217,27 @@ frozen exact entry set; write/edit only exact output paths. Unknown, nested,
 escalated or outside-replica calls are denied, not redirected. Preserve original
 native permission checks. Use a modest finite native request/tool bound plus
 cancellation so a failed file operation cannot loop indefinitely.
+For outputKind chat, expose only native read and deny all write/edit; require
+actual successful input reading rather than a claim of having read it. For files,
+retain read/write/edit with its nonempty output path set. No cross-kind fallback.
 
 The single-task Agent must have no parent conversation seed, no other Session
 access, the exact requested native model configuration on every request, and
 normal cancellation/disposal. An actual completed native turn is required;
 assistant text alone does not create a file success. Capture final entries
 from the replica's exact frozen set after the owned single turn stops.
+
+Reuse the public `@deepseek-ai/dsh-subagent` composition exports: capture delegated
+policy synchronously before the first await; `resolveChildDepth`,
+`resolveChildAgentOptions`, `childSessionMeta` (override only cwd with replica),
+then `appendDelegatedPolicyOverrides` and `applyChildComposition` in unpublished
+setup. The latter joins the parent's live preset before applying the narrow
+read/write/edit mask and persona. A bare agents.create can otherwise see no
+production preset tools, even when a root-mounted test harness passes. These
+public helpers also preserve the native never-ask delegation policy; do not
+copy their internals or invent an approval wrapper. Test with agent-scoped
+preset composition as well as ordinary native file calls. Use exported
+`finalAssistantOutput` and keep only visible text for the final answer.
 
 Append one host-only non-surface `tianwen/conversation-file-trial-result` Session
 event after the completed turn, then flush and calculate sessionDigest. Its
@@ -231,11 +264,12 @@ validate the absolute child target before cleanup and never delete its parent.
 Files: existing Evolution guidance/domain/ledger modules, guidance loop,
 observer, audited review/material/feedback modules and native integration tests.
 
-Study mode is optional `evaluationMode: 'local-files'`; absence retains the
+Study mode is optional `evaluationMode: 'local-files'`, with required
+`fileOutputKind: 'files' | 'chat'` for that mode; absence retains the
 historical text contract and no default field is inserted into parsed objects.
 Existing whole-body studyId and materialDigest then bind the mode and initial
 file contents automatically. Both loop selection and Evolution source validation
-must require all three sources to match the frozen mode, complete file material,
+must require all three sources to match the frozen mode and outputKind, complete file material,
 the same family/model/parent/consent/quality and existing support rules.
 
 Generated adjacent/holdout file cases contain bounded initial entries and exact
@@ -245,12 +279,12 @@ input-digest semantics remain unchanged; file input identity includes normalized
 request text and initial file contract so different real inputs are not mistaken
 for duplicate requests. No missing file case may silently fall back to text.
 
-Use `fileRules?: Partial<Record<ConversationFamily, string>>` alongside existing
+Use `fileRules?: Partial<Record<ConversationFamily, Partial<Record<'files' | 'chat', string>>>>` alongside existing
 Snapshot.rules; do not materialize absent maps. Old text snapshots/hashes remain
-identical. A file candidate only changes its selected family in fileRules; a text
+identical. A local-files candidate only changes its selected family/outputKind in fileRules; a text
 candidate only changes its selected family in rules. All other map entries and
 absence/presence remain fixed. Centralize mode-aware lookup; local-files has no
-fallback to text rules and external/subjective receive no unevaluated rule. File
+fallback to text or the other outputKind and external/subjective receive no unevaluated rule. File
 activation must preserve the independently tested text rule. Keep one existing
 snapshot/version chain, not two new stores or independent version systems.
 
@@ -262,7 +296,9 @@ the same frozen input and exact output. Neither recovery nor a retry reads the
 current replica to reconstruct historical proof.
 
 For original-result and method-study projection, original file preimages are
-sources and newly produced content is answer. Do not project post-write readback
+sources and contents of declared outputPaths plus the assistant reply are answer.
+Unchanged input-only files are not additional answer units; chat has no file
+answer units. Do not project post-write readback
 or write success tool text as factual support for that output. Host-confirmed
 file existence is narrow evidence of file existence, never of its asserted facts.
 Keep unchanged v6 claim semantics and separate two-reviewer consensus. A missing

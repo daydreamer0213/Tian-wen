@@ -12,7 +12,8 @@ not confined to chat text. Tianwen owns evidence capture, attribution, compariso
 and future-method governance; DSH still owns execution and native tools.
 
 The first complete increment covers bounded local UTF-8 file work using DSH's
-native read/write/edit tools. It does not claim to verify arbitrary shell
+native tools: read-only input-to-chat tasks as well as read/write/edit file
+deliverables. It does not claim to verify arbitrary shell
 commands, code-test execution, websites, remote transactions or subjective
 satisfaction. These remain explicit unsupported evidence modes, not successful
 text tasks. This boundary is a first increment, not a reduction of the overall
@@ -36,10 +37,15 @@ arguments. `agents.create` supports `meta.cwd` and `setup`; one-shot
 native Agent creation, not loosen the existing one-shot's tool allowlist.
 Native `dsh-tool-fs` supplies read/write/edit. No new file tool implementation,
 Agent loop, database, scheduler or Python verifier is introduced.
+Use DSH's exported child composition/delegated-policy helpers with native Agent
+creation: they join the parent's live preset, retain lineage and pin child
+approval to never. Setting cwd alone does not recreate this native composition.
 
 ## Capture and authority
 
-Admission distinguishes local-file-only deliverables before the main answer.
+Admission distinguishes local-file tasks and their delivery kind before the main
+answer: `files` requires file deliverables, while `chat` reads files for a chat
+answer. The output kind cannot be reassigned after a missing file result.
 The observer does not ask the user for a path packet and does not independently
 read model-guessed files. Observe actual allowed native file operations instead:
 before the first access to each path, capture its existing UTF-8 content or its
@@ -69,6 +75,11 @@ new file content is the answer being checked, never evidence supporting itself.
 Assistant claims and successful tool return codes alone cannot establish that
 the deliverable satisfies the request. Missing required files remain failures
 or unknowns, never silently replaced by the assistant's chat response.
+Read-only file-to-chat tasks may have an empty output-path set only with a
+nonempty frozen input set and a verified actual authorized successful native
+read. Failed reads, guessed paths or a capture alone do not qualify. Any write
+in a read-only task makes that learning material unavailable, without stopping
+the user's ordinary task. Its later trial exposes read only.
 
 ## Replay and independent evaluation
 
@@ -78,7 +89,8 @@ workspace/family/parent/model/consent/quality matching and source-pair deduplica
 Do not mix incompatible text-only and file-replay contracts in one study.
 Keep evaluated text and file methods in separate optional maps within the
 existing guidance snapshot; never overwrite or cross-apply a method that has
-only been evaluated in the other mode. Historical snapshot shapes stay exact.
+only been evaluated in the other mode or output kind. File rules are separated
+by family and files/chat output kind. Historical snapshot shapes stay exact.
 
 Each file trial receives an independently seeded temporary replica containing
 only frozen preimages, including original absence of output files. The model
