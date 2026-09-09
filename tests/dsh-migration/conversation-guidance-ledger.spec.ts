@@ -111,7 +111,7 @@ function fileOpening(tasks: readonly [ConversationTask, ConversationTask, Conver
   const { kind: _kind, studyId: _id, ...base } = opening(tasks, 'first', assessments)
   const body: GuidanceStudyBody = { ...base, evaluationMode: 'local-files', fileOutputKind: 'files', cases: base.cases.map(item => {
     if (!('prompt' in item)) return item
-    const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const, cwd: 'D:/DevData/tianwen-conversation-tests/frozen', entries: [{ path: 'pilot.txt', content: 'pilot source' }], outputPaths: ['pilot.txt'] }
+    const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const, cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', entries: [{ path: 'pilot.txt', content: 'pilot source' }], outputPaths: ['pilot.txt'] }
     const material = { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files }
     return { id: item.id, kind: item.kind, ...material, inputDigest: guidanceInputDigest(item.prompt, files), materialDigest: sha256(material) }
   }) }

@@ -251,3 +251,75 @@ releases or large cleanup were performed. This report establishes implementation
 and focused deterministic integration evidence, not real-model product acceptance.
 Root owns the independent correctness/scope gate and all Git work on the final
 stable file set.
+
+## Task 4 fix round 1/5: platform-appropriate fixture paths
+
+Finding: the four new fixture locations used Windows drive paths unconditionally;
+`parseConversationFileMaterial` checks platform-native `isAbsolute`, so POSIX
+execution rejects their cwd before the intended test behavior is exercised.
+This fixes the Important item from `task-4-gate-findings.md`.
+
+Changed only the four named tests and this report:
+
+- `conversation-claim-review.spec.ts`, `conversation-guidance-ledger.spec.ts`, and
+  `conversation-guidance-files.spec.ts`: fixture cwd now selects
+  `D:/DevData/tianwen-conversation-tests/frozen` on Windows or
+  `/tmp/tianwen-conversation-tests/frozen` otherwise.
+- `conversation-file-learning.spec.ts`: selects the corresponding platform base
+  and creates its unique child with `mkdtempSync(join(base, 'file-learning-'))`.
+  Windows generated data remains on D:. No production, CI, or Task 3 executor
+  edits; no staging or commits.
+
+Pre-fix POSIX evidence was obtained by reading the actual four test files:
+
+```powershell
+& D:/hermes/node/node.exe --input-type=module -e "import { posix } from 'node:path'; import { readFileSync } from 'node:fs'; const names = ['conversation-claim-review.spec.ts','conversation-guidance-ledger.spec.ts','conversation-guidance-files.spec.ts','conversation-file-learning.spec.ts']; for (const name of names) { const text = readFileSync('tests/dsh-migration/' + name, 'utf8'); const match = text.match(/(?:cwd: |mkdirSync\()'([^']*D:\/DevData[^']*)'/); const value = match?.[1]; console.log(JSON.stringify({file:name,path:value,posixAbsolute:value === undefined ? null : posix.isAbsolute(value)})); }"
+```
+
+Output (exit 0):
+
+```text
+{"file":"conversation-claim-review.spec.ts","path":"D:/DevData/tianwen-conversation-tests/frozen","posixAbsolute":false}
+{"file":"conversation-guidance-ledger.spec.ts","path":"D:/DevData/tianwen-conversation-tests/frozen","posixAbsolute":false}
+{"file":"conversation-guidance-files.spec.ts","path":"D:/DevData/tianwen-conversation-tests/frozen","posixAbsolute":false}
+{"file":"conversation-file-learning.spec.ts","path":"D:/DevData/tianwen-conversation-tests","posixAbsolute":false}
+```
+
+A separate Windows Node process then ran the actual existing material parser
+with its imported `isAbsolute` bound to POSIX semantics, asserting rejection of
+the old path and acceptance of the corrected POSIX path. This is a path-contract
+probe, not Linux suite execution. The first probe overwrote the Windows alias
+too (`path === path.win32` on Windows); the final probe preserves the Windows
+function before installing POSIX semantics, with no files changed by the probe.
+
+```powershell
+& D:/hermes/node/node.exe --input-type=module -e "import path from 'node:path'; import { syncBuiltinESMExports } from 'node:module'; import assert from 'node:assert/strict'; const windowsIsAbsolute = path.win32.isAbsolute; path.isAbsolute = path.posix.isAbsolute; syncBuiltinESMExports(); const { parseConversationFileMaterial } = await import('./packages/tianwen-evolution/dist/conversation-files.js'); const material = cwd => ({ schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd, entries: [{ path: 'out.txt', content: null }], outputPaths: ['out.txt'] }); assert.throws(() => parseConversationFileMaterial(material('D:/DevData/tianwen-conversation-tests/frozen')), /identity/); assert.equal(parseConversationFileMaterial(material('/tmp/tianwen-conversation-tests/frozen')).cwd, '/tmp/tianwen-conversation-tests/frozen'); assert.equal(path.posix.isAbsolute(path.posix.join('/tmp/tianwen-conversation-tests', 'file-learning-unique')), true); assert.equal(windowsIsAbsolute(path.win32.join('D:/DevData/tianwen-conversation-tests', 'file-learning-unique')), true); console.log('POSIX path-contract probe in Windows Node: old cwd rejected; corrected POSIX cwd parsed; Windows and POSIX native fixture roots are absolute. No Linux suite was executed.');"
+```
+
+Output (exit 0):
+
+```text
+POSIX path-contract probe in Windows Node: old cwd rejected; corrected POSIX cwd parsed; Windows and POSIX native fixture roots are absolute. No Linux suite was executed.
+```
+
+Focused covering Windows run:
+
+```powershell
+& D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-claim-review.spec.ts tests/dsh-migration/conversation-guidance-ledger.spec.ts tests/dsh-migration/conversation-guidance-files.spec.ts tests/dsh-migration/conversation-file-learning.spec.ts
+```
+
+Output (exit 0):
+
+```text
+Test Files  4 passed (4)
+     Tests  108 passed (108)
+  Start at  14:33:19
+  Duration  42.52s (transform 1.75s, setup 0ms, import 3.43s, tests 37.83s, environment 1ms)
+```
+
+Self-review: all four reported unconditional drive paths now select by platform;
+Windows storage remains on D:, and the native fixture uses a platform-native
+join for its unique child. Linux execution was not performed: root separately
+found only the docker-desktop WSL registration and an unavailable Docker daemon,
+and did not start or install either runtime. Existing Linux CI remains the actual
+Linux execution gate. Status: DONE, stable and ready for root to commit/review.

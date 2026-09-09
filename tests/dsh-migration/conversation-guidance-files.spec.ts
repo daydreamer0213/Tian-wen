@@ -5,7 +5,7 @@ import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import type { ConversationFileMaterial } from '../../packages/tianwen-evolution/src/conversation-files.js'
 
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
-const files: ConversationFileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd: 'D:/DevData/tianwen-conversation-tests/frozen', entries: [{ path: 'source.txt', content: 'Original facts.' }, { path: 'answer.txt', content: null }], outputPaths: ['answer.txt'] }
+const files: ConversationFileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', entries: [{ path: 'source.txt', content: 'Original facts.' }, { path: 'answer.txt', content: null }], outputPaths: ['answer.txt'] }
 const parent = { ...baselineGuidanceSnapshot('file-domain'), rules: { writing: 'Preserve text guidance.' }, fileRules: { writing: { chat: 'Preserve file chat guidance.' } } }
 function opening(): GuidanceStudyOpened {
   const body: GuidanceStudyBody = { scopeKey: parent.scopeKey, family: 'writing', failureCategory: 'source-fidelity', consentRevision: 1,

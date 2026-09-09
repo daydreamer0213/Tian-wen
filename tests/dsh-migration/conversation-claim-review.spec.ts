@@ -26,7 +26,7 @@ const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (tex
 })
 
 describe('claim evidence projection', () => {
-  const fileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: 'D:/DevData/tianwen-conversation-tests/frozen', outputKind: 'files', entries: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+  const fileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', outputKind: 'files', entries: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
   const fileResult = (content: string | null) => { const output = { answer: '', files: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content }] }; return { ...output, outputDigest: sha256(output) } }
   it('projects preimages as sources and only declared final files as answers with path membership', () => {
     const evidence = projectClaimEvidence({ task: { prompt: 'Write the supplied fact.', files: fileMaterial }, answer: '', fileResult: fileResult('Unsupported invention.') })

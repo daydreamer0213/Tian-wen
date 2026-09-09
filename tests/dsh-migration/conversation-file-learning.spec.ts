@@ -34,8 +34,9 @@ const materialOf = (request: GenerateOptions) => {
 }
 
 it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const)('uses actual isolated native files through natural review and ten-arm study: %s', async scenario => {
-  mkdirSync('D:/DevData/tianwen-conversation-tests', { recursive: true })
-  const root = mkdtempSync('D:/DevData/tianwen-conversation-tests/file-learning-')
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'file-learning-'))
   const evolutionRoot = join(root, 'evolution')
   const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const recover = scenario.startsWith('recover'); const withSource = scenario.includes('source'); const sourceAfter = scenario.endsWith('after')
   const definition = { name: 'file-scope-reference', provider: 'owned-test-fixture', source: 'bundled', description: 'Scope reference', invocation: { modelInvocable: true, userInvocable: true }, content: 'Preserve source scope in a file.' }
