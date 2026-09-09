@@ -34,7 +34,7 @@ const parallelCalls = (calls: readonly { readonly id: string, readonly name: str
 ]
 
 async function mount(script: Parameters<typeof mountPersistentHarness>[1]) {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-observer-')); roots.push(root)
   const harness = await mountPersistentHarness(join(root, 'sessions'), script)
@@ -173,7 +173,7 @@ it('requires a successful read for chat evidence and excludes chat tasks that wr
 })
 
 it('rejects an out-of-root capture without blocking the approved native write', async () => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const outside = mkdtempSync(join(base, 'file-observer-outside-')); roots.push(outside)
   const target = join(outside, 'outside.md')

@@ -12,6 +12,7 @@ import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { recoverConversationJudgmentRequest, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -28,6 +29,15 @@ const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (tex
 describe('claim evidence projection', () => {
   const fileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', outputKind: 'files', entries: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
   const fileResult = (content: string | null) => { const output = { answer: '', files: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content }] }; return { ...output, outputDigest: sha256(output) } }
+  it('never promotes ancillary methods or locations to quotable factual source IDs', () => {
+    const task = { request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Write the supplied fact.' }] })],
+      context: [], files: fileMaterial, ancillaryContext: { schemaVersion: 'tianwen.file-ancillary-context.v1',
+        methods: [{ definition: { content: 'METHOD_FACT_CANARY' } }], positiveLocations: [{ path: 'input.txt', lines: [1] }] } }
+    const withContext = projectClaimEvidence({ task, answer: '', fileResult: fileResult('Original fact.') })
+    const { ancillaryContext: _ancillary, ...plain } = task
+    expect(withContext).toEqual(projectClaimEvidence({ task: plain, answer: '', fileResult: fileResult('Original fact.') }))
+    expect(conversationEvidenceTexts(task as never, ['Original fact.'])).toEqual(['Write the supplied fact.', 'Original fact.', 'Original fact.'])
+  })
   it('projects preimages as sources and only declared final files as answers with path membership', () => {
     const evidence = projectClaimEvidence({ task: { prompt: 'Write the supplied fact.', files: fileMaterial }, answer: '', fileResult: fileResult('Unsupported invention.') })
     expect(evidence.items.map(item => ({ role: item.role, text: item.text, filePath: item.filePath, fileStage: item.fileStage }))).toEqual([
@@ -198,7 +208,7 @@ describe('claim audit validation', () => {
 })
 
 it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled', 'before-first', 'before-second'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-review-')); roots.push(root)
   const originalFeedback = { source: { kind: 'native', sessionId: 'old-feedback-session', sessionLifecycleFingerprint: sha256('old-feedback-lifecycle'), messageId: 'old-answer', feedbackVersion: 'v1', feedbackFingerprint: sha256('negative: raw marker') }, rating: 'negative' as const, note: 'RAW FEEDBACK ONLY: do not reverse the actor or erase the exception.' }
   const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [], qualityContract: conversationQualityContract(),

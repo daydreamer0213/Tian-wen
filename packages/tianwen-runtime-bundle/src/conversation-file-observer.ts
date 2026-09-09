@@ -4,6 +4,8 @@ import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/ds
 import { parseConversationFileEntries, parseConversationFileResult, sha256, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationFilePath, readConversationFile } from './conversation-file-material.js'
+import { ConversationFileAncillaryCapture, isFileAncillaryTool, verifyConversationFileAncillary, type ConversationFileAncillaryConfig } from './conversation-file-ancillary.js'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationFileObserver: TianwenConversationFileObserverService }
@@ -17,6 +19,7 @@ interface CaptureState {
   readonly captures: Map<string, Promise<void>>
   readonly outputPaths: Map<string, string>
   readonly successfulReads: Set<string>
+  readonly native: ConversationFileAncillaryCapture
   unavailable: boolean
   revoked: boolean
   final?: ConversationFileResult
@@ -34,13 +37,26 @@ function nativePath(exec: ToolDispatchExecution): string | undefined {
 }
 
 export class TianwenConversationFileObserverService extends Service {
-  static inject = ['agents', 'tools', 'tianwenEvolution'] as const
+  static inject = ['agents', 'tools', 'sessions', 'tianwenEvolution'] as const
   private readonly states = new Map<string, CaptureState>()
 
-  constructor(ctx: Context) { super(ctx, 'tianwenConversationFileObserver') }
+  constructor(ctx: Context, private readonly config: ConversationFileAncillaryConfig = {}) { super(ctx, 'tianwenConversationFileObserver') }
+
+  verifyAncillary(task: ConversationTask, cwd: string, events: readonly SessionEvent[], boundary: number): void {
+    verifyConversationFileAncillary(task, cwd, events, boundary, this.config)
+  }
 
   protected [Service.init](): void {
     const offExecute = this.ctx.on('tools/execute', async (exec, next) => this.observe(exec, next))
+    // Native emit does not await listeners. Retain the frozen final value now.
+    const offResult = this.ctx.on('tools/result', (exec, result) => {
+      if (exec.agent === undefined || !isRoot(exec.agent)) return
+      // Match call identity rather than a mutable current-turn property.
+      const call = exec.agent.session.events.findLast(event => event.type === 'tool/call' && String(event.data.callId) === String(exec.callId))
+      const current = call?.type === 'tool/call' ? this.ctx.tianwenEvolution.listConversationTasks(String(exec.agent.session.id))
+        .find(item => item.source.turn === call.data.turn && item.completion === undefined) : undefined
+      if (current !== undefined) this.states.get(current.source.taskId)?.native.result(exec, result)
+    })
     const offStopping = this.ctx.on('agent/turn-stopping', async ({ agent, turn }) => {
       if (!isRoot(agent)) return
       const task = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id)).find(item => item.source.turn === turn)
@@ -55,7 +71,7 @@ export class TianwenConversationFileObserverService extends Service {
         if (!this.authorized(state.consentRevision)) { state.revoked = true; delete state.final }
       }
     })
-    this.ctx.effect(() => () => { offExecute(); offStopping(); offConsent(); this.states.clear() }, 'tianwen-conversation-file-observer.dispose')
+    this.ctx.effect(() => () => { offExecute(); offResult(); offStopping(); offConsent(); this.states.clear() }, 'tianwen-conversation-file-observer.dispose')
   }
 
   takeResult(taskId: string): ConversationFileResult | undefined {
@@ -80,7 +96,8 @@ export class TianwenConversationFileObserverService extends Service {
     let state = this.states.get(task.source.taskId)
     if (state === undefined) {
       state = { taskId: task.source.taskId, consentRevision: task.source.consentRevision, cwd, outputKind,
-        captures: new Map(), outputPaths: new Map(), successfulReads: new Set(), unavailable: false, revoked: false }
+        captures: new Map(), outputPaths: new Map(), successfulReads: new Set(), unavailable: false, revoked: false,
+        native: new ConversationFileAncillaryCapture(this.ctx, task, cwd, this.config) }
       this.states.set(task.source.taskId, state)
     }
     return { task, state }
@@ -92,6 +109,9 @@ export class TianwenConversationFileObserverService extends Service {
     const { task, state } = current
     delete state.final
     if (state.revoked || !this.authorized(state.consentRevision)) { state.revoked = true; return next() }
+    try { await state.native.prepare(exec) }
+    catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error) }
+    if (isFileAncillaryTool(exec.name)) return state.native.execute(exec, next)
     const supported = exec.name === 'read' || exec.name === 'write' || exec.name === 'edit'
     if (!supported || exec.parent !== undefined || String(exec.rootCallId) !== String(exec.callId)
       || state.outputKind === 'chat' && exec.name !== 'read') {
@@ -116,7 +136,7 @@ export class TianwenConversationFileObserverService extends Service {
     } catch (error) {
       this.unavailable(state, this.reason(error)); this.warn(error)
     }
-    const result = await next()
+    const result = await state.native.execute(exec, next)
     if (result.isError) this.unavailable(state, 'capture-interrupted')
     else if (exec.name === 'read') state.successfulReads.add(String(exec.callId))
     else if (path !== undefined) state.outputPaths.set(path.toLowerCase(), path)
@@ -145,6 +165,18 @@ export class TianwenConversationFileObserverService extends Service {
     const entries = parseConversationFileEntries(await Promise.all(inputs.map(entry => readConversationFile(state.cwd, entry.path))))
     const captureSeq = agent.session.events.at(-1)?.seq
     if (captureSeq === undefined) throw new Error('native file capture boundary is unavailable')
+    const current = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === task.source.taskId)!
+    const ancillary = await state.native.freeze(current, agent, captureSeq)
+    const fresh = ancillary.filter(record => !current.fileAncillary?.some(existing => sha256(existing) === sha256(record)))
+    if (fresh.length > 0) {
+      if (!await this.ctx.sessions.flush(agent.session)) throw new Error('native file ancillary durability listener is unavailable')
+      if (agent.session.events.at(-1)?.seq !== captureSeq) throw new Error('native file ancillary capture boundary changed')
+      for (const record of fresh) {
+        if (!this.authorized(state.consentRevision)) { state.revoked = true; return }
+        this.ctx.tianwenEvolution.recordConversationLearning(record)
+      }
+    }
+    if (!this.authorized(state.consentRevision)) { state.revoked = true; return }
     state.final = parseConversationFileResult({
       schemaVersion: 'tianwen.conversation-file-result.v1', outputKind: state.outputKind,
       inputsDigest: sha256(inputs), captureSeq,

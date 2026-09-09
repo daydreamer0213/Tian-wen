@@ -4,6 +4,8 @@ import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } 
 import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
+import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
+import { isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
   return events.flatMap(event => {
@@ -36,6 +38,7 @@ export interface ConversationTaskMaterial {
   readonly criteria: readonly string[]
   readonly qualityContract?: ConversationQualityContract
   readonly files?: ConversationFileMaterial
+  readonly ancillaryContext?: ConversationFileAncillaryContext
   /** Present only on fresh study material, never on the original task review. */
   readonly feedbackStandard?: {
     readonly assessmentId: string
@@ -91,10 +94,11 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (sha256(requests) !== source.requestDigest || requests.length !== source.userMessageIds.length) throw new Error('natural task original request drift')
   const context = conversationContext(saved.events, source.startSeq, source.materialProjection)
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
-  const files = recoverFiles(saved.meta.cwd, saved.events, task)
+  const files = recoverFiles(ctx, saved.meta.cwd, saved.events, task)
+  const ancillaryContext = files === undefined ? undefined : projectConversationFileAncillaryContext(task.fileAncillary ?? [], files.entries)
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
     ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }),
-    ...(files === undefined ? {} : { files }) }
+    ...(files === undefined ? {} : { files }), ...(ancillaryContext === undefined ? {} : { ancillaryContext }) }
 }
 
 function recordedToolPath(cwd: string, candidate: unknown): string | undefined {
@@ -105,13 +109,17 @@ function recordedToolPath(cwd: string, candidate: unknown): string | undefined {
   return child.split(sep).join('/')
 }
 
-function recoverFiles(cwd: string | undefined, events: readonly SessionEvent[], task: ConversationTask): ConversationFileMaterial | undefined {
+function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly SessionEvent[], task: ConversationTask): ConversationFileMaterial | undefined {
   const completion = task.completion
   const result = completion?.files
   const outputKind = task.admission?.decision?.fileOutputKind
   const inputs = task.fileInputs ?? []
   if (cwd === undefined || !isAbsolute(cwd) || completion === undefined || result === undefined
     || task.fileUnavailable !== undefined || outputKind !== result.outputKind || inputs.length === 0) return
+  if ((task.fileAncillary?.length ?? 0) > 0) {
+    const consent = ctx.get('tianwenEvolution')?.getLearningAnalysisConsent()
+    if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== task.source.consentRevision) return
+  }
   const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= completion.endSeq)
   const terminal = span.at(-1)
   const status = terminal?.type === 'turn/end'
@@ -125,6 +133,7 @@ function recoverFiles(cwd: string | undefined, events: readonly SessionEvent[], 
     || sha256(evidenceIds) !== sha256(completion.evidenceIds)) return
   const calls = span.flatMap(event => {
     if (event.type !== 'tool/call') return []
+    if (isFileAncillaryTool(event.data.name)) return []
     if (event.data.name !== 'read' && event.data.name !== 'write' && event.data.name !== 'edit') return [{ event, path: undefined }]
     let args: unknown
     try { args = JSON.parse(event.data.arguments) } catch { return [{ event, path: undefined }] }
@@ -132,6 +141,13 @@ function recoverFiles(cwd: string | undefined, events: readonly SessionEvent[], 
     return [{ event, path }]
   })
   if (calls.length === 0 || calls.some(call => call.path === undefined)) return
+  try {
+    const observer = ctx.get('tianwenConversationFileObserver')
+    if (observer === undefined) {
+      if (task.fileAncillary?.some(record => record.payload.tool === 'skill')) return
+      verifyConversationFileAncillary(task, cwd, span, result.captureSeq)
+    } else observer.verifyAncillary(task, cwd, span, result.captureSeq)
+  } catch { return }
   if (!span.some(event => event.seq === result.captureSeq) || calls.some(call => call.event.seq > result.captureSeq)) return
   const inputByPath = new Map(inputs.map(input => [input.path.toLowerCase(), input]))
   if (inputByPath.size !== inputs.length || calls.some(call => !inputByPath.has(call.path!.toLowerCase()))) return
@@ -140,7 +156,9 @@ function recoverFiles(cwd: string | undefined, events: readonly SessionEvent[], 
     if (first === undefined || first.path !== input.path || first.event.seq !== input.callSeq || String(first.event.data.callId) !== input.callId) return
   }
   const successful = (call: typeof calls[number]) => span.some(event => event.type === 'tool/result' && isAppendSurfaceEvent(event)
-    && event.seq > call.event.seq && String(event.data.message.source.callId) === String(call.event.data.callId)
+    && event.seq > call.event.seq && event.seq <= result.captureSeq
+    && event.sourceEventSeqs?.[0] === call.event.seq && event.data.turn === call.event.data.turn && event.data.step === call.event.data.step
+    && String(event.data.message.source.callId) === String(call.event.data.callId)
     && event.data.error === undefined && event.data.message.content[0].isError !== true)
   if (calls.some(call => !successful(call))) return
   const mutations = new Set(calls.filter(call => call.event.data.name === 'write' || call.event.data.name === 'edit').map(call => call.path!.toLowerCase()))

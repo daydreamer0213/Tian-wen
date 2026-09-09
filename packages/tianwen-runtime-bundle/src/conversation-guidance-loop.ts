@@ -190,7 +190,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const parentRule = guidanceRule(study.opened.parentSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind)
     const guidance = formal ? guidanceRule(arm.role === 'baseline' ? study.opened.parentSnapshot : study.candidate!.candidateSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind)
       : arm.arm === 'control' ? parentRule : [parentRule, study.exploration!.intent.request.proposal.temporaryInstruction].filter(value => value !== undefined).join('\n\n')
-    const worker = 'request' in material ? { request: material.request, context: material.context, files: material.files } : { prompt: material.prompt, files: material.files }
+    const worker = 'request' in material ? { request: material.request, context: material.context, files: material.files,
+      ...(material.ancillaryContext === undefined ? {} : { ancillaryContext: material.ancillaryContext }) } : { prompt: material.prompt, files: material.files }
     return recoverConversationFileTrial(this.ctx, arm.executionProof, { receipt: retained.receipt, material: worker, callConfig,
       outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) })
   }
@@ -440,7 +441,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
           if (material.files === undefined || this.sourceConfig.evolutionRoot === undefined || !isAbsolute(this.sourceConfig.evolutionRoot)) throw new Error('source-unavailable')
           const replicaParent = join(this.sourceConfig.evolutionRoot, 'conversation-file-trials')
           await mkdir(replicaParent, { recursive: true })
-          return runConversationFileTrial(this.ctx, agent, { label: `Tianwen file trial ${studyOpened.studyId}`, callConfig, signal, material: { ...request, files: material.files }, ...(guidance === undefined ? {} : { guidance }), replicaParent,
+          return runConversationFileTrial(this.ctx, agent, { label: `Tianwen file trial ${studyOpened.studyId}`, callConfig, signal, material: { ...request, files: material.files,
+            ...('request' in material && material.ancillaryContext !== undefined ? { ancillaryContext: material.ancillaryContext } : {}) }, ...(guidance === undefined ? {} : { guidance }), replicaParent,
             retainReceipt: async receipt => { await this.assertCurrent(studyOpened, signal); evolution.recordConversationGuidance({ kind: 'study-file-trial-captured', studyId: studyOpened.studyId, materialDigest, target, receipt }) } })
         })() : await runConversationTrial(this.ctx, agent, { label: `Tianwen text trial ${studyOpened.studyId}`, callConfig, signal, material: request, ...(guidance === undefined ? {} : { guidance }) })
         await this.assertCurrent(studyOpened, signal)

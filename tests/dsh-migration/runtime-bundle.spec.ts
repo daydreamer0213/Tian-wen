@@ -99,6 +99,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/conversation-claim-review.ts',
     'src/conversation-file-material.ts',
     'src/conversation-file-observer.ts',
+    'src/conversation-file-ancillary.ts',
     'src/native-tool-observation.ts',
     'src/conversation-file-trial.ts',
     'src/explicit-correction-protocol.ts',
@@ -376,7 +377,7 @@ describe('CLI installed entry identity', () => {
   it.runIf(process.platform === 'win32')(
     'executes main through a pnpm-like Runtime Bundle junction',
     () => {
-      const fixtureBase = resolve('D:/DevData/tianwen-runtime-bundle-tests/cli-main-entry')
+      const fixtureBase = resolve(process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-runtime-bundle-tests/cli-main-entry')
       expect(isAbsolute(packageRoot)).toBe(true)
       mkdirSync(fixtureBase, { recursive: true })
       const fixtureRoot = mkdtempSync(join(fixtureBase, 'entry-'))
@@ -541,9 +542,9 @@ describe('@tianwen/runtime-bundle', () => {
   })
 
   it('executes the built runtime and mounts evidence and evolution', async () => {
-    const base = process.platform === 'win32'
+    const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32'
       ? 'D:/DevData/tianwen-runtime-bundle-tests/profiles'
-      : resolve('tmp/tianwen-runtime-bundle-tests/profiles')
+      : resolve('tmp/tianwen-runtime-bundle-tests/profiles'))
     mkdirSync(base, { recursive: true })
     const profileRoot = mkdtempSync(join(base, 'composition-'))
     const ctx = new Context()

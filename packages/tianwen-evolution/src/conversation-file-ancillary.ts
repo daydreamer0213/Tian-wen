@@ -20,8 +20,8 @@ export interface ConversationAncillaryProducer {
 }
 
 export type ConversationAncillaryPayload =
-  | { readonly tool: 'glob'; readonly root: string; readonly paths: readonly string[] }
-  | { readonly tool: 'grep'; readonly matches: readonly { readonly path: string; readonly lineNumber: number; readonly line: string }[] }
+  | { readonly tool: 'glob'; readonly root: string; readonly paths: readonly string[]; readonly nativeValueJson?: string }
+  | { readonly tool: 'grep'; readonly matches: readonly { readonly path: string; readonly lineNumber: number; readonly line: string }[]; readonly nativeValueJson?: string }
   | { readonly tool: 'skill'; readonly reference: ConversationSkillAdmission; readonly definition: Readonly<Record<string, unknown>> }
   | { readonly tool: 'pwsh'; readonly nativeReceiptJson: string; readonly nativeValueJson: string }
 
@@ -157,23 +157,24 @@ function parsePayload(value: unknown): ConversationAncillaryPayload {
     throw new TypeError('conversation file ancillary payload has invalid fields')
   }
   const tool = (value as Record<string, unknown>).tool
+  const nativeKeys = Object.hasOwn(value, 'nativeValueJson') ? ['nativeValueJson'] : []
   if (tool === 'glob') {
-    const input = exactObject(value, ['tool', 'root', 'paths'])
+    const input = exactObject(value, ['tool', 'root', 'paths', ...nativeKeys])
     const root = exactUtf8(input.root, 'root')
     if (!isAbsolute(root)) throw new TypeError('conversation file ancillary glob root must be absolute')
     const paths = exactArray(input.paths, ANCILLARY_RESULT_MAX_COUNT, 'glob path').map(parseMetadataPath)
     assertConsistentPaths(paths)
-    return { tool, root, paths }
+    return { tool, root, paths, ...(nativeKeys.length === 0 ? {} : { nativeValueJson: canonicalObjectJson(input.nativeValueJson, 'native value JSON') }) }
   }
   if (tool === 'grep') {
-    const input = exactObject(value, ['tool', 'matches'])
+    const input = exactObject(value, ['tool', 'matches', ...nativeKeys])
     const matches = exactArray(input.matches, ANCILLARY_RESULT_MAX_COUNT, 'grep match').map(value => {
       const match = exactObject(value, ['path', 'lineNumber', 'line'])
       return { path: parseMetadataPath(match.path), lineNumber: positiveInteger(match.lineNumber, 'line'),
         line: exactUtf8(match.line, 'line', true) }
     })
     assertConsistentPaths([...new Set(matches.map(match => match.path))])
-    return { tool, matches }
+    return { tool, matches, ...(nativeKeys.length === 0 ? {} : { nativeValueJson: canonicalObjectJson(input.nativeValueJson, 'native value JSON') }) }
   }
   if (tool === 'skill') {
     const input = exactObject(value, ['tool', 'reference', 'definition'])
@@ -212,7 +213,9 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
 }
 
 function splitNativeLines(content: string): readonly string[] {
-  return content.split(/\r\n|\n/u)
+  // ripgrep removes only a file-leading UTF-8 BOM before returning match lines.
+  // This comparison view never replaces captured content or its input digest.
+  return (content.startsWith('\uFEFF') ? content.slice(1) : content).split(/\r\n|\n/u)
 }
 
 export function parseConversationFileAncillaryContext(

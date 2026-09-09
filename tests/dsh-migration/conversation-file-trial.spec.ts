@@ -21,7 +21,7 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 
 async function mountTrial(script: Parameters<typeof mountPersistentHarness>[1], options: { readonly codePreset?: boolean, readonly sandboxPolicy?: boolean,
   readonly globalFileTools?: boolean, readonly presetToolAllow?: readonly string[] } = {}) {
-  const base = 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-trial-')); roots.push(root)
   const original = join(root, 'original'); const replicas = join(root, 'replicas')

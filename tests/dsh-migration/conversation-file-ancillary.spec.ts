@@ -64,6 +64,31 @@ function record(payload: Record<string, unknown>, change: Partial<AncillaryRecor
   }
 }
 const globRecord = record({ tool: 'glob', root: 'D:/fixture', paths: ['input.md', 'nested/readme.md'] })
+it('retains optional canonical native JSON in host glob/grep records without worker leakage or legacy drift', () => {
+  const legacy = record({ tool: 'glob', root: 'D:/fixture', paths: ['nested/readme.md'] })
+  expect(api.parseConversationTaskFileAncillary(legacy)).toEqual(legacy)
+  for (const native of [
+    record({ ...legacy.payload, nativeValueJson: '{"paths":["nested\\\\readme.md"],"root":"."}' }),
+    record({ tool: 'grep', matches: [{ path: 'input.md', lineNumber: 1, line: 'alpha' }], nativeValueJson: '{"matches":[{"line":"alpha","lineNumber":1,"path":"input.md"}]}' }),
+  ]) {
+    expect(api.parseConversationTaskFileAncillary(native)).toEqual(native)
+    expect(JSON.stringify(api.projectConversationFileAncillaryContext([native], files.entries) ?? null)).not.toContain('nativeValueJson')
+    for (const invalid of ['{ "paths":[]}', '[]', undefined]) expect(() => api.parseConversationTaskFileAncillary({ ...native,
+      payload: { ...native.payload, nativeValueJson: invalid } })).toThrow()
+    expect(() => api.parseConversationTaskFileAncillary({ ...native,
+      payload: { ...native.payload, nativeValueJson: JSON.stringify({ padding: 'x'.repeat(65536) }) } })).toThrow(/byte/u)
+  }
+})
+it('compares native leading BOM grep lines without changing the original input digest', () => {
+  const content = '\uFEFFfirst needle\r\nsecond \uFEFFneedle\n'
+  const evidence = record({ tool: 'grep', matches: [{ path: 'input.md', lineNumber: 1, line: 'first needle' },
+    { path: 'input.md', lineNumber: 2, line: 'second \uFEFFneedle' }] })
+  expect(api.projectConversationFileAncillaryContext([evidence], [{ path: 'input.md', content }])?.positiveLocations)
+    .toEqual([{ path: 'input.md', inputDigest: evolution.sha256({ path: 'input.md', content }), lines: [1, 2] }])
+  expect(() => api.projectConversationFileAncillaryContext([record({ tool: 'grep', matches: [
+    { path: 'input.md', lineNumber: 2, line: 'second needle' },
+  ] })], [{ path: 'input.md', content }])).toThrow(/line/u)
+})
 const grepRecord = record({ tool: 'grep', matches: [
   { path: 'input.md', lineNumber: 3, line: 'alpha' },
   { path: 'input.md', lineNumber: 1, line: 'alpha' },

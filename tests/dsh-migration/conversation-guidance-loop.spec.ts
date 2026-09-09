@@ -10,6 +10,7 @@ import { SessionId, SkillRegistry, createUserMessage, mountPersistentHarness, mo
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { apply as applyBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
+import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
@@ -38,7 +39,7 @@ const admission = { kind: 'task', objective: 'Summarize supplied facts', criteri
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
 it('forwards the actual explicit runtime environment and independent natural admissions', async () => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'bundle-config-'))
   const harness = await mountFeedbackHarness(join(root, 'sessions'), [])
   const plugin = vi.spyOn(harness.ctx, 'plugin')
@@ -46,6 +47,7 @@ it('forwards the actual explicit runtime environment and independent natural adm
   try {
     await applyBundle(harness.ctx, { evolutionRoot, conversationSkillSources: [] })
     expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, skillSources: [] })
+    expect(plugin).toHaveBeenCalledWith(TianwenConversationFileObserverService, { evolutionRoot, skillSources: [] })
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
     expect(harness.adapter.requests).toHaveLength(0)
   } finally { plugin.mockRestore(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
@@ -61,7 +63,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'
   const explored = scenario.includes('explored')
@@ -713,7 +715,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
 }, 30_000)
 
 it.each(['valid', 'valid-explored', 'valid-source-explored', 'valid-source-frozen-feedback', 'missing', 'tampered'] as const)('handles %s natural correction recovery without rewriting earlier met reviews', async recovery => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908' : '/tmp/tianwen-feedback-source-semantics'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908' : '/tmp/tianwen-feedback-source-semantics')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'feedback-loop-'))
   const guidance = 'Preserve the stated population boundary when summarizing numerical results.'
   const withSource = recovery.startsWith('valid-source')
@@ -978,7 +980,7 @@ it.each(['valid', 'valid-explored', 'valid-source-explored', 'valid-source-froze
 }, 30_000)
 
 it('keeps an accepted oversize natural feedback request exact and unavailable before a study call', async () => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908/new-fix-tests' : '/tmp/tianwen-feedback-source-semantics'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908/new-fix-tests' : '/tmp/tianwen-feedback-source-semantics')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'oversize-natural-feedback-'))
   const marker = 'OVERSIZE-NATURAL-DIRECT-FEEDBACK-MARKER:'
   // This remains below the admission-material limit with the short original
