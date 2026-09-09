@@ -1,0 +1,122 @@
+# Natural learning from actual local-file work
+
+Status: implementing the owner's 2026-09-09 instruction to continue the recommended
+product-gap repair and targeted real-model acceptance. This is not a completion
+or efficacy report. Baseline is c13bad79052541751907a105d72ac43d7a5cd3c4.
+
+## Product decision
+
+Ordinary users ask for work, including changes to files. Their verified results
+and attributable feedback must not be discarded merely because the answer is
+not confined to chat text. Tianwen owns evidence capture, attribution, comparison
+and future-method governance; DSH still owns execution and native tools.
+
+The first complete increment covers bounded local UTF-8 file work using DSH's
+native read/write/edit tools. It does not claim to verify arbitrary shell
+commands, code-test execution, websites, remote transactions or subjective
+satisfaction. These remain explicit unsupported evidence modes, not successful
+text tasks. This boundary is a first increment, not a reduction of the overall
+normal-use learning objective.
+
+## Alternatives and reuse
+
+1. Removing the `text` selection filter alone is insufficient: current trials
+   cannot perform file effects and would judge descriptions of work.
+2. A new generic executor/evaluator platform is unnecessary. Installed DSH
+   0.1.1-rc.2 already exposes Agent creation, native file tools, tool guards,
+   cancellation, persistence and final output.
+3. Selected: a narrow file-material adapter and replica execution, connected to
+   the existing task, study, exploration, source-reference, dual-review,
+   activation and rollback mechanisms.
+
+Installed public APIs were inspected locally: `dsh-tools` around-dispatch
+`tools/execute` observes an allowed call before its body; it must not modify
+arguments. `agents.create` supports `meta.cwd` and `setup`; one-shot
+`subagents.start` does not support changing cwd. File trials must therefore use
+native Agent creation, not loosen the existing one-shot's tool allowlist.
+Native `dsh-tool-fs` supplies read/write/edit. No new file tool implementation,
+Agent loop, database, scheduler or Python verifier is introduced.
+
+## Capture and authority
+
+Admission distinguishes local-file-only deliverables before the main answer.
+The observer does not ask the user for a path packet and does not independently
+read model-guessed files. Observe actual allowed native file operations instead:
+before the first access to each path, capture its existing UTF-8 content or its
+absence. Bind the first capture to the task and native call. A read followed by
+a write retains the original preimage, not the intermediate answer.
+
+Capture only regular files inside the task's recorded cwd; reject path escape,
+links/reparse-point ancestors, alternate streams/device paths, binary content,
+more than 8 paths or more than 32768 UTF-8 content bytes in one snapshot. Reading
+uses a bounded file handle and checks for changes during capture. Capture failure
+does not stop the user's task; it makes its file-learning material unavailable.
+
+Only actual native file tools are covered. Other work-tool effects, incomplete
+capture, missing durable initial evidence, interrupted tasks or files outside
+the root cannot acquire a replayable file receipt. Recovery must never read
+today's file and call it yesterday's input. Existing text and historical tasks
+retain their original material, identities and verdicts.
+
+At task completion, capture the actual files in the frozen access set and bind
+them to the completed native result. Original file input is source evidence;
+new file content is the answer being checked, never evidence supporting itself.
+Assistant claims and successful tool return codes alone cannot establish that
+the deliverable satisfies the request. Missing required files remain failures
+or unknowns, never silently replaced by the assistant's chat response.
+
+## Replay and independent evaluation
+
+Select only compatible sources with complete verified file material. Preserve
+the existing two distinct supports, independent successful counterexample,
+workspace/family/parent/model/consent/quality matching and source-pair deduplication.
+Do not mix incompatible text-only and file-replay contracts in one study.
+
+Each file trial receives an independently seeded temporary replica containing
+only frozen preimages, including original absence of output files. The model
+sees the original request/context and explicit source-to-replica path mapping,
+not old output, feedback criteria, expected answers, arm identity or other trials.
+Use a native Agent whose cwd is the replica. Restrict visible and executable
+tools to native read/write/edit, allow reads only from the frozen set, and writes
+only to recorded output paths. Deny other tools and permission escalation.
+Never rewrite tool arguments to make an out-of-scope request look permitted.
+
+Capture actual final replica files, native tool events, model configuration and
+persisted Session proof. Independent reviewers receive frozen original criteria,
+inputs and actual produced content, with no arm labels or candidate source text.
+The existing acceptance requirements remain; no skipped/unknown comparison may
+activate a method. Synthetic adjacent/holdout tasks are labelled synthetic and
+must exercise the same file contract. Exploration reuses this same executor.
+
+Replica paths use the configured project data root, not a new system-drive cache.
+Retain receipts and necessary bounded evidence; retire only exact owned replicas
+after capture. Windows arbitrary-command sandbox enforcement is partial, so this
+increment does not enable shell/network execution or claim OS-level isolation
+against another malicious host process swapping filesystem objects.
+
+## Acceptance, reuse and stop conditions
+
+Preserve R0–R10, K and both 022 actual episodes. Their unchanged proof remains
+valid, but none is relabelled as this increment's real file-learning proof.
+
+Engineering checks must distinguish actual missing/wrong files from a successful
+chat claim; preserve preimages; reject links, guessed/outside accesses, binary or
+oversized files; prevent baseline/candidate contamination and access to original
+outputs; bind recovered proof and exercise ordinary withdrawal/disablement.
+
+After implementation and focused review, freeze a bounded real-model protocol:
+ordinary natural inputs via the built-in browser, actual DeepSeek responses,
+real file effects and feedback. No scripted judgments or internal trigger calls.
+Track why each branch was or was not selected. Targeted exploration and source
+selection scenarios are legitimate controlled real-model tests, not guaranteed
+natural outcomes; an appropriate direct proposal can be valid without proving
+exploration. Diagnose a missed intended branch before revising a scenario.
+
+Prioritize actual new connections; do not rerun all historical trials. Reading
+external sources remains limited to the approved isolated environment and exact
+source admission. No Daily external-source permission is inferred. Text-method
+activation is not labelled executable-Skill promotion or stable future benefit.
+
+Full verification, exact-main CI, backups and ordinary Daily delivery remain
+separate later gates. No tags, package publication, shortcut-target deletion,
+credential relocation or broad cleanup is authorized by this increment.
