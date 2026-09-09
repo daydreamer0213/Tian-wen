@@ -207,6 +207,30 @@ The function creates one unique empty child per trial, seeds Task 1 preimages,
 uses a native Agent at that cwd, and returns answer, actual final file entries,
 output digest and persisted proof. Text trial APIs are unchanged.
 
+The shared caller contract is deliberately narrow:
+
+```ts
+type ConversationFileTrialMaterial =
+  | { readonly request: ConversationTaskMaterial['request']; readonly context: ConversationTaskMaterial['context']; readonly files: ConversationFileMaterial }
+  | { readonly prompt: string; readonly files: ConversationFileMaterial }
+interface ConversationFileTrialOutput {
+  readonly answer: string
+  readonly files: readonly ConversationFileEntry[]
+  readonly outputDigest: Sha256Digest
+}
+// run input: { label, material, guidance?, callConfig, signal, replicaParent }
+// run result: ConversationFileTrialOutput & { proof: ConversationJudgmentProof }
+// recover input after (ctx, proof): { material, guidance?, callConfig, outputDigest }
+// recover result: ConversationFileTrialOutput
+```
+
+`callConfig` is required for file execution and recovery. Recovery compares the
+expected complete worker material and optional guidance against the persisted
+native request, not just the receipt's self-declared digests. Runtime validation
+rejects extra worker-material fields rather than leaking review-only standards.
+It returns the recovered actual answer/files so the caller can bind both blind
+reviews to precisely that output. File trials never use structured_output.
+
 Worker material excludes criteria, feedback standards, original final outputs,
 arm labels and other trial answers. Provide an explicit original-cwd to replica
 mapping without mutating user text or tool arguments. Native read/write/edit
