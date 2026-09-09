@@ -422,8 +422,8 @@ narrow extension is finalized from the failing interleaving check, not speculati
 ## Task 5: Targeted real-model branches and delivery
 
 - [x] Update verification matrix with exact newly changed contracts and reused historical evidence before launching any model episode.
-- [ ] Freeze task inputs, preconditions, expected observable behavior, permitted alternative decisions and stop conditions in an E-backed isolated environment.
-- [ ] Use normal built-in-browser inputs and actual configured DeepSeek. Preserve
+- [x] Freeze task inputs, preconditions, expected observable behavior, permitted alternative decisions and stop conditions in an E-backed isolated environment.
+- [x] Use normal built-in-browser inputs and actual configured DeepSeek. Preserve
   every attempt and artifact; do not supply judged outputs or force internal branches.
 - [ ] Verify local-file learning connection, then separately targeted exploration
   and approved-reference selection where the protocol has a concrete evidence gap.
@@ -436,6 +436,19 @@ narrow extension is finalized from the failing interleaving check, not speculati
 
 ## Progress and retained failures
 
+- 2026-09-09 18:44: supported built-in browser restored after owner restart;
+  exact5a30 candidate frozen and used through ordinary UI with real DeepSeek.
+  F1 local-files/files and C1 local-files/chat each ran once and completed, but
+  both naturally used glob/pwsh before native read. First glob records
+  unsupported-tool; 0 first preimages, no completion.files, final inconclusive
+  for both after four real independent reviews. Actual content inspections found
+  no clear task-output violation, so no artificial feedback was added. Ordinary
+  disablement revision2 retained old tasks; no study/active file method existed.
+  Frozen/native provenance checks passed before/after disable and after owned
+  process stop. No new candidate, merge, CI orDaily update. Details in operations/
+  tianwen-local-file-learning-023-real-results-20260909.md. Task5 connection and
+  delivery remain incomplete; next is a bounded tool/evidence design decision,
+  not reopening Tasks1–4 or rerunning the same inputs to obtain a preferred path.
 - 2026-09-09 16:25: candidate source and final whole-branch review closed; only
   Important was Python CI membership, fixed5a30f22 and scoped review closed.
   Exact5a30 Python609/4conditional skips, Runtime13steps0, fresh A1 27/27,

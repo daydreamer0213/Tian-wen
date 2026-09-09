@@ -1,6 +1,16 @@
 # 天问架构总览 v2
 
-**更新：** 2026-09-08
+**更新：** 2026-09-09
+
+**当前：** 日常交付基线为022/preview23，本轮未升级。023文件学习候选已完成原定
+工程检查，并在恢复后的Codex内置浏览器真实执行两项普通DeepSeek文件任务；任务
+本身完成，但正常glob/pwsh导致文件证据捕获退出，故023实用验收未通过、未交付。
+需要处理的是标准原生工具与文件取证的衔接，不是任务专用写作规则，也不是再次重做
+旧学习核心。任意Shell的可靠作用证明不能由工具说明或文件前后相同替代；后续设计
+尚未实施。详见[最新真实结果](operations/tianwen-local-file-learning-023-real-results-20260909.md)
+及[当前交接](operations/tianwen-current-project-handoff.md)。下方旧阶段快照保留原时间范围。
+
+### 2026-09-08历史验收入口
 
 **当前验收入口：** [验证总表与必要检查](operations/tianwen-verification-coverage-current.md)
 及[当前交接](operations/tianwen-current-project-handoff.md)。021候选已完成工程检查与R10；
