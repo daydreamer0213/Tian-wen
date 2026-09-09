@@ -17,6 +17,13 @@ import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
 import { ConversationGuidanceState } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { guidanceInputDigest } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import {
+  parseConversationFileEntries,
+  parseConversationFileMaterial,
+  parseConversationFileResult,
+  parseConversationFileTrialReceipt,
+} from '../../packages/tianwen-evolution/src/conversation-files.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -32,6 +39,30 @@ const materialOf = (request: GenerateOptions) => {
   if (block?.type !== 'text') throw new Error('missing review material')
   return JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!)
 }
+
+it('preserves every old v1 file shape and digest when ancillary fields are absent', () => {
+  const entries = [{ path: 'input.md', content: 'pilot source' }, { path: 'output.md', content: null }]
+  const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const,
+    cwd: 'D:/fixture', entries, outputPaths: ['output.md'] }
+  const resultEntries = [{ path: 'input.md', content: 'pilot source' }, { path: 'output.md', content: 'pilot summary' }]
+  const result = { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: 'files' as const,
+    inputsDigest: sha256(entries), captureSeq: 17, outputPaths: ['output.md'], entries: resultEntries }
+  const output = { answer: 'pilot saved', files: resultEntries }
+  const receipt = { schemaVersion: 'tianwen.conversation-file-trial-receipt.v1' as const, outputKind: 'files' as const,
+    ...output, outputDigest: sha256(output), workerMaterialDigest: sha256({ prompt: 'Summarize pilot.', files }),
+    executionProof: { sessionId: 'worker-fixture', sessionDigest: sha256('session'), requestDigest: sha256('request') } }
+  expect(parseConversationFileEntries(Array.from({ length: 8 }, (_, index) => ({ path: `input-${index}.md`, content: null })))).toHaveLength(8)
+  expect(() => parseConversationFileEntries(Array.from({ length: 9 }, (_, index) => ({ path: `input-${index}.md`, content: null })))).toThrow(/count|limit/i)
+  expect(parseConversationFileEntries([{ path: 'bounded.txt', content: 'x'.repeat(32768) }])).toHaveLength(1)
+  expect(() => parseConversationFileEntries([{ path: 'overflow.txt', content: 'x'.repeat(32769) }])).toThrow(/byte|limit/i)
+  expect(parseConversationFileMaterial(files)).toEqual(files)
+  expect(parseConversationFileResult(result)).toEqual(result)
+  expect(parseConversationFileTrialReceipt(receipt)).toEqual(receipt)
+  expect(Object.keys(parseConversationFileMaterial(files))).toEqual(['schemaVersion', 'outputKind', 'cwd', 'entries', 'outputPaths'])
+  expect(Object.keys(parseConversationFileResult(result))).toEqual(['schemaVersion', 'outputKind', 'inputsDigest', 'captureSeq', 'outputPaths', 'entries'])
+  expect(Object.keys(parseConversationFileTrialReceipt(receipt))).toEqual(['schemaVersion', 'outputKind', 'answer', 'files', 'outputDigest', 'workerMaterialDigest', 'executionProof'])
+  expect(guidanceInputDigest('  Summarize   pilot. ', files)).toBe(sha256({ request: 'Summarize pilot.', files }))
+})
 
 it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const)('uses actual isolated native files through natural review and ten-arm study: %s', async scenario => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'

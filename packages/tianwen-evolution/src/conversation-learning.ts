@@ -1,6 +1,7 @@
 import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
 import { parseClaimAudit, type ClaimAudit } from './conversation-claim-audit.js'
+import { parseConversationTaskFileAncillary, projectConversationFileAncillaryContext, type ConversationTaskFileAncillary } from './conversation-file-ancillary.js'
 import { parseConversationFileEntries, parseConversationFileResult, type ConversationFileResult, type ConversationTaskFileInput, type ConversationTaskFileUnavailable } from './conversation-files.js'
 
 export const CONVERSATION_FAMILIES = ['summarization', 'writing', 'planning', 'code', 'other'] as const
@@ -202,7 +203,7 @@ export interface ConversationTaskReviewIntent {
   readonly materialDigest: Sha256Digest
 }
 
-export type ConversationLearningRecord = ConversationTaskSource | ConversationTaskAdmission | ConversationTaskCompletion | ConversationTaskReview | ConversationTaskReviewIntent | ConversationTaskModelObserved | ConversationTaskFileInput | ConversationTaskFileUnavailable
+export type ConversationLearningRecord = ConversationTaskSource | ConversationTaskAdmission | ConversationTaskCompletion | ConversationTaskReview | ConversationTaskReviewIntent | ConversationTaskModelObserved | ConversationTaskFileInput | ConversationTaskFileUnavailable | ConversationTaskFileAncillary
 export interface ConversationLearningEvent {
   readonly type: 'conversation-learning-recorded'
   readonly schemaVersion: 'tianwen.conversation-learning.v1'
@@ -218,6 +219,7 @@ export interface ConversationTask {
   readonly reviewIntent?: ConversationTaskReviewIntent
   readonly models?: readonly ConversationTaskModelObserved[]
   readonly fileInputs?: readonly ConversationTaskFileInput[]
+  readonly fileAncillary?: readonly ConversationTaskFileAncillary[]
   readonly fileUnavailable?: ConversationTaskFileUnavailable
 }
 
@@ -327,6 +329,7 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
     const [entry] = parseConversationFileEntries([{ path: input.path, content: input.content }])
     return { kind: 'task-file-input-captured', taskId: text(input.taskId, 512), callId: text(input.callId, 512), callSeq: integer(input.callSeq), ...entry! }
   }
+  if (value.kind === 'task-file-ancillary-captured') return parseConversationTaskFileAncillary(value)
   if (value.kind === 'task-file-evidence-unavailable') {
     const input = object(value, ['kind', 'taskId', 'reason'])
     return { kind: 'task-file-evidence-unavailable', taskId: text(input.taskId, 512), reason: oneOf(input.reason, ['unsupported-tool', 'unsafe-path', 'material-unavailable', 'capture-interrupted']) }
@@ -365,7 +368,15 @@ export class ConversationLearningState {
     if (record.kind === 'task-finished') return task?.completion
     if (record.kind === 'task-review-started') return task?.reviewIntent
     if (record.kind === 'task-model-observed') return task?.models?.find(model => model.headerSeq === record.headerSeq)
-    if (record.kind === 'task-file-input-captured') return task?.fileInputs?.find(input => input.callId === record.callId || input.path.toLowerCase() === record.path.toLowerCase())
+    if (record.kind === 'task-file-input-captured') {
+      return task?.fileInputs?.find(input => input.callId === record.callId || input.callSeq === record.callSeq || input.path.toLowerCase() === record.path.toLowerCase())
+        ?? task?.fileAncillary?.find(item => item.callId === record.callId || item.callSeq === record.callSeq || item.resultSeq === record.callSeq)
+    }
+    if (record.kind === 'task-file-ancillary-captured') {
+      return task?.fileAncillary?.find(item => item.callId === record.callId || item.callSeq === record.callSeq || item.resultSeq === record.resultSeq
+        || item.callSeq === record.resultSeq || item.resultSeq === record.callSeq)
+        ?? task?.fileInputs?.find(input => input.callId === record.callId || input.callSeq === record.callSeq || input.callSeq === record.resultSeq)
+    }
     if (record.kind === 'task-file-evidence-unavailable') return task?.fileUnavailable
     return task?.review
   }
@@ -395,6 +406,7 @@ export class ConversationLearningState {
         if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.admission.decision.fileOutputKind !== record.files.outputKind || record.status !== 'completed' || task.fileUnavailable !== undefined
           || inputs.length === 0 || record.files.inputsDigest !== sha256(inputs)
           || record.files.captureSeq >= record.endSeq || task.fileInputs!.some(input => input.callSeq >= record.files!.captureSeq)
+          || (task.fileAncillary ?? []).some(item => item.resultSeq > record.files!.captureSeq)
           || sha256(record.files.entries.map(entry => entry.path)) !== sha256(inputs.map(entry => entry.path))) {
           throw new Error('task file result does not match its immutable captured inputs and completion')
         }
@@ -409,6 +421,27 @@ export class ConversationLearningState {
       if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) throw new Error('task file capture requires local-files admission and must precede the completed result')
       if (task.fileUnavailable !== undefined || record.callSeq <= task.source.startSeq) throw new Error('task file capture is unavailable or outside the task boundary')
       parseConversationFileEntries([...(task.fileInputs ?? []).map(input => ({ path: input.path, content: input.content })), { path: record.path, content: record.content }])
+      return
+    }
+    if (record.kind === 'task-file-ancillary-captured') {
+      if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) {
+        throw new Error('task file ancillary capture requires local-files admission and must precede the completed result')
+      }
+      if (task.fileUnavailable !== undefined) throw new Error('task file ancillary capture is unavailable')
+      if (record.callSeq <= task.source.startSeq || record.callSeq >= record.resultSeq) throw new Error('task file ancillary sequence is outside the task boundary')
+      if ((task.fileAncillary?.length ?? 0) >= 16) throw new Error('task file ancillary record count exceeds the 16-record limit')
+      if (record.payload.tool === 'skill' && record.payload.reference.scopeKey !== task.source.scopeKey) {
+        throw new Error('task file ancillary Skill reference does not match the task scope')
+      }
+      if (record.payload.tool === 'grep') {
+        for (const match of record.payload.matches) {
+          const input = task.fileInputs?.find(item => item.path === match.path)
+          if (input?.content === null || input === undefined) throw new Error('task file ancillary grep requires a readable captured input')
+          if (input.callSeq >= record.callSeq) throw new Error('task file ancillary grep requires an earlier captured input')
+        }
+      }
+      const entries = task.fileInputs?.map(input => ({ path: input.path, content: input.content })) ?? []
+      projectConversationFileAncillaryContext([...(task.fileAncillary ?? []), record], entries)
       return
     }
     if (record.kind === 'task-file-evidence-unavailable') {
@@ -450,6 +483,10 @@ export class ConversationLearningState {
       }
       if (record.kind === 'task-file-input-captured') {
         this.tasks.set(record.taskId, { ...previous, fileInputs: [...(previous.fileInputs ?? []), record] })
+        return
+      }
+      if (record.kind === 'task-file-ancillary-captured') {
+        this.tasks.set(record.taskId, { ...previous, fileAncillary: [...(previous.fileAncillary ?? []), record] })
         return
       }
       if (record.kind === 'task-file-evidence-unavailable') {
