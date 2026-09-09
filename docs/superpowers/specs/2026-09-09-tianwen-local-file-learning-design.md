@@ -58,8 +58,13 @@ the root cannot acquire a replayable file receipt. Recovery must never read
 today's file and call it yesterday's input. Existing text and historical tasks
 retain their original material, identities and verdicts.
 
-At task completion, capture the actual files in the frozen access set and bind
-them to the completed native result. Original file input is source evidence;
+At the awaited native `agent/turn-stopping` hook, capture the actual files in
+the frozen access set. Bind that snapshot synchronously to the ensuing completed
+`turn/end`. Steering can cause this hook to repeat, so replace the pending final
+snapshot on each stop attempt; no later tool execution may be hidden behind an
+earlier snapshot. This avoids reading the next user task's edits as this task's
+result. Missing stop-boundary capture after a crash is unavailable, not rebuilt
+from current files. Original file input is source evidence;
 new file content is the answer being checked, never evidence supporting itself.
 Assistant claims and successful tool return codes alone cannot establish that
 the deliverable satisfies the request. Missing required files remain failures
@@ -71,6 +76,9 @@ Select only compatible sources with complete verified file material. Preserve
 the existing two distinct supports, independent successful counterexample,
 workspace/family/parent/model/consent/quality matching and source-pair deduplication.
 Do not mix incompatible text-only and file-replay contracts in one study.
+Keep evaluated text and file methods in separate optional maps within the
+existing guidance snapshot; never overwrite or cross-apply a method that has
+only been evaluated in the other mode. Historical snapshot shapes stay exact.
 
 Each file trial receives an independently seeded temporary replica containing
 only frozen preimages, including original absence of output files. The model
@@ -82,11 +90,17 @@ only to recorded output paths. Deny other tools and permission escalation.
 Never rewrite tool arguments to make an out-of-scope request look permitted.
 
 Capture actual final replica files, native tool events, model configuration and
-persisted Session proof. Independent reviewers receive frozen original criteria,
+persisted Session proof. A bounded host-written, non-surface result receipt in
+that native Session binds captured files to execution before proof is hashed;
+reviewer input alone is not proof of an execution's file output. Independent reviewers receive frozen original criteria,
 inputs and actual produced content, with no arm labels or candidate source text.
 The existing acceptance requirements remain; no skipped/unknown comparison may
 activate a method. Synthetic adjacent/holdout tasks are labelled synthetic and
 must exercise the same file contract. Exploration reuses this same executor.
+Inherited rules remain subject to support withdrawal. If a later different-mode
+method sits above an invalidated ancestor, use the existing whole-snapshot chain
+rollback with explicit ancestor evidence; do not leave the inherited invalid
+rule active or invent independent per-rule version stores.
 
 Replica paths use the configured project data root, not a new system-drive cache.
 Retain receipts and necessary bounded evidence; retire only exact owned replicas

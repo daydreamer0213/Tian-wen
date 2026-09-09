@@ -61,9 +61,99 @@ expect(await readConversationFile(replicaRoot, 'output.md')).toEqual({ path: 'ou
 
 ## Task 2: Native task capture and immutable learning identity
 
-Files: `conversation-learning.ts`, observer/task-material modules, native
-conversation-learning/observer tests. Add a narrow file-evidence record/module
-only if needed to avoid coupling pure Evolution records to filesystem code.
+Files: new `packages/tianwen-evolution/src/conversation-files.ts`, existing
+Evolution `conversation-learning.ts` and `index.ts`; new runtime-bundle
+`conversation-file-observer.ts`, existing `conversation-file-material.ts`,
+`conversation-observer.ts`, `conversation-judgment.ts`, `conversation-task-material.ts`,
+`runtime.ts`; relevant conversation-learning/native observer tests.
+
+This task captures truthful file evidence but does not yet admit it into a study
+or call a file review successful. Task 3 owns real file comparison and positive
+file-result review. Keep unsupported external/subjective verdicts unchanged.
+
+Move the pure entry type/constants/parser from Task 1 into the new Evolution
+file module and re-export them through the runtime helper, avoiding duplicated
+validators or a reverse dependency from Evolution into Runtime. Expose these
+additional contracts through Evolution's public index:
+
+```ts
+export interface ConversationTaskFileInput {
+  readonly kind: 'task-file-input-captured'
+  readonly taskId: string
+  readonly callId: string
+  readonly callSeq: number
+  readonly path: string
+  readonly content: string | null
+}
+export interface ConversationTaskFileUnavailable {
+  readonly kind: 'task-file-evidence-unavailable'
+  readonly taskId: string
+  readonly reason: 'unsupported-tool' | 'unsafe-path' | 'material-unavailable' | 'capture-interrupted'
+}
+export interface ConversationFileResult {
+  readonly schemaVersion: 'tianwen.conversation-file-result.v1'
+  readonly inputsDigest: Sha256Digest
+  readonly captureSeq: number
+  readonly outputPaths: readonly string[]
+  readonly entries: readonly ConversationFileEntry[]
+}
+export interface ConversationFileMaterial {
+  readonly schemaVersion: 'tianwen.conversation-file-material.v1'
+  readonly cwd: string
+  readonly entries: readonly ConversationFileEntry[]
+  readonly outputPaths: readonly string[]
+}
+export function parseConversationFileMaterial(value: unknown): ConversationFileMaterial
+```
+
+`ConversationTask` gains optional `fileInputs` and `fileUnavailable` projections;
+`ConversationTaskCompletion` gains optional `files: ConversationFileResult`.
+First captures append before the permitted file operation and before completion,
+once per case-insensitive path; repeated reads/writes never replace a preimage.
+The existing private conversation-learning event stores these records; do not
+expose them as public ledger events. The domain validates capture timing, unique
+path/call IDs, total count/bytes, final snapshot exact path coverage and digest,
+nonempty output subset, completion status and local-files admission. All original
+record shapes and hashes remain unchanged when new fields are absent.
+
+Add `local-files` to the admission mode enum and instructions: only tasks whose
+required effects are bounded local text-file results, without running commands,
+tests, network calls or other external effects. It requires no new user fields.
+Actual native operations decide captured paths, not a model-supplied path list.
+
+Runtime service `TianwenConversationFileObserverService` exposes
+`takeResult(taskId: string): ConversationFileResult | undefined`. It observes
+root local-file tasks at `tools/execute` (after normal authorization and guards).
+It captures the exact first `read/write/edit` target using Task 1 helpers, awaits
+durable append, then always delegates the original allowed operation. Ineligible
+material marks file evidence unavailable, not a failed user operation. No model
+calls, prompt steering, argument rewriting or extra reads of guessed files.
+Concurrent first reads must share the first capture, not append conflicting
+preimages. A work tool outside those native file tools makes the file receipt
+unavailable. Treat Code Mode/composite execution as unsupported for this first
+contract rather than silently overlooking nested effects.
+Check the task's current consent revision before capture and again before
+appending newly read content. Consent withdrawal discards pending results and
+prevents further capture; it must not interrupt the user's authorized task.
+
+Use awaited `agent/turn-stopping` to capture final entries and current event seq.
+Replace the pending snapshot if steering causes a later stop attempt. Existing
+observer completion calls `takeResult` and binds it to the actual completed
+native result; failed/interrupted/unsupported turns receive no success-capable
+file receipt. Recovery has no pending final snapshot and must not read current
+files to manufacture one. Dispose hooks and pending memory through native
+service lifecycle. Keep all capture failures contained from foreground work.
+
+Extend `ConversationTaskMaterial` with optional `files: ConversationFileMaterial` containing the recorded
+cwd, frozen input entries and output paths only (not final artifacts). Recovery
+checks the native source span, first-call identity/arguments/path, compatible
+mode, complete capture and final record binding without touching current files.
+Only attach this optional file replay material when the complete binding can be
+verified. Missing file evidence must not prevent recovery of the original user
+request/context or ordinary feedback attribution; those existing paths remain
+usable without `files`. A later study must separately require verified `files`.
+Original final artifacts remain separately available on task completion for
+the later original-result evaluator and feedback consumer.
 
 - [ ] Write RED for an actual native file call whose original input survives a later write, plus absent output and capture failure.
 - [ ] Add pre-answer local-file mode while keeping historical admission shapes valid.
@@ -74,18 +164,122 @@ only if needed to avoid coupling pure Evolution records to filesystem code.
 
 Required assertion: a model saying `saved` with missing `output.md` must not create
 a successful file receipt; re-reading a changed source after restart must not
-replace the saved preimage.
+replace the saved preimage. Pure domain RED must catch overwritten preimages,
+late captures, wrong input digest and missing final paths. Native RED must show
+an actual allowed write retains original bytes while changing the real file,
+and a following turn cannot change the preceding task's captured final content.
 
-## Task 3: Real replica trial and existing study integration
+`parseConversationFileMaterial` is strict data-only validation: exact fields,
+schema, nonblank absolute cwd, existing bounded entry parser, and a nonempty
+unique output subset using the exact canonical entry paths. It never touches
+the filesystem. Native recovery additionally proves that cwd is the recorded
+task root; a synthetic case will have this root supplied by the host in Task 3.
 
-Files: a narrow `conversation-file-trial.ts`, existing guidance loop, audited
-review/material modules and corresponding native integration tests.
+## Task 3: Real native replica execution and persisted output proof
+
+Files: new `packages/tianwen-runtime-bundle/src/conversation-file-trial.ts`
+and `tests/dsh-migration/conversation-file-trial.spec.ts`. Task 4 owns consumers.
+
+Expose `runConversationFileTrial` and `recoverConversationFileTrial` using the
+existing three-field `ConversationJudgmentProof`. Run input includes exact
+worker material (request/context or synthetic prompt, plus initial `files`),
+optional guidance, frozen callConfig, signal, and an explicit absolute replica
+parent root supplied by the configured host. No operating-system tmpdir fallback.
+The function creates one unique empty child per trial, seeds Task 1 preimages,
+uses a native Agent at that cwd, and returns answer, actual final file entries,
+output digest and persisted proof. Text trial APIs are unchanged.
+
+Worker material excludes criteria, feedback standards, original final outputs,
+arm labels and other trial answers. Provide an explicit original-cwd to replica
+mapping without mutating user text or tool arguments. Native read/write/edit
+must already be available; require them, do not register replacement work tools.
+Restrict visibility AND execution in unpublished Agent setup, and use the
+native around-dispatch seam for awaited path validation. Read only from the
+frozen exact entry set; write/edit only exact output paths. Unknown, nested,
+escalated or outside-replica calls are denied, not redirected. Preserve original
+native permission checks. Use a modest finite native request/tool bound plus
+cancellation so a failed file operation cannot loop indefinitely.
+
+The single-task Agent must have no parent conversation seed, no other Session
+access, the exact requested native model configuration on every request, and
+normal cancellation/disposal. An actual completed native turn is required;
+assistant text alone does not create a file success. Capture final entries
+from the replica's exact frozen set after the owned single turn stops.
+
+Append one host-only non-surface `tianwen/conversation-file-trial-result` Session
+event after the completed turn, then flush and calculate sessionDigest. Its
+strict bounded payload binds the file contract, exact worker request identity,
+initial material digest, actual answer and final entries. No new store or
+executable artifact is needed. `outputDigest = sha256({ answer, files })` for
+file trials. Recovery validates unique receipt, native request and completion,
+tool paths, model configuration and the output binding without reading current
+files or invoking any model. Never accept an ordinary text execution proof as
+file proof. Preserve bounded receipts when retiring only the exact owned replica;
+validate the absolute child target before cleanup and never delete its parent.
 
 - [ ] Write RED that the candidate trial must actually change its own replica,
   while baseline and original workspace bytes remain unchanged.
 - [ ] Use `agents.create({ meta: { cwd: replicaRoot, origin: 'subagent', parentSession }, setup })` and native `followup`/`whenIdle`; register no new work tools.
 - [ ] Restrict and guard native read/write/edit by exact replica/allowed paths;
   preserve cancellation and exact native model/persistence proof.
+- [ ] Verify actual source/candidate isolation, missing output, denied original
+  path, disallowed tools, cancellation, file tampering and exact receipt recovery.
+- [ ] Independent task-scoped review before integrating the new executor.
+
+## Task 4: Existing study and blind-review integration
+
+Files: existing Evolution guidance/domain/ledger modules, guidance loop,
+observer, audited review/material/feedback modules and native integration tests.
+
+Study mode is optional `evaluationMode: 'local-files'`; absence retains the
+historical text contract and no default field is inserted into parsed objects.
+Existing whole-body studyId and materialDigest then bind the mode and initial
+file contents automatically. Both loop selection and Evolution source validation
+must require all three sources to match the frozen mode, complete file material,
+the same family/model/parent/consent/quality and existing support rules.
+
+Generated adjacent/holdout file cases contain bounded initial entries and exact
+output paths, not answers. The host supplies cwd, not the generator. Freeze
+`{ prompt, criteria, qualityContract, files }` before proposing guidance. Text
+input-digest semantics remain unchanged; file input identity includes normalized
+request text and initial file contract so different real inputs are not mistaken
+for duplicate requests. No missing file case may silently fall back to text.
+
+Use `fileRules?: Partial<Record<ConversationFamily, string>>` alongside existing
+Snapshot.rules; do not materialize absent maps. Old text snapshots/hashes remain
+identical. A file candidate only changes its selected family in fileRules; a text
+candidate only changes its selected family in rules. All other map entries and
+absence/presence remain fixed. Centralize mode-aware lookup; local-files has no
+fallback to text rules and external/subjective receive no unevaluated rule. File
+activation must preserve the independently tested text rule. Keep one existing
+snapshot/version chain, not two new stores or independent version systems.
+
+Connect Task 3 to every file formal and exploration arm. File outputDigest is
+the hash of answer plus actual final entries, used consistently in arm records,
+exploration observations, source-selection recovery and claim-review recovery.
+Recovery first verifies executor host receipt, then both blind reviewers used
+the same frozen input and exact output. Neither recovery nor a retry reads the
+current replica to reconstruct historical proof.
+
+For original-result and method-study projection, original file preimages are
+sources and newly produced content is answer. Do not project post-write readback
+or write success tool text as factual support for that output. Host-confirmed
+file existence is narrow evidence of file existence, never of its asserted facts.
+Keep unchanged v6 claim semantics and separate two-reviewer consensus. A missing
+required output cannot be promoted to met; missing capture remains inconclusive.
+Feedback attribution retains the original task/user feedback and adds verified
+file results when available, never requiring file evidence to recover plain text.
+
+Current rollback is chain-head only. Add a focused interleaving check (file
+activation -> text activation -> file support withdrawn). The active inherited
+file rule must not remain in use. Reuse whole-parent-snapshot rollback, with an
+explicit verified ancestor-invalidated reason if a later head must be removed
+before the unsupported ancestor; validate ancestry and the ancestor's actual
+support/consent invalidation in the ledger. Do not silently bypass source gates
+or introduce per-rule history replay at every injection. Exact API for this
+narrow extension is finalized from the failing interleaving check, not speculation.
+
+- [ ] Write RED for file-mode selection and snapshot/hash compatibility before modifying consumers.
 - [ ] Give reviewers original frozen inputs plus actual outputs, never output
   content as its own factual source. Bind file output to recovered audit proof.
 - [ ] Select compatible verified file evidence through existing support and
@@ -94,7 +288,7 @@ review/material modules and corresponding native integration tests.
   no reapplication on restart and existing text behavior with focused tests.
 - [ ] Independent correctness/scope review; fix only reproduced findings.
 
-## Task 4: Targeted real-model branches and delivery
+## Task 5: Targeted real-model branches and delivery
 
 - [ ] Update verification matrix with exact newly changed contracts and reused historical evidence before launching any model episode.
 - [ ] Freeze task inputs, preconditions, expected observable behavior, permitted alternative decisions and stop conditions in an E-backed isolated environment.
