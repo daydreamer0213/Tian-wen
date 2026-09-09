@@ -177,3 +177,66 @@ pwsh-sandbox disable/insert loses effective config/disabled/inject and is being
 removed from the producer-only change. A supported pre-boot composition adapter
 or native CLI configuration preparation must preserve those fields before either
 derived service is enabled. No current ordinary installation is claimed wired.
+
+## 2026-09-09 23:42: final-result and native persistence seam
+
+The earlier registration probe is now passed (retained E consumer-tools-probe,
+stock10/observed19 plus2 comparisons); the derived service is Task2, not yet
+ordinary startup. Startup's current public composition decision is in
+2026-09-09-tianwen-native-observation-startup.md. These supersede the pending
+probe/design statements immediately above.
+
+Read-only installed-source tracing confirms this order in0.1.1-rc.2:
+native tool/call append -> tools/execute/body -> normalization/post-execute ->
+cancellation override -> materialize/finalizeContent/materialize -> synchronous
+tools/result with frozen final exec/result -> append-surface tool/result ->
+step/end -> awaited agent/turn-stopping -> optional steering or turn/end.
+Bodies may finish in parallel; finalization/result publication/append use model
+call order. An execute middleware's next() return is not the final value.
+
+Task3 should retain exec.token plus session/call identity inside the existing
+execute observer/capture. A synchronous tools/result listener takes the final
+canonical value, rechecks the scoped definition/provenance and copies its final
+event projection. Async listeners are not awaited. At freeze, bind the complete
+native event via source.callId, sourceEventSeqs[0]===callSeq, turn and step;
+compare content/isError/error.info/meta, then hash that whole event separately
+from result.value. UI presentResult reads persisted content only and cannot
+provide the missing canonical value. Do not add presentation/finalizer wrappers.
+
+Tool/post/finalizer errors produce final error results. Cancelled unstarted
+calls have synthetic appended results without capture or tools/result and must
+not be certified. Abort/error skips turn-stopping. A temporary stopping boundary
+may be steered into another step, so freeze/append must be idempotent and final
+recovery must reject stale or incomplete boundaries.
+
+Native append commits the in-memory log before asynchronous write-behind.
+Before appending new ancillary records at freeze, use the public owner method
+await ctx.sessions.flush(agent.session) and require true; false means no
+persistence listener. Failed flush means evidence unavailable, not a tool error.
+This closes the known final-turn write-behind window; it is not a blanket
+guarantee against external disk failure. Keep the cold-read rebind check.
+
+Installed-source locations (all resolved from the existing DSH installation):
+dsh-tools/lib/index.js:3202-3290,3366-3472 and lib/types/index.d.ts:77-83,257-258;
+dsh-agent-loop/lib/index.js:153-317,542-599; dsh-session/lib/index.js:1410-1477,
+1780-1810 (flush owner); dsh-session-checkpoint-policy/lib/index.js:50-75;
+dsh-host-apiproxy/lib/index.js:1325-1357. Root also checked JSONL adapter
+lib/index.js:1196-1220: its append path writes and syncs the file. This was
+read-only investigation, zero new probes/models/browsers or product tests.
+
+## Native grep UTF-8 BOM integration check
+
+A subsequent distinct check376664 used the same fs-search package's bundled
+@vscode/ripgrep-win32-x64@1.18.0 binary with --no-config --json --regexp=needle
+-- - and stdin U+FEFF + "first needle\r\nsecond needle\n". Exit0, empty stderr,
+zero files/models; input SHA97621ed0ab014ccd6c34d2dd3ce6a2775b2e57bad9c8e23406f2522e3ed37823.
+It returned first line "first needle" and second line "second needle". Native
+fs-search/lib/index.js:968-972 retains that text and removes only terminal CRLF/LF.
+The completed pure Task1 projector's splitNativeLines currently retains the
+initial BOM, so it would incorrectly reject this legitimate first-line match.
+This is a native integration incompatibility, not corrupted evidence or a
+reason to strip original file bytes. Task3 owns a narrow regression/fix: use
+native leading-BOM line semantics only when comparing grep locations, retain
+the original full content/input digest, and preserve non-leading U+FEFF text.
+Its actual native grep fixture will cover the file-based path once; do not
+rerun old whole suites or mutate the historical BOM preservation tests.

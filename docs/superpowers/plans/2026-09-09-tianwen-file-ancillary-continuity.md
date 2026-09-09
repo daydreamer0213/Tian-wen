@@ -1,7 +1,8 @@
 # Ordinary File Ancillary Continuity Implementation Plan
 
-Status: Task1 implemented at0c112af from BASE06d3e9a; independent task review
-in progress, focused36/36 and state17/17 GREEN plus Evolution tsc. Producer task
+Status: Task1 complete/review clean at0c112af, focused36/36 and state17/17
+GREEN plus Evolution tsc. Task2 complete/review clean ataefca18:11selected
+GREEN plus real-loader fix1GREEN and unchanged typecheck/build. Task3 next. Producer task
 review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
@@ -250,6 +251,7 @@ RED/GREEN, native vs unit scope and any missing configuration semantics.
 - Modify: `conversation-file-observer.ts`, `conversation-task-material.ts`, `conversation-file-trial.ts`, `conversation-guidance-loop.ts` within that src directory.
 - Modify: `conversation-claim-review.ts` only if a conditional ancillary authority instruction is needed; preserve historical no-context requests.
 - Create: `tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts`.
+- Modify: `packages/tianwen-evolution/src/conversation-file-ancillary.ts` and its `conversation-file-ancillary.spec.ts` only for the independently confirmed native leading-BOM grep line compatibility described below.
 - Modify: existing `conversation-file-observer.spec.ts`, `conversation-file-trial.spec.ts`, `conversation-guidance-loop.spec.ts`, `conversation-claim-review.spec.ts`, `runtime-bundle.spec.ts` for the affected integration contract.
 
 **Inputs:** Task1 exact public contracts, Task2 native-registration method,
@@ -308,10 +310,16 @@ refuse the ancillary receipt without altering the call. Keep the native
 standard preset and original native tool plugins untouched. No pre-step tool
 replacement or static host patch can stand in for this registration evidence.
 
-The capture helper checks actual scoped identity at dispatch/result, binds
-top-level native call IDs/arguments and saves canonical final result.value.
-It also saves the final ToolExecutionResult content binding; at freeze, locate
-the corresponding persisted successful tool/result and store its exact digest.
+The capture helper checks actual scoped identity at dispatch/result and binds
+top-level native call IDs/arguments plus exec.token. The tools/execute next()
+return is not final: native post-execute, cancellation and finalizeContent still
+follow it. Use a synchronous tools/result listener to retain the frozen final
+canonical result.value and its content/isError/error.info/meta projection;
+native emit does not await async listeners. Recheck the winner/proof there.
+At freeze, match the appended tool/result by source.callId,
+sourceEventSeqs[0]===callSeq and turn/step, verify its final projection and store
+the complete event digest separately from valueDigest. No finalizer/presentation
+wrapper. See the final-result seam section in the native observation research.
 Pwsh requires a strict directory receipt, exact task/session/call identity,
 command/workdir/settings binding and nativeResultDigest matching foreground
 value with the native-added kind field removed. Unknown/background/noncertified
@@ -331,7 +339,24 @@ the file observer; do not add new sources or global roots.
 Preserve read/write/edit first-access capture and no task serialization. Track
 each ancillary call separately. At agent/turn-stopping, all native results and
 producer terminal/EOF must be complete within captureSeq before appending the
-corresponding bounded host records. Check consent again before every append.
+corresponding bounded host records. Native append is initially in-memory;
+await the public ctx.sessions.flush(agent.session) before new ancillary ledger
+appends and require true (a durability listener participated). Add the sessions
+injection to the file observer. Flush error/no listener makes evidence unavailable,
+not an original tool error. Check consent again before every append.
+Stopping can be steered into another step: keep repeated freezes/record writes
+idempotent and reject stale/incomplete capture boundaries on final recovery.
+Cover post/finalizer errors, skipped cancelled calls without tools/result,
+async-listener lateness, repeated stopping and flush failure with focused tests.
+
+Native integration check376664 confirmed bundled rg strips a UTF-8 BOM at the
+start of input before returning grep's first line; Task1's pure splitter retains
+it and would incorrectly reject that match. Add focused RED then the narrow line
+comparison correction plus one actual native file grep regression. Never strip
+or normalize stored original content or inputDigest; non-leading U+FEFF remains
+ordinary line content. The report must distinguish this integration fix from
+Task1's already closed original contract gate. Evidence is in the feasibility
+note's Native grep UTF-8 BOM section; do not rerun the stdin probe.
 Every task tool call must be either accounted-for native file access or a
 validated ancillary receipt. Missing, unmatched, duplicate, revoked or late data
 leaves no file result; never backfill by rereading after the task.
