@@ -6,14 +6,14 @@ GREEN plus real-loader fix1GREEN and unchanged typecheck/build. Task3 complete/
 review clean atb228543: original69 covering + prior212 regressions, then fix1
 60native/observer and7config/export checks, typecheck/build. Default environment
 and consent-disposal findings both closed. Task4 initial implementation669b9d0
-and followupf48434c remain in fix round1 after review: private Windows ACL and
+and followupf48434c required fix round1 after review: private Windows ACL and
 cleanup failure must preserve stock launch. Those fixes and ordinary-session
 gate passed scoped rereview at059b0f3. Additional dedicated-root junction guard
 passed focused3GREEN/tsc and scoped fix2 rereview at6b535a1; it is not a ban on
 legitimate configured stateRoot/ancestor migration. Task4 is complete. Agentless WorkspaceWrite control timed
 out both outside/inside capture; corrected public standard-session gate passed
 04:13:50,14.62s, with preserved actual result/receipt. Prior unrestricted success
-and fixture failures retain their original scope. Task5 has not started. Producer task
+and fixture failures retain their original scope. Task5 is running from603db20. Producer task
 review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
