@@ -120,13 +120,13 @@ export class TianwenConversationObserverService extends Service {
     if (task.admission === undefined) this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId: task.source.taskId, decision: null, proof: null, unavailableReason: 'cancelled' })
     const answer = visible(events).filter(message => message.role === 'assistant')
     const status = terminal.data.reason.kind === 'completed' ? 'completed' : terminal.data.reason.kind === 'aborted' ? 'interrupted' : 'failed'
-    const files = status === 'completed' ? this.ctx.get('tianwenConversationFileObserver')?.takeResult(task.source.taskId) : undefined
+    const files = this.ctx.get('tianwenConversationFileObserver')?.takeResult(task.source.taskId)
     this.ctx.tianwenEvolution.recordConversationLearning({
       kind: 'task-finished', taskId: task.source.taskId, endSeq: terminal.seq,
       status,
       assistantMessageIds: answer.map(message => message.id), resultDigest: sha256(events),
       evidenceIds: events.filter(item => item.type === 'tool/result').map(item => sha256(item)),
-      ...(files === undefined ? {} : { files }),
+      ...(status === 'completed' && files !== undefined ? { files } : {}),
     })
   }
   private restore(agent: Agent): void {

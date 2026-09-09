@@ -77,9 +77,11 @@ export class TianwenConversationFileObserverService extends Service {
 
   takeResult(taskId: string): ConversationFileResult | undefined {
     const state = this.states.get(taskId)
-    if (state === undefined || state.revoked || state.unavailable || !this.authorized(state.consentRevision)) return
-    const result = state.final === undefined ? undefined : structuredClone(state.final)
-    delete state.final
+    if (state === undefined) return
+    const result = state.revoked || state.unavailable || !this.authorized(state.consentRevision) || state.final === undefined
+      ? undefined : structuredClone(state.final)
+    state.native.discard()
+    this.states.delete(taskId)
     return result
   }
 

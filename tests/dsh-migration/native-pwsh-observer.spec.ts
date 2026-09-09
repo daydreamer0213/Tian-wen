@@ -133,7 +133,7 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
   it('explicit configured composition preserves stock cwd interpreter and limits without capture',async () => {
     const config={cwd:join(workspace,'nested'),pwshPath:(stock.shell as any).pwshPath,timeoutMs:12000,maxTimeoutMs:13000,maxOutputBytes:2048,maxSpillBytes:4096,graceMs:250}
     const boot=await load('@deepseek-ai/dsh-app-boot')
-    const base=boot.loadOverlayPatches('tianwen-test',nativeRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
+    const base=boot.loadOverlayPatches('tianwen-test',cliRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
     const patch=boot.loadOverlayPatches('tianwen-test',join(import.meta.dirname,'../../packages/tianwen-runtime-bundle/goal-first.patch.yml'))
     const entries=withNativePwshObservation(boot.composeEntries([base,[{id:'pwsh-sandbox',config}],patch]))
     const selected=entries.find(row=>row.id === 'pwsh-sandbox')!

@@ -50,12 +50,21 @@ async function mount(script: Parameters<typeof mountPersistentHarness>[1]) {
   return { ...harness, handle, root }
 }
 
+type TerminalCaptureState = { native: { pending: Map<string, unknown>, invalid: boolean } }
+function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, TerminalCaptureState> {
+  return (harness.ctx.tianwenConversationFileObserver as unknown as { states: Map<string, TerminalCaptureState> }).states
+}
+
 it('keeps the first bytes while an actual approved native write changes the file', async () => {
   const responses = [structured(admission), toolCallResponse('write-1', 'write', { file_path: 'input.md', content: 'rewritten\r\n' }), textResponse('saved'),
     ...reviewPair()]
   const harness = await mount(responses)
   writeFileSync(join(harness.root, 'input.md'), 'original\r\n')
   let resumed: Awaited<ReturnType<typeof harness.ctx.agents.resume>> | undefined
+  let terminalState: TerminalCaptureState | undefined
+  const offTerminal = harness.ctx.on('agent/turn-stopping', ({ agent }) => {
+    if (agent === harness.handle.agent) terminalState = [...captureStates(harness).values()][0]
+  })
   try {
     harness.handle.agent.followup(direct('Rewrite input.md with the requested new text.'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
@@ -63,6 +72,9 @@ it('keeps the first bytes while an actual approved native write changes the file
     const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
     expect(task.fileInputs?.map(({ path, content }) => ({ path, content }))).toEqual([{ path: 'input.md', content: 'original\r\n' }])
     expect(task.completion?.files).toMatchObject({ outputKind: 'files', outputPaths: ['input.md'], entries: [{ path: 'input.md', content: 'rewritten\r\n' }] })
+    expect(captureStates(harness).has(task.source.taskId)).toBe(false)
+    expect(terminalState?.native.invalid).toBe(true)
+    expect(terminalState?.native.pending.size).toBe(0)
     expect(task.review?.verdict).toBe('met')
     writeFileSync(join(harness.root, 'input.md'), 'later bytes')
     await harness.handle.dispose()
@@ -72,7 +84,7 @@ it('keeps the first bytes while an actual approved native write changes the file
       schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd: harness.root,
       entries: [{ path: 'input.md', content: 'original\r\n' }], outputPaths: ['input.md'],
     })
-  } finally { await resumed?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  } finally { offTerminal(); await resumed?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('omits file replay when the native span, completion summary or terminal no longer binds', async () => {
@@ -266,9 +278,13 @@ it('contains a durable capture append failure without changing the allowed write
 it('never binds an interrupted turn even when its native write already ran', async () => {
   const harness = await mount([structured(admission), toolCallResponse('interrupted-write', 'write', { file_path: 'input.md', content: 'write reached disk' })])
   writeFileSync(join(harness.root, 'input.md'), 'original')
+  let terminalState: TerminalCaptureState | undefined
   const off = harness.ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
-    if (exec.name === 'write' && !result.isError) exec.agent?.cancel({ kind: 'user' })
+    if (exec.name === 'write' && !result.isError) {
+      terminalState = [...captureStates(harness).values()][0]
+      exec.agent?.cancel({ kind: 'user' })
+    }
     return decision
   })
   try {
@@ -278,6 +294,9 @@ it('never binds an interrupted turn even when its native write already ran', asy
     expect(readFileSync(join(harness.root, 'input.md'), 'utf8')).toBe('write reached disk')
     expect(task.completion?.status).toBe('interrupted')
     expect(task.completion?.files).toBeUndefined()
+    expect(captureStates(harness).has(task.source.taskId)).toBe(false)
+    expect(terminalState?.native.invalid).toBe(true)
+    expect(terminalState?.native.pending.size).toBe(0)
   } finally { off(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
