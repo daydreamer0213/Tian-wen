@@ -1,7 +1,7 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import { parseConversationFileEntries, sha256, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
+import { parseConversationFileEntries, parseConversationFileResult, sha256, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationFilePath, readConversationFile } from './conversation-file-material.js'
 
@@ -145,11 +145,11 @@ export class TianwenConversationFileObserverService extends Service {
     const entries = parseConversationFileEntries(await Promise.all(inputs.map(entry => readConversationFile(state.cwd, entry.path))))
     const captureSeq = agent.session.events.at(-1)?.seq
     if (captureSeq === undefined) throw new Error('native file capture boundary is unavailable')
-    state.final = {
+    state.final = parseConversationFileResult({
       schemaVersion: 'tianwen.conversation-file-result.v1', outputKind: state.outputKind,
       inputsDigest: sha256(inputs), captureSeq,
       outputPaths: state.outputKind === 'files' ? inputs.flatMap(entry => state.outputPaths.has(entry.path.toLowerCase()) ? [entry.path] : []) : [], entries,
-    }
+    })
   }
 
   private authorized(revision: number): boolean {

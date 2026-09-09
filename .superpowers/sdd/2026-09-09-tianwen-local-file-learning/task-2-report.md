@@ -94,3 +94,99 @@ All exited 0 with no output.
 ## Concerns and handoff
 
 No known Task 2 correctness blocker remains. File evidence is intentionally not a positive review or study candidate yet: Task 3/4 must consume the separately bound original final artifacts and replay material under their own review/selection contracts. Composite/Code Mode and any non-native work tool remain deliberately ineligible.
+
+## Independent review fix round 1
+
+Review base: `3751696c923cc9403a881f2ac73fbe927ebbabf3`. The fixes below were prepared on later documentation-only HEAD `38503a2abbc5f72ddd85a9d83bc79d154017aeba` without staging or committing.
+
+### Recovery binding
+
+Added a genuine native-session recovery test that preserves the original request/context while independently changing: the `write` content with the same call ID/path/success result, completion assistant-message summary, terminal turn with a correspondingly recomputed span digest, and completion status. File replay must be omitted in every case.
+
+RED:
+
+```text
+D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-observer.spec.ts -t "omits file replay when the native span" --reporter=verbose
+```
+
+```text
+Test Files  1 failed (1)
+Tests       1 failed | 9 skipped (10)
+AssertionError: expected material.files to be undefined; received the recorded file material
+```
+
+Root cause: `recoverFiles` validated only selected call/path/result fields, not the immutable completion boundary. It now also requires the full native span digest, the exact final `turn/end` sequence and turn, matching native/completion status, assistant message IDs, and tool-result evidence IDs. A failed file binding still returns the ordinary request/context material with `files` omitted.
+
+Focused GREEN:
+
+```text
+D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-observer.spec.ts -t "omits file replay when the native span" --reporter=verbose
+```
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed | 9 skipped (10)
+Duration    2.67s
+```
+
+### Vanished final output
+
+Added a genuine native write whose successful post-execute hook removes the file before `agent/turn-stopping`. The user operation is observed as successful, file learning becomes unavailable, and the ordinary completed task record must still be durable.
+
+RED:
+
+```text
+D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-observer.spec.ts -t "records ordinary completion when a successful write disappears" --reporter=verbose
+```
+
+```text
+Test Files  1 failed (1)
+Tests       1 failed | 10 skipped (11)
+AssertionError: expected task.completion.status to be "completed"; received undefined
+```
+
+Root cause: final capture parsed only bounded entries, so a requested output with `content: null` reached the Evolution completion parser and made the entire `task-finished` append fail. The observer now runs the strict `ConversationFileResult` parser before publishing its pending result; missing output is contained by the existing unavailable path before ordinary completion is recorded.
+
+Focused GREEN:
+
+```text
+D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-observer.spec.ts -t "records ordinary completion when a successful write disappears" --reporter=verbose
+```
+
+```text
+Test Files  1 passed (1)
+Tests       1 passed | 10 skipped (11)
+Duration    2.58s
+```
+
+### Round 1 verification
+
+```text
+D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-observer.spec.ts tests/dsh-migration/conversation-task-material.spec.ts --reporter=dot
+```
+
+```text
+Test Files  2 passed (2)
+Tests       14 passed (14)
+Duration    5.53s
+```
+
+An initial runtime-bundle noEmit run then exposed six TypeScript narrowing errors for the newly named optional completion. The guard now explicitly excludes an undefined completion before using it; this was a type-only correction. Final fresh type/test evidence follows the completed round.
+
+```text
+D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-observer.spec.ts tests/dsh-migration/conversation-task-material.spec.ts --reporter=dot
+```
+
+```text
+Test Files  2 passed (2)
+Tests       14 passed (14)
+Duration    5.54s
+```
+
+```text
+D:/hermes/node/node.exe node_modules/typescript/bin/tsc -p packages/tianwen-runtime-bundle/tsconfig.json --noEmit --pretty false
+D:/hermes/node/node.exe node_modules/typescript/bin/tsc -p packages/tianwen-evolution/tsconfig.json --noEmit --pretty false
+git diff --check
+```
+
+All three exited 0 with no output. Round 1 is ready for root-owned staging and scoped re-review.

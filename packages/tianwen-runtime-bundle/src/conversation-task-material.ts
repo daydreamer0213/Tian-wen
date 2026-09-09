@@ -104,11 +104,23 @@ function recordedToolPath(cwd: string, candidate: unknown): string | undefined {
 }
 
 function recoverFiles(cwd: string | undefined, events: readonly SessionEvent[], task: ConversationTask): ConversationFileMaterial | undefined {
-  const result = task.completion?.files
+  const completion = task.completion
+  const result = completion?.files
   const outputKind = task.admission?.decision?.fileOutputKind
   const inputs = task.fileInputs ?? []
-  if (cwd === undefined || !isAbsolute(cwd) || result === undefined || task.fileUnavailable !== undefined || outputKind !== result.outputKind || inputs.length === 0) return
-  const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
+  if (cwd === undefined || !isAbsolute(cwd) || completion === undefined || result === undefined
+    || task.fileUnavailable !== undefined || outputKind !== result.outputKind || inputs.length === 0) return
+  const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= completion.endSeq)
+  const terminal = span.at(-1)
+  const status = terminal?.type === 'turn/end'
+    ? terminal.data.reason.kind === 'completed' ? 'completed' : terminal.data.reason.kind === 'aborted' ? 'interrupted' : 'failed'
+    : undefined
+  const assistantMessageIds = conversationMessages(span, task.source.materialProjection).filter(message => message.role === 'assistant').map(message => message.id)
+  const evidenceIds = span.filter(event => event.type === 'tool/result').map(event => sha256(event))
+  if (sha256(span) !== completion.resultDigest || terminal?.type !== 'turn/end' || terminal.seq !== completion.endSeq
+    || terminal.data.turn !== task.source.turn || status !== completion.status
+    || sha256(assistantMessageIds) !== sha256(completion.assistantMessageIds)
+    || sha256(evidenceIds) !== sha256(completion.evidenceIds)) return
   const calls = span.flatMap(event => {
     if (event.type !== 'tool/call') return []
     if (event.data.name !== 'read' && event.data.name !== 'write' && event.data.name !== 'edit') return [{ event, path: undefined }]

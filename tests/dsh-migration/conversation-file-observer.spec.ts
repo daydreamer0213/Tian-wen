@@ -7,6 +7,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
@@ -72,6 +73,41 @@ it('keeps the first bytes while an actual approved native write changes the file
       entries: [{ path: 'input.md', content: 'original\r\n' }], outputPaths: ['input.md'],
     })
   } finally { await resumed?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('omits file replay when the native span, completion summary or terminal no longer binds', async () => {
+  const harness = await mount([structured(admission), toolCallResponse('bound-write', 'write', { file_path: 'input.md', content: 'saved result' }),
+    textResponse('saved'), ...reviewPair()])
+  writeFileSync(join(harness.root, 'input.md'), 'original')
+  try {
+    harness.handle.agent.followup(direct('Rewrite input.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId('file-chat'))
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect')
+    const recoverWithoutFiles = async (inspection: typeof saved, candidate = task) => {
+      inspect.mockResolvedValueOnce(inspection)
+      const material = await recoverConversationTaskMaterial(harness.ctx, candidate)
+      expect(material.request).toHaveLength(1)
+      expect(material.files).toBeUndefined()
+    }
+
+    const changedCall = { ...saved, events: saved.events.map(event => event.type === 'tool/call' && String(event.data.callId) === 'bound-write'
+      ? { ...event, data: { ...event.data, arguments: JSON.stringify({ file_path: 'input.md', content: 'changed after completion' }) } }
+      : event) } as typeof saved
+    await recoverWithoutFiles(changedCall)
+
+    await recoverWithoutFiles(saved, { ...task, completion: { ...task.completion!, assistantMessageIds: ['different-answer'] } })
+
+    const wrongTurn = { ...saved, events: saved.events.map(event => event.type === 'turn/end' && event.seq === task.completion!.endSeq
+      ? { ...event, data: { ...event.data, turn: event.data.turn + 1 } }
+      : event) } as typeof saved
+    const wrongTurnSpan = wrongTurn.events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
+    await recoverWithoutFiles(wrongTurn, { ...task, completion: { ...task.completion!, resultDigest: sha256(wrongTurnSpan) } })
+
+    await recoverWithoutFiles(saved, { ...task, completion: { ...task.completion!, status: 'failed' } })
+    inspect.mockRestore()
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('does not replace a preimage after read, write and reread in the same turn', async () => {
@@ -178,6 +214,32 @@ it('keeps missing output and unavailable capture ineligible without blocking ord
     expect(task.completion?.files).toBeUndefined()
     expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', expect.stringMatching(/too large/i))
   } finally { warning.mockRestore(); await unavailable.handle.dispose(); await unavailable.ctx.fiber.dispose() }
+})
+
+it('records ordinary completion when a successful write disappears before final capture', async () => {
+  const harness = await mount([structured(admission), toolCallResponse('vanishing-write', 'write', { file_path: 'input.md', content: 'written before removal' }),
+    textResponse('saved'), ...reviewPair()])
+  writeFileSync(join(harness.root, 'input.md'), 'original')
+  let writeCompleted = false
+  const off = harness.ctx.on('tools/post-execute', async (exec, result, next) => {
+    const decision = await next()
+    if (exec.name === 'write' && !result.isError) {
+      writeCompleted = true
+      rmSync(join(harness.root, 'input.md'))
+    }
+    return decision
+  })
+  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
+  try {
+    harness.handle.agent.followup(direct('Rewrite input.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(writeCompleted).toBe(true)
+    expect(task.completion?.status).toBe('completed')
+    expect(task.completion?.files).toBeUndefined()
+    expect(task.fileUnavailable?.reason).toBe('material-unavailable')
+    expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', expect.stringMatching(/missing an output/i))
+  } finally { off(); warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('contains a durable capture append failure without changing the allowed write', async () => {
