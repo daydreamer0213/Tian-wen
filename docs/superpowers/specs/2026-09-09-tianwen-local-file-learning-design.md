@@ -102,7 +102,10 @@ only to recorded output paths. Deny other tools and permission escalation.
 Never rewrite tool arguments to make an out-of-scope request look permitted.
 
 Capture actual final replica files, native tool events, model configuration and
-persisted Session proof. A bounded host-written result receipt in the existing
+persisted Session proof. An authorized save may legitimately preserve existing
+bytes; truthfully captured execution does not require a content difference.
+Whether that output meets the task belongs to the existing independent review.
+A bounded host-written result receipt in the existing
 private study ledger binds captured files to that immutable native proof before
 review starts. The installed native persistence reader does not support new
 downstream Session event types; do not insert one, mutate its known-type set or

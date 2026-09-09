@@ -263,6 +263,9 @@ from the replica's exact frozen set after the owned single turn stops.
 File-only work may have an empty chat answer; do not require an unnecessary
 confirmation message when the real output is a file. Chat-output tasks still
 require their actual chat answer. Empty file content and absent file are distinct.
+The positive isolation test must demonstrate a real change; this does not make
+changed bytes a prerequisite for every trial. A genuine native save of unchanged
+content is allowed, and task correctness remains the reviewers' responsibility.
 
 Reuse the public `@deepseek-ai/dsh-subagent` composition exports: capture delegated
 policy synchronously before the first await; `resolveChildDepth`,
