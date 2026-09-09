@@ -7,8 +7,11 @@ review clean atb228543: original69 covering + prior212 regressions, then fix1
 60native/observer and7config/export checks, typecheck/build. Default environment
 and consent-disposal findings both closed. Task4 initial implementation669b9d0
 and followupf48434c remain in fix round1 after review: private Windows ACL and
-cleanup failure must preserve stock launch. Those focused fixes passed; full
-fix report and scoped rereview pending. Agentless WorkspaceWrite control timed
+cleanup failure must preserve stock launch. Those fixes and ordinary-session
+gate passed scoped rereview at059b0f3. One additional dedicated-root junction
+fixture disproved existing target ACL mutation but showed the actual container
+remained an unprotected linked target; a narrow reject-to-stock guard is fix2,
+not a ban on legitimate configured stateRoot/ancestor migration. Agentless WorkspaceWrite control timed
 out both outside/inside capture; corrected public standard-session gate passed
 04:13:50,14.62s, with preserved actual result/receipt. Prior unrestricted success
 and fixture failures retain their original scope. Task5 has not started. Producer task
