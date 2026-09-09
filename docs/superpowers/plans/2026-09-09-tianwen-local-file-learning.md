@@ -265,6 +265,13 @@ public helpers also preserve the native never-ask delegation policy; do not
 copy their internals or invent an approval wrapper. Test with agent-scoped
 preset composition as well as ordinary native file calls. Use exported
 `finalAssistantOutput` and keep only visible text for the final answer.
+After joining the parent preset, use the public child-scoped
+`childCtx.tools.presentAs('native')` presentation override. A parent may select
+Code Mode even though the deployment default is standard/native; a name filter
+alone does not remove its reserved run_code transport. The child must expose
+only the native permitted file calls, while the parent presentation stays intact.
+Cover an agent-scoped Code Mode parent in the composition test as well; the
+existing execution guard still rejects any attempted composite/unknown call.
 
 Append one host-only non-surface `tianwen/conversation-file-trial-result` Session
 event after the completed turn, then flush and calculate sessionDigest. Its
