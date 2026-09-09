@@ -27,10 +27,11 @@ function start(turn = 1) {
   }
 }
 const proof = { sessionId: 'native-reviewer', sessionDigest: sha256('reviewer'), requestDigest: sha256('review request') }
-function admission(taskId: string, mode = 'text' as 'text' | 'external' | 'subjective') {
+function admission(taskId: string, mode = 'text' as 'text' | 'external' | 'subjective' | 'local-files') {
   return {
     kind: 'task-admitted' as const, taskId, proof, qualityContract: conversationQualityContract(),
-    decision: { kind: 'task' as const, objective: 'Summarize the supplied measurements.', criteria: ['Retain the measured percentage and pilot-only scope.'], family: 'summarization' as const, evaluationMode: mode, relatedTaskId: null, feedback: null },
+    decision: { kind: 'task' as const, objective: 'Summarize the supplied measurements.', criteria: ['Retain the measured percentage and pilot-only scope.'], family: 'summarization' as const, evaluationMode: mode, relatedTaskId: null, feedback: null,
+      ...(mode === 'local-files' ? { fileOutputKind: 'files' as const } : {}) },
     unavailableReason: null,
   }
 }
@@ -157,6 +158,17 @@ describe('natural conversation task evidence', () => {
     for (const materialProjection of [null, undefined, 'surface-text.v2']) {
       expect(() => parseConversationLearningRecord({ ...legacy, materialProjection })).toThrow()
     }
+  })
+
+  it('requires a frozen file output kind only for local-file admission without changing historical text records', () => {
+    const source = start()
+    const textAdmission = admission(source.taskId)
+    expect(parseConversationLearningRecord(textAdmission)).toEqual(textAdmission)
+    expect(parseConversationLearningRecord(admission(source.taskId, 'local-files'))).toEqual(admission(source.taskId, 'local-files'))
+    expect(() => parseConversationLearningRecord({ ...textAdmission, decision: { ...textAdmission.decision, fileOutputKind: 'chat' } })).toThrow(/decision|file|field/i)
+    const local = admission(source.taskId, 'local-files')
+    const { fileOutputKind: _kind, ...missingKind } = local.decision
+    expect(() => parseConversationLearningRecord({ ...local, decision: missingKind })).toThrow(/output|kind|file/i)
   })
 
   it('retains distinct later tasks in the same native Session and restores them without legacy Run bindings', () => {
@@ -286,6 +298,50 @@ describe('natural conversation task evidence', () => {
     ledger.recordConversationLearning(finish(source.taskId))
     expect(() => ledger.recordConversationLearning(observed)).toThrow(/before|completed/i)
     expect(ledger.listConversationTasks()[0]?.models).toBeUndefined()
+  })
+
+  it('freezes the first file preimage and rejects replacement or post-result capture', () => {
+    const ledger = ledgerWithConsent()
+    const source = start()
+    ledger.recordConversationLearning(source)
+    ledger.recordConversationLearning(admission(source.taskId, 'local-files'))
+    const captured = { kind: 'task-file-input-captured' as const, taskId: source.taskId,
+      callId: 'write-1', callSeq: 14, path: 'input.md', content: 'original\r\n' }
+    expect(ledger.recordConversationLearning(captured)).toEqual({ duplicate: false })
+    expect(ledger.recordConversationLearning(captured)).toEqual({ duplicate: true })
+    expect(() => ledger.recordConversationLearning({ ...captured, callId: 'write-2', content: 'rewritten\r\n' })).toThrow(/first|preimage|path|capture|freeze/i)
+    expect(ledger.listConversationTasks()[0]?.fileInputs).toEqual([captured])
+    ledger.recordConversationLearning(finish(source.taskId))
+    expect(() => ledger.recordConversationLearning({ ...captured, callId: 'write-3', callSeq: 17, path: 'output.md', content: null })).toThrow(/before|completed|result/i)
+  })
+
+  it('binds file completion to the frozen kind, input digest and exact final path coverage', () => {
+    const setup = (kind: 'files' | 'chat' = 'files') => {
+      const ledger = ledgerWithConsent(), source = start()
+      ledger.recordConversationLearning(source)
+      const admitted = admission(source.taskId, 'local-files')
+      ledger.recordConversationLearning({ ...admitted, decision: { ...admitted.decision, fileOutputKind: kind } })
+      const captured = { kind: 'task-file-input-captured' as const, taskId: source.taskId,
+        callId: `${kind}-1`, callSeq: 14, path: 'input.md', content: 'original\r\n' }
+      ledger.recordConversationLearning(captured)
+      const files = { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: kind,
+        inputsDigest: sha256([{ path: 'input.md', content: 'original\r\n' }]), captureSeq: 17,
+        outputPaths: kind === 'files' ? ['input.md'] : [], entries: [{ path: 'input.md', content: kind === 'files' ? 'rewritten\r\n' : 'original\r\n' }] }
+      return { ledger, source, files }
+    }
+    const valid = setup()
+    expect(valid.ledger.recordConversationLearning({ ...finish(valid.source.taskId), files: valid.files })).toEqual({ duplicate: false })
+
+    const wrongDigest = setup()
+    expect(() => wrongDigest.ledger.recordConversationLearning({ ...finish(wrongDigest.source.taskId), files: { ...wrongDigest.files, inputsDigest: sha256('wrong') } })).toThrow(/input|digest|file/i)
+    const missingFinal = setup()
+    expect(() => missingFinal.ledger.recordConversationLearning({ ...finish(missingFinal.source.taskId), files: { ...missingFinal.files, entries: [{ path: 'other.md', content: 'saved' }], outputPaths: ['other.md'] } })).toThrow(/path|input|file/i)
+    const absentOutput = setup()
+    expect(() => absentOutput.ledger.recordConversationLearning({ ...finish(absentOutput.source.taskId), files: { ...absentOutput.files, entries: [{ path: 'input.md', content: null }] } })).toThrow(/output|missing|file/i)
+    const frozenKind = setup('files')
+    expect(() => frozenKind.ledger.recordConversationLearning({ ...finish(frozenKind.source.taskId), files: { ...frozenKind.files, outputKind: 'chat', outputPaths: [] } })).toThrow(/kind|file/i)
+    const chat = setup('chat')
+    expect(chat.ledger.recordConversationLearning({ ...finish(chat.source.taskId), files: chat.files })).toEqual({ duplicate: false })
   })
 
   it('parses only exact model observation fields with a positive native header sequence and a digest', () => {

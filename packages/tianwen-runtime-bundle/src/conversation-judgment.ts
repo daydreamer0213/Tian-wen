@@ -20,12 +20,16 @@ const verdict = choices(['met', 'not-met', 'inconclusive'])
 // Describe the actual result fields to the native capture tool. An open object
 // let the real model emit schema metadata (`type`) instead of the required `kind`.
 // Native validation and the stricter evidence/domain checks both remain active.
-const CONVERSATION_ADMISSION_SCHEMA = object({
-  kind: choices(['task', 'conversation']), objective: string, criteria: { ...strings, description: 'Separate observable user requirements. Preserve every explicit output-only restriction, exclusion, condition, uncertainty and decision boundary; do not reduce an output restriction to merely selecting source content.' },
-  family: choices(CONVERSATION_FAMILIES), evaluationMode: choices(['text', 'external', 'subjective']),
-  relatedTaskId: nullable(string),
-  feedback: nullable(object({ kind: choices(['correction', 'positive', 'preference', 'requirement-change']), quote: string, category })),
-})
+const CONVERSATION_ADMISSION_SCHEMA: ObjectJsonSchema = {
+  type: 'object', additionalProperties: false,
+  required: ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback'],
+  properties: {
+    kind: choices(['task', 'conversation']), objective: string, criteria: { ...strings, description: 'Separate observable user requirements. Preserve every explicit output-only restriction, exclusion, condition, uncertainty and decision boundary; do not reduce an output restriction to merely selecting source content.' },
+    family: choices(CONVERSATION_FAMILIES), evaluationMode: choices(['text', 'external', 'subjective', 'local-files']),
+    fileOutputKind: choices(['files', 'chat']), relatedTaskId: nullable(string),
+    feedback: nullable(object({ kind: choices(['correction', 'positive', 'preference', 'requirement-change']), quote: string, category })),
+  },
+}
 export function conversationAdmissionSchema(relatedTaskIds: readonly string[]): ObjectJsonSchema {
   return { ...CONVERSATION_ADMISSION_SCHEMA, properties: { ...CONVERSATION_ADMISSION_SCHEMA.properties,
     relatedTaskId: relatedTaskIds.length === 0 ? { type: 'null' } : nullable(choices(relatedTaskIds)),

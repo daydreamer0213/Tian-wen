@@ -1,13 +1,8 @@
 import { lstat, mkdir, open, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-
-export interface ConversationFileEntry {
-  readonly path: string
-  readonly content: string | null
-}
-
-export const CONVERSATION_FILE_MAX_COUNT = 8
-export const CONVERSATION_FILE_MAX_BYTES = 32768
+import { CONVERSATION_FILE_MAX_BYTES, parseConversationFileEntries, type ConversationFileEntry } from '@tianwen/evolution'
+export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial } from '@tianwen/evolution'
+export type { ConversationFileEntry, ConversationFileMaterial } from '@tianwen/evolution'
 
 function slashPath(value: string): string {
   return value.split(sep).join('/')
@@ -15,18 +10,6 @@ function slashPath(value: string): string {
 
 function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
-}
-
-function validateMaterialPath(path: string): string[] {
-  if (path !== path.normalize('NFC') || path.includes('\\')) throw new Error('ambiguous conversation file path')
-  const segments = path.split('/')
-  if (segments.some(segment => segment === '' || segment === '.' || segment === '..'
-    || segment.endsWith('.') || segment.endsWith(' ')
-    || /[<>:"|?*\u0000-\u001f]/u.test(segment)
-    || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(segment))) {
-    throw new Error('reserved or ambiguous conversation file path')
-  }
-  return segments
 }
 
 async function canonicalRoot(root: string): Promise<string> {
@@ -52,49 +35,6 @@ async function inspectPath(root: string, segments: readonly string[]): Promise<v
   }
 }
 
-export function parseConversationFileEntries(value: unknown): readonly ConversationFileEntry[] {
-  if (!Array.isArray(value) || value.length > CONVERSATION_FILE_MAX_COUNT) {
-    throw new Error('conversation file material exceeds the file count limit')
-  }
-  const paths = new Set<string>()
-  const spellings = new Map<string, string>()
-  let totalBytes = 0
-  return value.map(item => {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw new Error('invalid conversation file entry')
-    const entry = item as Record<string, unknown>
-    const keys = Object.keys(entry)
-    if (keys.length !== 2 || !keys.includes('path') || !keys.includes('content')
-      || typeof entry.path !== 'string' || (typeof entry.content !== 'string' && entry.content !== null)) {
-      throw new Error('invalid conversation file entry')
-    }
-    const segments = validateMaterialPath(entry.path)
-    for (let length = 1; length <= segments.length; length++) {
-      const spelling = segments.slice(0, length).join('/')
-      const alias = spelling.toLowerCase()
-      const previous = spellings.get(alias)
-      if (previous !== undefined && previous !== spelling) throw new Error('case-aliased conversation file path')
-      spellings.set(alias, spelling)
-    }
-    const alias = entry.path.toLowerCase()
-    if (paths.has(alias)) throw new Error('duplicate conversation file path')
-    if (segments.slice(0, -1).some((_, index) => paths.has(segments.slice(0, index + 1).join('/').toLowerCase()))
-      || [...paths].some(path => path.startsWith(`${alias}/`))) {
-      throw new Error('conflicting conversation file path')
-    }
-    paths.add(alias)
-    if (entry.content !== null) {
-      if (entry.content.includes('\0')) throw new Error('conversation file content contains NUL')
-      const bytes = Buffer.from(entry.content, 'utf8')
-      if (new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) !== entry.content) {
-        throw new Error('conversation file content is not exact UTF-8')
-      }
-      totalBytes += bytes.byteLength
-      if (totalBytes > CONVERSATION_FILE_MAX_BYTES) throw new Error('conversation file material exceeds the byte limit')
-    }
-    return { path: entry.path, content: entry.content }
-  })
-}
-
 export async function conversationFilePath(root: string, candidate: string): Promise<string> {
   if (candidate.length === 0 || candidate.includes('\0')) throw new Error('invalid conversation file path')
   const rootPath = await canonicalRoot(root)
@@ -104,7 +44,8 @@ export async function conversationFilePath(root: string, candidate: string): Pro
     throw new Error('conversation file path escapes root')
   }
   const path = slashPath(child)
-  const segments = validateMaterialPath(path)
+  parseConversationFileEntries([{ path, content: null }])
+  const segments = path.split('/')
   await inspectPath(rootPath, segments)
   const canonicalTarget = await realpath(target).catch(error => {
     if (missing(error)) return target

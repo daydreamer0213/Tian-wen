@@ -218,9 +218,16 @@ interface ConversationFileTrialOutput {
   readonly files: readonly ConversationFileEntry[]
   readonly outputDigest: Sha256Digest
 }
-// run input: { label, material, guidance?, callConfig, signal, replicaParent }
-// run result: ConversationFileTrialOutput & { proof: ConversationJudgmentProof }
-// recover input after (ctx, proof): { material, guidance?, callConfig, outputDigest }
+interface ConversationFileTrialReceipt extends ConversationFileTrialOutput {
+  readonly schemaVersion: 'tianwen.conversation-file-trial-receipt.v1'
+  readonly outputKind: 'files' | 'chat'
+  readonly workerMaterialDigest: Sha256Digest
+  readonly executionProof: ConversationJudgmentProof
+}
+// run input: { label, material, guidance?, callConfig, signal, replicaParent,
+//              retainReceipt: (receipt: ConversationFileTrialReceipt) => void | Promise<void> }
+// run result: ConversationFileTrialOutput & { proof: ConversationJudgmentProof, receipt: ConversationFileTrialReceipt }
+// recover input after (ctx, proof): { receipt, material, guidance?, callConfig, outputDigest }
 // recover result: ConversationFileTrialOutput
 ```
 
@@ -273,16 +280,27 @@ only the native permitted file calls, while the parent presentation stays intact
 Cover an agent-scoped Code Mode parent in the composition test as well; the
 existing execution guard still rejects any attempted composite/unknown call.
 
-Append one host-only non-surface `tianwen/conversation-file-trial-result` Session
-event after the completed turn, then flush and calculate sessionDigest. Its
-strict bounded payload binds the file contract, exact worker request identity,
-initial material digest, actual answer and final entries. No new store or
-executable artifact is needed. `outputDigest = sha256({ answer, files })` for
-file trials. Recovery validates unique receipt, native request and completion,
-tool paths, model configuration and the output binding without reading current
-files or invoking any model. Never accept an ordinary text execution proof as
-file proof. Preserve bounded receipts when retiring only the exact owned replica;
-validate the absolute child target before cleanup and never delete its parent.
+After the completed native turn and actual file capture, flush and calculate the
+unchanged native sessionDigest. Create the strict bounded host receipt, then await
+the required retainReceipt callback before returning output or retiring its replica.
+This is a host-only persistence seam, never a model tool. Task 4 supplies the
+existing private study ledger append; Task 3 does not add a store. Receipt-retention
+failure produces no successful trial return and no subsequent review; retain the
+exact owned replica for diagnosis until bounded evidence is safely retained.
+Do not append a custom native Session event: the installed reader rejects unknown
+types during cold recovery, although live inspect misleadingly accepts them.
+Do not alter native dependencies/catalogs, spoof another native event, mutate frozen
+events, or append around the live-session coordinator.
+
+`outputDigest = sha256({ answer, files })` for file trials. Export a strict receipt
+parser: exact schema/fields, bounded answer and files, output kind, worker material
+identity, proof and recomputed output digest. Recovery requires both that receipt
+and its matching native request/completion/tool/config proof. The native Session
+digest does NOT by itself contain final file output. Never recover from reviewer
+input alone or an ordinary text execution proof; never read current files or invoke
+a model to reconstruct missing receipt data. Check actual cold inspection after
+Agent disposal, not only a live persistence view. Validate the absolute owned
+replica child target before cleanup and never delete its parent.
 
 - [ ] Write RED that the candidate trial must actually change its own replica,
   while baseline and original workspace bytes remain unchanged.
@@ -290,7 +308,8 @@ validate the absolute child target before cleanup and never delete its parent.
 - [ ] Restrict and guard native read/write/edit by exact replica/allowed paths;
   preserve cancellation and exact native model/persistence proof.
 - [ ] Verify actual source/candidate isolation, missing output, denied original
-  path, disallowed tools, cancellation, file tampering and exact receipt recovery.
+  path, disallowed tools, cancellation, file tampering, retention-before-return,
+  failed retention and exact cold receipt recovery.
 - [ ] Independent task-scoped review before integrating the new executor.
 
 ## Task 4: Existing study and blind-review integration
@@ -328,6 +347,26 @@ exploration observations, source-selection recovery and claim-review recovery.
 Recovery first verifies executor host receipt, then both blind reviewers used
 the same frozen input and exact output. Neither recovery nor a retry reads the
 current replica to reconstruct historical proof.
+
+Add `study-file-trial-captured` to existing private ConversationGuidanceRecord,
+not a new store or native Session event. Its wrapper binds studyId, the existing
+case materialDigest and a discriminated target: formal caseId + baseline/candidate,
+or frozen exploration request digest + control/treatment. It contains the strict
+Task 3 receipt without a verdict. Validate mode/outputKind, study phase and unique
+target. Persist this from runConversationFileTrial's retainReceipt callback after
+native proof exists and before either reviewer starts. Record the receipt before
+retiring the replica. A persisted receipt without complete reviews is not an arm
+and must not authorize replaying a missing generation after restart.
+
+Reserve each receipt's execution Session for its target. Formal/exploration arm
+validation consumes only its own matching receipt (proof, material, output digest)
+and retains all existing cross-arm/proposal/judgment Session independence checks;
+do not reject its own reservation or weaken global reuse checks. Missing, changed,
+cross-target or reused receipts are unavailable. Recovery obtains the receipt from
+the private ledger, verifies the native proof through Task 3, then binds both blind
+reviews to the same output. Test true cold private-ledger/native recovery with zero
+model calls, public-event exclusion, retention failure before review, and formal
+and exploration consumption. Historical text objects acquire no new fields.
 
 For original-result and method-study projection, original file preimages are
 sources and contents of declared outputPaths plus the assistant reply are answer.

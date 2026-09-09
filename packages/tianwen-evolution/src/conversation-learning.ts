@@ -1,6 +1,7 @@
 import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
 import { parseClaimAudit, type ClaimAudit } from './conversation-claim-audit.js'
+import { parseConversationFileEntries, parseConversationFileResult, type ConversationFileResult, type ConversationTaskFileInput, type ConversationTaskFileUnavailable } from './conversation-files.js'
 
 export const CONVERSATION_FAMILIES = ['summarization', 'writing', 'planning', 'code', 'other'] as const
 export const CONVERSATION_FAILURES = ['source-fidelity', 'instruction-following', 'task-understanding', 'verification', 'tool-use', 'user-preference'] as const
@@ -141,7 +142,8 @@ export interface ConversationAdmissionDecision {
   readonly objective: string
   readonly criteria: readonly string[]
   readonly family: ConversationFamily
-  readonly evaluationMode: 'text' | 'external' | 'subjective'
+  readonly evaluationMode: 'text' | 'external' | 'subjective' | 'local-files'
+  readonly fileOutputKind?: 'files' | 'chat'
   readonly relatedTaskId: string | null
   readonly feedback: null | {
     readonly kind: 'correction' | 'positive' | 'preference' | 'requirement-change'
@@ -168,6 +170,7 @@ export interface ConversationTaskCompletion {
   readonly assistantMessageIds: readonly string[]
   readonly resultDigest: Sha256Digest
   readonly evidenceIds: readonly Sha256Digest[]
+  readonly files?: ConversationFileResult
 }
 
 export interface ConversationTaskModelObserved {
@@ -199,7 +202,7 @@ export interface ConversationTaskReviewIntent {
   readonly materialDigest: Sha256Digest
 }
 
-export type ConversationLearningRecord = ConversationTaskSource | ConversationTaskAdmission | ConversationTaskCompletion | ConversationTaskReview | ConversationTaskReviewIntent | ConversationTaskModelObserved
+export type ConversationLearningRecord = ConversationTaskSource | ConversationTaskAdmission | ConversationTaskCompletion | ConversationTaskReview | ConversationTaskReviewIntent | ConversationTaskModelObserved | ConversationTaskFileInput | ConversationTaskFileUnavailable
 export interface ConversationLearningEvent {
   readonly type: 'conversation-learning-recorded'
   readonly schemaVersion: 'tianwen.conversation-learning.v1'
@@ -214,6 +217,8 @@ export interface ConversationTask {
   readonly review?: ConversationTaskReview
   readonly reviewIntent?: ConversationTaskReviewIntent
   readonly models?: readonly ConversationTaskModelObserved[]
+  readonly fileInputs?: readonly ConversationTaskFileInput[]
+  readonly fileUnavailable?: ConversationTaskFileUnavailable
 }
 
 export function conversationTaskId(source: Pick<ConversationTaskSource, 'sessionId' | 'sessionLifecycleFingerprint' | 'turn'>): string {
@@ -262,7 +267,7 @@ function unavailable(value: unknown): ConversationUnavailable | null {
 }
 
 export function parseConversationAdmission(value: unknown): ConversationAdmissionDecision {
-  const input = object(value, ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback'])
+  const input = object(value, ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback', ...(Object.hasOwn(value as object, 'fileOutputKind') ? ['fileOutputKind'] : [])])
   let feedback: ConversationAdmissionDecision['feedback'] = null
   if (input.feedback !== null) {
     const item = object(input.feedback, ['kind', 'quote', 'category'])
@@ -271,12 +276,15 @@ export function parseConversationAdmission(value: unknown): ConversationAdmissio
       quote: text(item.quote, 2048), category: item.category === null ? null : oneOf(item.category, CONVERSATION_FAILURES),
     }
   }
+  const evaluationMode = oneOf(input.evaluationMode, ['text', 'external', 'subjective', 'local-files'])
   const result: ConversationAdmissionDecision = {
     kind: oneOf(input.kind, ['task', 'conversation']), objective: text(input.objective, 4096, true),
     criteria: list(input.criteria, item => text(item, 2048), 12),
-    family: oneOf(input.family, CONVERSATION_FAMILIES), evaluationMode: oneOf(input.evaluationMode, ['text', 'external', 'subjective']),
+    family: oneOf(input.family, CONVERSATION_FAMILIES), evaluationMode,
     relatedTaskId: input.relatedTaskId === null ? null : text(input.relatedTaskId, 512), feedback,
+    ...(Object.hasOwn(input, 'fileOutputKind') ? { fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}),
   }
+  if ((evaluationMode === 'local-files') !== (result.fileOutputKind !== undefined)) throw new TypeError('local-files admission requires an exclusive file output kind')
   if (result.kind === 'task' && (result.objective.trim() === '' || result.criteria.length === 0)) throw new TypeError('task admission requires an objective and criteria')
   if (feedback?.kind === 'correction' && (feedback.category === null || result.relatedTaskId === null)) throw new TypeError('a correction requires a target and problem category')
   return result
@@ -306,12 +314,22 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
       ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}) }
   }
   if (value.kind === 'task-finished') {
-    const input = object(value, ['kind', 'taskId', 'endSeq', 'status', 'assistantMessageIds', 'resultDigest', 'evidenceIds'])
-    return { kind: 'task-finished', taskId: text(input.taskId, 512), endSeq: integer(input.endSeq), status: oneOf(input.status, ['completed', 'interrupted', 'failed']), assistantMessageIds: uniqueTextList(input.assistantMessageIds), resultDigest: digest(input.resultDigest), evidenceIds: list(input.evidenceIds, digest, 256) }
+    const input = object(value, ['kind', 'taskId', 'endSeq', 'status', 'assistantMessageIds', 'resultDigest', 'evidenceIds', ...(Object.hasOwn(value, 'files') ? ['files'] : [])])
+    return { kind: 'task-finished', taskId: text(input.taskId, 512), endSeq: integer(input.endSeq), status: oneOf(input.status, ['completed', 'interrupted', 'failed']), assistantMessageIds: uniqueTextList(input.assistantMessageIds), resultDigest: digest(input.resultDigest), evidenceIds: list(input.evidenceIds, digest, 256),
+      ...(Object.hasOwn(input, 'files') ? { files: parseConversationFileResult(input.files) } : {}) }
   }
   if (value.kind === 'task-model-observed') {
     const input = object(value, ['kind', 'taskId', 'headerSeq', 'modelConfigDigest'])
     return { kind: 'task-model-observed', taskId: text(input.taskId, 512), headerSeq: integer(input.headerSeq), modelConfigDigest: digest(input.modelConfigDigest) }
+  }
+  if (value.kind === 'task-file-input-captured') {
+    const input = object(value, ['kind', 'taskId', 'callId', 'callSeq', 'path', 'content'])
+    const [entry] = parseConversationFileEntries([{ path: input.path, content: input.content }])
+    return { kind: 'task-file-input-captured', taskId: text(input.taskId, 512), callId: text(input.callId, 512), callSeq: integer(input.callSeq), ...entry! }
+  }
+  if (value.kind === 'task-file-evidence-unavailable') {
+    const input = object(value, ['kind', 'taskId', 'reason'])
+    return { kind: 'task-file-evidence-unavailable', taskId: text(input.taskId, 512), reason: oneOf(input.reason, ['unsupported-tool', 'unsafe-path', 'material-unavailable', 'capture-interrupted']) }
   }
   if (value.kind === 'task-reviewed') {
     const input = object(value, ['kind', 'taskId', 'admissionDigest', 'resultDigest', 'verdict', 'category', 'explanation', 'evidenceQuotes', 'proof', 'unavailableReason', ...(Object.hasOwn(value, 'reviewChecks') ? ['reviewChecks'] : [])])
@@ -347,6 +365,8 @@ export class ConversationLearningState {
     if (record.kind === 'task-finished') return task?.completion
     if (record.kind === 'task-review-started') return task?.reviewIntent
     if (record.kind === 'task-model-observed') return task?.models?.find(model => model.headerSeq === record.headerSeq)
+    if (record.kind === 'task-file-input-captured') return task?.fileInputs?.find(input => input.callId === record.callId || input.path.toLowerCase() === record.path.toLowerCase())
+    if (record.kind === 'task-file-evidence-unavailable') return task?.fileUnavailable
     return task?.review
   }
 
@@ -370,10 +390,29 @@ export class ConversationLearningState {
     }
     if (record.kind === 'task-finished') {
       if (record.endSeq <= task.source.startSeq) throw new Error('task result must follow its source boundary')
+      if (record.files !== undefined) {
+        const inputs = task.fileInputs?.map(input => ({ path: input.path, content: input.content })) ?? []
+        if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.admission.decision.fileOutputKind !== record.files.outputKind || record.status !== 'completed' || task.fileUnavailable !== undefined
+          || inputs.length === 0 || record.files.inputsDigest !== sha256(inputs)
+          || record.files.captureSeq >= record.endSeq || task.fileInputs!.some(input => input.callSeq >= record.files!.captureSeq)
+          || sha256(record.files.entries.map(entry => entry.path)) !== sha256(inputs.map(entry => entry.path))) {
+          throw new Error('task file result does not match its immutable captured inputs and completion')
+        }
+      }
       return
     }
     if (record.kind === 'task-model-observed') {
       if (task.admission === undefined || task.completion !== undefined) throw new Error('task model observation requires admission and must precede the completed result')
+      return
+    }
+    if (record.kind === 'task-file-input-captured') {
+      if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) throw new Error('task file capture requires local-files admission and must precede the completed result')
+      if (task.fileUnavailable !== undefined || record.callSeq <= task.source.startSeq) throw new Error('task file capture is unavailable or outside the task boundary')
+      parseConversationFileEntries([...(task.fileInputs ?? []).map(input => ({ path: input.path, content: input.content })), { path: record.path, content: record.content }])
+      return
+    }
+    if (record.kind === 'task-file-evidence-unavailable') {
+      if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) throw new Error('task file evidence status requires local-files admission and must precede the completed result')
       return
     }
     if (record.kind === 'task-review-started') {
@@ -406,6 +445,14 @@ export class ConversationLearningState {
       const previous = this.tasks.get(record.taskId)!
       if (record.kind === 'task-model-observed') {
         this.tasks.set(record.taskId, { ...previous, models: [...(previous.models ?? []), record] })
+        return
+      }
+      if (record.kind === 'task-file-input-captured') {
+        this.tasks.set(record.taskId, { ...previous, fileInputs: [...(previous.fileInputs ?? []), record] })
+        return
+      }
+      if (record.kind === 'task-file-evidence-unavailable') {
+        this.tasks.set(record.taskId, { ...previous, fileUnavailable: record })
         return
       }
       const key = record.kind === 'task-admitted' ? 'admission' : record.kind === 'task-finished' ? 'completion' : record.kind === 'task-review-started' ? 'reviewIntent' : 'review'

@@ -102,9 +102,13 @@ only to recorded output paths. Deny other tools and permission escalation.
 Never rewrite tool arguments to make an out-of-scope request look permitted.
 
 Capture actual final replica files, native tool events, model configuration and
-persisted Session proof. A bounded host-written, non-surface result receipt in
-that native Session binds captured files to execution before proof is hashed;
-reviewer input alone is not proof of an execution's file output. Independent reviewers receive frozen original criteria,
+persisted Session proof. A bounded host-written result receipt in the existing
+private study ledger binds captured files to that immutable native proof before
+review starts. The installed native persistence reader does not support new
+downstream Session event types; do not insert one, mutate its known-type set or
+write around its active-session coordinator. The native sessionDigest covers
+native execution; the separate private receipt binds actual file output to it.
+Reviewer input alone is not proof of an execution's file output. Independent reviewers receive frozen original criteria,
 inputs and actual produced content, with no arm labels or candidate source text.
 The existing acceptance requirements remain; no skipped/unknown comparison may
 activate a method. Synthetic adjacent/holdout tasks are labelled synthetic and

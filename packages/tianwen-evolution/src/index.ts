@@ -1,6 +1,8 @@
 import type { PublicLedgerEvent } from './ledger.js'
 export { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, conversationTaskId, conversationQualityContract, parseConversationQualityContract, hasCurrentConversationQuality, parseConversationAdmission, parseConversationLearningRecord, parseConversationReviewChecks, parseConversationAuditedReviewChecks, parseStoredConversationReviewChecks, parseConversationQualityReviewChecks, conversationReviewConsensus } from './conversation-learning.js'
 export type { ConversationReviewCheck, ConversationReviewChecks, ConversationAuditedReviewCheck, ConversationAuditedReviewChecks, ConversationStoredReviewChecks, ConversationQualityContract, ConversationAdmissionDecision, ConversationFailure, ConversationFamily, ConversationJudgmentProof, ConversationLearningRecord, ConversationTask, ConversationTaskAdmission, ConversationTaskCompletion, ConversationTaskModelObserved, ConversationTaskReview, ConversationTaskSource, ConversationUnavailable } from './conversation-learning.js'
+export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial } from './conversation-files.js'
+export type { ConversationFileEntry, ConversationFileMaterial, ConversationFileResult, ConversationTaskFileInput, ConversationTaskFileUnavailable } from './conversation-files.js'
 export { parseClaimAudit } from './conversation-claim-audit.js'
 export type { ClaimAssessment, ClaimAudit, ClaimAuditV1, ClaimAuditV2 } from './conversation-claim-audit.js'
 export { baselineGuidanceSnapshot, guidanceInputDigest, guidanceVersion, guidanceStudyId, parseGuidanceSnapshot, parseConversationGuidanceRecord } from './conversation-guidance.js'

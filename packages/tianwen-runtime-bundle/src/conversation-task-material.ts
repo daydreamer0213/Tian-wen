@@ -1,7 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
-import { learningSessionLifecycleFingerprint, sha256, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
@@ -34,6 +35,7 @@ export interface ConversationTaskMaterial {
   readonly objective: string
   readonly criteria: readonly string[]
   readonly qualityContract?: ConversationQualityContract
+  readonly files?: ConversationFileMaterial
   /** Present only on fresh study material, never on the original task review. */
   readonly feedbackStandard?: {
     readonly assessmentId: string
@@ -87,6 +89,54 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (sha256(requests) !== source.requestDigest || requests.length !== source.userMessageIds.length) throw new Error('natural task original request drift')
   const context = conversationContext(saved.events, source.startSeq, source.materialProjection)
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
+  const files = recoverFiles(saved.meta.cwd, saved.events, task)
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
-    ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }) }
+    ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }),
+    ...(files === undefined ? {} : { files }) }
+}
+
+function recordedToolPath(cwd: string, candidate: unknown): string | undefined {
+  if (typeof candidate !== 'string' || candidate.length === 0) return
+  const target = resolve(isAbsolute(candidate) ? candidate : resolve(cwd, candidate))
+  const child = relative(cwd, target)
+  if (child === '' || child === '..' || child.startsWith(`..${sep}`) || isAbsolute(child)) return
+  return child.split(sep).join('/')
+}
+
+function recoverFiles(cwd: string | undefined, events: readonly SessionEvent[], task: ConversationTask): ConversationFileMaterial | undefined {
+  const result = task.completion?.files
+  const outputKind = task.admission?.decision?.fileOutputKind
+  const inputs = task.fileInputs ?? []
+  if (cwd === undefined || !isAbsolute(cwd) || result === undefined || task.fileUnavailable !== undefined || outputKind !== result.outputKind || inputs.length === 0) return
+  const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
+  const calls = span.flatMap(event => {
+    if (event.type !== 'tool/call') return []
+    if (event.data.name !== 'read' && event.data.name !== 'write' && event.data.name !== 'edit') return [{ event, path: undefined }]
+    let args: unknown
+    try { args = JSON.parse(event.data.arguments) } catch { return [{ event, path: undefined }] }
+    const path = recordedToolPath(cwd, args !== null && typeof args === 'object' ? (args as Record<string, unknown>).file_path : undefined)
+    return [{ event, path }]
+  })
+  if (calls.length === 0 || calls.some(call => call.path === undefined)) return
+  if (!span.some(event => event.seq === result.captureSeq) || calls.some(call => call.event.seq > result.captureSeq)) return
+  const inputByPath = new Map(inputs.map(input => [input.path.toLowerCase(), input]))
+  if (inputByPath.size !== inputs.length || calls.some(call => !inputByPath.has(call.path!.toLowerCase()))) return
+  for (const input of inputs) {
+    const first = calls.find(call => call.path!.toLowerCase() === input.path.toLowerCase())
+    if (first === undefined || first.path !== input.path || first.event.seq !== input.callSeq || String(first.event.data.callId) !== input.callId) return
+  }
+  const successful = (call: typeof calls[number]) => span.some(event => event.type === 'tool/result' && isAppendSurfaceEvent(event)
+    && event.seq > call.event.seq && String(event.data.message.source.callId) === String(call.event.data.callId)
+    && event.data.error === undefined && event.data.message.content[0].isError !== true)
+  if (calls.some(call => !successful(call))) return
+  const mutations = new Set(calls.filter(call => call.event.data.name === 'write' || call.event.data.name === 'edit').map(call => call.path!.toLowerCase()))
+  if (outputKind === 'chat') {
+    if (mutations.size !== 0 || !calls.some(call => call.event.data.name === 'read' && successful(call)) || result.outputPaths.length !== 0) return
+  } else if (outputKind === 'files') {
+    if (mutations.size === 0 || result.outputPaths.length !== mutations.size
+      || result.outputPaths.some(path => !mutations.has(path.toLowerCase()))) return
+  } else return
+  const entries = inputs.map(({ path, content }) => ({ path, content }))
+  if (result.inputsDigest !== sha256(entries) || sha256(result.entries.map(entry => entry.path)) !== sha256(entries.map(entry => entry.path))) return
+  return { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind, cwd, entries, outputPaths: result.outputPaths }
 }

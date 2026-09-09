@@ -6,6 +6,7 @@ import {
   CONVERSATION_FILE_MAX_COUNT,
   conversationFilePath,
   parseConversationFileEntries,
+  parseConversationFileMaterial,
   readConversationFile,
   seedConversationFiles,
 } from '../../packages/tianwen-runtime-bundle/src/conversation-file-material.js'
@@ -116,6 +117,26 @@ it('parses only canonical bounded UTF-8 file entries without aliases or extra fi
     { path: 'Notes/one.md', content: 'one' },
     { path: 'notes/two.md', content: 'two' },
   ])).toThrow()
+})
+
+it('parses strict file and read-to-chat material without touching the filesystem', () => {
+  const cwd = resolve(fixtureBase, 'synthetic-root')
+  expect(parseConversationFileMaterial({ schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd,
+    entries: [{ path: 'output.md', content: null }], outputPaths: ['output.md'] })).toEqual({
+    schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd,
+    entries: [{ path: 'output.md', content: null }], outputPaths: ['output.md'],
+  })
+  expect(parseConversationFileMaterial({ schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd,
+    entries: [{ path: 'input.md', content: 'source' }], outputPaths: [] })).toEqual({
+    schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd,
+    entries: [{ path: 'input.md', content: 'source' }], outputPaths: [],
+  })
+  for (const material of [
+    { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd, entries: [{ path: 'output.md', content: null }], outputPaths: [] },
+    { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd, entries: [{ path: 'input.md', content: null }], outputPaths: [] },
+    { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd, entries: [{ path: 'input.md', content: 'source' }], outputPaths: ['input.md'] },
+    { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd: 'relative', entries: [{ path: 'output.md', content: null }], outputPaths: ['output.md'] },
+  ]) expect(() => parseConversationFileMaterial(material)).toThrow()
 })
 
 it('rejects malformed paths and material above count or aggregate UTF-8 byte limits', () => {
