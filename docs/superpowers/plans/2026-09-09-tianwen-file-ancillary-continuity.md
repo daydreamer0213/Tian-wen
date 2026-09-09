@@ -457,6 +457,7 @@ No model scenario is added merely to trigger adoption.
 **Files:**
 - Create: `packages/tianwen-desktop-host/src/native-observation-launch.ts`.
 - Modify: `packages/tianwen-desktop-host/src/host.ts`, `packages/tianwen-desktop-host/package.json` (include the new built helper).
+- Modify: `scripts/audit-desktop-artifact.mjs` only to add the new helper to the current B2 resource allowlist; preserve the historical B1 set and current version until Task5.
 - Create: `tests/dsh-migration/tianwen-native-observation-launch.spec.ts`.
 - Modify: `tests/dsh-migration/tianwen-desktop-host.spec.ts`, `tianwen-desktop-artifact.spec.ts`, and `runtime-bundle.spec.ts` only for changed packaging/startup expectations.
 - Read: `docs/research/2026-09-09-tianwen-native-observation-startup.md`.
@@ -567,6 +568,12 @@ timeout, normal child exit and host stop; never leave a background helper.
 Keep the overlay until child exit if native reload may still read it. Report
 unsupported observation without promising file learning; ordinary Web still
 works. No new user choice or repeated model-usage permission prompt.
+
+Package the new `app/dist/native-observation-launch.js` helper in the current
+B2 artifact and require it in that exact resource allowlist. The allowlist is
+static (audit-desktop-artifact.mjs48-63), so changing package.json alone cannot
+pass the existing artifact audit. Add a missing-helper rejection using the
+existing B2 fixture; retain unknown-file rejection and the historical B1 layout.
 
 - [ ] **Step 4: Run focused GREEN and the actual product startup gate.**
 
