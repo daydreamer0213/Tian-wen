@@ -17,10 +17,6 @@
 - id: sandbox
   disabled: false
 
-- id: pwsh-sandbox
-  name: '@deepseek-ai/dsh-pwsh-sandbox'
-  disabled: true
-
 - id: goal-round-driver
   disabled: true
 
@@ -34,10 +30,6 @@
   disabled: true
 
 - insert:
-    - id: tianwen-native-pwsh-observer
-      name: '@tianwen/runtime-bundle/native-pwsh-observer'
-      disabled: !!js process.platform !== 'win32'
-
     - id: agent-presets
       name: '@deepseek-ai/dsh-agent-presets'
       config:

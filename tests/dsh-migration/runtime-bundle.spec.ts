@@ -739,7 +739,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect(patch).toContain('session-title-llm')
   })
 
-  it('exports the native observation entries and replaces the existing shell row', async () => {
+  it('exports the opt-in native observation entries while the ordinary patch keeps the original shell', async () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as { exports: Record<string,unknown>; files:string[] }
     for (const entry of ['native-pwsh-observer','native-tool-observation']) {
       expect(manifest.exports[`./${entry}`]).toEqual({types:`./dist/${entry}.d.ts`,default:`./dist/${entry}.js`})
@@ -755,7 +755,26 @@ describe('@tianwen/runtime-bundle', () => {
     const loader = await import(pathToFileURL(fromDsh.resolve('@deepseek-ai/cordis-plugin-loader')).href)
     const entries = boot.composeEntries([base,patches]) as Array<{id?:string;name?:string;disabled?:unknown}>
     const shells = entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name ?? '') && !loader.interpolate({process},row.disabled))
-    expect(shells.map(row=>row.name)).toEqual(process.platform === 'win32' ? ['@tianwen/runtime-bundle/native-pwsh-observer'] : [])
+    expect(shells.map(row=>row.name)).toEqual(process.platform === 'win32' ? ['@deepseek-ai/dsh-pwsh-sandbox'] : [])
+  })
+
+  it.each([false,true])('preserves the effective native shell configuration and disabled=%s', async disabled => {
+    const fromBundle = createRequire(resolve(packageRoot,'package.json'))
+    const fromDsh = createRequire(fromBundle.resolve('@deepseek-ai/dsh/package.json'))
+    const boot = await import(pathToFileURL(fromDsh.resolve('@deepseek-ai/dsh-app-boot')).href)
+    const loader = await import(pathToFileURL(fromDsh.resolve('@deepseek-ai/cordis-plugin-loader')).href)
+    const base = boot.loadOverlayPatches('tianwen-test',fromDsh.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
+    const profile = [{id:'pwsh-sandbox',config:{cwd:'E:/configured-workspace',pwshPath:'D:/configured-powershell/pwsh.exe',timeoutMs:12345,maxTimeoutMs:23456,maxOutputBytes:4096,maxSpillBytes:8192,graceMs:250},inject:['subprocess','sandbox','sandboxPolicy','configured-ready'],disabled}]
+    const patch = boot.loadOverlayPatches('tianwen-test',resolve(packageRoot,'goal-first.patch.yml'))
+    const composed = boot.composeEntries([base,profile,patch]) as Array<{id:string;name:string;config?:unknown;inject?:unknown;disabled?:unknown}>
+    const shells = composed.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name) && !loader.interpolate({process},row.disabled))
+    if (disabled) expect(shells).toEqual([])
+    else {
+      expect(shells).toHaveLength(1)
+      expect(shells[0]?.name).toBe('@deepseek-ai/dsh-pwsh-sandbox')
+      expect(shells[0]?.config).toEqual(profile[0]!.config)
+      expect(shells[0]?.inject).toEqual(profile[0]!.inject)
+    }
   })
 
   it('parses Goal-first revision as a scalar expression for start and mutation config', async () => {

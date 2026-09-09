@@ -7,11 +7,24 @@ import { connect } from 'node:net'
 import { Context } from '@deepseek-ai/cordis'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { TianwenNativeToolObservationService, parseNativeDirectoryReceipt } from '../../packages/tianwen-runtime-bundle/src/native-tool-observation.js'
-import { NativeObservedPwshExecutor } from '../../packages/tianwen-runtime-bundle/src/native-pwsh-observer.js'
+import { NativeObservedPwshExecutor, withNativePwshObservation } from '../../packages/tianwen-runtime-bundle/src/native-pwsh-observer.js'
 
 describe('native pwsh producer export', () => {
   it('inherits the sole native shell provider contract', () => {
     expect(NativeObservedPwshExecutor.inject).toEqual(['subprocess', 'sandbox', 'sandboxPolicy'])
+  })
+  it.each([false,true])('explicit pre-boot transformation preserves configured row metadata and disabled=%s', disabled => {
+    const native = {id:'pwsh-sandbox',name:'@deepseek-ai/dsh-pwsh-sandbox',config:{cwd:'E:/configured',pwshPath:'D:/pwsh/pwsh.exe',timeoutMs:12345,maxTimeoutMs:23456,maxOutputBytes:4096,maxSpillBytes:8192,graceMs:250},inject:['subprocess','sandbox','sandboxPolicy','ready'],disabled}
+    const unrelated = {id:'another',name:'another-plugin',config:{keep:true}}
+    const output = withNativePwshObservation([native,unrelated])
+    expect(output).toEqual([{...native,name:'@tianwen/runtime-bundle/native-pwsh-observer'},unrelated])
+    expect(native.name).toBe('@deepseek-ai/dsh-pwsh-sandbox')
+  })
+  it('keeps unsupported or ambiguous entry lists unchanged', () => {
+    const native={id:'pwsh-sandbox',name:'@deepseek-ai/dsh-pwsh-sandbox'}
+    for (const entries of [[{...native,name:'custom-shell'}],[native,{...native}],[native,{id:'observer',name:'@tianwen/runtime-bundle/native-pwsh-observer'}]]) {
+      expect(withNativePwshObservation(entries)).toEqual(entries)
+    }
   })
 })
 
@@ -19,7 +32,7 @@ const nativeRequire = createRequire('D:/DevData/tianwen-real-user-retest-2026090
 const load = (name: string) => import(/* @vite-ignore */ pathToFileURL(nativeRequire.resolve(name)).href)
 describe.skipIf(process.platform !== 'win32')('native product gate', () => {
   let stock: Context, observed: Context, workspace: string
-  let compose: (executor: any) => Promise<Context>
+  let compose: (executor: any, config?: Record<string, unknown>) => Promise<Context>
   const evidence: unknown[] = []
   const originalTemp = { TEMP:process.env.TEMP, TMP:process.env.TMP }
   const identity = {taskId:'native-product',sessionId:'native-session',callId:'native-call'}
@@ -31,13 +44,13 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
     await mkdir(join(workspace,'nested'))
     await Promise.all([writeFile(join(workspace,'one.txt'),'one'),writeFile(join(workspace,'two.txt'),'two'),writeFile(join(workspace,'nested','three.txt'),'three')])
     const [subprocess,sandbox,policy,pwsh] = await Promise.all(['@deepseek-ai/dsh-subprocess-local','@deepseek-ai/dsh-sandbox-local','@deepseek-ai/dsh-sandbox-policy','@deepseek-ai/dsh-pwsh-sandbox'].map(load))
-    compose = async (executor: any) => {
+    compose = async (executor: any, config = {}) => {
       const ctx=new Context()
       await ctx.plugin(subprocess.LocalSubprocessRuntime)
       await ctx.plugin(sandbox.LocalSandboxProvider,{})
       await ctx.plugin(policy.SandboxPolicyService,{mode:'workspace-write',workspaceRoot:workspace})
       await ctx.plugin(TianwenNativeToolObservationService)
-      await ctx.plugin(executor,{cwd:workspace,timeoutMs:15000,maxTimeoutMs:15000,maxOutputBytes:65536,maxSpillBytes:65536,graceMs:500})
+      await ctx.plugin(executor,{cwd:workspace,timeoutMs:15000,maxTimeoutMs:15000,maxOutputBytes:65536,maxSpillBytes:65536,graceMs:500,...config})
       return ctx
     }
     stock=await compose(pwsh.SandboxPwshExecutor); observed=await compose(NativeObservedPwshExecutor)
@@ -104,8 +117,8 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
     const loader=await load('@deepseek-ai/cordis-plugin-loader')
     const base=boot.loadOverlayPatches('tianwen-test',nativeRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
     const patch=boot.loadOverlayPatches('tianwen-test',join(import.meta.dirname,'../../packages/tianwen-runtime-bundle/goal-first.patch.yml'))
-    const entries=boot.composeEntries([base,patch]) as Array<{name:string;disabled?:unknown}>
-    const shells=entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name) && !loader.interpolate({process},row.disabled))
+    const entries=withNativePwshObservation(boot.composeEntries([base,patch]))
+    const shells=entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name ?? '') && !loader.interpolate({process},row.disabled))
     expect(shells.map(row=>row.name)).toEqual(['@tianwen/runtime-bundle/native-pwsh-observer'])
     const built=await import('../../packages/tianwen-runtime-bundle/dist/native-pwsh-observer.js')
     const ctx=await compose(built.default)
@@ -114,6 +127,31 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
       expect(value.receipt?.identity).toEqual(identity)
       expect(value.result.exitCode).toBe(0)
     } finally {await ctx.fiber.dispose()}
+  })
+  it('explicit configured composition preserves stock cwd interpreter and limits without capture',async () => {
+    const config={cwd:join(workspace,'nested'),pwshPath:(stock.shell as any).pwshPath,timeoutMs:12000,maxTimeoutMs:13000,maxOutputBytes:2048,maxSpillBytes:4096,graceMs:250}
+    const boot=await load('@deepseek-ai/dsh-app-boot')
+    const base=boot.loadOverlayPatches('tianwen-test',nativeRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
+    const patch=boot.loadOverlayPatches('tianwen-test',join(import.meta.dirname,'../../packages/tianwen-runtime-bundle/goal-first.patch.yml'))
+    const entries=withNativePwshObservation(boot.composeEntries([base,[{id:'pwsh-sandbox',config}],patch]))
+    const selected=entries.find(row=>row.id === 'pwsh-sandbox')!
+    expect(selected.name).toBe('@tianwen/runtime-bundle/native-pwsh-observer')
+    expect(selected.config).toEqual(config)
+    const built=await import('../../packages/tianwen-runtime-bundle/dist/native-pwsh-observer.js')
+    const native=await load('@deepseek-ai/dsh-pwsh-sandbox')
+    const configuredStock=await compose(native.SandboxPwshExecutor,config)
+    const configuredObserver=await compose(built.default,selected.config as Record<string,unknown>)
+    const preflight=vi.spyOn(configuredObserver.shell as any,'qualify')
+    try {
+      const request={command:'Get-Location',timeoutMs:14000}
+      expect(configuredObserver.shell.resolve(request)).toEqual(configuredStock.shell.resolve(request))
+      expect(configuredObserver.shell.resolve(request)).toMatchObject({workdir:config.cwd,timeoutMs:13000,stdoutMaxBytes:2048})
+      expect((configuredObserver.shell as any).pwshPath).toBe(config.pwshPath)
+      expect((configuredObserver.shell as any).config).toMatchObject(config)
+      const result=await configuredObserver.shell.run(configuredObserver.shell.resolve(request))
+      expect(result).toEqual(await configuredStock.shell.run(configuredStock.shell.resolve(request)))
+      expect(preflight).not.toHaveBeenCalled()
+    } finally {preflight.mockRestore();await configuredObserver.fiber.dispose();await configuredStock.fiber.dispose()}
   })
   it('finishes when a connected receiver stops reading',async () => {
     const baseline=await stock.shell.run(stock.shell.resolve({command:'Get-Location'}))

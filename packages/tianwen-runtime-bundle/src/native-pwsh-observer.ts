@@ -10,6 +10,23 @@ import { sha256 } from '@tianwen/evolution/learning-intake'
 import { insideNativeWorkspace, parseNativeDirectoryCommands, type NativeDirectoryCommand, type NativeDirectoryReceipt } from './native-tool-observation.js'
 import { observationPrefix, qualificationScript } from './native-pwsh-observation-scripts.js'
 
+export interface NativePwshCompositionEntry {
+  readonly id?: string
+  readonly name?: string
+  readonly [key: string]: unknown
+}
+
+/** Explicit host opt-in AFTER all profile patches, BEFORE mounting any entries.
+ * Only the exact native module name changes; config, disabled expressions,
+ * injections, id and all other metadata remain intact. No launcher calls this
+ * automatically. Ambiguous/unsupported trees retain their original providers.
+ */
+export function withNativePwshObservation(entries: readonly NativePwshCompositionEntry[]): readonly NativePwshCompositionEntry[] {
+  const native = entries.filter(entry => entry.id === 'pwsh-sandbox' && entry.name === '@deepseek-ai/dsh-pwsh-sandbox' && !entry.group)
+  if (native.length !== 1 || entries.some(entry => entry.name === '@tianwen/runtime-bundle/native-pwsh-observer')) return [...entries]
+  return entries.map(entry => entry === native[0] ? { ...entry, name: '@tianwen/runtime-bundle/native-pwsh-observer' } : entry)
+}
+
 async function admittedPath(root: string, path: string): Promise<boolean> {
   if (!insideNativeWorkspace(root, path)) return false
   // Check every existing ancestor, including the workspace itself; missing leaf
