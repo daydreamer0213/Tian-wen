@@ -766,7 +766,7 @@ describe('@tianwen/runtime-bundle', () => {
     const base = boot.loadOverlayPatches('tianwen-test',fromDsh.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
     const profile = [{id:'pwsh-sandbox',config:{cwd:'E:/configured-workspace',pwshPath:'D:/configured-powershell/pwsh.exe',timeoutMs:12345,maxTimeoutMs:23456,maxOutputBytes:4096,maxSpillBytes:8192,graceMs:250},inject:['subprocess','sandbox','sandboxPolicy','configured-ready'],disabled}]
     const patch = boot.loadOverlayPatches('tianwen-test',resolve(packageRoot,'goal-first.patch.yml'))
-    const composed = boot.composeEntries([base,profile,patch]) as Array<{id:string;name:string;config?:unknown;inject?:unknown;disabled?:unknown}>
+    const composed = boot.composeEntries([base,profile,patch,[{id:'pwsh-sandbox',disabled}]]) as Array<{id:string;name:string;config?:unknown;inject?:unknown;disabled?:unknown}>
     const shells = composed.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name) && !loader.interpolate({process},row.disabled))
     if (disabled) expect(shells).toEqual([])
     else {
@@ -775,6 +775,21 @@ describe('@tianwen/runtime-bundle', () => {
       expect(shells[0]?.config).toEqual(profile[0]!.config)
       expect(shells[0]?.inject).toEqual(profile[0]!.inject)
     }
+  })
+
+  it.each(['baseline','configured','earlier-disabled','final-disabled'])('keeps unobserved native composition equal to pre-feature precedence: %s', async scenario => {
+    const fromBundle = createRequire(resolve(packageRoot,'package.json'))
+    const fromDsh = createRequire(fromBundle.resolve('@deepseek-ai/dsh/package.json'))
+    const boot = await import(pathToFileURL(fromDsh.resolve('@deepseek-ai/dsh-app-boot')).href)
+    const base = boot.loadOverlayPatches('tianwen-test',fromDsh.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'))
+    const patch = boot.loadOverlayPatches('tianwen-test',resolve(packageRoot,'goal-first.patch.yml'))
+    const profile = scenario === 'baseline' ? [] : [{id:'pwsh-sandbox',config:{cwd:'E:/configured',timeoutMs:12345},inject:['subprocess','sandbox','sandboxPolicy'],...(scenario === 'earlier-disabled' ? {disabled:true} : {})}]
+    const finalOverride = scenario === 'final-disabled' ? [{id:'pwsh-sandbox',disabled:true}] : []
+    // Exact native-row override from pre-feature commit 884df4b; other Goal-first
+    // entries do not change native shell options.
+    const preFeature = [{id:'pwsh-sandbox',disabled:{__jsExpr:"process.platform !== 'win32'"}}]
+    const selectShell = (entries: Array<{name?:string}>) => entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name ?? ''))
+    expect(selectShell(boot.composeEntries([base,profile,patch,finalOverride]))).toEqual(selectShell(boot.composeEntries([base,profile,preFeature,finalOverride])))
   })
 
   it('parses Goal-first revision as a scalar expression for start and mutation config', async () => {

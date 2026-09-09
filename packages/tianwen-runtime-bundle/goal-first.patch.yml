@@ -17,6 +17,9 @@
 - id: sandbox
   disabled: false
 
+- id: pwsh-sandbox
+  disabled: !!js process.platform !== 'win32'
+
 - id: goal-round-driver
   disabled: true
 
