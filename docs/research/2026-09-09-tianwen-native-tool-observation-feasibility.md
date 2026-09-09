@@ -130,3 +130,50 @@ still binds every receipt to persisted native calls/results and prevents origina
 answer leakage into independent replicas. Old Tasks1-4 and evidence retain
 their original scope. The producer and consumer have separate implementation
 gates; passing this mechanism probe does not complete either product gate.
+
+## Consumer routing check, 2026-09-09 22:41
+
+The ordinary native tool rows are in standard's agent-plane composition, not
+the host patch. The host patch cannot replace those rows. Installed CLI boot
+forces the shipped agent-preset root ahead of the user root; a same-id user
+standard preset does not override it. No new preset or profile migration has
+been selected or implemented.
+
+The public per-agent setup callback is awaited before publication, but ordinary
+Web creation does not use Tianwen's setup callback. agent/created and
+agent/session-start are notifications, not awaited global setup middleware.
+
+Installed agent-loop assembles system prompt and tools before agent/pre-step;
+the awaited pre-step waterfall runs before the model request and execution,
+not before that assembly. Reapplying native plugins there would duplicate
+handlers (including an unguarded skill injection handler) and leave the first
+request using the earlier assembly. Re-registering even the same definition
+at child scope can bypass inherited tool restrictions. Both routes are rejected.
+
+Read-only winner-reference capture in pre-step avoids those mutations, but
+does not by itself establish native provenance: a same-name/schema shadow
+could already be the winner. Native standard header plus schema equality is
+not an implementation certificate. A public provenance or pre-load adapter
+seam is still being checked; no consumer code is dispatched on that assumption.
+
+Subsequent public-service check found a smaller registration-time route, not
+an existing ToolDefinition receipt: ToolRuntime.register is publicly overridable,
+Cordis traces its this.ctx to the registering caller, and public
+Context.fiber.runtime.callback is the plugin registry identity key. The derived
+service can compare that callback with registry.resolve(actualNativeModule),
+delegate super.register unchanged, and retain the definition/fiber/function
+references only after registration succeeds. This is an installed-source result
+pending a minimal native probe, not yet implemented or accepted as a product.
+
+Unlike late wrappers, this route observes original registrations at their
+original scope; it requires neither reapplying native tool plugins nor changing
+standard preset/session identity. Native class/config/lifecycle behavior must
+remain intact, and unknown module copies/shadows/ref mutation fail certification
+without changing ordinary registration or execution. The trusted-host boundary
+remains; this is not protection from a malicious host rewriting arbitrary objects.
+
+The other outstanding question is safe host startup wiring. The static
+pwsh-sandbox disable/insert loses effective config/disabled/inject and is being
+removed from the producer-only change. A supported pre-boot composition adapter
+or native CLI configuration preparation must preserve those fields before either
+derived service is enabled. No current ordinary installation is claimed wired.

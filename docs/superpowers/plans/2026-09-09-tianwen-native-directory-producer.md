@@ -15,6 +15,18 @@ execution. The existing DSH executor retains confinement and process ownership.
 
 ## Global Constraints
 
+Review correction for fix round1: preserve the default native composition.
+Remove the static disable/insert replacement below; it loses old entry config,
+inject and disabled metadata. Keep the provider export and explicit-composition
+native gate. Automatic ordinary startup wiring belongs to the following
+consumer/startup integration, not this producer completion claim. A pure
+pre-boot EntryOptions transform, if added, changes only the exact module name
+and preserves every other field. This paragraph supersedes conflicting static
+patch examples/automatic-wiring wording in Task1 below.
+Restore the exact884df4b Goal-first native platform row; the old platform enable
+override and normal patch precedence remain. A disabled-profile test must apply
+its final explicit disable after Goal-first if that is the effective input.
+
 - Work only in D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge on codex/conversation-claim-evidence.
 - Daily022 at D:/DevData/tianwen-experience and C:/Users/Administrator/Desktop/deepseek.lnk are protected.
 - Frozen E-drive candidate-cached-5a30f22 and native-use are immutable; old F1/C1 remain failed file-learning captures.
@@ -31,8 +43,9 @@ execution. The existing DSH executor retains confinement and process ownership.
 - Create: `packages/tianwen-runtime-bundle/src/native-pwsh-observer.ts` (derived native executor and exported plugin).
 - Create: `packages/tianwen-runtime-bundle/src/native-pwsh-observation-scripts.ts` (trusted AST qualification and bounded observation scripts).
 - Modify: `packages/tianwen-runtime-bundle/package.json`, `pnpm-lock.yaml` (only locked installed native peer/dev dependency references and producer export/build/files).
-- Modify: `packages/tianwen-runtime-bundle/src/runtime.ts` (register the shared service), `packages/tianwen-runtime-bundle/goal-first.patch.yml` (replace the same pwsh-sandbox row's name, never add a second shell).
+- Modify: `packages/tianwen-runtime-bundle/src/runtime.ts` (register the shared service), `packages/tianwen-runtime-bundle/goal-first.patch.yml` (disable the original pwsh-sandbox row and insert its observed replacement, never run a second shell provider).
 - Create: `tests/dsh-migration/native-tool-observation.spec.ts`, `tests/dsh-migration/native-pwsh-observer.spec.ts`.
+- Modify: `tests/dsh-migration/runtime-bundle.spec.ts` (exact peer/input/export/patch expectations for this producer; preserve strict allowlists).
 - Read: `docs/superpowers/specs/2026-09-09-tianwen-native-tool-observation-design.md`, producer section only; all Global Constraints above bind this task.
 
 **Scope:** Producer only. Do not edit conversation file observer, task ledger,
@@ -171,8 +184,13 @@ workspace. Do not treat directory output as a source snapshot.
 
 ```yaml
 - id: pwsh-sandbox
-  name: '@tianwen/runtime-bundle/native-pwsh-observer'
-  disabled: !!js process.platform !== 'win32'
+  name: '@deepseek-ai/dsh-pwsh-sandbox'
+  disabled: true
+
+- insert:
+    - id: tianwen-native-pwsh-observer
+      name: '@tianwen/runtime-bundle/native-pwsh-observer'
+      disabled: !!js process.platform !== 'win32'
 ```
 
 Preserve native options/config and inherited injections. Runtime registers

@@ -31,6 +31,19 @@ safe preflight cannot finish, execute the original command by the native stock
 path. No environment variable declarations or ordinary tool argument changes.
 The producer alone grants no task eligibility and appends no ledger event.
 
+Review correction: the static disable/insert patch loses effective options,
+inject metadata and a profile's disabled state. Remove that automatic replacement
+from the producer-only increment. The exported derived provider remains available
+for an explicitly composed native entry which preserves all old entry metadata.
+Restore the exact pre-feature Goal-first platform row; do not remove its existing
+disabled override or change patch precedence. Preservation applies to the final
+effective composition after the normal profile/Goal-first/final overrides.
+Default/ordinary installation stays stock until the following startup/consumer
+integration has a verified supported pre-boot route; do not claim it is already
+wired. A pure entry transformation may replace only the exact native module name
+after native composition and before boot, keeping every other field unchanged.
+It is not a launcher or authorization to change shared installations.
+
 Use the selected native PowerShell parser on command text as DATA before
 instrumenting an eligible command. No handwritten PowerShell tokenizer, no
 Get-Command pre-resolution, no invocation of submitted text during preflight.
@@ -109,6 +122,87 @@ feedback or arm identities. Existing trial tools remain read/write/edit (read
 only for chat). Existing material and worker digests bind optional context.
 Fact assessment must not flatten method or navigation hints into source facts.
 Generated cases with no original discovery trajectory keep their existing form.
+
+### Consumer decisions after installed-interface and concurrency checks
+
+Native registry0.1.1-rc.2 has no persistent registration ID. A proper derived
+ToolRuntime observes its public register method at original registration time.
+Cordis traces this.ctx to the registering plugin, and public
+this.ctx.fiber.runtime.callback identifies the actual imported plugin after
+registry.resolve normalization. Retain exact definition/origin/callable/schema
+references only after super.register succeeds, preserve the exact original
+disposer, and compare the actual scoped winner before/after each dispatch.
+Unknown sources, module copies, shadows, ambiguous/reused or changed definitions
+have no certificate. Store only a versioned serializable producer identity in
+the ledger; do not invent a persistent native registration field.
+
+This public-service seam passed a native in-memory fs-search probe: stock10 and
+observed19 checks plus two equivalence comparisons, two real scopes and global
+layer, existing same-name shadow, original restrictions and disposal preserved.
+An initial probe caller missing its tools injection was corrected once; no
+tool/model execution occurred. Product tests must additionally exercise actual
+skill/pwsh registration. Evidence is retained in E consumer-tools-probe.
+
+Do not replace/reapply agent-plane tool rows or alter the standard preset.
+Pre-step occurs after prompt/tool assembly; reapplying plugins there duplicates
+handlers and child-local registration can bypass inherited restrictions.
+The shared standing preset also has no supported per-agent entry replacement.
+Those routes were rejected before consumer implementation.
+
+Safe ordinary wiring uses the native CLI's public configuration preparation:
+obtain composed raw EntryOptions through --dump-config, preserve their dynamic
+expressions and all metadata, and pass a narrow final --patch selecting derived
+tools/pwsh services at Desktop Web startup. Keep full dump only in memory;
+do not log secrets or overwrite user profile/home patches. Dump itself regenerates
+the native derived cordis.yml anchor, as normal native boot does. It is not a
+fully resolved runtime snapshot. Verify actual service activation/configuration
+after composition; preserve stock behavior when unsupported/ambiguous, never
+silently discard options. This startup boundary needs its own product gate.
+Direct native-bin launches without the adapter remain stock and cannot claim
+the new ancillary continuity; existing learning paths are not disabled.
+
+The current native glob value is `{root, paths}`, grep value is `{matches}` with
+`{path,lineNumber,line}`, and skill value is `{name,provider,resourceBase?,content}`.
+Capture the canonical value and final persisted result binding separately; UI
+inline retention is not the full canonical value. Native raw search overflow is
+an error. Tianwen additionally bounds each retained receipt and its projection.
+The foreground pwsh canonical value adds `kind:'foreground'` to the declared
+ShellExecutionResult fields, allowing comparison to the producer result digest.
+
+F1's actual summarization skill already had a frozen ConversationSkillAdmission
+and a unique `isolated-reviewed-summary` filesystem provider with default roots
+disabled. Its ordinary task read is not a study-source selection/adaptation
+branch. Reuse this approval only in the approved independent environment, with
+the new environment's exact scope binding and unchanged reviewed content; never
+silently add an external source to Daily. Skill result alone lacks the complete
+definition/revision, so compare it to the approved full definition at capture.
+
+Directory, glob, skill and read calls may occur in parallel. Close each call's
+own identity/result before freeze; do not serialize ordinary model execution.
+Grep requires a successful persisted read result strictly before its call,
+not merely an earlier read call or a promise that happened to finish first.
+Any same-path write/edit call through grep completion, including failed or
+in-flight calls, makes that grep unsuitable as preimage evidence.
+
+The minimal worker projection carries only preimage-bound positive grep
+locations and exact admitted method definitions. Glob/pwsh receipts keep the
+host evidence chain complete but need not add directory text to workers:
+captured file entries already contain their original relative paths. Never
+copy model-written command, pattern, description, query, complete tool message,
+or post-write directory metadata into trial input. The proof remains host-side.
+This avoids an extra directory-output parser and answer leakage through queries.
+Absent positive hints/methods means no optional context field, even when
+directory calls were accounted for. No absence/completeness inference is added.
+
+Freeze must await/validate all owned pending ancillary evidence and final native
+results within its capture boundary. Missing, duplicate, late, revoked or
+unbound records leave no file result. Recovery uses the same deterministic
+projection and does not invent receipts for historical unsupported calls.
+
+Keep the existing guidanceInputDigest(request, files) source-independence key.
+Different model queries or loaded method context must not make identical user
+requests/file material count as two independent failure sources. Full material
+and worker/request digests already bind the optional context for exact replay.
 
 ## Gates and stop conditions
 
