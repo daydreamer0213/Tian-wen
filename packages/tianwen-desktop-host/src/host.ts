@@ -274,7 +274,14 @@ export async function startDesktopWebHost(target: DesktopTarget, dependencies: D
   let observation = preparation.status
   let patchPath = preparation.patchPath
   if (observation.kind !== 'observed' || patchPath === undefined || !await preparation.verify()) {
-    await preparation.cleanup()
+    const cleanup = preparation.cleanup
+    const safeCleanup = async (): Promise<void> => {
+      try {
+        await cleanup()
+      } catch {}
+    }
+    await safeCleanup()
+    preparation = { ...stockObservationPreparation(), cleanup: safeCleanup }
     observation = { kind: 'stock', reason: 'observation-unavailable' }
     patchPath = undefined
   }

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   closeSync,
@@ -92,6 +93,67 @@ export interface NativeObservationLaunchPreparation {
 export interface NativeObservationLaunchDependencies {
   readonly nonce?: () => string
   readonly loadNativeModules?: (target: DesktopTarget) => Promise<NativeModules>
+  readonly secureLaunchDirectory?: (path: string) => void
+}
+
+const windowsAclScript = `
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$path = $env:TIANWEN_OBSERVATION_ACL_PATH
+$info = [System.IO.DirectoryInfo]::new($path)
+$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+$none = [System.Security.AccessControl.PropagationFlags]::None
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$full = [System.Security.AccessControl.FileSystemRights]::FullControl
+$acl = [System.Security.AccessControl.DirectorySecurity]::new()
+$acl.SetAccessRuleProtection($true, $false)
+foreach ($sid in @($current, $system) | Select-Object -Unique) {
+  [void]$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, $full, $inherit, $none, $allow))
+}
+$info.SetAccessControl($acl)
+$actual = $info.GetAccessControl()
+$owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+$expected = @($current.Value, $system.Value) | Select-Object -Unique
+$rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
+if (!$actual.AreAccessRulesProtected -or $owner -ne $current.Value -or $rules.Count -ne $expected.Count) {
+  throw 'private launch directory ACL verification failed'
+}
+foreach ($rule in $rules) {
+  $invalid = $rule.IsInherited
+  $invalid = $invalid -or $rule.AccessControlType -ne $allow
+  $invalid = $invalid -or $expected -notcontains $rule.IdentityReference.Value
+  $invalid = $invalid -or ([int]$rule.FileSystemRights -band [int]$full) -ne [int]$full
+  $invalid = $invalid -or $rule.InheritanceFlags -ne $inherit
+  $invalid = $invalid -or $rule.PropagationFlags -ne $none
+  if ($invalid) {
+    throw 'private launch directory ACL verification failed'
+  }
+}
+`
+
+function secureLaunchDirectory(path: string): void {
+  if (process.platform !== 'win32') return
+  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
+  execFileSync(join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-EncodedCommand',
+    Buffer.from(windowsAclScript, 'utf16le').toString('base64'),
+  ], {
+    env: {
+      SystemRoot: systemRoot,
+      windir: process.env.windir ?? systemRoot,
+      TIANWEN_OBSERVATION_ACL_PATH: path,
+    },
+    maxBuffer: 8192,
+    timeout: 10_000,
+    windowsHide: true,
+  })
 }
 
 class BoundedSourceReader {
@@ -351,12 +413,15 @@ export async function prepareNativeObservationLaunch(
     if (!isDeepStrictEqual(roundtrip, overlay)) throw new Error('native observation overlay is not lossless')
 
     const launchRoot = join(stateRoot, 'native-observation-launch')
+    const secureDirectory = dependencies.secureLaunchDirectory ?? secureLaunchDirectory
     mkdirSync(launchRoot, { recursive: true, mode: 0o700 })
+    secureDirectory(launchRoot)
     launchFolder = join(launchRoot, `launch-${(dependencies.nonce ?? randomUUID)()}`)
     const child = relative(launchRoot, launchFolder)
     if (child === '' || child.startsWith('..') || isAbsolute(child)) throw new Error('invalid launch folder')
     mkdirSync(launchFolder, { mode: 0o700 })
     ownsLaunchFolder = true
+    secureDirectory(launchFolder)
     const patchPath = join(launchFolder, 'observation.patch.yml')
     writeFileSync(patchPath, rendered, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
     const overlayDigest = createHash('sha256').update(rendered).digest('hex')
@@ -384,7 +449,11 @@ export async function prepareNativeObservationLaunch(
     }
     return { patchPath, status: { kind: 'observed' }, verify, cleanup }
   } catch {
-    if (ownsLaunchFolder) rmSync(launchFolder!, { recursive: true, force: true })
+    if (ownsLaunchFolder) {
+      try {
+        rmSync(launchFolder!, { recursive: true, force: true })
+      } catch {}
+    }
     return stockPreparation()
   }
 }

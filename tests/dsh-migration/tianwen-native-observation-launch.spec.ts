@@ -1,7 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
@@ -23,6 +24,9 @@ const fixtureParent = resolve(
   process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-file-tests'),
   'native-observation-launch',
 )
+const actualStartupEvidenceRoot = resolve(
+  process.env.TIANWEN_DSH_PROBE_ROOT ?? join(tmpdir(), 'tianwen-dsh-probes'),
+)
 const fixtures: string[] = []
 const actualStartupEnabled = process.platform === 'win32'
   && process.env.TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP === '1'
@@ -40,6 +44,7 @@ interface LaunchModule {
     dependencies?: {
       nonce?: () => string
       loadNativeModules?: () => Promise<never>
+      secureLaunchDirectory?: (path: string) => void
     },
   ): Promise<{
     patchPath?: string
@@ -63,6 +68,119 @@ function write(path: string, contents: string): void {
 
 function writeJson(path: string, value: unknown): void {
   write(path, `${JSON.stringify(value)}\n`)
+}
+
+function persistActualStartupEvidence(path: string, receipt: Record<string, unknown>): void {
+  const evidence = {
+    schemaVersion: receipt.schemaVersion,
+    probeError: receipt.probeError,
+    sessionPolicy: receipt.sessionPolicy,
+    directory: receipt.directory,
+  }
+  const rendered = `${JSON.stringify(evidence)}\n`
+  const bytes = Buffer.byteLength(rendered)
+  if (bytes > 128 * 1024) {
+    const summary = `${JSON.stringify({
+      schemaVersion: 'tianwen.native-observation-startup-evidence.v1',
+      oversized: true,
+      bytes,
+      probeError: receipt.probeError,
+      sessionPolicy: receipt.sessionPolicy,
+    })}\n`
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, summary, { encoding: 'utf8', flag: 'wx' })
+    throw new Error(`native startup evidence exceeded 128 KiB: ${bytes}`)
+  }
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, rendered, { encoding: 'utf8', flag: 'wx' })
+}
+
+const windowsPowerShell = join(
+  process.env.SystemRoot ?? 'C:\\Windows',
+  'System32',
+  'WindowsPowerShell',
+  'v1.0',
+  'powershell.exe',
+)
+
+function runWindowsAclScript(script: string, environment: NodeJS.ProcessEnv): string {
+  return execFileSync(windowsPowerShell, [
+    '-NoLogo',
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-Command',
+    script,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, ...environment },
+    maxBuffer: 8192,
+    timeout: 10_000,
+    windowsHide: true,
+  })
+}
+
+function installHostileFixtureAcl(stateRoot: string, launchRoot: string): void {
+  runWindowsAclScript(`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$stateRoot = $env:TIANWEN_ACL_STATE_ROOT
+$launchRoot = $env:TIANWEN_ACL_LAUNCH_ROOT
+$inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
+$none = [System.Security.AccessControl.PropagationFlags]::None
+$allow = [System.Security.AccessControl.AccessControlType]::Allow
+$full = [System.Security.AccessControl.FileSystemRights]::FullControl
+$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$system = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-18')
+$everyone = [System.Security.Principal.SecurityIdentifier]::new('S-1-1-0')
+$users = [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545')
+$parent = [System.Security.AccessControl.DirectorySecurity]::new()
+$parent.SetAccessRuleProtection($true, $false)
+foreach ($sid in @($current, $system, $everyone)) {
+  [void]$parent.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, $full, $inherit, $none, $allow))
+}
+[System.IO.DirectoryInfo]::new($stateRoot).SetAccessControl($parent)
+[System.IO.Directory]::CreateDirectory($launchRoot) | Out-Null
+$childInfo = [System.IO.DirectoryInfo]::new($launchRoot)
+$child = $childInfo.GetAccessControl()
+[void]$child.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($users, [System.Security.AccessControl.FileSystemRights]::ReadAndExecute, $allow))
+$childInfo.SetAccessControl($child)
+`, {
+    TIANWEN_ACL_STATE_ROOT: stateRoot,
+    TIANWEN_ACL_LAUNCH_ROOT: launchRoot,
+  })
+}
+
+interface WindowsAclSnapshot {
+  protected: boolean
+  owner: string
+  current: string
+  rules: Array<{ sid: string, inherited: boolean, type: string, rights: number }>
+}
+
+function readWindowsAcl(path: string): WindowsAclSnapshot {
+  const output = runWindowsAclScript(`
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+$acl = [System.IO.DirectoryInfo]::new($env:TIANWEN_ACL_PATH).GetAccessControl()
+$current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+  [pscustomobject]@{
+    sid = $_.IdentityReference.Value
+    inherited = $_.IsInherited
+    type = $_.AccessControlType.ToString()
+    rights = [int]$_.FileSystemRights
+  }
+})
+[pscustomobject]@{
+  protected = $acl.AreAccessRulesProtected
+  owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+  current = $current
+  rules = $rules
+} | ConvertTo-Json -Depth 4 -Compress
+`, { TIANWEN_ACL_PATH: path })
+  return JSON.parse(output) as WindowsAclSnapshot
 }
 
 function createBundle(profileRoot: string, name: string, patch: string): string {
@@ -466,6 +584,62 @@ describe('Tianwen native observation launch preparation', () => {
     expect(readFileSync(sibling, 'utf8')).toBe('keep')
   })
 
+  it.skipIf(process.platform !== 'win32')('replaces hostile inherited and explicit ACLs only on its dedicated Windows launch directories', async () => {
+    const launch = await loadLaunchModule()
+    expect(launch).toBeDefined()
+    if (launch === undefined) return
+    const fixture = createFixture()
+    const launchRoot = join(fixture.paths.stateRoot, 'native-observation-launch')
+    mkdirSync(fixture.paths.stateRoot, { recursive: true })
+    const outsideMarker = join(fixture.paths.stateRoot, 'outside-marker.txt')
+    write(outsideMarker, 'keep')
+    installHostileFixtureAcl(fixture.paths.stateRoot, launchRoot)
+
+    const prepared = await launch.prepareNativeObservationLaunch(fixture.target, fixture.environment, {
+      nonce: () => 'windows-private',
+    })
+
+    expect(prepared.status).toEqual({ kind: 'observed' })
+    expect(readFileSync(outsideMarker, 'utf8')).toBe('keep')
+    for (const path of [launchRoot, dirname(prepared.patchPath!)]) {
+      const acl = readWindowsAcl(path)
+      expect(acl.protected).toBe(true)
+      expect(acl.owner).toBe(acl.current)
+      expect(acl.rules).toHaveLength(2)
+      expect(acl.rules.every(rule => !rule.inherited && rule.type === 'Allow')).toBe(true)
+      expect(acl.rules.map(rule => rule.sid).sort()).toEqual([acl.current, 'S-1-5-18'].sort())
+      expect(acl.rules.every(rule => (rule.rights & 0x1f01ff) === 0x1f01ff)).toBe(true)
+    }
+    const outsideAcl = readWindowsAcl(fixture.paths.stateRoot)
+    expect(outsideAcl.rules.some(rule => rule.sid === 'S-1-1-0')).toBe(true)
+    await prepared.cleanup()
+  })
+
+  it('falls back to stock before writing YAML when private launch-directory access cannot be established', async () => {
+    const launch = await loadLaunchModule()
+    expect(launch).toBeDefined()
+    if (launch === undefined) return
+    const fixture = createFixture()
+    const visited: string[] = []
+
+    const prepared = await launch.prepareNativeObservationLaunch(fixture.target, fixture.environment, {
+      nonce: () => 'acl-failure',
+      secureLaunchDirectory: path => {
+        visited.push(path)
+        if (visited.length === 2) throw new Error('fixture ACL refusal')
+      },
+    })
+
+    expect(visited.map(path => relative(fixture.paths.stateRoot, path))).toEqual([
+      'native-observation-launch',
+      join('native-observation-launch', 'launch-acl-failure'),
+    ])
+    expect(prepared.status).toEqual({ kind: 'stock', reason: 'observation-unavailable' })
+    expect(prepared.patchPath).toBeUndefined()
+    expect(existsSync(join(visited[1]!, 'observation.patch.yml'))).toBe(false)
+    expect(existsSync(visited[1]!)).toBe(false)
+  })
+
   it('does not claim or delete a pre-existing launch folder on a nonce collision', async () => {
     const launch = await loadLaunchModule()
     expect(launch).toBeDefined()
@@ -508,6 +682,8 @@ describe('Tianwen native observation launch preparation', () => {
       mkdirSync(fixtureParent, { recursive: true })
       const root = mkdtempSync(join(fixtureParent, 'actual-startup-'))
       fixtures.push(root)
+      const evidencePath = join(actualStartupEvidenceRoot, `${basename(root)}.json`)
+      console.log(`native startup evidence path: ${evidencePath}`)
       const dshRoot = dirname(dshManifestPath)
       const dshManifest = JSON.parse(readFileSync(dshManifestPath, 'utf8')) as {
         bin: { dsh: string }
@@ -537,19 +713,49 @@ import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { NativeObservedToolRuntime } from '@tianwen/runtime-bundle/native-tools-observer'
 import { NativeObservedPwshExecutor } from '@tianwen/runtime-bundle/native-pwsh-observer'
+import { SessionId } from '${pathToFileURL(requireFromDsh.resolve('@deepseek-ai/dsh-session')).href}'
+import { CallId } from '${pathToFileURL(requireFromDsh.resolve('@deepseek-ai/dsh-llm')).href}'
 
 export const name = 'tianwen-native-observation-startup-probe'
-export const inject = ['loader', 'tools', 'shell', 'sandboxPolicy', 'agentPresets', 'tianwenNativeToolObservation']
+export const inject = ['loader', 'tools', 'shell', 'sandboxPolicy', 'agentPresets', 'agents', 'tianwenNativeToolObservation']
 
 async function collect(ctx, config) {
   const names = ['glob', 'grep', 'skill', 'pwsh']
   const scope = await ctx.agentPresets.standingKeyFor('standard')
   const definitions = Object.fromEntries(names.map(name => [name, ctx.tools.get(name, scope)]))
   const sandboxPolicy = ctx.sandboxPolicy.resolve()
-  const captured = await ctx.tianwenNativeToolObservation.capture(
-    { taskId: 'desktop-startup', sessionId: 'desktop-startup-session', callId: 'desktop-startup-directory' },
-    () => ctx.shell.run(ctx.shell.resolve({ command: 'Get-Location' })),
-  )
+  const sessionId = SessionId('desktop-startup-session')
+  const callId = CallId('desktop-startup-directory')
+  const handle = await ctx.agents.create({
+    sessionId,
+    meta: { cwd: ctx.shell.config.cwd, agentPreset: 'standard' },
+    setup: async agentCtx => { await ctx.agentPresets.mount(agentCtx, 'standard') },
+  })
+  let captured
+  let sessionPolicy
+  const startedAt = Date.now()
+  try {
+    const effectivePolicy = ctx.sandboxPolicy.resolve({ session: handle.agent.session })
+    sessionPolicy = {
+      mode: effectivePolicy.mode,
+      workspaceRoot: effectivePolicy.workspaceRoot,
+      sessionCwd: resolve(handle.agent.session.header.cwd),
+      matchesPwshCwd: resolve(effectivePolicy.workspaceRoot) === resolve(ctx.shell.config.cwd),
+    }
+    captured = await ctx.tianwenNativeToolObservation.capture(
+      { taskId: 'desktop-startup', sessionId: String(sessionId), callId: String(callId) },
+      () => ctx.agents.withInitiator(handle.agent, () => ctx.tools.execute({
+        callId,
+        name: 'pwsh',
+        arguments: { command: 'Get-Location', description: 'Report the current directory' },
+        agent: handle.agent,
+        signal: new AbortController().signal,
+      })),
+    )
+  } finally {
+    await handle.dispose()
+  }
+  const elapsedMs = Date.now() - startedAt
   const receipt = {
     schemaVersion: 'tianwen.native-observation-startup.v1',
     providers: {
@@ -568,21 +774,14 @@ async function collect(ctx, config) {
       workspaceRoot: sandboxPolicy.workspaceRoot,
       matchesPwshCwd: resolve(sandboxPolicy.workspaceRoot) === resolve(ctx.shell.config.cwd),
     },
+    sessionPolicy,
     declarations: ctx.tools.schemas(scope).filter(schema => names.includes(schema.name)).map(schema => schema.name).sort(),
     registrations: Object.fromEntries(names.map(name => [name, ctx.tools.nativeRegistration(definitions[name])])),
     directory: {
-      resultExitCode: captured.result.exitCode,
-      receipt: captured.receipt,
-      diagnostic: captured.result.exitCode === 0 ? undefined : {
-        exitCode: captured.result.exitCode,
-        signal: captured.result.signal,
-        timedOut: captured.result.timedOut,
-        aborted: captured.result.aborted,
-        stdoutTruncated: captured.result.stdout.truncated,
-        stderrTruncated: captured.result.stderr.truncated,
-        stderrText: captured.result.stderr.text,
-        sandbox: captured.result.sandbox,
-      },
+      elapsedMs,
+      result: captured.result,
+      receiptStatus: captured.receipt === undefined ? 'absent' : 'present',
+      receipt: captured.receipt ?? null,
     },
   }
   mkdirSync(dirname(config.receiptPath), { recursive: true })
@@ -659,8 +858,9 @@ export function apply(ctx, config) {
       let host: Awaited<ReturnType<typeof startDesktopWebHost>> | undefined
       try {
         host = await startDesktopWebHost(target)
-        expect(host.observation).toEqual({ kind: 'observed' })
         const receipt = await waitForJson(receiptPath)
+        persistActualStartupEvidence(evidencePath, receipt)
+        expect(host.observation).toEqual({ kind: 'observed' })
         if ('probeError' in receipt) {
           throw new Error(`native startup probe failed: ${JSON.stringify(receipt.probeError)}`)
         }
@@ -670,10 +870,20 @@ export function apply(ctx, config) {
             workspaceRoot: resolve('.'),
             matchesPwshCwd: true,
           },
+          sessionPolicy: {
+            mode: 'workspace-write',
+            workspaceRoot: resolve('.'),
+            sessionCwd: resolve('.'),
+            matchesPwshCwd: true,
+          },
         })
-        const directory = receipt.directory as { resultExitCode?: unknown, diagnostic?: unknown } | undefined
-        if (directory?.resultExitCode !== 0) {
-          throw new Error(`native directory probe failed: ${JSON.stringify(directory?.diagnostic)}`)
+        const directory = receipt.directory as {
+          result?: { isError?: unknown, value?: { exitCode?: unknown } }
+          receiptStatus?: unknown
+          receipt?: unknown
+        } | undefined
+        if (directory?.result?.isError !== false || directory?.result?.value?.exitCode !== 0 || directory.receiptStatus !== 'present') {
+          throw new Error(`native session directory probe failed: ${JSON.stringify(directory)}`)
         }
         expect(receipt).toMatchObject({
           schemaVersion: 'tianwen.native-observation-startup.v1',
@@ -703,7 +913,18 @@ export function apply(ctx, config) {
             pwsh: { package: '@deepseek-ai/dsh-tool-pwsh', version: '0.1.1-rc.2' },
           },
           directory: {
-            resultExitCode: 0,
+            result: {
+              isError: false,
+              value: {
+                kind: 'foreground',
+                exitCode: 0,
+                sandbox: {
+                  mode: 'workspace-write',
+                  denied: false,
+                },
+              },
+            },
+            receiptStatus: 'present',
             receipt: {
               schemaVersion: 'tianwen.native-pwsh-directory.v1',
               identity: {

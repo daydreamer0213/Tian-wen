@@ -412,6 +412,31 @@ describe('Tianwen Desktop Web host contract', () => {
     expect(cleanups).toEqual(['cleaned', 'cleaned'])
   })
 
+  it('still starts stock Web when cleanup of a drifted observation overlay rejects', async () => {
+    const target = resolveDesktopTarget(fixture())
+    const fake = child()
+    let spawnedArgs: readonly string[] | undefined
+    const host = await startDesktopWebHost(target, {
+      prepareObservation: async () => ({
+        patchPath: join(fixtureRoot, 'uncleanable-drifted.patch.yml'),
+        status: { kind: 'observed' },
+        verify: async () => false,
+        cleanup: async () => { throw new Error('fixture cleanup refusal') },
+      }),
+      spawn: ((_program, args) => {
+        spawnedArgs = args
+        queueMicrotask(() => fake.stdout.write('ready http://127.0.0.1:4321/\n'))
+        return fake
+      }) as never,
+    })
+
+    expect(spawnedArgs).toEqual([
+      target.dshBin, 'web', '--host', '127.0.0.1', '--port', '0', '--no-open',
+    ])
+    expect(host.observation).toEqual({ kind: 'stock', reason: 'observation-unavailable' })
+    await host.stop()
+  })
+
   it.each(['throw', 'missing-pipes'])('cleans an observed overlay when process startup fails: %s', async scenario => {
     const target = resolveDesktopTarget(fixture())
     const cleanups: string[] = []

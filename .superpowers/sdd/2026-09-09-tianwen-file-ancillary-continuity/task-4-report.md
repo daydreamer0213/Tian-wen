@@ -6,9 +6,9 @@ Branch: `codex/conversation-claim-evidence`
 
 Required base ancestor: `41e9f673cbab3573d885ff3cade445cda3f72876`
 
-## Result — DONE_WITH_CONCERNS
+## Result — DONE
 
-Ordinary `startDesktopWebHost()` now prepares a narrow native-schema overlay and invokes the existing DSH Web command as `dsh web --patch <owned-temporary-patch> --host 127.0.0.1 --port 0 --no-open`. An isolated unrestricted engineering startup passed with the two observer subclasses as the sole `tools` and `pwsh-sandbox` providers, the standard preset's `glob`, `grep`, `pwsh`, and `skill` declarations and native producer identities intact, explicit native configuration preserved, and a successful certified `Get-Location` receipt. No model or browser was started. However, the follow-up ordinary `workspace-write` gate timed out inside the native directory command, so unrestricted success is not ordinary-permission acceptance.
+Ordinary `startDesktopWebHost()` now prepares a narrow native-schema overlay and invokes the existing DSH Web command as `dsh web --patch <owned-temporary-patch> --host 127.0.0.1 --port 0 --no-open`. The final standard-Session engineering startup passed under ordinary `workspace-write`: the two observer subclasses were the sole `tools` and `pwsh-sandbox` providers, the standard preset's `glob`, `grep`, `pwsh`, and `skill` declarations and native producer identities remained intact, explicit native configuration was preserved, and native `Get-Location` returned exit 0 with a certified directory receipt. No model or browser was started. An earlier agentless control timed out both outside and inside observation; source tracing established that it omitted the normal session required to materialize Windows workspace grants, so it remains diagnostic evidence rather than an ordinary-session failure.
 
 Unsupported, ambiguous, invalid, oversize, or drifted preparation returns only `{ kind: 'stock', reason: 'observation-unavailable' }`; Desktop then starts the unchanged stock Web command without an observation claim or loss of ordinary tools.
 
@@ -18,7 +18,7 @@ Unsupported, ambiguous, invalid, oversize, or drifted preparation returns only `
 - Every source read is capped at the remaining aggregate 1 MiB plus one detection byte before parsing. Native `composeEntries` remains the patch algorithm; Desktop does not call `loadProfile`, a dump child, a profile initializer, or expression evaluation.
 - Only the unique exact top-level native `tools` and `pwsh-sandbox` rows are adapted. Their closed native config plus `disabled`, `inject`, `isolate`, and `intercept` metadata is copied losslessly; guarded patches disable the originals and insert uniquely named observer rows. Unrelated rows never enter the temporary patch.
 - Raw manifests, patches, absent optional files, installation-first bundle resolutions, and the generated overlay are bound and rechecked before spawn. Native skipped-name-guard output aborts before host exposure.
-- Each admitted launch owns one `launch-<uuid>/observation.patch.yml` below the existing learning-loop state directory. The file/folder uses private native modes where applicable, inherits the Windows account ACL, remains until child exit, and is removed on start failure, timeout, stop, or normal exit. Nonce collisions never claim or delete an existing folder.
+- Each admitted launch owns one `launch-<uuid>/observation.patch.yml` below the existing learning-loop state directory. POSIX mode bits remain private where applicable. On Windows, before the YAML write, a bounded hidden system PowerShell process replaces and immediately verifies a protected allowlist DACL on only the dedicated `native-observation-launch` root and its new launch child: the current process-token user SID and `SYSTEM`, explicit `Allow`, full control, with no inherited or additional access rules. Failure returns fixed stock status before sensitive content is written. The overlay remains until child exit and cleanup is attempted on start failure, timeout, stop, or normal exit; no claim promises that OS deletion must succeed. Nonce collisions never claim or delete an existing folder.
 - `host.ts` uses one exact environment object for preparation and spawn, retains the existing readiness/navigation/process-tree boundaries, exposes only the bounded observed/stock status, and keeps stock startup available.
 - Desktop packaging now includes `dist/native-observation-launch.js`; the existing B2 audit allowlist includes exactly `app/dist/native-observation-launch.js`. Historical B1 and the current version were unchanged.
 
@@ -104,10 +104,10 @@ No `pnpm run`/`pnpm exec` healthcheck, dependency installation, Electron packagi
 
 ## Self-review and residual concerns
 
-- The helper is 390 lines: larger than the hoped-for “small adapter,” but its responsibilities remain exactly the bounded reader, native source discovery/schema composition, two-row validation/rendering, drift verification, and owned cleanup. No generic profile manager, wrapper registration framework, watcher, or new store was introduced. Obvious duplicate byte re-encoding was removed; verification compares the captured raw-byte digests directly.
-- Windows privacy relies on inherited account ACLs because Node's POSIX mode bits are not Windows ACL primitives. The folder is under the existing owned state tree, uses exclusive file creation, unpredictable UUIDs, exact ownership checks, and bounded lifetime. An OS-level deletion failure can still leave an owned local folder; product errors remain non-sensitive and no broader cleanup target is attempted.
+- The helper is now 459 lines after the Windows ACL set-and-verify routine: larger than the hoped-for “small adapter,” but its responsibilities remain exactly the bounded reader, native source discovery/schema composition, two-row validation/rendering, drift verification, private launch-directory preparation, and owned cleanup. No generic profile manager, wrapper registration framework, watcher, or new store was introduced. Obvious duplicate byte re-encoding was removed; verification compares the captured raw-byte digests directly.
+- Windows privacy no longer relies on inherited ACLs. The product constructs and verifies a protected current-token-user-plus-`SYSTEM` DACL before writing the YAML, only on its two dedicated owned directories. An OS-level deletion failure can still leave an owned local folder; product errors remain non-sensitive, stock Web still starts after drift cleanup rejects, and no broader cleanup target is attempted.
 - The actual-start selection is repository/Windows-CI portable but not installer acceptance. It requires the job to build the observer entries and set the explicit environment flag; Task 5 owns that job wiring.
-- The unrestricted engineering gate used the existing `DSH_PERMISSION_MODE=danger-full-access` deployment switch only inside the credential-scrubbed fixture so the deterministic directory command required no interactive approval; product code never sets or changes permissions. The ordinary-permission follow-up below remains unresolved.
+- The unrestricted engineering gate used the existing `DSH_PERMISSION_MODE=danger-full-access` deployment switch only inside the credential-scrubbed fixture; product code never sets or changes permissions. It is retained only as evidence for that scope. The ordinary-permission follow-up below ultimately passed through the normal public standard-Session tool path.
 
 ## Ordinary workspace-write follow-up
 
@@ -133,7 +133,7 @@ Outcome at 03:17:55: `1 failed, 24 skipped`, 25.39 s total (24.948 s test). Exac
 {"exitCode":1,"signal":null,"timedOut":true,"aborted":false,"stdoutTruncated":false,"stderrTruncated":false,"stderrText":"","sandbox":{"mode":"workspace-write","denied":false,"enforcement":"partial"}}
 ```
 
-The effective sandbox was not denied, stderr was empty and complete, but the fixed native directory command exceeded its 15-second fixture budget. No retry, policy widening, model, browser, or product/helper change followed. The exact E fixture/TEMP children were verified, removed, and rechecked absent; matching live startup processes were zero. Status therefore remains `DONE_WITH_CONCERNS` pending the scoped review of ordinary-permission timeout behavior and Windows private-overlay access.
+The effective sandbox was not denied, stderr was empty and complete, but the fixed native directory command exceeded its 15-second fixture budget. No immediate retry, policy widening, model, browser, or product/helper change followed. The exact E fixture/TEMP children were verified, removed, and rechecked absent; matching live startup processes were zero. This checkpoint remained `DONE_WITH_CONCERNS` until the scoped Windows ACL fix and normal standard-Session gate documented below.
 
 ## Exact final command appendix
 
@@ -153,3 +153,100 @@ Scoped runtime three-entry build (`Done in 18ms`; outputs 18.4 KiB, 9.4 KiB, 3.9
 ```powershell
 & 'D:\hermes\node\node.exe' 'packages\tianwen-runtime-bundle\node_modules\esbuild\bin\esbuild' 'packages/tianwen-runtime-bundle/src/native-pwsh-observer.ts' 'packages/tianwen-runtime-bundle/src/native-tool-observation.ts' 'packages/tianwen-runtime-bundle/src/native-tools-observer.ts' --bundle --platform=node --format=esm --target=node22 --tree-shaking=true '--external:@deepseek-ai/*' --outdir='packages/tianwen-runtime-bundle/dist'
 ```
+
+## Correctness fix round 1
+
+Review base: `f48434cd95b1fc0dbc9cc43a62694b82de5ebd00`. Root-only documentation commits above it did not change the owned product or test files.
+
+### Scoped implementation
+
+- Windows overlay confidentiality is now established rather than inferred. The product uses the absolute system Windows PowerShell, hidden/noninteractive/no-profile, with a static UTF-16 encoded .NET `DirectorySecurity` script, a 10-second process timeout, and 8192-byte process buffers. The path is passed as one environment value rather than interpolated into script text. The script builds a fresh protected DACL with only the current process-token user SID and `S-1-5-18` (`SYSTEM`), both explicit inheritable `Allow`/`FullControl` entries, applies it, then reads it back and verifies protection, owner, exact SID set, access type, rights, inheritance, and propagation. It runs only for the dedicated `stateRoot/native-observation-launch` root and the newly owned launch child, before `observation.patch.yml` is written. Non-Windows keeps the existing private mode bits. Any set/verify failure is caught as preparation-unavailable; an owned child cleanup is attempted, no YAML is written, and the fixed stock result is returned.
+- A hostile Windows fixture gives the parent state root explicit `Everyone` full control and the dedicated launch root an additional explicit built-in Users read/execute rule. The product test proves the dedicated root and launch child become the exact protected two-SID allowlist while the state root's broad rule and an outside marker remain untouched. A dependency-injected ACL refusal proves fallback happens before YAML write and the owned child is removed.
+- Drift cleanup is now wrapped in a no-throw lifecycle adapter. Cleanup refusal cannot block unchanged stock Web spawn or later `stop()`, while the existing two-attempt idempotent cleanup contract remains intact. The public result stays the fixed `{ kind: 'stock', reason: 'observation-unavailable' }`; no deletion-success promise or sensitive error is exposed.
+
+### RED and focused GREEN
+
+All commands below used the installed Vitest directly with `TIANWEN_FILE_TEST_ROOT`, `TEMP`, and `TMP` set to the approved E consumer-test tree and with `TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP` absent.
+
+- 03:39:45 ACL RED: launch spec filtered by `hostile inherited|private launch-directory`; `2 failed, 25 skipped`, 5.54 s. The hostile root remained `protected: false`, and the injected security callback was never called (`[]`). Two earlier fixture-only attempts at 03:37:54 and 03:38:34 exposed respectively an inherited incompatible `PSModulePath` during `Set-Acl` module autoload and an unavailable owner-changing privilege; neither was counted as product RED. The fixture was corrected to use system PowerShell plus direct `DirectoryInfo.SetAccessControl` without changing ownership.
+- 03:42:22 cleanup RED: host spec filtered by the new cleanup-rejection case; `1 failed, 68 skipped`, 579 ms. `startDesktopWebHost()` rejected with the exact fixture error `fixture cleanup refusal` before stock spawn could complete.
+- 03:44:18 first ACL implementation run: `1 failed, 1 passed, 25 skipped`, 5.55 s. The failure was a Windows PowerShell 5.1 parser incompatibility with leading-line `-or`; the product correctly fell back to stock. Boolean accumulation replaced that syntax without changing policy.
+- 03:44:25 cleanup focused GREEN: `1 passed, 68 skipped`, 557 ms.
+- 03:45:50 ACL focused GREEN: `2 passed, 25 skipped`, 17.23 s. It includes the actual hostile Windows DACL readback and the injected security-refusal fallback.
+- 03:49:10 first full two-file gate after the initial cleanup fix: launch spec passed, but the host's pre-existing drift test found only one cleanup call instead of its lifecycle contract's two; totals `94 passed, 1 failed, 1 skipped`, 103.92 s. The cleanup wrapper was retained for later lifecycle calls while swallowing only its rejection.
+- 03:51:40 focused drift plus cleanup-refusal GREEN: `2 passed, 67 skipped`, 755 ms.
+
+Exact focused RED command shape:
+
+```powershell
+$env:TIANWEN_FILE_TEST_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\file-tests'
+$env:TEMP='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\temp'
+$env:TMP=$env:TEMP
+Remove-Item Env:TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP -ErrorAction SilentlyContinue
+& 'D:\hermes\node\node.exe' 'node_modules\vitest\vitest.mjs' run 'tests/dsh-migration/tianwen-native-observation-launch.spec.ts' -t 'hostile inherited|private launch-directory' --reporter=verbose
+& 'D:\hermes\node\node.exe' 'node_modules\vitest\vitest.mjs' run 'tests/dsh-migration/tianwen-desktop-host.spec.ts' -t 'still starts stock Web when cleanup of a drifted observation overlay rejects' --reporter=verbose
+```
+
+### WorkspaceWrite diagnostic and standard-Session attempts
+
+The reviewer-authorized comparison replaced the one direct observed call with two calls using the same resolved `ShellExecSpec`, fixed `Get-Location`, D worktree cwd, WorkspaceWrite policy, and unchanged 15-second timeout: first outside capture, then inside capture. The fixture retained each full native-bounded result, elapsed wall time, and receipt presence. The command was the explicit actual-start command already shown in the ordinary follow-up, with the same approved E variables and `TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP=1`.
+
+At 03:46:56 the single comparison completed as `1 failed, 26 skipped`, 47.20 s total (46.754 s test). Exact bounded comparison:
+
+```json
+{"sameResolvedSpec":true,"baseline":{"elapsedMs":15208,"result":{"exitCode":1,"signal":null,"timedOut":true,"aborted":false,"timeoutMs":15000,"stdout":{"text":"","truncated":false},"stderr":{"text":"","truncated":false},"sandbox":{"mode":"workspace-write","denied":false,"enforcement":"partial"}}},"observed":{"elapsedMs":18802,"result":{"exitCode":1,"signal":null,"timedOut":true,"aborted":false,"timeoutMs":15000,"stdout":{"text":"","truncated":false},"stderr":{"text":"","truncated":false},"sandbox":{"mode":"workspace-write","denied":false,"enforcement":"partial"}}}}
+```
+
+The observer-outside baseline independently reproduced the timeout, so the result is not attributed to the observation wrapper. No receipt existed because neither execution succeeded. The diagnostic calls were then removed from the default startup fixture; the evidence remains here and was not rerun.
+
+Read-only native tracing then established that ordinary tool PowerShell resolves policy from `exec.agent.session`, and the Windows sandbox materializes the per-session workspace and temporary grants before process execution. Root authorized one meaningfully different standard-Session gate: create an idle agent with the fixed SessionId, D worktree cwd and `standard` preset mounted in creation setup; execute the native `pwsh` tool under `withInitiator` and the existing explicit observation capture; never drive the agent or invoke a model; dispose it in `finally`. Public `SessionId`/`CallId` are resolved through the already installed DSH package graph with the committed `createRequire` route.
+
+At 04:01:20 that gate ran once and failed before PowerShell execution: `1 failed, 26 skipped`, 12.72 s total (12.270 s test), with exact retained probe error:
+
+```json
+{"name":"TypeError","message":"(intermediate value)?.commit is not a function"}
+```
+
+The concise setup callback returned `agentPresets.mount(...)`'s value. The public `AgentSetup` contract treats any non-void setup result as an `AgentSetupCommit` and invokes `.commit()`, so this was a fixture setup-shape error rather than a WorkspaceWrite or observer result. Root cross-checked the contract and the existing `conversation-file-learning.spec.ts` precedent, then authorized the exact minimal correction: an awaited block that returns void. This attempt produced no native result or receipt.
+
+The corrected standard-Session gate ran once at 04:06:14 with every product, permission, cwd, command, and timeout setting unchanged. Result: `1 failed, 26 skipped`, 44.14 s total (43.681 s test). The failure was a fixture path-format assertion after collection, not a reported PowerShell failure: `sessionPolicy.sessionCwd` was recorded as `D:/DevData/...` while the assertion expected the path-equivalent `D:\DevData\...`. The same assertion object confirmed `mode: workspace-write`, `workspaceRoot` equal to the D worktree, and `matchesPwshCwd: true`; Vitest omitted 21 other matching properties. Because this policy assertion preceded the explicit native-result/receipt guard and normal `afterEach` removed the fixture, that run did not preserve enough result detail to claim the native command or certified receipt succeeded. No additional run occurred until root authorized the persistence/normalization correction below. The committed fixture normalizes the recorded session cwd with `resolve()` so path-equivalent Windows separators do not cause a false mismatch.
+
+Static follow-up confirmed the success discriminator rather than loosening it: installed `@deepseek-ai/dsh-tools` declares `ToolExecutionSuccess.isError` as required literal `false`; `createSuccessResult()` and `materializeFinalResult()` both explicitly materialize it, and the closed native-glob precedent asserts the same field. The committed `isError === false`, foreground `exitCode === 0`, and receipt-present conditions are therefore the exact public result contract. Before any host/policy/result assertion, the selected fixture writes only `schemaVersion`, `probeError`, `sessionPolicy`, and `directory` to a unique `TIANWEN_DSH_PROBE_ROOT/actual-startup-<fixture-nonce>.json`, outside the per-test root removed by `afterEach`, with exclusive creation and the exact path printed. Evidence is capped at 128 KiB; an oversize case first writes a bounded metadata/policy summary and then fails.
+
+### Final deterministic gate before the standard-Session attempt
+
+```powershell
+$env:TIANWEN_FILE_TEST_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\file-tests'
+$env:TIANWEN_DSH_PROBE_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\dsh-probes'
+$env:TEMP='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\temp'
+$env:TMP=$env:TEMP
+Remove-Item Env:TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP -ErrorAction SilentlyContinue
+& 'D:\hermes\node\node.exe' 'node_modules\vitest\vitest.mjs' run 'tests/dsh-migration/tianwen-native-observation-launch.spec.ts' 'tests/dsh-migration/tianwen-desktop-host.spec.ts' --reporter=dot
+```
+
+03:59:05 result: `2 files passed; 95 passed, 1 skipped`, 103.20 s. The one skip is the separately selected actual-start fixture. Direct Desktop type/build immediately afterward:
+
+```powershell
+& 'D:\hermes\node\node.exe' 'node_modules\typescript\bin\tsc' -b 'packages\tianwen-desktop-host\tsconfig.json' --pretty false --force
+```
+
+Result: exit 0, 3.24 s, no diagnostics.
+
+### Fix-round self-review and remaining concern
+
+- The protected DACL is created and verified from current process-token identity plus `SYSTEM`; no username lookup, shell interpolation, inherited trust, broad parent mutation, package install, dependency, or background process was introduced. The system helper is synchronous and bounded at 10 seconds per dedicated directory. Full Windows deterministic coverage is consequently slower (103.20 s for both specs), an explicit startup-cost tradeoff of the standard-library fix.
+- ACL preparation failure and cleanup failure both fail closed to stock Web with fixed status. Cleanup remains best effort because an OS deletion refusal cannot safely be converted into a broad or privileged cleanup operation.
+- The final standard-Session gate produced preserved evidence sufficient to claim ordinary WorkspaceWrite native execution and certification. The unrestricted 02:59:42 success remains evidence only for its own danger-full-access fixture scope, and the two agentless timeouts remain explicit diagnostics rather than merged into the successful cohort.
+
+### Final standard-Session WorkspaceWrite proof
+
+After root authorized only the unique evidence path plus path normalization, the same selected actual-start command ran once at 04:13:50. Result: `1 passed, 26 skipped`, 14.62 s total (14.168 s test). It printed and wrote the exact 3922-byte evidence file `E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\dsh-probes\actual-startup-efC87w.json` before assertions. The retained facts were:
+
+- session policy `mode: workspace-write`; `workspaceRoot` and normalized session cwd both the D worktree; `matchesPwshCwd: true`;
+- native directory elapsed time 1545 ms; tool result `isError: false`, `kind: foreground`, exit 0, null signal, no timeout/abort/truncation, empty stderr, WorkspaceWrite sandbox `denied: false`, `enforcement: partial`;
+- `receiptStatus: present`; certified schema `tianwen.native-pwsh-directory.v1`, exact task/session/call identity, fixed `Get-Location` command/parser qualification, D worktree cwd/workspace root, native result digest, and complete start/lookup/terminal frames;
+- both observer providers and all declaration/registration/config assertions passed, one private overlay existed while the child ran, and its launch root was empty after `host.stop()`.
+
+This is an actual exported `startDesktopWebHost()` launch and standard-Session native tool execution under ordinary WorkspaceWrite, not a full model conversation lifecycle: the agent remained idle except for the explicit public tool call, and no model was invoked.
+
+After the evidence was read into this report, the exact approved targets were resolved and verified beneath `E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests`: `file-tests/native-observation-launch`, `dsh-probes`, and `temp`. A policy wrapper rejected two `Remove-Item` command constructions before process creation, so those attempts changed nothing. The same PowerShell then used .NET `File.Delete`/`Directory.Delete` on only the already verified literal absolute targets. Final checks reported all three absent and `matching-live-processes=0`. The evidence facts remain in this report; the E evidence file itself and test-created DSH/Vitest temp children were removed. Daily, the shortcut, frozen023 paths, old model evidence, and the protected Desktop packaging output remained untouched.
