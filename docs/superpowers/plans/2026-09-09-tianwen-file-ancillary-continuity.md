@@ -13,13 +13,17 @@ passed focused3GREEN/tsc and scoped fix2 rereview at6b535a1; it is not a ban on
 legitimate configured stateRoot/ancestor migration. Task4 is complete. Agentless WorkspaceWrite control timed
 out both outside/inside capture; corrected public standard-session gate passed
 04:13:50,14.62s, with preserved actual result/receipt. Prior unrestricted success
-and fixture failures retain their original scope. Task5 is running from603db20. Producer task
+and fixture failures retain their original scope. Task5 complete/review clean at
+6907b00:024/preview25/exactarchive/predecessor/WindowsCI coordination, current
+scopedGREEN and fullbuild recorded in its report; no new C/I/M. One final new-
+delta review precedes fresh candidate packaging and real IAB/DeepSeek use. Producer task
 review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
-Ordinary Desktop startup will use public native configuration composition and
+Ordinary Desktop startup now uses public native configuration composition and
 the native CLI's final overlay boundary;
-that configuration preparation still requires its own product gate. See the native observation research
+that configuration preparation passed its scoped engineering gate; new packaged
+real-use proof remains. See the native observation research
 notes for rejected alternatives and the exact supported seams.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
