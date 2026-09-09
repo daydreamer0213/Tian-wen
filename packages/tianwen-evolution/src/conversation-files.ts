@@ -1,4 +1,6 @@
 import { isAbsolute } from 'node:path'
+import type { ConversationJudgmentProof } from './conversation-learning.js'
+import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
 
 export interface ConversationFileEntry {
@@ -88,6 +90,19 @@ export interface ConversationFileMaterial {
   readonly outputPaths: readonly string[]
 }
 
+export interface ConversationFileTrialOutput {
+  readonly answer: string
+  readonly files: readonly ConversationFileEntry[]
+  readonly outputDigest: Sha256Digest
+}
+
+export interface ConversationFileTrialReceipt extends ConversationFileTrialOutput {
+  readonly schemaVersion: 'tianwen.conversation-file-trial-receipt.v1'
+  readonly outputKind: 'files' | 'chat'
+  readonly workerMaterialDigest: Sha256Digest
+  readonly executionProof: ConversationJudgmentProof
+}
+
 function exactObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) throw new TypeError('conversation file material has invalid fields')
@@ -97,6 +112,29 @@ function exactObject(value: unknown, keys: readonly string[]): Record<string, un
 function digest(value: unknown): Sha256Digest {
   if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(value)) throw new TypeError('conversation file digest is invalid')
   return value as Sha256Digest
+}
+
+function proof(value: unknown): ConversationJudgmentProof {
+  const input = exactObject(value, ['sessionId', 'sessionDigest', 'requestDigest'])
+  if (typeof input.sessionId !== 'string' || input.sessionId.length === 0 || input.sessionId.length > 512) {
+    throw new TypeError('conversation file trial proof is invalid')
+  }
+  return { sessionId: input.sessionId, sessionDigest: digest(input.sessionDigest), requestDigest: digest(input.requestDigest) }
+}
+
+export function parseConversationFileTrialReceipt(value: unknown): ConversationFileTrialReceipt {
+  const input = exactObject(value, ['schemaVersion', 'outputKind', 'answer', 'files', 'outputDigest', 'workerMaterialDigest', 'executionProof'])
+  if (input.schemaVersion !== 'tianwen.conversation-file-trial-receipt.v1'
+    || (input.outputKind !== 'files' && input.outputKind !== 'chat')
+    || typeof input.answer !== 'string' || Buffer.byteLength(input.answer, 'utf8') > CONVERSATION_FILE_MAX_BYTES
+    || (input.outputKind === 'chat' && input.answer.trim().length === 0)) {
+    throw new TypeError('conversation file trial receipt is invalid')
+  }
+  const files = parseConversationFileEntries(input.files)
+  const outputDigest = digest(input.outputDigest)
+  if (outputDigest !== sha256({ answer: input.answer, files })) throw new TypeError('conversation file trial output digest is invalid')
+  return { schemaVersion: input.schemaVersion, outputKind: input.outputKind, answer: input.answer, files,
+    outputDigest, workerMaterialDigest: digest(input.workerMaterialDigest), executionProof: proof(input.executionProof) }
 }
 
 function positiveInteger(value: unknown): number {
