@@ -7,9 +7,11 @@ review clean atb228543: original69 covering + prior212 regressions, then fix1
 60native/observer and7config/export checks, typecheck/build. Default environment
 and consent-disposal findings both closed. Task4 initial implementation669b9d0
 and followupf48434c remain in fix round1 after review: private Windows ACL and
-cleanup failure must preserve stock launch. Ordinary WorkspaceWrite timed out
-once; same-spec native/observed diagnosis pending. Unrestricted startup success
-does not close that gate. Task5 has not started. Producer task
+cleanup failure must preserve stock launch. Those focused fixes passed; full
+fix report and scoped rereview pending. Agentless WorkspaceWrite control timed
+out both outside/inside capture; corrected public standard-session gate passed
+04:13:50,14.62s, with preserved actual result/receipt. Prior unrestricted success
+and fixture failures retain their original scope. Task5 has not started. Producer task
 review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
