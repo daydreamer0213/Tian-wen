@@ -68,8 +68,8 @@ Evolution `conversation-learning.ts` and `index.ts`; new runtime-bundle
 `runtime.ts`; relevant conversation-learning/native observer tests.
 
 This task captures truthful file evidence but does not yet admit it into a study
-or call a file review successful. Task 3 owns real file comparison and positive
-file-result review. Keep unsupported external/subjective verdicts unchanged.
+or call a file review successful. Task 3 owns native replica execution; Task 4
+owns comparison and file-result review. Keep unsupported external/subjective verdicts unchanged.
 
 Move the pure entry type/constants/parser from Task 1 into the new Evolution
 file module and re-export them through the runtime helper, avoiding duplicated
@@ -226,6 +226,9 @@ access, the exact requested native model configuration on every request, and
 normal cancellation/disposal. An actual completed native turn is required;
 assistant text alone does not create a file success. Capture final entries
 from the replica's exact frozen set after the owned single turn stops.
+File-only work may have an empty chat answer; do not require an unnecessary
+confirmation message when the real output is a file. Chat-output tasks still
+require their actual chat answer. Empty file content and absent file are distinct.
 
 Reuse the public `@deepseek-ai/dsh-subagent` composition exports: capture delegated
 policy synchronously before the first await; `resolveChildDepth`,
@@ -303,6 +306,10 @@ or write success tool text as factual support for that output. Host-confirmed
 file existence is narrow evidence of file existence, never of its asserted facts.
 Keep unchanged v6 claim semantics and separate two-reviewer consensus. A missing
 required output cannot be promoted to met; missing capture remains inconclusive.
+An actual empty output file may have one explicit empty answer unit with the
+existing v2 audit's null entry, retaining artifact membership without inventing
+answer text or weakening text-task audit rules. An absent output is not an empty
+output and must not acquire that success path.
 Feedback attribution retains the original task/user feedback and adds verified
 file results when available, never requiring file evidence to recover plain text.
 
