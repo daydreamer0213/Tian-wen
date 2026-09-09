@@ -224,3 +224,32 @@ output b88e62. This is serialization evidence, not product startup acceptance.
 These tests establish startup wiring only. They do not by themselves prove a
 native tool effect, a successful ordinary task, semantic answer quality, or a
 Daily deployment.
+
+## Ordinary Windows startup execution context (2026-09-10)
+
+The initial agentless `shell.resolve -> shell.run` probe is a valid public call,
+but not the same Windows permission preparation path as a normal standard
+session. The one same-host/same-spec WorkspaceWrite comparison timed out both
+outside capture (15208 ms) and inside capture (18802 ms), with the unchanged
+15000 ms native timeout. Both had empty stdout/stderr and `denied: false`.
+This establishes failure in the stock agentless baseline, not its root cause.
+The earlier unrestricted success remains restricted to that environment.
+
+Public native source explains the context difference: tool-pwsh resolves policy
+from `agent.session` (installed lib/index.js192-200,360-411). The Windows local
+provider materializes workspace/session-temp ACL grants before the shell
+deadline for a session-bound call, passing `write-sid` and `temp-write-sid` to
+the runner (sandbox-local lib/index.js298-320,344-368,383-429). Agentless calls
+do not take that path; runner initialization is inside the command deadline.
+`agentPresets.standingKeyFor('standard')` only obtains a definition scope.
+
+The ordinary engineering gate should create an idle agent through public
+`agents.create`, with a real SessionId, `meta.cwd` equal to the existing fixture
+cwd, and the standard preset mounted through its public setup hook; then use
+`agents.withInitiator` and `tools.execute` for pwsh. Existing public-dispatch
+precedent is tests/dsh-probe/goal-authority.spec.ts106-120, and the closed Task3
+native session fixture is conversation-file-ancillary-runtime.spec.ts52-93,
+273-282. No model drive, permission increase, DSH modification or timeout
+increase is required. Dispose the agent afterward. Explicit observation capture
+may surround this tool dispatch to assert a receipt, but that remains startup/
+tool engineering evidence, not the complete conversation-learning lifecycle.
