@@ -312,13 +312,20 @@ replica child target before cleanup and never delete its parent.
 
 - [ ] Write RED that the candidate trial must actually change its own replica,
   while baseline and original workspace bytes remain unchanged.
-- [ ] Use `agents.create({ meta: { cwd: replicaRoot, origin: 'subagent', parentSession }, setup })` and native `followup`/`whenIdle`; register no new work tools.
-- [ ] Restrict and guard native read/write/edit by exact replica/allowed paths;
+  Candidate/original trace passes; the explicit paired-baseline assertion is
+  carried to Task 4's native study integration (non-blocking Task 3 review item).
+- [x] Use `agents.create({ meta: { cwd: replicaRoot, origin: 'subagent', parentSession }, setup })` and native `followup`/`whenIdle`; register no new work tools.
+- [x] Restrict and guard native read/write/edit by exact replica/allowed paths;
   preserve cancellation and exact native model/persistence proof.
-- [ ] Verify actual source/candidate isolation, missing output, denied original
+- [x] Verify actual source/candidate isolation, missing output, denied original
   path, disallowed tools, cancellation, file tampering, retention-before-return,
   failed retention and exact cold receipt recovery.
-- [ ] Independent task-scoped review before integrating the new executor.
+- [x] Independent task-scoped review before integrating the new executor.
+
+Task 3 gate: b99405c implementation, 5bd9d49 fixes; root fresh 26/26 and two
+package typechecks. Both Important findings closed by scoped re-review. Keep
+seed-failure partial-replica cleanup as a deferred Minor for final triage, and
+the paired-baseline assertion above for Task 4. No new real-model evidence yet.
 
 ## Task 4: Existing study and blind-review integration
 
@@ -405,6 +412,8 @@ narrow extension is finalized from the failing interleaving check, not speculati
   content as its own factual source. Bind file output to recovered audit proof.
 - [ ] Select compatible verified file evidence through existing support and
   counterexample rules; replay actual files for source/exploration/holdout cases.
+  Include the carried Task 3 assertion: an actual baseline and candidate execute
+  independent replicas, retained baseline output and original bytes stay intact.
 - [ ] Verify accepted/rejected/unknown, source/reference ordering, withdrawal,
   no reapplication on restart and existing text behavior with focused tests.
 - [ ] Independent correctness/scope review; fix only reproduced findings.
