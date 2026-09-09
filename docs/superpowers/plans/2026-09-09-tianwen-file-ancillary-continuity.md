@@ -8,10 +8,9 @@ review clean atb228543: original69 covering + prior212 regressions, then fix1
 and consent-disposal findings both closed. Task4 initial implementation669b9d0
 and followupf48434c remain in fix round1 after review: private Windows ACL and
 cleanup failure must preserve stock launch. Those fixes and ordinary-session
-gate passed scoped rereview at059b0f3. One additional dedicated-root junction
-fixture disproved existing target ACL mutation but showed the actual container
-remained an unprotected linked target; a narrow reject-to-stock guard is fix2,
-not a ban on legitimate configured stateRoot/ancestor migration. Agentless WorkspaceWrite control timed
+gate passed scoped rereview at059b0f3. Additional dedicated-root junction guard
+passed focused3GREEN/tsc and scoped fix2 rereview at6b535a1; it is not a ban on
+legitimate configured stateRoot/ancestor migration. Task4 is complete. Agentless WorkspaceWrite control timed
 out both outside/inside capture; corrected public standard-session gate passed
 04:13:50,14.62s, with preserved actual result/receipt. Prior unrestricted success
 and fixture failures retain their original scope. Task5 has not started. Producer task
@@ -679,6 +678,17 @@ the spec would otherwise skip this case. Run the eventually closed ordinary
 WorkspaceWrite gate, not the earlier unrestricted fixture. Preserve existing
 test-root overrides and portable runner.temp handling. Task4's outstanding
 permission/private-storage issues must close before this CI coordination starts.
+
+Task4 fix2 also has a separately selected Windows junction regression:
+`TIANWEN_RUN_NATIVE_OBSERVATION_JUNCTION_DIAGNOSTIC=1`. Set it alongside the
+startup flag in that same Desktop Windows command and assert both selections
+in the existing CI contract. Its body already passed the scoped native helper
+gate; do not rerun it locally just to add the flag. Set its optional
+`TIANWEN_TASK4_EVIDENCE_ROOT` to a dedicated runner.temp evidence directory,
+outside disposable fixture children (local override is the approved E
+consumer-evidence/task4 directory). Preserve its portable fallback; no required
+author-local E drive. Where the job already uploads diagnostics, include these
+small retained evidence paths without creating a new reporting framework.
 
 - [ ] **Step 4: Run focused current-version/installer/Desktop/CI checks and build.**
 
