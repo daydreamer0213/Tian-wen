@@ -196,7 +196,10 @@ tests. Real later edits must never rewrite the frozen read input after restart.
 ## Task 3: Real native replica execution and persisted output proof
 
 Files: new `packages/tianwen-runtime-bundle/src/conversation-file-trial.ts`
-and `tests/dsh-migration/conversation-file-trial.spec.ts`. Task 4 owns consumers.
+and `tests/dsh-migration/conversation-file-trial.spec.ts`; pure receipt type/parser
+in existing Evolution `conversation-files.ts` and its public index. The runtime
+adapter re-exports that shared contract; Evolution must not import Runtime.
+Task 4 owns private study persistence and all review/selection consumers.
 
 Expose `runConversationFileTrial` and `recoverConversationFileTrial` using the
 existing three-field `ConversationJudgmentProof`. Run input includes exact
@@ -287,6 +290,8 @@ This is a host-only persistence seam, never a model tool. Task 4 supplies the
 existing private study ledger append; Task 3 does not add a store. Receipt-retention
 failure produces no successful trial return and no subsequent review; retain the
 exact owned replica for diagnosis until bounded evidence is safely retained.
+Give retention an immutable isolated snapshot; a callback must not mutate the
+adapter's returned output or receipt. Validate required host inputs before running.
 Do not append a custom native Session event: the installed reader rejects unknown
 types during cold recovery, although live inspect misleadingly accepts them.
 Do not alter native dependencies/catalogs, spoof another native event, mutate frozen
