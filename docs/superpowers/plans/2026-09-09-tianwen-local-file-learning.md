@@ -421,7 +421,7 @@ narrow extension is finalized from the failing interleaving check, not speculati
 
 ## Task 5: Targeted real-model branches and delivery
 
-- [ ] Update verification matrix with exact newly changed contracts and reused historical evidence before launching any model episode.
+- [x] Update verification matrix with exact newly changed contracts and reused historical evidence before launching any model episode.
 - [ ] Freeze task inputs, preconditions, expected observable behavior, permitted alternative decisions and stop conditions in an E-backed isolated environment.
 - [ ] Use normal built-in-browser inputs and actual configured DeepSeek. Preserve
   every attempt and artifact; do not supply judged outputs or force internal branches.
@@ -436,6 +436,19 @@ narrow extension is finalized from the failing interleaving check, not speculati
 
 ## Progress and retained failures
 
+- 2026-09-09 16:25: candidate source and final whole-branch review closed; only
+  Important was Python CI membership, fixed5a30f22 and scoped review closed.
+  Exact5a30 Python609/4conditional skips, Runtime13steps0, fresh A1 27/27,
+  ordinary Profile3/4unselected and Windows8/8 concurrent cold boot passed.
+  Broad a556 TypeScript passed portions are reused because its TS/runtime inputs
+  did not change; the one root interpreter-path failure has the fresh full-file
+  check, not a falsely relabelled all-green full command. Candidate023/preview24
+  double Runtime pack, Desktop directory/NSIS and artifact audit passed. All
+  failed attempts retained. See operations/tianwen-local-file-learning-023-candidate-20260909.md
+  for exact identities and receipts. Task5 overall remains incomplete: no new
+  actual-model/UI episode, no merge/CI/Daily delivery. Browser SDK trust rejection
+  requires an external supported-connection recovery; no security workaround or
+  automated Computer Use privacy/consent action. Do not redo the closed review.
 - 2026-09-09: baseline c13bad7 clean; targeted unchanged domain tests 61/61 passed.
 - Initial `pnpm exec` invoked dependency-health installation and refused module
   removal without TTY. No purge approved; direct installed Vitest ran successfully.
