@@ -129,3 +129,64 @@ Result: typecheck exit 0; 2 test files passed, 25/25 tests passed; `git diff --c
 - No dependencies, stores, custom Session events, Task 4 consumers, Daily files, network calls, model calls outside the scripted native harness, broad cleanup, staging, or commits were added.
 - Successful trials remove only their verified owned child replica and never the parent. A retention failure intentionally leaves one diagnostic child directory.
 - The executor is intentionally a focused adapter file; no broader runtime refactor was performed.
+
+## Fix round 1: formal gate Important findings
+
+Formal gate: `/root/local_file_trial_gate`, reviewed at `b99405c`. Only the two Important findings were handled in this round.
+
+### Effective native capability prerequisite
+
+The child setup now checks its final effective native schema view and executable definitions after joining the parent's live preset, applying the narrow mask, and forcing native presentation. A files trial requires exactly `read`, `write`, and `edit`; a chat trial requires exactly `read`. Missing capabilities fail Agent creation before the first model request, tool call, or receipt retention.
+
+RED command:
+
+```powershell
+& 'D:/hermes/node/node.exe' 'node_modules/vitest/vitest.mjs' run 'tests/dsh-migration/conversation-file-trial.spec.ts' -t 'missing effective'
+```
+
+RED result:
+
+```text
+Test Files  1 failed (1)
+Tests       1 failed | 14 skipped (15)
+AssertionError: promise resolved ... instead of rejecting
+```
+
+The fixture exposed the real native `write` tool but hid `read` and `edit` through the parent's mounted preset. Before the fix, the trial made two model requests, wrote the output, retained a receipt, and resolved successfully.
+
+GREEN command:
+
+```powershell
+& 'D:/hermes/node/node.exe' 'node_modules/vitest/vitest.mjs' run 'tests/dsh-migration/conversation-file-trial.spec.ts' -t 'missing effective|joins the parent live preset'
+```
+
+GREEN result:
+
+```text
+Test Files  1 passed (1)
+Tests       2 passed | 13 skipped (15)
+```
+
+The missing-capability case additionally asserts zero model requests and no receipt retention.
+
+### Genuine agent-scoped file-tool composition
+
+The Code Mode test no longer mounts `@deepseek-ai/dsh-tool-fs` globally. Its real parent AgentPreset now contains both the installed file-tool plugin and installed presentation plugin. The test proves the root tool view has no `read`, the parent Code Mode view contains `run_code`, the child model request contains exactly native `edit`/`read`/`write`, the child persists the joined preset id, and the parent view remains unchanged after child disposal.
+
+### Fix-round final verification
+
+Commands:
+
+```powershell
+& 'D:/hermes/node/node.exe' 'node_modules/typescript/bin/tsc' -b 'packages/tianwen-evolution/tsconfig.json' 'packages/tianwen-runtime-bundle/tsconfig.json' --pretty false
+& 'D:/hermes/node/node.exe' 'node_modules/vitest/vitest.mjs' run 'tests/dsh-migration/conversation-file-trial.spec.ts' 'tests/dsh-migration/conversation-file-observer.spec.ts'
+```
+
+Result: typecheck exit 0; 2 test files passed, 26/26 tests passed.
+
+Files amended in fix round 1:
+
+- `packages/tianwen-runtime-bundle/src/conversation-file-trial.ts`
+- `tests/dsh-migration/conversation-file-trial.spec.ts`
+
+No Minor finding, Task 4 consumer, dependency, document, staging area, or commit was changed in this round.

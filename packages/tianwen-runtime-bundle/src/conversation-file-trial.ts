@@ -213,6 +213,11 @@ export async function runConversationFileTrial(ctx: Context, parent: Agent, rawI
         appendDelegatedPolicyOverrides(child.session, policies)
         applyChildComposition(childCtx, parent, { persona: PERSONA, toolFilter: { allow: allowed } })
         childCtx.tools.presentAs('native')
+        const nativeSchemas = childCtx.tools.schemas(child).map(schema => schema.name)
+        if (nativeSchemas.length !== allowed.length || allowed.some(name => !nativeSchemas.includes(name)
+          || childCtx.tools.get(name, child) === undefined)) {
+          throw new Error('conversation file trial native file capabilities are unavailable')
+        }
         childCtx.tools.guard(execution => {
           toolCalls += 1
           if (toolCalls > MAX_TOOL_CALLS) return 'conversation file trial tool limit exceeded'

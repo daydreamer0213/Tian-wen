@@ -14,11 +14,13 @@ const localFs = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-
 const agentPresets = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-agent-presets')).href)
 const codeRuntime = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-code-runtime-worker-thread')).href)
 const presentationPath = cliRequire.resolve('@deepseek-ai/dsh-agent-tool-presentation').replaceAll('\\', '/')
+const fileToolsPath = cliRequire.resolve('@deepseek-ai/dsh-tool-fs').replaceAll('\\', '/')
 const roots: string[] = []
 
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
-async function mountTrial(script: Parameters<typeof mountPersistentHarness>[1], options: { readonly codePreset?: boolean, readonly sandboxPolicy?: boolean } = {}) {
+async function mountTrial(script: Parameters<typeof mountPersistentHarness>[1], options: { readonly codePreset?: boolean, readonly sandboxPolicy?: boolean,
+  readonly globalFileTools?: boolean, readonly presetToolAllow?: readonly string[] } = {}) {
   const base = 'D:/DevData/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-trial-')); roots.push(root)
@@ -34,20 +36,26 @@ async function mountTrial(script: Parameters<typeof mountPersistentHarness>[1], 
     },
   } as never)
   await harness.ctx.plugin(localFs.default, { cwd: root })
-  await harness.ctx.plugin(fileTools, {})
-  if (options.codePreset) {
-    const presetRoot = join(root, 'presets'); const preset = join(presetRoot, 'code-test')
+  if (options.globalFileTools !== false && !options.codePreset) await harness.ctx.plugin(fileTools, {})
+  const presetId = options.codePreset ? 'code-test' : options.presetToolAllow === undefined ? undefined : 'filtered-test'
+  if (presetId !== undefined) {
+    const presetRoot = join(root, 'presets'); const preset = join(presetRoot, presetId)
     mkdirSync(preset, { recursive: true })
-    writeFileSync(join(preset, 'agent.cordis.yml'), `- id: tool-presentation\n  name: '${presentationPath}'\n  config:\n    mode: code\n`)
+    if (options.codePreset) {
+      writeFileSync(join(preset, 'agent.cordis.yml'), `- id: file-tools\n  name: '${fileToolsPath}'\n  config: {}\n- id: tool-presentation\n  name: '${presentationPath}'\n  config:\n    mode: code\n`)
+    } else {
+      writeFileSync(join(preset, 'restrict.mjs'), `export const name = 'test-tool-restriction'\nexport const inject = ['tools']\nexport function apply(ctx) { ctx.tools.restrict({ allow: ${JSON.stringify(options.presetToolAllow)} }) }\n`)
+      writeFileSync(join(preset, 'agent.cordis.yml'), "- id: tool-restriction\n  name: './restrict.mjs'\n")
+    }
     await harness.ctx.plugin(Loader)
-    await harness.ctx.plugin(codeRuntime.default, {})
-    await harness.ctx.plugin(agentPresets.default, { default: 'code-test', roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
+    if (options.codePreset) await harness.ctx.plugin(codeRuntime.default, {})
+    await harness.ctx.plugin(agentPresets.default, { default: presetId, roots: [{ path: presetRoot, trust: 'system' }], includeUserRoot: false })
   }
   const presets = harness.ctx.get('agentPresets')
   const parent = await harness.ctx.agents.create({ sessionId: SessionId(`file-trial-parent-${roots.length}`),
-    meta: { cwd: original, ...(options.codePreset ? { agentPreset: 'code-test' } : {}) },
+    meta: { cwd: original, ...(presetId === undefined ? {} : { agentPreset: presetId }) },
     agentOptions: { provider: 'tianwen-probe', model: 'scripted' },
-    ...(options.codePreset ? { setup: async (agentCtx: typeof harness.ctx) => { await presets!.mount(agentCtx, 'code-test') } } : {}) })
+    ...(presetId === undefined ? {} : { setup: async (agentCtx: typeof harness.ctx) => { await presets!.mount(agentCtx, presetId) } }) })
   const material = {
     prompt: 'Read input.md and write its requested result to output.md.',
     files: { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const, cwd: original,
@@ -193,6 +201,7 @@ it('joins the parent live preset, forces only native file tools in the child, an
     textResponse('Saved.'),
   ], { codePreset: true })
   try {
+    expect(harness.ctx.tools.get('read')).toBeUndefined()
     const parentTools = harness.parent.agent.ctx.tools.schemas(harness.parent.agent).map(tool => tool.name)
     expect(parentTools).toContain('run_code')
     const result = await runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, retainReceipt: () => undefined })
@@ -200,6 +209,21 @@ it('joins the parent live preset, forces only native file tools in the child, an
     expect(harness.parent.agent.ctx.tools.schemas(harness.parent.agent).map(tool => tool.name)).toEqual(parentTools)
     const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
     expect(saved.meta.agentPreset).toBe('code-test')
+  } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('rejects missing effective native file capabilities before model execution or receipt retention', async () => {
+  const harness = await mountTrial([
+    toolCallResponse('write-output', 'write', { file_path: 'output.md', content: 'candidate result' }),
+    textResponse('Saved.'),
+  ], { presetToolAllow: ['write'] })
+  let retained = false
+  try {
+    expect(harness.parent.agent.ctx.tools.schemas(harness.parent.agent).map(tool => tool.name)).toEqual(['write'])
+    await expect(runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input,
+      retainReceipt: () => { retained = true } })).rejects.toThrow('native file capabilities')
+    expect(harness.adapter.requests).toHaveLength(0)
+    expect(retained).toBe(false)
   } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
 })
 
