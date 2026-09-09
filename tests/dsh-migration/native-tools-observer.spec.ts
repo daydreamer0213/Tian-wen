@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
@@ -172,44 +172,67 @@ describe('NativeObservedToolRuntime native registration provenance', () => {
     }
   })
 
-  it.each([false, true])('loads the built public provider from an explicit disabled=%s composition', async disabled => {
-    const built = await import(
-      '../../packages/tianwen-runtime-bundle/dist/native-tools-observer.js'
-    ) as { default: new (ctx: any, config?: any) => any }
-    const boot = await load('@deepseek-ai/dsh-app-boot') as {
-      loadOverlayPatches(name: string, path: string): unknown[]
-      composeEntries(layers: unknown[]): Array<Record<string, unknown>>
+  it('loads the built public provider through a real disabled and injection-gated loader entry', async () => {
+    const builtUrl = pathToFileURL(resolve(
+      import.meta.dirname,
+      '../../packages/tianwen-runtime-bundle/dist/native-tools-observer.js',
+    )).href
+    const built = await import(builtUrl) as {
+      default: new (ctx: any, config?: any) => any
     }
-    const base = boot.loadOverlayPatches(
-      'native-tools-observer-test',
-      nativeRequire.resolve('@deepseek-ai/dsh-base/cordis.patch.yml'),
-    )
-    const stockEntry = boot.composeEntries([base]).find(entry => entry.id === 'tools')!
-    const configured = {
-      ...stockEntry,
-      config: { mode: 'native', maxParallelSubCalls: 3 },
-      inject: ['systemPrompt', 'configured-ready'],
-      disabled,
+    const loader = await load('@deepseek-ai/cordis-plugin-loader') as {
+      default: new (ctx: any, config?: any) => any
     }
-    const selected = {
-      ...configured,
-      name: '@tianwen/runtime-bundle/native-tools-observer',
-    }
-    expect({ ...selected, name: configured.name }).toEqual(configured)
-
-    const harness = await createHarness(built.default, configured.config)
+    const ctx = new native.cordis.Context()
+    const config = { mode: 'native', maxParallelSubCalls: 3 }
+    const inject = ['systemPrompt', 'configured-ready']
     try {
-      await mountNativeLayer(harness.ctx)
-      expect(harness.ctx.tools.nativeRegistration(harness.ctx.tools.get('glob')))
-        .toEqual(expectedProducer.fsSearch)
-      expect(harness.ctx.tools.nativeRegistration(harness.ctx.tools.get('skill')))
-        .toEqual(expectedProducer.skill)
-      expect(harness.ctx.tools.nativeRegistration(harness.ctx.tools.get('pwsh')))
-        .toEqual(expectedProducer.pwsh)
-      expect(harness.ctx.tools.schemas().map((schema: any) => schema.name).sort())
-        .toEqual(['glob', 'grep', 'pwsh', 'skill'])
+      await ctx.plugin(native.systemPrompt.SystemPrompt)
+      await ctx.plugin(loader.default, { baseUrl: pathToFileURL(import.meta.dirname).href })
+      const id = await ctx.loader.create({
+        name: builtUrl,
+        config,
+        inject,
+        disabled: true,
+      })
+      await ctx.loader.await()
+
+      const entry = ctx.loader.resolve(id)
+      expect(entry.options).toMatchObject({
+        id,
+        name: builtUrl,
+        config,
+        inject,
+        disabled: true,
+      })
+      expect(entry.disabled).toBe(true)
+      expect(entry.fiber).toBeUndefined()
+      expect(ctx.get('tools')).toBeUndefined()
+
+      await ctx.loader.update(id, { config, inject, disabled: false })
+      await ctx.loader.await()
+      expect(entry.options).toMatchObject({ config, inject, disabled: false })
+      expect(entry.fiber?.state).toBe(0)
+      expect(ctx.get('tools')).toBeUndefined()
+
+      const ready = await ctx.plugin({
+        name: 'configured-ready-provider',
+        apply(pluginCtx: any) { pluginCtx.provide('configured-ready', {}) },
+      })
+      await ctx.loader.await()
+      expect(entry.fiber?.state).toBe(2)
+      expect(entry.fiber?.config).toEqual(config)
+      expect(typeof built.default).toBe('function')
+      const loaderExport = ctx.loader.unwrapExports(await ctx.loader.import(builtUrl))
+      expect(entry.fiber?.runtime.callback).toBe(ctx.registry.resolve(loaderExport))
+      expect(ctx.tools.nativeRegistration).toEqual(expect.any(Function))
+
+      await ready.dispose()
+      await ctx.loader.await()
+      expect(entry.fiber?.state).toBe(0)
+      expect(ctx.get('tools')).toBeUndefined()
     } finally {
-      await harness.ctx.fiber.dispose()
+      await ctx.fiber.dispose()
     }
   })
 

@@ -140,8 +140,8 @@ It returned only `alpha.txt`; the exact temporary directory was removed in `fina
 
 ## Package changes
 
-- Added required native peers/dev links for `@deepseek-ai/dsh-tool-fs-search` and `@deepseek-ai/dsh-tool-pwsh`, both exactly `0.1.1-rc.2`.
-- Reused existing `@deepseek-ai/dsh-tool-skill`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-scope` and Cordis peers.
+- Declared the three runtime requirements imported by the observer in both peer/dev surfaces: `@deepseek-ai/dsh-tool-fs-search`, `@deepseek-ai/dsh-tool-pwsh` and `@deepseek-ai/dsh-scope` (all exactly `0.1.1-rc.2`).
+- Reused existing `@deepseek-ai/dsh-tool-skill`, `@deepseek-ai/dsh-tools` and Cordis peers.
 - Added the `./native-tools-observer` export, files list entries and normal build entry.
 - Added only package-local junctions for the two already installed native packages missing from `packages/tianwen-runtime-bundle/node_modules`; both targets were first resolved and version-checked under this repository's existing `node_modules/.pnpm` store. No install or shared package edit was performed.
 
@@ -161,5 +161,39 @@ It returned only `alpha.txt`; the exact temporary directory was removed in `fina
 - Confirmed all certificate bookkeeping is instance-local weak storage; there is no process-global registration state.
 - Confirmed the built entry keeps actual native module namespace imports external, preserving callback identity across the separately bundled provider.
 - Confirmed no static activation or ordinary profile wiring was added; that remains Task 4.
-- Configuration semantics covered here are the installed parent defaults plus preservation of an explicitly composed row's `config`, `disabled` and `inject` fields. The observer adds no configuration of its own. A disabled row is metadata-only in this test and is not passed to a loader that would skip mounting; loader/ordinary-launch activation remains out of scope.
+- Configuration semantics covered here are the installed parent defaults plus a real Loader entry carrying `config`, `disabled` and `inject`. The observer adds no configuration of its own. Ordinary-launch activation remains out of scope.
 - Focused tests were run by design. The historical full suite and model/product gates were not replayed, per the task brief.
+
+## Review fix round 1
+
+The initial explicit-composition test was ineffective: it copied plain objects and instantiated the provider directly with only `config`, so neither `disabled` nor `inject` reached the installed loader. The test was replaced without changing production code.
+
+The replacement uses the installed `@deepseek-ai/cordis-plugin-loader` and the built public entry URL. It creates one real loader entry with the exact `config`, `inject` and `disabled: true`, verifies the selected entry retains them, verifies disabled state prevents a fiber, enables the entry while its extra injection is absent and observes a pending fiber, then provides `configured-ready` and verifies activation with the validated config and exact loader-resolved built callback. Disposing that provider returns the entry to pending and removes `ctx.tools`, proving injection gating in both directions.
+
+Meaningful RED command:
+
+```powershell
+& 'D:/hermes/node/node.exe' 'node_modules/vitest/vitest.mjs' run tests/dsh-migration/native-tools-observer.spec.ts -t 'loads the built public provider through a real disabled and injection-gated loader entry'
+```
+
+The first loader-backed run reached activation but failed its callback identity assertion because the Vitest-transformed direct import and the loader's native import were distinct module instances:
+
+```text
+Test Files 1 failed (1)
+Tests 1 failed | 6 skipped (7)
+AssertionError: expected [Function ToolRuntime] to be [Function ToolRuntime] // Object.is equality
+```
+
+The assertion now compares the entry fiber callback with the public export obtained through the same loader import/unwrap seam that selected the plugin; this is the relevant identity boundary and avoids a test-runner-created second module copy.
+
+Focused GREEN command (same command as RED) output:
+
+```text
+Test Files 1 passed (1)
+Tests 1 passed | 6 skipped (7)
+Duration 690ms
+```
+
+The six skipped tests were excluded by the `-t` filter. The unrelated actual-glob case was not selected or rerun in this review fix. No typecheck/build rerun was necessary because production and build inputs did not change.
+
+Dependency wording correction: the observer runtime import set requires manifest declarations for fs-search, pwsh and dsh-scope. Only fs-search and pwsh needed new package-local junctions; dsh-scope was already present locally. No installation or shared dependency edit was performed.
