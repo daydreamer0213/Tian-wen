@@ -43,11 +43,11 @@ binary/NUL, over-count/byte limits, malformed paths and extra fields. Reads are
 bounded and detect in-read replacement/change. Seeding requires an existing
 empty nonlinked root and writes only non-null entries; it never deletes files.
 
-- [ ] Add the minimal failing check for existing file capture, exact original bytes and absent output.
-- [ ] Run `node node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-material.spec.ts`; verify the failure names the missing behavior.
-- [ ] Implement the above helpers with Node standard-library filesystem primitives and the established path/snapshot constraints.
-- [ ] Cover escape, link/ancestor, nonempty seed root, invalid UTF-8, over-cap material and two independently seeded replicas.
-- [ ] Verify focused tests and review helper scope before integration.
+- [x] Add the minimal failing check for existing file capture, exact original bytes and absent output.
+- [x] Run `node node_modules/vitest/vitest.mjs run tests/dsh-migration/conversation-file-material.spec.ts`; verify the failure names the missing behavior.
+- [x] Implement the above helpers with Node standard-library filesystem primitives and the established path/snapshot constraints.
+- [x] Cover escape, link/ancestor, nonempty seed root, invalid UTF-8, over-cap material and two independently seeded replicas.
+- [x] Verify focused tests and review helper scope before integration.
 
 Example contract check:
 
@@ -309,4 +309,8 @@ narrow extension is finalized from the failing interleaving check, not speculati
 - Initial `pnpm exec` invoked dependency-health installation and refused module
   removal without TTY. No purge approved; direct installed Vitest ran successfully.
 - Read-only investigations confirmed native file tools and Agent creation reuse.
+- Task 1: implementation 38839d5, BOM correction a5309ee; fresh helper 9/9,
+  focused typecheck, and independent fix review passed. Earlier combined helper
+  and unchanged domain check was 69/69. This is foundation evidence, not native
+  file-learning or actual-model acceptance.
 - No production implementation or new model acceptance is complete at plan creation.
