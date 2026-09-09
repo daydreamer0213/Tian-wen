@@ -86,6 +86,14 @@ unexpected lookups, wrong identity, incomplete bytes, unsuccessful execution,
 truncation, timeout, cancellation or denied sandbox produce no certificate.
 Failed original commands still run and return their original errors.
 
+The producer's executionSettingsDigest witnesses its actual execution spec/config
+under that trusted-host boundary. Session history does not contain the full raw
+settings, so the consumer validates the digest field and preserves the strict
+captured receipt rather than reconstructing or exposing shell configuration.
+Identity, available command/workspace/interpreter fields, qualification/frames
+and final native-result linkage are checked separately. Cold recovery must not
+claim that persisted tool events independently reconstruct the raw settings.
+
 This receipt proves bounded directory metadata behavior only. It is neither
 file-content provenance, proof of every path's existence, a generic Shell safety
 classifier, nor a task-success judgment. Background, arbitrary Shell, network,
@@ -149,9 +157,13 @@ handlers and child-local registration can bypass inherited restrictions.
 The shared standing preset also has no supported per-agent entry replacement.
 Those routes were rejected before consumer implementation.
 
-Safe ordinary wiring uses public loadProfile/loadOptionalPatches/composeEntries
-after the existing verified profile-ready gate: obtain raw EntryOptions in
-native bundle/profile/home order, preserve dynamic expressions/all metadata,
+Safe ordinary wiring uses public path resolution and composeEntries after the
+existing verified profile-ready gate. A small bounded source-discovery reader
+follows the native installation-first bundle resolution and bundle/profile/home
+order, parses through the native entry-list schema, and does not initialize or
+normalize profiles. Direct loadProfile cannot enforce the pre-parse1MiB input
+limit and can initialize after a profile-disappearance race, so it is not used.
+Obtain raw EntryOptions while preserving dynamic expressions/all metadata,
 and pass a narrow final --patch selecting derived tools/pwsh services at Desktop
 Web startup. Do not run a second CLI dump process, log full configuration or
 overwrite user profile/home patches. Use cordis-plugin-include.entryListSchema

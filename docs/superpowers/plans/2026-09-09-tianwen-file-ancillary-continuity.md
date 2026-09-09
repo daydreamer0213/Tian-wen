@@ -2,7 +2,8 @@
 
 Status: Task1 complete/review clean at0c112af, focused36/36 and state17/17
 GREEN plus Evolution tsc. Task2 complete/review clean ataefca18:11selected
-GREEN plus real-loader fix1GREEN and unchanged typecheck/build. Task3 next. Producer task
+GREEN plus real-loader fix1GREEN and unchanged typecheck/build. Task3 in progress;
+native ancillary/BOM RED reproduced3 expected failures with48 passing. Producer task
 review closed atfe84013. Pure v1 compatibility reviewed; native
 registration-time provenance mechanism passed a focused in-memory probe.
 Use a derived ToolRuntime, not late tool wrappers or a new standard preset.
@@ -325,6 +326,16 @@ command/workdir/settings binding and nativeResultDigest matching foreground
 value with the native-added kind field removed. Unknown/background/noncertified
 calls invalidate this task's file evidence and continue the normal task.
 
+The receipt's executionSettingsDigest is a producer-witnessed opaque digest of
+the actual native execution spec/config, not independently reconstructable from
+Session history. Require this capture's strict receipt, validate its digest
+format and preserve its canonical bytes. Independently check available identity,
+command/workspace/interpreter fields, qualification/frames and final native value
+binding. Recovery rebinds the persisted events but must not claim they alone prove
+the raw settings. Do not expose settings, recreate shell configuration or expand
+the completed producer solely to recompute this field; the existing trusted-host
+record boundary applies.
+
 Glob root/returned paths must resolve within the task workspace. Grep match
 paths must be previously read complete inputs and all returned lines validate;
 raw native overflow/error and Tianwen bounds are refused. Skill requires current
@@ -424,10 +435,13 @@ default standard preset. Retain existing host process/readiness/stop ownership.
 
 - [ ] **Step 1: Write RED for native composition, CLI overlay and cleanup.**
 
-Use public loadProfile/loadOptionalPatches/composeEntries from the exact installed
-DSH after the existing profile-ready check; do not run a dump subprocess or
-evaluate expressions in Desktop. Bound configuration input to1MiB in memory
-and never log it. Test final `web --patch path --host ...`. Preserve
+Use public path-resolution helpers and composeEntries from the exact installed
+DSH after the existing profile-ready check; discover sources with bounded reads
+and parse patches through the native entryListSchema. Do not call loadProfile
+or its unbounded readers, run a dump subprocess or evaluate expressions in Desktop.
+Bound aggregate source bytes before parsing to1MiB and never log them; this is
+an input-byte limit, not a generic JavaScript/YAML heap guarantee.
+Test final `web --patch path --host ...`. Preserve
 raw `!!js`, config, disabled, inject, isolate/intercept and normal patch order.
 Test profile/home/bundle/overlay drift, duplicate/custom/missing targets,
 unrepresentable metadata, failed/oversize configuration input, skipped-name-guard warning,
@@ -441,12 +455,21 @@ that must run also use this root for this task, not new D/C fixture folders.
 
 - [ ] **Step 2: Implement only native configuration preparation.**
 
-Resolve public app-boot composition helpers and
+Resolve public app-boot resolveProfileDir/resolveBundleDir/composeEntries and
 cordis-plugin-include.entryListSchema from the already verified installed DSH,
-not another package copy. Reuse Profile.layers packageDir/patchPath and its
-user patch, then the home optional patch in native order. Public loadProfile
-may initialize a missing profile, so call only after the existing verified
-profile-ready gate and reject disappearance before invoking it. Serialize the
+not another package copy. Mirror only the installed source-discovery loop:
+read the existing web Profile manifest; resolve its declared bundles in order
+with the native installation-first anchor order; read each bundle manifest's
+dsh.bundle.patch and that patch; then the Profile patch and optional home patch.
+Use bounded file reads (at most remaining budget plus one byte), not stat followed
+by an unbounded read; reject incomplete/oversize/invalid input. Bind manifests,
+patch bytes and absent optional sources, and use public composeEntries for the
+actual patch algorithm. Parse patch lists with the native schema and its native
+list/object shape checks. Never initialize or normalize a profile in this helper.
+loadProfile reads/parses everything before returning and can initialize a missing
+profile after a precheck, so it cannot meet these two helper guarantees. This
+small discovery loop is not a replacement configuration manager or boot path.
+Serialize the
 narrow final YAML through the native schema; never execute
 its expressions in Desktop. Exact target IDs/names must be unique top-level
 `tools`/`@deepseek-ai/dsh-tools` and
@@ -523,3 +546,24 @@ residual risks, privacy/cleanup and packaging outputs. Root performs task review
 one final new-delta integration review, and freezes a fresh E candidate for the
 already specified bounded real-use increment. Candidate/version coordination
 and that real-use gate follow separately; no adoption-seeking extra cohort.
+
+## Required candidate/CI follow-up after these code tasks
+
+Before candidate freeze/merge, add the new native producer, provenance, ancillary
+and startup tests to the appropriate Windows CI gates and update the matching
+tests/contracts/test_public_repository_surface.py CI assertions. Existing CI
+lists predate this increment and do not yet cover these files.
+
+Make native-pwsh-observer.spec.ts and native-tools-observer.spec.ts resolve
+packages through the repository's installed @deepseek-ai/dsh/package.json,
+not the author's D-drive retest installation. Use TIANWEN_FILE_TEST_ROOT for
+local E fixtures with a portable CI fallback, not a required E drive. Root
+read-only check ce8641 established that the portable resolver and the previous
+resolver select the same six installed native modules locally; this change
+does not warrant repeating model or file-learning cohorts. Task3 uses the same
+portable resolver/root convention in its owned tests. Required new CI coverage
+and the exact-main CI gate remain mandatory before a Daily update.
+
+Coordinate a fresh candidate/version separately; do not overwrite frozen023 or
+blindly replace historical predecessor/version fixtures. Reuse the established
+Task5 delivery/upgrade protocol in the local-file-learning plan.

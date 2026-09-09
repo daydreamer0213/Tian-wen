@@ -6,17 +6,42 @@
 ## Decision
 
 The installed DSH `0.1.1-rc.2` provides a supported narrow startup boundary.
-Use public app-boot loadProfile/loadOptionalPatches/composeEntries to build raw
-entries in memory, then invoke the existing native Web CLI once with a narrow
-final --patch. This supersedes the initially proposed dump subprocess. It needs
+Use public app-boot path resolution and composeEntries, with a small bounded
+source-discovery reader, to build raw entries in memory; invoke the existing
+native Web CLI once with a narrow final --patch. This supersedes both the initial
+dump subprocess and the intermediate direct-loadProfile proposal. It needs
 neither a DSH boot fork nor a second execution kernel or profile manager.
 
-Call loadProfile only after the existing verified profile-ready gate; it may
-initialize a missing profile, so it is not a general read-only parser. Public
-Profile.layers exposes packageDir/patchPath for source binding. Desktop's
+The final read-only source check found that loadProfile fully reads/parses every
+source before returning. A profile-ready precheck also cannot prevent its
+missing-profile initialization if the file disappears before loadProfile reads
+it. Therefore direct loadProfile cannot satisfy the intended pre-parse byte bound
+and helper-no-profile-write guarantees. Use public resolveProfileDir and
+resolveBundleDir, mirror only the small source-discovery loop, and retain native
+composeEntries as the composition algorithm. Desktop's
 host/port/no-open arguments and the native preset-root/telemetry overlays do not
 modify the two target service rows. Compose bundle layers, profile patches and
 home patches in that order; expressions remain unevaluated until native boot.
+
+The discovery loop reads the existing web Profile package.json, resolves each
+declared bundle in order using native installation-first anchors, reads that
+bundle's package.json dsh.bundle.patch and patch bytes, then reads the Profile
+patch and optional home patch. Each read is bounded by the remaining aggregate
+1MiB budget plus one detection byte before JSON/YAML parsing. Do not use an
+unbounded read after stat; the byte cap is not a generic YAML/JavaScript heap
+bound. Native entryListSchema and list/object shape checks parse patches;
+public composeEntries performs the unchanged patch algorithm. Do not initialize
+or normalize profiles, call native unbounded readers, or evaluate expressions.
+Bind/recheck all relevant manifests, patch bytes and absent optional sources
+before launch, including installation-first resolution results. Unsupported or
+changed sources use stock Web without claiming observation.
+
+Installed app-boot source reviewed: readProfileManifest lines462-473,
+resolveBundleDir535-542, loadProfile556-589, composeEntries592-596 and
+loadOptionalPatches810-820 (lib/index.js in the installed0.1.1-rc.2 package).
+composeEntries has no I/O. Importing public app-boot loads JavaScript helpers,
+not profile plugins or a native addon; it has no public profile-only subpath.
+Source check663e72 was read-only, with no new process/model/profile writes.
 
 Normal production Web DOES hot-reload profile/home patches. The fixed final
 overlay pins these two host service rows to the process's startup snapshot;
@@ -154,8 +179,8 @@ The existing `startDesktopWebHost()` in
 `packages/tianwen-desktop-host/src/host.ts` already owns the native DSH child
 process and its launch arguments. The smallest product route is:
 
-1. Add a bounded helper beside the existing Desktop host code to call the public
-   native composition helpers, select the two target rows, and return a
+1. Add a bounded helper beside the existing Desktop host code to discover/read
+   the native sources and call public native composition, select the two target rows, and return a
    non-sensitive in-memory description. No complete config stdout is produced.
 2. Add a small renderer for the one temporary launch patch and its exact
    target guards.
