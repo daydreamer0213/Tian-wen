@@ -60,6 +60,8 @@ const serverPeerDependencies = {
   '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
   '@deepseek-ai/dsh-subagent': '0.1.1-rc.2',
   '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-tool-fs-search': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-tool-pwsh': '0.1.1-rc.2',
   '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
 } as const
 
@@ -630,6 +632,8 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/native-pwsh-observer.d.ts',
       'dist/native-tool-observation.js',
       'dist/native-tool-observation.d.ts',
+      'dist/native-tools-observer.js',
+      'dist/native-tools-observer.d.ts',
       'dist/smoke.js',
       'dist/status.js',
       'dist/status.d.ts',
@@ -741,11 +745,11 @@ describe('@tianwen/runtime-bundle', () => {
 
   it('exports the opt-in native observation entries while the ordinary patch keeps the original shell', async () => {
     const manifest = json(resolve(packageRoot, 'package.json')) as { exports: Record<string,unknown>; files:string[] }
-    for (const entry of ['native-pwsh-observer','native-tool-observation']) {
+    for (const entry of ['native-pwsh-observer','native-tool-observation','native-tools-observer']) {
       expect(manifest.exports[`./${entry}`]).toEqual({types:`./dist/${entry}.d.ts`,default:`./dist/${entry}.js`})
       expect(manifest.files).toContain(`dist/${entry}.d.ts`)
       const loaded = await import(pathToFileURL(resolve(packageRoot,`dist/${entry}.js`)).href)
-      expect(typeof (entry === 'native-pwsh-observer' ? loaded.default : loaded.parseNativeDirectoryReceipt)).toBe('function')
+      expect(typeof (entry === 'native-tool-observation' ? loaded.parseNativeDirectoryReceipt : loaded.default)).toBe('function')
     }
     const fromBundle = createRequire(resolve(packageRoot,'package.json'))
     const fromDsh = createRequire(fromBundle.resolve('@deepseek-ai/dsh/package.json'))
@@ -756,6 +760,19 @@ describe('@tianwen/runtime-bundle', () => {
     const entries = boot.composeEntries([base,patches]) as Array<{id?:string;name?:string;disabled?:unknown}>
     const shells = entries.filter(row=>['@deepseek-ai/dsh-pwsh-sandbox','@tianwen/runtime-bundle/native-pwsh-observer'].includes(row.name ?? '') && !loader.interpolate({process},row.disabled))
     expect(shells.map(row=>row.name)).toEqual(process.platform === 'win32' ? ['@deepseek-ai/dsh-pwsh-sandbox'] : [])
+  })
+
+  it('keeps every native registration identity import external in the built observer entry', () => {
+    const source = readFileSync(resolve(packageRoot, 'dist/native-tools-observer.js'), 'utf8')
+    expect([...source.matchAll(/from\s+["']([^"']+)["']/gu)].map(match => match[1]).sort())
+      .toEqual([
+        '@deepseek-ai/dsh-scope',
+        '@deepseek-ai/dsh-tool-fs-search',
+        '@deepseek-ai/dsh-tool-pwsh',
+        '@deepseek-ai/dsh-tool-skill',
+        '@deepseek-ai/dsh-tools',
+        'node:crypto',
+      ])
   })
 
   it.each([false,true])('preserves the effective native shell configuration and disabled=%s', async disabled => {
