@@ -36,7 +36,7 @@ and the preceding opt-in native directory producer. No third-party library.
 - Keep 8 files/32768 UTF-8 content bytes and the existing96 KiB model material limit. No change to study thresholds, quality contract or activation/rollback policy.
 - Host ancillary limits: at most16 records per task,65536 serialized UTF-8 bytes per record,256 glob paths or grep matches per record. Worker ancillary context at most24576 UTF-8 bytes; reject overflow, never silently truncate.
 - New native fixtures and generated data go to E:/待清理/D盘迁移-2026-09-08/Tianwen-本地文件学习-023/consumer-tests, not C: or frozen native-use.
-- No ordinary task restrictions, scripted acceptance answers, arbitrary Shell permission, shared dependency edits, model calls, push/merge/release or Daily installation in these four code tasks.
+- No ordinary task restrictions, scripted acceptance answers, arbitrary Shell permission, shared dependency edits, model calls, push/merge/release or Daily installation in these feature/preparation tasks.
 - DSH still executes and presents all tools. Unknown effects/receipts make learning unavailable, not the original task. Use apply_patch and preserve concurrent root docs.
 
 ### Task 1: Add bounded optional ancillary records and deterministic worker context
@@ -560,7 +560,93 @@ the candidate/CI coordination below, then one final new-delta integration review
 before freezing a fresh E candidate for the already specified bounded real-use
 increment. No adoption-seeking extra cohort.
 
-## Required candidate/CI follow-up after these code tasks
+### Task 5: Coordinate the distinct candidate identity and portable CI gates
+
+**Files:**
+- Modify active versions/archive names in `packages/tianwen-runtime-bundle/package.json`, `src/portable-profile.ts`, `src/controlled-lifecycle.ts` in that package; `packages/tianwen-desktop-host/package.json`, `src/host.ts`, `src/main.ts`, `src/locale.ts` in that package.
+- Modify `scripts/install-tianwen.mjs`, `scripts/stage-desktop-runtime.mjs`, `scripts/audit-desktop-artifact.mjs`, `scripts/verify-dsh-profile.mjs`, `.github/workflows/ci.yml`.
+- Modify `tests/contracts/test_public_repository_surface.py` and the exact current-version expectations in `tests/dsh-migration/runtime-bundle.spec.ts`, `controlled-lifecycle-command.spec.ts`, `controlled-lifecycle-profile.spec.ts`, `one-shot-profile-lifecycle.spec.ts`, `ordinary-long-goal-cli.spec.ts`, `portable-goal-cli.spec.ts`, `portable-profile-composition.e2e.spec.ts`, `portable-plugin-lifecycle.e2e.spec.ts`, `runtime-profile.spec.ts`, `tianwen-startup.e2e.spec.ts`, `tianwen-version-upgrade.e2e.spec.ts`, `tianwen-installer.spec.ts`, `tianwen-desktop-host.spec.ts`, `tianwen-desktop-profile-prepare.spec.ts`, `tianwen-desktop-artifact.spec.ts`, `tianwen-desktop-distribution.e2e.spec.ts`.
+- Modify only native package resolution/test-root portability in `tests/dsh-migration/native-pwsh-observer.spec.ts`, `native-tools-observer.spec.ts`; use the same test-only override for any Task4 launch fixture that still needs it.
+- Root owns status/research docs and candidate construction; do not modify frozen artifacts, runtime behavior or archived version claims in this task.
+
+**Interface:** Existing published versions and CLI/archive names, no new runtime
+API. Current Runtime becomes `0.1.24`; Desktop `0.1.0-preview.25` embeds exactly
+`tianwen-runtime-bundle-0.1.24.tgz`. Existing supported old layouts retain their
+exact matchers; only a genuine frozen023 predecessor is added. The four feature
+tasks must pass their own scoped reviews before this coordination starts.
+
+- [ ] **Step 1: Update existing version/CI contract expectations and record RED.**
+
+Use the existing current-package assertions, not a second generic version store:
+
+```ts
+expect(runtimeManifest.version).toBe('0.1.24')
+expect(desktopManifest.version).toBe('0.1.0-preview.25')
+```
+
+Apply those values in the existing tests' actual manifest variables and current
+archive checks. Add023 to the appropriate existing predecessor table only after
+checking frozen5a30f225142d462bfca52d503cc1883257aaecaf profile rendering; assert
+the old supported versions remain accepted. Extend the existing exact Windows
+CI membership assertions first and run only those changed cases to record the
+missing version/new-test membership failures before changing production files.
+
+- [ ] **Step 2: Synchronize active release identity and new test portability.**
+
+Update the active version/archive sites listed above, keeping every historical
+predecessor literal/test distinct. For the two native tests replace author-local
+package lookup with the already verified repository resolver:
+
+```ts
+const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+const base = process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-native-tests')
+```
+
+Use suite-specific child directories and existing finally cleanup. Set the local
+override to the approved E consumer-tests root. Set CI's override to a dedicated
+runner.temp directory; preserve its existing D-drive setup for older tests.
+Do not install dependencies or modify the shared package copies.
+
+- [ ] **Step 3: Add the missing exact Windows CI membership.**
+
+Append to the existing installer-windows Vitest command and corresponding public
+surface assertions, in the same order:
+
+```text
+tests/dsh-migration/native-tool-observation.spec.ts
+tests/dsh-migration/native-pwsh-observer.spec.ts
+tests/dsh-migration/native-tools-observer.spec.ts
+tests/dsh-migration/conversation-file-ancillary.spec.ts
+tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts
+```
+
+Append `tests/dsh-migration/tianwen-native-observation-launch.spec.ts` to the
+existing desktop-windows deterministic command and its exact contract. Keep
+Windows-owned native suites out of Ubuntu's test command. Update stage/audit
+archive names together with the package manifests; do not silently skip new
+native tests because a runner lacks the author's private directories.
+
+- [ ] **Step 4: Run focused current-version/installer/Desktop/CI checks and build.**
+
+Use installed Node/Vitest for the amended version/installer/Desktop/packaging
+checks and the existing Python interpreter for the changed public-surface
+contract. Run affected package typechecks/build. Reuse feature-task native
+execution gates when their code and resolved module files are unchanged;
+package collection/resolution checks cover the test-only path adjustment.
+No historical model cohort, full installed023 upgrade or unchanged full Python
+suite merely for a version bump. Record exact commands/results/skips, including
+any environment-only failures rather than relabelling an earlier run green.
+
+- [ ] **Step 5: Self-review, commit only owned files and hand off candidate freeze.**
+
+Commit `chore: prepare native observation candidate and CI gates`. Report exact
+024/preview25 coherence,023 predecessor authority, legacy preservation, changed
+CI membership and portable fixture behavior. Root reviews this scoped change,
+then performs the one final new-delta review, fresh E packaging/byte audit and
+the already authorized bounded real-use increment. No release or Daily mutation
+occurs in this preparation task.
+
+**Retained coordination rationale and evidence:**
 
 Before candidate freeze/merge, add the new native producer, provenance, ancillary
 and startup tests to the appropriate Windows CI gates and update the matching
@@ -585,6 +671,15 @@ frozen023 or blindly replace historical predecessor/version fixtures. The
 read-only candidate-ci-preflight.md in this plan's SDD workspace lists the exact
 active sources. Verify frozen023's actual managed profile shape before adding
 its predecessor matcher; current edited source is not frozen023 authority.
+
+That read-only comparison is now closed: frozen5a30f225's renderProfilePatch
+(installer194-237) and frozen learning-loop predecessor renderer(310-353) have
+identical templates. Reuse that renderer for023, retaining exact version/archive/
+receipt checks; no new matcher shape. Root checked installer tests1153-1212:
+their migration/rollback table uses scriptedInstaller, not actual deployment.
+Adding023 to that existing deterministic table is allowed and simpler than a
+new recognition-only parallel table. Do not confuse these small unit fixtures
+with an additional real installed-upgrade cohort; the latter is not required.
 
 Preserve every existing predecessor including Daily022. The required real
 upgrade is from the user's actual Daily022 baseline after all delivery gates;
