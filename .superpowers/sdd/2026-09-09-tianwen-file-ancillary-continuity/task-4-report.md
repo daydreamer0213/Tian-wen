@@ -6,9 +6,9 @@ Branch: `codex/conversation-claim-evidence`
 
 Required base ancestor: `41e9f673cbab3573d885ff3cade445cda3f72876`
 
-## Result
+## Result — DONE_WITH_CONCERNS
 
-Ordinary `startDesktopWebHost()` now prepares a narrow native-schema overlay and invokes the existing DSH Web command as `dsh web --patch <owned-temporary-patch> --host 127.0.0.1 --port 0 --no-open`. The final isolated engineering startup passed with the two observer subclasses as the sole `tools` and `pwsh-sandbox` providers, the standard preset's `glob`, `grep`, `pwsh`, and `skill` declarations and native producer identities intact, explicit native configuration preserved, and a successful certified `Get-Location` receipt. No model or browser was started.
+Ordinary `startDesktopWebHost()` now prepares a narrow native-schema overlay and invokes the existing DSH Web command as `dsh web --patch <owned-temporary-patch> --host 127.0.0.1 --port 0 --no-open`. An isolated unrestricted engineering startup passed with the two observer subclasses as the sole `tools` and `pwsh-sandbox` providers, the standard preset's `glob`, `grep`, `pwsh`, and `skill` declarations and native producer identities intact, explicit native configuration preserved, and a successful certified `Get-Location` receipt. No model or browser was started. However, the follow-up ordinary `workspace-write` gate timed out inside the native directory command, so unrestricted success is not ordinary-permission acceptance.
 
 Unsupported, ambiguous, invalid, oversize, or drifted preparation returns only `{ kind: 'stock', reason: 'observation-unavailable' }`; Desktop then starts the unchanged stock Web command without an observation claim or loss of ordinary tools.
 
@@ -74,7 +74,7 @@ For completeness, four failed fixture executions occurred across three distinct 
 
 The amended test retains bounded non-content process flags and, only on nonzero exit, the fixed fixture's native-bounded stderr (at most the configured 8192 bytes) before cleanup. Credential-like environment variables are removed from the child environment and restored afterward. The fixed command contains no user input or credentials.
 
-Final actual gate at 02:59:42: `1 passed, 24 skipped`, 8.52 s total (8.069 s test). Proof obtained from the actual exported `startDesktopWebHost` launch:
+Unrestricted actual gate at 02:59:42: `1 passed, 24 skipped`, 8.52 s total (8.069 s test). Proof obtained from the actual exported `startDesktopWebHost` launch with the fixture-only `DSH_PERMISSION_MODE=danger-full-access` setting:
 
 - `host.observation` was `{ kind: 'observed' }`.
 - `NativeObservedToolRuntime` and `NativeObservedPwshExecutor` were registered; their native parents were not competing providers.
@@ -107,4 +107,49 @@ No `pnpm run`/`pnpm exec` healthcheck, dependency installation, Electron packagi
 - The helper is 390 lines: larger than the hoped-for “small adapter,” but its responsibilities remain exactly the bounded reader, native source discovery/schema composition, two-row validation/rendering, drift verification, and owned cleanup. No generic profile manager, wrapper registration framework, watcher, or new store was introduced. Obvious duplicate byte re-encoding was removed; verification compares the captured raw-byte digests directly.
 - Windows privacy relies on inherited account ACLs because Node's POSIX mode bits are not Windows ACL primitives. The folder is under the existing owned state tree, uses exclusive file creation, unpredictable UUIDs, exact ownership checks, and bounded lifetime. An OS-level deletion failure can still leave an owned local folder; product errors remain non-sensitive and no broader cleanup target is attempted.
 - The actual-start selection is repository/Windows-CI portable but not installer acceptance. It requires the job to build the observer entries and set the explicit environment flag; Task 5 owns that job wiring.
-- The earlier exit-1 reason under the first workspace-write fixture remains unknown because the first fixture retained no stderr. The final approved engineering gate used the existing `DSH_PERMISSION_MODE=danger-full-access` deployment switch only inside the credential-scrubbed fixture so the deterministic directory command required no interactive approval; product code never sets or changes permissions.
+- The unrestricted engineering gate used the existing `DSH_PERMISSION_MODE=danger-full-access` deployment switch only inside the credential-scrubbed fixture so the deterministic directory command required no interactive approval; product code never sets or changes permissions. The ordinary-permission follow-up below remains unresolved.
+
+## Ordinary workspace-write follow-up
+
+Commit `669b9d0` was reviewed with two unresolved readiness concerns: unrestricted proof did not establish ordinary WorkspaceWrite behavior, and inherited Windows ACLs alone did not establish private overlay access. Root's bounded read-only native trace confirmed that an agentless direct Shell call is valid, no agent/session is missing, and base `sandboxPolicy` derives `mode` from `DSH_PERMISSION_MODE` and `workspaceRoot` from `process.cwd()`. The host and fixture PowerShell cwd both use the D worktree, so the probe was amended without a new config row or product change.
+
+The amended receipt records `ctx.sandboxPolicy.resolve().mode`, its `workspaceRoot`, and whether that root resolves to the same directory as `ctx.shell.config.cwd`; the committed assertion requires `workspace-write`, the D worktree root, and `matchesPwshCwd: true`. On nonzero execution it retains exit/signal/timeout/abort/truncation/sandbox fields and native-bounded stderr text before fixture cleanup. In the sole failed run, this assertion was still ordered after the nonzero-directory guard and therefore was not reached or printed; the retained execution diagnostic independently proves effective `workspace-write`, while the root/cwd equality comes from the read-only native trace. The committed test moves the unchanged assertion before the directory guard, without another startup run.
+
+The exact amended gate was run once, as required:
+
+```powershell
+New-Item -ItemType Directory -Force -Path 'E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\temp' | Out-Null
+$env:TIANWEN_FILE_TEST_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\file-tests'
+$env:TIANWEN_DSH_PROBE_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\dsh-probes'
+$env:TEMP='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\temp'
+$env:TMP=$env:TEMP
+$env:TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP='1'
+& 'D:\hermes\node\node.exe' 'node_modules\vitest\vitest.mjs' run 'tests/dsh-migration/tianwen-native-observation-launch.spec.ts' -t 'starts the actual Desktop Web product with both native observers and one directory receipt' --reporter=verbose
+```
+
+Outcome at 03:17:55: `1 failed, 24 skipped`, 25.39 s total (24.948 s test). Exact retained diagnostic:
+
+```json
+{"exitCode":1,"signal":null,"timedOut":true,"aborted":false,"stdoutTruncated":false,"stderrTruncated":false,"stderrText":"","sandbox":{"mode":"workspace-write","denied":false,"enforcement":"partial"}}
+```
+
+The effective sandbox was not denied, stderr was empty and complete, but the fixed native directory command exceeded its 15-second fixture budget. No retry, policy widening, model, browser, or product/helper change followed. The exact E fixture/TEMP children were verified, removed, and rechecked absent; matching live startup processes were zero. Status therefore remains `DONE_WITH_CONCERNS` pending the scoped review of ordinary-permission timeout behavior and Windows private-overlay access.
+
+## Exact final command appendix
+
+Final three-file deterministic affected gate (`103 passed, 1 skipped`, 17.20 s; 03:00:21):
+
+```powershell
+$env:TIANWEN_FILE_TEST_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\file-tests'
+$env:TIANWEN_DSH_PROBE_ROOT='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\dsh-probes'
+$env:TEMP='E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-023\consumer-tests\temp'
+$env:TMP=$env:TEMP
+Remove-Item Env:TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP -ErrorAction SilentlyContinue
+& 'D:\hermes\node\node.exe' 'node_modules\vitest\vitest.mjs' run 'tests/dsh-migration/tianwen-native-observation-launch.spec.ts' 'tests/dsh-migration/tianwen-desktop-host.spec.ts' 'tests/dsh-migration/tianwen-desktop-artifact.spec.ts' --reporter=dot
+```
+
+Scoped runtime three-entry build (`Done in 18ms`; outputs 18.4 KiB, 9.4 KiB, 3.9 KiB):
+
+```powershell
+& 'D:\hermes\node\node.exe' 'packages\tianwen-runtime-bundle\node_modules\esbuild\bin\esbuild' 'packages/tianwen-runtime-bundle/src/native-pwsh-observer.ts' 'packages/tianwen-runtime-bundle/src/native-tool-observation.ts' 'packages/tianwen-runtime-bundle/src/native-tools-observer.ts' --bundle --platform=node --format=esm --target=node22 --tree-shaking=true '--external:@deepseek-ai/*' --outdir='packages/tianwen-runtime-bundle/dist'
+```

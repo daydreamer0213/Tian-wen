@@ -533,7 +533,7 @@ describe('Tianwen native observation launch preparation', () => {
         receiptPath: !!js process.env.TIANWEN_OBSERVATION_PROBE_RECEIPT
 `)
       write(join(probeRoot, 'probe.mjs'), `import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { NativeObservedToolRuntime } from '@tianwen/runtime-bundle/native-tools-observer'
 import { NativeObservedPwshExecutor } from '@tianwen/runtime-bundle/native-pwsh-observer'
@@ -545,6 +545,7 @@ async function collect(ctx, config) {
   const names = ['glob', 'grep', 'skill', 'pwsh']
   const scope = await ctx.agentPresets.standingKeyFor('standard')
   const definitions = Object.fromEntries(names.map(name => [name, ctx.tools.get(name, scope)]))
+  const sandboxPolicy = ctx.sandboxPolicy.resolve()
   const captured = await ctx.tianwenNativeToolObservation.capture(
     { taskId: 'desktop-startup', sessionId: 'desktop-startup-session', callId: 'desktop-startup-directory' },
     () => ctx.shell.run(ctx.shell.resolve({ command: 'Get-Location' })),
@@ -561,6 +562,11 @@ async function collect(ctx, config) {
       toolMode: ctx.tools.defaultMode,
       maxParallelSubCalls: ctx.tools.maxParallelSubCalls,
       pwsh: ctx.shell.config,
+    },
+    sandboxPolicy: {
+      mode: sandboxPolicy.mode,
+      workspaceRoot: sandboxPolicy.workspaceRoot,
+      matchesPwshCwd: resolve(sandboxPolicy.workspaceRoot) === resolve(ctx.shell.config.cwd),
     },
     declarations: ctx.tools.schemas(scope).filter(schema => names.includes(schema.name)).map(schema => schema.name).sort(),
     registrations: Object.fromEntries(names.map(name => [name, ctx.tools.nativeRegistration(definitions[name])])),
@@ -649,7 +655,7 @@ export function apply(ctx, config) {
       changedEnvironment.set('TIANWEN_OBSERVATION_PROBE_RECEIPT', process.env.TIANWEN_OBSERVATION_PROBE_RECEIPT)
       process.env.TIANWEN_OBSERVATION_PROBE_RECEIPT = receiptPath
       changedEnvironment.set('DSH_PERMISSION_MODE', process.env.DSH_PERMISSION_MODE)
-      process.env.DSH_PERMISSION_MODE = 'danger-full-access'
+      process.env.DSH_PERMISSION_MODE = 'workspace-write'
       let host: Awaited<ReturnType<typeof startDesktopWebHost>> | undefined
       try {
         host = await startDesktopWebHost(target)
@@ -658,6 +664,13 @@ export function apply(ctx, config) {
         if ('probeError' in receipt) {
           throw new Error(`native startup probe failed: ${JSON.stringify(receipt.probeError)}`)
         }
+        expect(receipt).toMatchObject({
+          sandboxPolicy: {
+            mode: 'workspace-write',
+            workspaceRoot: resolve('.'),
+            matchesPwshCwd: true,
+          },
+        })
         const directory = receipt.directory as { resultExitCode?: unknown, diagnostic?: unknown } | undefined
         if (directory?.resultExitCode !== 0) {
           throw new Error(`native directory probe failed: ${JSON.stringify(directory?.diagnostic)}`)
