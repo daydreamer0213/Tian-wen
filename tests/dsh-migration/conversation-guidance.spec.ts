@@ -290,7 +290,7 @@ describe('proposal-only feedback clues', () => {
       const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-invalid')
       return { kind, base }
     }
-    for (const clues of [[], [ref, ref], [ref, { ...ref, taskId: 'clue-task-2', assessmentId: 'clue-assessment-2' }, { ...ref, taskId: 'clue-task-3', assessmentId: 'clue-assessment-3' }]]) {
+    for (const clues of [[], [ref, ref], [ref, { ...ref, assessmentId: 'clue-assessment-2' }], [ref, { ...ref, taskId: 'clue-task-2' }], [ref, { ...ref, taskId: 'clue-task-2', assessmentId: 'clue-assessment-2' }, { ...ref, taskId: 'clue-task-3', assessmentId: 'clue-assessment-3' }]]) {
       const { kind, base } = file(); const body = { ...base, proposalClues: clues }
       expect(() => parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) })).toThrow(/clue|distinct|length/i)
     }

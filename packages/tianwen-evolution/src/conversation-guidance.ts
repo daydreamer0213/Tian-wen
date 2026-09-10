@@ -266,7 +266,8 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
   const proposalClues = Object.hasOwn(input, 'proposalClues') ? list(input.proposalClues, parseProposalClue, 2) : []
   if (Object.hasOwn(input, 'proposalClues') && proposalClues.length === 0) throw new TypeError('proposal clues must be nonempty when present')
   if (proposalClues.length > 0 && mode.evaluationMode !== 'local-files') throw new TypeError('proposal clues require a local-files study')
-  if (proposalClues.length > 0 && (new Set(proposalClues.map(item => `${item.taskId}\0${item.assessmentId}`)).size !== proposalClues.length
+  if (proposalClues.length > 0 && (new Set(proposalClues.map(item => item.taskId)).size !== proposalClues.length
+    || new Set(proposalClues.map(item => item.assessmentId)).size !== proposalClues.length
     || proposalClues.some(item => sourceTaskIds.includes(item.taskId) || item.taskId === counterexampleTaskId))) throw new TypeError('proposal clues must be unique and disjoint from actual sources')
   if (cases.some(item => !('sourceTaskId' in item) && sha256(item.qualityContract ?? null) !== sha256(quality.qualityContract ?? null))) throw new TypeError('guidance generated cases must freeze the same quality contract as the study')
   if (cases.length !== 5 || cases.some((item, index) => item.kind !== CASE_KINDS[index])

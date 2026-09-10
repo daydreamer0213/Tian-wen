@@ -143,6 +143,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const feedback = this.ctx.get('tianwenConversationFeedback')
     if (feedback === undefined) return []
     const evolution = this.ctx.tianwenEvolution
+    let firstConfig
+    try { firstConfig = await recoverConversationTaskModel(this.ctx, first) } catch { return [] }
+    const firstModelDigest = conversationTaskModelDigest(first)
+    if (firstModelDigest === undefined || sha256(firstConfig) !== firstModelDigest) return []
     const candidates = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
       && task.source.proposalCluePolicy === 'feedback.v1' && !actualTaskIds.includes(task.source.taskId)
       && task.source.consentRevision === first.source.consentRevision && task.source.behaviorVersion === first.source.behaviorVersion
@@ -162,6 +166,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (assessment?.result === undefined || assessment.result.classification === 'positive' || assessment.result.category !== category
         || assessment.result.supplementalCriteria.length === 0) continue
       try {
+        const config = await recoverConversationTaskModel(this.ctx, task)
+        if (sha256(config) !== conversationTaskModelDigest(task) || sha256(config) !== sha256(firstConfig)) continue
         const material = await feedback.proposalClueForAssessment(assessment)
         clues.push({ reference: { taskId: task.source.taskId, assessmentId: assessment.started.assessmentId,
           assessmentDigest: sha256(assessment.result), materialDigest: assessment.started.materialDigest }, material })
@@ -625,8 +631,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
     for (const reference of references) {
       const assessment = this.ctx.tianwenEvolution.listConversationFeedbackAssessments(reference.taskId)
         .find(item => item.started.assessmentId === reference.assessmentId)
+      const task = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === reference.taskId)
       if (assessment?.result === undefined || sha256(assessment.result) !== reference.assessmentDigest
-        || assessment.started.materialDigest !== reference.materialDigest) throw new Error('source-unavailable')
+        || assessment.started.materialDigest !== reference.materialDigest || task === undefined
+        || sha256(await recoverConversationTaskModel(this.ctx, task)) !== study.modelConfigDigest) throw new Error('source-unavailable')
       const material = await feedback.proposalClueForAssessment(assessment)
       if (material.taskId !== reference.taskId) throw new Error('source-unavailable')
       clues.push(material)

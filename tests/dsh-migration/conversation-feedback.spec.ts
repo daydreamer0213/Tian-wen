@@ -158,9 +158,10 @@ const nativeReview = { verdict: 'met', category: null, explanation: 'The duratio
 const nativeAssessment = { classification: 'attributable-problem', category: 'source-fidelity',
   supplementalCriteria: ['Retain the pilot-only scope.'], explanation: 'The request limits the duration to the pilot.', evidenceQuotes: ['pilot'] }
 async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-feedback-tests' : '/tmp/tianwen-conversation-feedback-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-feedback-tests' : '/tmp/tianwen-conversation-feedback-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'feedback-')); roots.push(root)
+  if (process.env.TIANWEN_FILE_TEST_ROOT !== undefined) expect(root.replaceAll('\\', '/').startsWith(`${base.replaceAll('\\', '/')}/`)).toBe(true)
   const harness = await mountFeedbackHarness(root, script)
   await harness.ctx.plugin(SubagentRuntime)
   await harness.ctx.plugin(spawn, { providerName: 'spawn' })
@@ -193,6 +194,46 @@ describe('native feedback assessment adapter', () => {
         classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain the pilot-only scope.'] })
       expect(JSON.stringify(clue)).not.toMatch(/toolEvidence|fileResult|files|context|original/i)
       expect(Buffer.byteLength(JSON.stringify(clue), 'utf8')).toBeLessThanOrEqual(8192)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it('rejects an 8193-byte projected clue without truncating the frozen native feedback', async () => {
+    const answer = `It took 5 days. ${'x'.repeat(8193)}`
+    const harness = await mount([structured(nativeAdmission), textResponse(answer), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note: 'You omitted the pilot scope.', ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(JSON.stringify(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment))).toContain(answer)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('material-too-large')
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it('rejects a proposal clue when the frozen material digest or native proof drifts', async () => {
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note: 'You omitted the pilot scope.', ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment({ ...assessment,
+        started: { ...assessment.started, materialDigest: sha256('changed frozen material') } })).rejects.toThrow('frozen material changed')
+      const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+      vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
+        const saved = await inspect(id)
+        return String(id) === assessment.result!.proof!.sessionId ? { ...saved, events: saved.events.map(event => event.type === 'user/message'
+          ? { ...event, data: { ...event.data, content: [{ type: 'text', text: 'substituted native assessment input' }] } } : event) } : saved
+      })
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow(/source-unavailable|invalid-judgment/i)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 

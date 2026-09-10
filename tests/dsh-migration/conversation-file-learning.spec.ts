@@ -65,12 +65,13 @@ it('preserves every old v1 file shape and digest when ancillary fields are absen
   expect(guidanceInputDigest('  Summarize   pilot. ', files)).toBe(sha256({ request: 'Summarize pilot.', files }))
 })
 
-it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-clue', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-recover', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const)('uses actual isolated native files through natural review and ten-arm study: %s', async scenario => {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-clue', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}`, async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-learning-'))
+  if (process.env.TIANWEN_FILE_TEST_ROOT !== undefined) expect(root.replaceAll('\\', '/').startsWith(`${base.replaceAll('\\', '/')}/`)).toBe(true)
   const evolutionRoot = join(root, 'evolution')
-  const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const clueOnly = scenario === 'feedback-clue-alone'; const activeClue = scenario.startsWith('feedback-clue') && scenario !== 'feedback-clue-withdrawn-before-proposal'; const recover = scenario.startsWith('recover') || scenario.startsWith('feedback-clue-recover'); const withSource = scenario.includes('source'); const sourceAfter = scenario.endsWith('after')
+  const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const clueOnly = scenario === 'feedback-clue-alone'; const frozenWithdrawal = scenario === 'feedback-clue-withdraw-after-frozen-before-proposal'; const nativeModelDrift = scenario === 'feedback-clue-native-model-drift'; const activeClue = scenario.startsWith('feedback-clue') && !['feedback-clue-withdrawn-before-proposal', 'feedback-clue-native-model-drift'].includes(scenario); const recover = scenario.startsWith('recover') || scenario.startsWith('feedback-clue-recover'); const withSource = scenario.includes('source'); const sourceAfter = scenario.endsWith('after')
   const definition = { name: 'file-scope-reference', provider: 'owned-test-fixture', source: 'bundled', description: 'Scope reference', invocation: { modelInvocable: true, userInvocable: true }, content: 'Preserve source scope in a file.' }
   const sourceAdmission = { name: definition.name, provider: definition.provider, digest: sha256(definition), origin: 'https://example.invalid/owned-test-fixture', revision: 'fixture-v1', license: 'MIT' as const, reviewedAt: '2026-09-08T00:00:00.000Z', kind: 'self-contained-text' as const, runtime: '0.1.1-rc.2' as const, purpose: 'conversation-method-reference' as const,
     scopeKey: `conversation:${sha256({ cwd: root })}`, environmentDigest: sha256({ kind: 'tianwen.conversation-skill-environment.v1', evolutionRoot }) }
@@ -95,6 +96,7 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
       expect(JSON.stringify(material.proposalClues)).not.toMatch(/toolEvidence|fileResult|files|ancillary|context/i)
     }
     if (scenario === 'feedback-clue-withdrawn-before-proposal') expect(material.proposalClues).toBeUndefined()
+    if (nativeModelDrift) expect(material.proposalClues).toBeUndefined()
     if (withSource && !sourceAfter) return structured({ inspectSource: definition.name })
     if (explored) return structured(exploration(material))
     return structured({ guidance: 'Preserve pilot scope in the output file.' })
@@ -176,21 +178,58 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
         expect(harness.adapter.requests).toHaveLength(requests)
         return
       }
+      if (nativeModelDrift) {
+        const expectedDigest = harness.ctx.tianwenEvolution.listConversationTasks()[0]!.models![0]!.modelConfigDigest
+        expect(target.models?.every(model => model.modelConfigDigest === expectedDigest)).toBe(true)
+        const headerSeq = target.models![0]!.headerSeq
+        const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+        vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
+          const saved = await inspect(id)
+          return String(id) === String(handle.agent.session.id) ? { ...saved, events: saved.events.map(event => event.seq === headerSeq && event.type === 'request/header'
+            ? { ...event, data: { ...event.data, header: { ...event.data.header, config: { ...event.data.header.config, temperature: 0.35 } } } } : event) } : saved
+        })
+      }
     }
+    let frozenNativeWithdrawal: Promise<unknown> | undefined
     const original = chat ? undefined : readFileSync(join(root, 'output.md'), 'utf8')
     const originalRecord = harness.ctx.tianwenEvolution.recordConversationGuidance.bind(harness.ctx.tianwenEvolution)
     const fault = vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationGuidance').mockImplementation(record => {
+      if (frozenWithdrawal && record.kind === 'study-opened') {
+        const stored = originalRecord(record)
+        const target = harness.ctx.tianwenEvolution.listConversationTasks()[3]!
+        const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+        const source = assessment.started.source
+        if (source.kind !== 'native') throw new Error('fixture requires native feedback')
+        frozenNativeWithdrawal = harness.ctx.messageFeedback.delete({ sessionId: handle.agent.session.id, messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), ifVersion: nativeFeedbackVersion! })
+          .then(async result => { await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('natural-files'); return result })
+        harness.ctx.tianwenEvolution.recordLearningFeedbackRetraction({ sessionId: source.sessionId, messageId: source.messageId,
+          retractedFeedbackVersion: source.feedbackVersion, sessionLifecycleFingerprint: source.sessionLifecycleFingerprint })
+        return stored
+      }
       if (recover && record.kind === 'guidance-activated') throw new Error('interrupt activation')
       if (scenario === 'retention-failure' && record.kind === 'study-file-trial-captured') throw new Error('receipt storage failed')
       if (scenario === 'consent-retention' && record.kind === 'study-file-trial-captured') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
       return originalRecord(record)
     })
+    const requestsBeforeStudy = harness.adapter.requests.length
     await harness.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
     await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    await frozenNativeWithdrawal
     fault.mockRestore()
+    if (nativeModelDrift) {
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      return
+    }
     const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
     expect(study).toBeDefined()
     expect(readFileSync(join(root, 'input.md'), 'utf8')).toBe(scenario.startsWith('feedback-clue') ? 'partial clue source' : 'pilot source 3')
+    if (frozenWithdrawal) {
+      expect(study.opened.proposalClues).toHaveLength(1)
+      expect(study.stopped).toBeDefined()
+      expect(study.candidate).toBeUndefined()
+      expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy + 1)
+      return
+    }
     if (activeClue) {
       expect(study.opened.proposalClues).toHaveLength(1)
       expect(study.opened.proposalClues![0]!.taskId).toBe(harness.ctx.tianwenEvolution.listConversationTasks()[3]!.source.taskId)
@@ -198,6 +237,7 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
       expect(study.arms).toHaveLength(10)
     }
     if (scenario === 'feedback-clue-withdrawn-before-proposal') expect(study.opened.proposalClues).toBeUndefined()
+    if (nativeModelDrift) expect(study.opened.proposalClues).toBeUndefined()
     if (!chat) expect(readFileSync(join(root, 'output.md'), 'utf8')).toBe(original)
     if (scenario === 'retention-failure' || scenario === 'consent-retention') {
       expect(checks).toBe(0); expect(study.fileTrials).toBeUndefined(); expect(study.arms).toEqual([]); expect(study.stopped).toBeDefined(); return
@@ -288,4 +328,4 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
       } finally { await restarted.ctx.fiber.dispose() }
     }
   } finally { if (!stopped) { await handle.dispose(); await harness.ctx.fiber.dispose() }; rmSync(root, { recursive: true, force: true }) }
-})
+}, scenario.startsWith('recover-source-explored') ? 30_000 : undefined)
