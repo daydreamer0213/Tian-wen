@@ -9,7 +9,7 @@ import {
   type ConversationFeedbackStarted, type ConversationTask, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, runConversationJudgment } from './conversation-judgment.js'
+import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, recoverConversationStructuredJudgment, runConversationJudgment } from './conversation-judgment.js'
 import { conversationEvidenceTexts, conversationMessages, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import type { ConversationFileTrialOutput } from '@tianwen/evolution'
 
@@ -34,6 +34,21 @@ export interface ConversationFeedbackMaterial {
     readonly request?: readonly UserMessage[]
     readonly quote?: string
   }
+}
+export interface ConversationProposalClueMaterial {
+  readonly schemaVersion: 'tianwen.proposal-clue.v1'
+  readonly taskId: string
+  readonly request: ConversationTaskMaterial['request']
+  readonly answer: ReturnType<typeof conversationMessages>
+  readonly feedback: {
+    readonly rating?: 'positive' | 'negative'
+    readonly note?: string
+    readonly request?: readonly UserMessage[]
+    readonly quote?: string
+  }
+  readonly classification: ConversationFeedbackResult['classification']
+  readonly category: ConversationFeedbackResult['category']
+  readonly supplementalCriteria: ConversationFeedbackResult['supplementalCriteria']
 }
 type FeedbackBinding = Pick<ConversationFeedbackStarted, 'taskId' | 'admissionDigest' | 'resultDigest' | 'source' | 'consentRevision'>
 
@@ -108,6 +123,27 @@ export class TianwenConversationFeedbackService extends Service {
     const material = await this.materialForBinding(assessment.started)
     if (sha256(material) !== assessment.started.materialDigest) throw new Error('feedback assessment frozen material changed')
     return material
+  }
+
+  /** Recover a bounded proposal-only surface from the immutable native assessment. */
+  async proposalClueForAssessment(assessment: ConversationFeedbackAssessment): Promise<ConversationProposalClueMaterial> {
+    const result = assessment.result
+    if (result?.proof === null || result?.proof === undefined
+      || !['attributable-problem', 'preference'].includes(result.classification)
+      || result.category === null || result.supplementalCriteria.length === 0) throw new Error('feedback proposal clue is not eligible')
+    const material = await this.materialForAssessment(assessment)
+    const { kind: _kind, assessmentId: _assessmentId, taskId: _taskId, proof: _proof, unavailableReason: _unavailableReason, ...structured } = result
+    const recovered = await recoverConversationStructuredJudgment(this.ctx, result.proof, structured)
+    if (sha256(recovered.material) !== sha256(material)) throw new Error('feedback assessment native material drift')
+    const feedback = material.feedback.rating === undefined
+      ? { ...(material.feedback.request === undefined ? {} : { request: material.feedback.request }),
+        ...(material.feedback.quote === undefined ? {} : { quote: material.feedback.quote }) }
+      : { rating: material.feedback.rating, ...(material.feedback.note === undefined ? {} : { note: material.feedback.note }) }
+    const clue: ConversationProposalClueMaterial = { schemaVersion: 'tianwen.proposal-clue.v1', taskId: assessment.started.taskId,
+      request: material.original.request, answer: material.answer, feedback, classification: result.classification,
+      category: result.category, supplementalCriteria: result.supplementalCriteria }
+    if (Buffer.byteLength(JSON.stringify(clue), 'utf8') > 8192) throw new Error('material-too-large')
+    return clue
   }
 
   private async materialForBinding(binding: FeedbackBinding): Promise<ConversationFeedbackMaterial> {

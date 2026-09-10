@@ -3103,6 +3103,29 @@ export class EvolutionLedger {
           || assessment.result.category !== study.failureCategory || assessment.result.supplementalCriteria.length === 0) throw new LedgerIntegrityError('natural learning feedback support is absent or retracted')
       } else if (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory)) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
     }
+    for (const clue of study.proposalClues ?? []) {
+      const task = tasks.find(item => item.source.taskId === clue.taskId)
+      if (study.evaluationMode !== 'local-files' || task === undefined || task.source.proposalCluePolicy !== 'feedback.v1'
+        || task.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
+        || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
+        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== 'local-files'
+        || task.admission.decision.fileOutputKind !== study.fileOutputKind
+        || sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
+        || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
+        || (task.fileUnavailable === undefined && task.completion.files !== undefined && (task.fileInputs?.length ?? 0) > 0)) {
+        throw new LedgerIntegrityError('proposal clue requires a marked compatible completed task with incomplete file evidence')
+      }
+      const all = this.#conversationFeedback.list(task.source.taskId)
+      if (all.some(item => item.result === undefined)) throw new LedgerIntegrityError('proposal clue has a pending replacement assessment')
+      const active = all.filter(item => item.result?.proof !== null && item.result?.proof !== undefined
+        && this.isConversationFeedbackAssessmentActive(item.started.assessmentId))
+      const latest = [...active].reverse().find(item => ['attributable-problem', 'preference', 'positive'].includes(item.result!.classification))
+      if (latest === undefined || latest.started.assessmentId !== clue.assessmentId || latest.result!.classification === 'positive'
+        || latest.result!.category !== study.failureCategory || latest.result!.supplementalCriteria.length === 0
+        || sha256(latest.result) !== clue.assessmentDigest || latest.started.materialDigest !== clue.materialDigest) {
+        throw new LedgerIntegrityError('proposal clue feedback assessment is absent, changed, or no longer eligible')
+      }
+    }
     if (new Set(study.sourceTaskIds.map(id => {
       const task = tasks.find(task => task.source.taskId === id)!
       return study.evaluationMode === 'local-files' ? sha256({ requestDigest: task.source.requestDigest, inputs: task.fileInputs!.map(({ path, content }) => ({ path, content })), outputKind: task.completion!.files!.outputKind, outputPaths: task.completion!.files!.outputPaths }) : task.source.requestDigest

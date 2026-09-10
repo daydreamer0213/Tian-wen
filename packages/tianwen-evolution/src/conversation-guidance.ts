@@ -36,6 +36,12 @@ export interface GuidanceGeneratedCase {
   readonly files?: ConversationFileMaterial
 }
 export type GuidanceCase = GuidanceSourceCase | GuidanceGeneratedCase
+export interface GuidanceProposalClue {
+  readonly taskId: string
+  readonly assessmentId: string
+  readonly assessmentDigest: Sha256Digest
+  readonly materialDigest: Sha256Digest
+}
 export interface GuidanceStudyBody {
   readonly evaluationMode?: 'local-files'
   readonly fileOutputKind?: 'files' | 'chat'
@@ -51,6 +57,8 @@ export interface GuidanceStudyBody {
   readonly modelConfigDigest: Sha256Digest
   /** Absent only in historical studies; frozen before proposing a method. */
   readonly qualityContract?: ConversationQualityContract
+  /** Bounded feedback hypotheses for the proposer only; never study sources. */
+  readonly proposalClues?: readonly GuidanceProposalClue[]
 }
 export interface GuidanceStudyOpened extends GuidanceStudyBody {
   readonly kind: 'study-opened'
@@ -240,8 +248,13 @@ function parseCase(value: unknown): GuidanceCase {
   if (guidanceInputDigest(material.prompt, material.files) !== common.inputDigest) throw new TypeError('guidance generated input digest is invalid')
   return { ...common, kind, ...material }
 }
+function parseProposalClue(value: unknown): GuidanceProposalClue {
+  const input = object(value, ['taskId', 'assessmentId', 'assessmentDigest', 'materialDigest'])
+  return { taskId: text(input.taskId, 512), assessmentId: text(input.assessmentId, 512),
+    assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
+}
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : [])])
   const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
@@ -250,6 +263,11 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
   if (cases.some(item => !('sourceTaskId' in item) && (mode.evaluationMode === 'local-files'
     ? item.files?.outputKind !== mode.fileOutputKind : item.files !== undefined))) throw new TypeError('guidance cases require the frozen file mode and output kind')
   const quality = Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}
+  const proposalClues = Object.hasOwn(input, 'proposalClues') ? list(input.proposalClues, parseProposalClue, 2) : []
+  if (Object.hasOwn(input, 'proposalClues') && proposalClues.length === 0) throw new TypeError('proposal clues must be nonempty when present')
+  if (proposalClues.length > 0 && mode.evaluationMode !== 'local-files') throw new TypeError('proposal clues require a local-files study')
+  if (proposalClues.length > 0 && (new Set(proposalClues.map(item => `${item.taskId}\0${item.assessmentId}`)).size !== proposalClues.length
+    || proposalClues.some(item => sourceTaskIds.includes(item.taskId) || item.taskId === counterexampleTaskId))) throw new TypeError('proposal clues must be unique and disjoint from actual sources')
   if (cases.some(item => !('sourceTaskId' in item) && sha256(item.qualityContract ?? null) !== sha256(quality.qualityContract ?? null))) throw new TypeError('guidance generated cases must freeze the same quality contract as the study')
   if (cases.length !== 5 || cases.some((item, index) => item.kind !== CASE_KINDS[index])
     || new Set(cases.map(item => item.id)).size !== 5
@@ -263,6 +281,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
     failureCategory: oneOf(input.failureCategory, CONVERSATION_FAILURES), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), parentSnapshot: parseGuidanceSnapshot(input.parentSnapshot),
     sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest), ...quality, ...mode,
+    ...(Object.hasOwn(input, 'proposalClues') ? { proposalClues } : {}),
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')
   if (guidanceStudyId(body) !== studyId) throw new TypeError('guidance study identity does not match its frozen body')

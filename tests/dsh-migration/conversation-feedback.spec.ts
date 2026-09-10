@@ -176,6 +176,26 @@ async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
 }
 
 describe('native feedback assessment adapter', () => {
+  it('projects only verified bounded feedback clue surfaces from the native assessment', async () => {
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note: 'You omitted the pilot scope.', ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      const clue = await harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)
+      expect(clue).toMatchObject({ schemaVersion: 'tianwen.proposal-clue.v1', taskId: target.source.taskId,
+        request: expect.any(Array), answer: expect.any(Array), feedback: { rating: 'negative', note: 'You omitted the pilot scope.' },
+        classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain the pilot-only scope.'] })
+      expect(JSON.stringify(clue)).not.toMatch(/toolEvidence|fileResult|files|context|original/i)
+      expect(Buffer.byteLength(JSON.stringify(clue), 'utf8')).toBeLessThanOrEqual(8192)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('uses the frozen surface projection for actual native feedback material after an oversized assistant reasoning block', async () => {
     const hidden = 'HIDDEN-FEEDBACK-REASONING-'.repeat(6_000)
     const harness = await mount([structured(nativeAdmission), reasoningTextResponse(hidden, 'It took 5 days.'),
@@ -193,6 +213,7 @@ describe('native feedback assessment adapter', () => {
       const { kind: _kind, assessmentId: _assessmentId, taskId: _taskId, proof: _proof, unavailableReason: _unavailableReason, ...captured } = assessment.result!
       const judgment = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, captured)
       expect(target.source.materialProjection).toBe('surface-text.v1')
+      expect(target.source.proposalCluePolicy).toBe('feedback.v1')
       expect(JSON.stringify(material.answer)).toContain('It took 5 days.')
       expect(JSON.stringify(material.answer)).not.toContain('HIDDEN-FEEDBACK-REASONING-')
       expect(JSON.stringify(judgment.material)).toContain('It took 5 days.')

@@ -251,6 +251,57 @@ describe('natural source reference state binding', () => {
   })
 })
 
+describe('proposal-only feedback clues', () => {
+  const ref = { taskId: 'clue-task', assessmentId: 'clue-assessment',
+    assessmentDigest: `sha256:${'a'.repeat(64)}`, materialDigest: `sha256:${'b'.repeat(64)}` }
+  const validFileOpening = (label: string) => {
+    const { kind: _kind, studyId: _studyId, ...base } = opening(label)
+    const cases = base.cases.map(item => {
+      if ('sourceTaskId' in item) return item
+      const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const,
+        cwd: 'D:/DevData/tianwen-conversation-guidance-tests/frozen', entries: [{ path: 'input.txt', content: 'frozen input' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+      const material = { prompt: item.prompt, criteria: item.criteria, files }
+      return { id: item.id, kind: item.kind, ...material, materialDigest: sha256(material), inputDigest: guidanceInputDigest(item.prompt, files) }
+    })
+    const body = { ...base, evaluationMode: 'local-files' as const, fileOutputKind: 'files' as const, cases }
+    return { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+  }
+
+  it('retains up to two frozen proposal clues in a local-file study identity without changing old openings', () => {
+    const old = opening('proposal-clue-old')
+    expect(parseConversationGuidanceRecord(old)).toEqual(old)
+    const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-file')
+    const body = { ...base, proposalClues: [ref] }
+    expect(parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) }))
+      .toMatchObject({ proposalClues: [ref] })
+  })
+
+  it.each([
+    { ...ref, assessmentDigest: 'not-a-digest' },
+    { ...ref, materialDigest: 'sha256:BAD' },
+  ])('rejects malformed proposal clue digests', clue => {
+    const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-digest')
+    const body = { ...base, proposalClues: [clue] }
+    expect(() => parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) })).toThrow(/digest|clue/i)
+  })
+
+  it('rejects duplicate, third, overlapping, and non-file proposal clues', () => {
+    const file = () => {
+      const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-invalid')
+      return { kind, base }
+    }
+    for (const clues of [[], [ref, ref], [ref, { ...ref, taskId: 'clue-task-2', assessmentId: 'clue-assessment-2' }, { ...ref, taskId: 'clue-task-3', assessmentId: 'clue-assessment-3' }]]) {
+      const { kind, base } = file(); const body = { ...base, proposalClues: clues }
+      expect(() => parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) })).toThrow(/clue|distinct|length/i)
+    }
+    const { kind, base } = file(); const overlap = { ...base, proposalClues: [{ ...ref, taskId: base.sourceTaskIds[0] }] }
+    expect(() => parseConversationGuidanceRecord({ kind, ...overlap, studyId: guidanceStudyId(overlap) })).toThrow(/clue|source/i)
+    const text = opening('proposal-clue-text'); const { kind: textKind, studyId: _textId, ...textBase } = text
+    const textBody = { ...textBase, proposalClues: [ref] }
+    expect(() => parseConversationGuidanceRecord({ kind: textKind, ...textBody, studyId: guidanceStudyId(textBody) })).toThrow(/local|clue/i)
+  })
+})
+
 function evaluated(state: ConversationGuidanceState, opened = opening(), change?: (records: GuidanceArmRecord[]) => void) {
   append(state, opened)
   const proposed = candidate(opened)

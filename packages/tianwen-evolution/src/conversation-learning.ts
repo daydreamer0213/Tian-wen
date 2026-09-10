@@ -136,6 +136,8 @@ export interface ConversationTaskSource {
   readonly behaviorVersion: Sha256Digest
   /** Omission is the historical native-content projection. */
   readonly materialProjection?: 'surface-text.v1'
+  /** Omission is historical and is never recruited as a feedback proposal clue. */
+  readonly proposalCluePolicy?: 'feedback.v1'
 }
 
 export interface ConversationAdmissionDecision {
@@ -295,13 +297,14 @@ export function parseConversationAdmission(value: unknown): ConversationAdmissio
 export function parseConversationLearningRecord(value: unknown): ConversationLearningRecord {
   if (value === null || typeof value !== 'object' || !('kind' in value)) throw new TypeError('conversation learning record is invalid')
   if (value.kind === 'task-started') {
-    const input = object(value, ['kind', 'taskId', 'sessionId', 'sessionLifecycleFingerprint', 'turn', 'startSeq', 'userMessageIds', 'requestDigest', 'contextDigest', 'scopeKey', 'consentRevision', 'behaviorVersion', ...(Object.hasOwn(value, 'materialProjection') ? ['materialProjection'] : [])])
+    const input = object(value, ['kind', 'taskId', 'sessionId', 'sessionLifecycleFingerprint', 'turn', 'startSeq', 'userMessageIds', 'requestDigest', 'contextDigest', 'scopeKey', 'consentRevision', 'behaviorVersion', ...(Object.hasOwn(value, 'materialProjection') ? ['materialProjection'] : []), ...(Object.hasOwn(value, 'proposalCluePolicy') ? ['proposalCluePolicy'] : [])])
     const source: ConversationTaskSource = {
       kind: 'task-started', taskId: text(input.taskId, 512), sessionId: text(input.sessionId, 512),
       sessionLifecycleFingerprint: digest(input.sessionLifecycleFingerprint), turn: integer(input.turn), startSeq: integer(input.startSeq),
       userMessageIds: uniqueTextList(input.userMessageIds), requestDigest: digest(input.requestDigest), contextDigest: digest(input.contextDigest),
       scopeKey: text(input.scopeKey, 512), consentRevision: integer(input.consentRevision), behaviorVersion: digest(input.behaviorVersion),
       ...(Object.hasOwn(input, 'materialProjection') ? { materialProjection: oneOf(input.materialProjection, ['surface-text.v1']) } : {}),
+      ...(Object.hasOwn(input, 'proposalCluePolicy') ? { proposalCluePolicy: oneOf(input.proposalCluePolicy, ['feedback.v1']) } : {}),
     }
     if (source.taskId !== conversationTaskId(source) || source.userMessageIds.length === 0) throw new TypeError('conversation task identity does not match its source')
     return source

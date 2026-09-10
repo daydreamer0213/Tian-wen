@@ -150,13 +150,16 @@ describe('natural conversation task evidence', () => {
     expect(() => replay.recordConversationLearning({ ...legacy, qualityContract })).toThrow(/changed|frozen|conflict/i)
   })
 
-  it('accepts only the explicit surface-text material version while retaining markerless native task sources', () => {
+  it('accepts only explicit prospective native source markers while retaining markerless history', () => {
     const legacy = start()
-    const projected = { ...legacy, materialProjection: 'surface-text.v1' as const }
+    const projected = { ...legacy, materialProjection: 'surface-text.v1' as const, proposalCluePolicy: 'feedback.v1' as const }
     expect(parseConversationLearningRecord(legacy)).toEqual(legacy)
     expect(parseConversationLearningRecord(projected)).toEqual(projected)
     for (const materialProjection of [null, undefined, 'surface-text.v2']) {
       expect(() => parseConversationLearningRecord({ ...legacy, materialProjection })).toThrow()
+    }
+    for (const proposalCluePolicy of [null, undefined, 'feedback.v2']) {
+      expect(() => parseConversationLearningRecord({ ...legacy, proposalCluePolicy })).toThrow()
     }
   })
 

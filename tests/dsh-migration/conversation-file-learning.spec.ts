@@ -64,12 +64,12 @@ it('preserves every old v1 file shape and digest when ancillary fields are absen
   expect(guidanceInputDigest('  Summarize   pilot. ', files)).toBe(sha256({ request: 'Summarize pilot.', files }))
 })
 
-it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const)('uses actual isolated native files through natural review and ten-arm study: %s', async scenario => {
+it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-clue', 'feedback-clue-recover', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const)('uses actual isolated native files through natural review and ten-arm study: %s', async scenario => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-learning-'))
   const evolutionRoot = join(root, 'evolution')
-  const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const recover = scenario.startsWith('recover'); const withSource = scenario.includes('source'); const sourceAfter = scenario.endsWith('after')
+  const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const recover = scenario.startsWith('recover') || scenario === 'feedback-clue-recover'; const withSource = scenario.includes('source'); const sourceAfter = scenario.endsWith('after')
   const definition = { name: 'file-scope-reference', provider: 'owned-test-fixture', source: 'bundled', description: 'Scope reference', invocation: { modelInvocable: true, userInvocable: true }, content: 'Preserve source scope in a file.' }
   const sourceAdmission = { name: definition.name, provider: definition.provider, digest: sha256(definition), origin: 'https://example.invalid/owned-test-fixture', revision: 'fixture-v1', license: 'MIT' as const, reviewedAt: '2026-09-08T00:00:00.000Z', kind: 'self-contained-text' as const, runtime: '0.1.1-rc.2' as const, purpose: 'conversation-method-reference' as const,
     scopeKey: `conversation:${sha256({ cwd: root })}`, environmentDigest: sha256({ kind: 'tianwen.conversation-skill-environment.v1', evolutionRoot }) }
@@ -79,12 +79,20 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
   const script: ScriptEntry[] = []
   for (let i = 1; i <= 3; i++) script.push(structured({ ...admission, fileOutputKind: chat ? 'chat' : 'files' }), toolCallResponse(`read-${i}`, 'read', { file_path: 'input.md' }),
     ...(chat ? [] : [toolCallResponse(`write-${i}`, 'write', { file_path: 'output.md', content: `pilot original ${i}` })]), textResponse('pilot saved'), ...pair(i === 3 ? 'met' : 'not-met'))
-  if (scenario === 'feedback') script.push(structured({ classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain pilot scope.'], explanation: 'The original output contains the claimed issue.', evidenceQuotes: ['pilot original 1'] }))
+  if (scenario.startsWith('feedback-clue')) script.push(structured(admission), toolCallResponse('read-clue', 'read', { file_path: 'input.md' }), textResponse('partial reply without a saved output'), ...pair('inconclusive'))
+  if (scenario.startsWith('feedback')) script.push(structured({ classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain pilot scope.'], explanation: 'The original output contains the claimed issue.', evidenceQuotes: [scenario.startsWith('feedback-clue') ? 'partial reply without a saved output' : 'pilot original 1'] }))
   const generated = (kind: string) => ({ prompt: `Summarize ${kind} pilot input.`, criteria: ['Preserve pilot scope.'], files: { entries: [{ path: 'input.md', content: `pilot ${kind}` }, ...(chat ? [] : [{ path: 'output.md', content: null }])], outputPaths: chat ? [] : ['output.md'] } })
-  script.push(structured({ adjacent: generated('adjacent'), holdout: generated('holdout') }))
+  script.push(request => {
+    if (scenario.startsWith('feedback-clue')) expect(materialOf(request).proposalClues).toBeUndefined()
+    return structured({ adjacent: generated('adjacent'), holdout: generated('holdout') })
+  })
   script.push(request => {
     const material = materialOf(request)
     expect(material.sources.every((source: { files?: unknown }) => source.files !== undefined)).toBe(true)
+    if (scenario.startsWith('feedback-clue')) {
+      expect(material.proposalClues).toMatchObject([{ schemaVersion: 'tianwen.proposal-clue.v1', classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain pilot scope.'] }])
+      expect(JSON.stringify(material.proposalClues)).not.toMatch(/toolEvidence|fileResult|files|ancillary|context/i)
+    }
     if (withSource && !sourceAfter) return structured({ inspectSource: definition.name })
     if (explored) return structured(exploration(material))
     return structured({ guidance: 'Preserve pilot scope in the output file.' })
@@ -98,6 +106,7 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
       expect(study.fileTrials?.length).toBe(Math.floor(checks++ / 2) + 1)
       if (scenario === 'recover-incomplete' && checks === 2) throw new Error('second review interrupted')
       const material = materialOf(request)
+      if (scenario.startsWith('feedback-clue')) expect(JSON.stringify(request.messages)).not.toContain('tianwen.proposal-clue.v1')
       if (chat) expect(material.original.fileResult.answer).toBe(`pilot ${label}`)
       else expect(material.original.fileResult.files.find((entry: { path: string }) => entry.path === 'output.md').content).toBe(`pilot ${label}`)
       expect(material.claimEvidence.items.filter((item: { role: string }) => item.role === 'answer').some((item: { filePath: string }) => item.filePath === 'output.md')).toBe(!chat)
@@ -110,7 +119,7 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
     if (withSource && sourceAfter) script.push(() => structured(finalProposal()))
   }
   for (let i = 0; i < 5; i++) for (const role of ['baseline', 'candidate'] as const) trial(`${i}-${role}`, role === 'baseline' && i === 0 ? 'not-met' : role === 'candidate' && i === 4 && (scenario === 'rejected' || scenario === 'unknown') ? scenario === 'rejected' ? 'not-met' : 'inconclusive' : 'met')
-  const harness = await (scenario === 'feedback' ? mountFeedbackHarness : mountPersistentHarness)(join(root, 'sessions'), script)
+  const harness = await (scenario.startsWith('feedback') ? mountFeedbackHarness : mountPersistentHarness)(join(root, 'sessions'), script)
   const presetRoot = join(root, 'presets'); mkdirSync(join(presetRoot, 'files'), { recursive: true })
   writeFileSync(join(presetRoot, 'files', 'agent.cordis.yml'), `- id: file-tools\n  name: '${fileToolsPath}'\n  config: {}\n`)
   await harness.ctx.plugin(localFs.default, { cwd: root }); await harness.ctx.plugin(Loader)
@@ -129,19 +138,26 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
       await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     }
     expect(harness.ctx.tianwenEvolution.listConversationTasks().map(task => task.review?.verdict)).toEqual(['not-met', 'not-met', 'met'])
-    if (scenario === 'feedback') {
+    if (scenario.startsWith('feedback')) {
       await harness.ctx.plugin(TianwenMessageFeedbackBridgeService); await harness.ctx.plugin(TianwenConversationFeedbackService)
-      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      if (scenario.startsWith('feedback-clue')) {
+        writeFileSync(join(root, 'input.md'), 'partial clue source')
+        handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize this partial file task without writing an output.' }] }))
+        await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+      }
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[scenario.startsWith('feedback-clue') ? 3 : 0]!
       await harness.ctx.messageFeedback.put({ sessionId: handle.agent.session.id, messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note: 'The output lost the pilot scope.', ifVersion: null })
       await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('natural-files'); await harness.ctx.tianwenConversationFeedback.scheduleForSession('natural-files')
       const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
       const material = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
-      expect(material.fileResult?.files.find(entry => entry.path === 'output.md')?.content).toBe('pilot original 1')
-      expect(material.original.files?.entries.find(entry => entry.path === 'input.md')?.content).toBe('pilot source 1')
-      expect(material.toolEvidence).toEqual([])
+      if (scenario === 'feedback') {
+        expect(material.fileResult?.files.find(entry => entry.path === 'output.md')?.content).toBe('pilot original 1')
+        expect(material.original.files?.entries.find(entry => entry.path === 'input.md')?.content).toBe('pilot source 1')
+        expect(material.toolEvidence).toEqual([])
+      } else expect(material.fileResult).toBeUndefined()
       expect(material.feedback.note).toBe('The output lost the pilot scope.')
       expect(assessment.result?.classification).toBe('attributable-problem')
-      return
+      if (scenario === 'feedback') return
     }
     const original = chat ? undefined : readFileSync(join(root, 'output.md'), 'utf8')
     const originalRecord = harness.ctx.tianwenEvolution.recordConversationGuidance.bind(harness.ctx.tianwenEvolution)
@@ -156,7 +172,13 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
     fault.mockRestore()
     const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
     expect(study).toBeDefined()
-    expect(readFileSync(join(root, 'input.md'), 'utf8')).toBe('pilot source 3')
+    expect(readFileSync(join(root, 'input.md'), 'utf8')).toBe(scenario.startsWith('feedback-clue') ? 'partial clue source' : 'pilot source 3')
+    if (scenario.startsWith('feedback-clue')) {
+      expect(study.opened.proposalClues).toHaveLength(1)
+      expect(study.opened.proposalClues![0]!.taskId).toBe(harness.ctx.tianwenEvolution.listConversationTasks()[3]!.source.taskId)
+      expect([...study.opened.sourceTaskIds, study.opened.counterexampleTaskId]).not.toContain(study.opened.proposalClues![0]!.taskId)
+      expect(study.arms).toHaveLength(10)
+    }
     if (!chat) expect(readFileSync(join(root, 'output.md'), 'utf8')).toBe(original)
     if (scenario === 'retention-failure' || scenario === 'consent-retention') {
       expect(checks).toBe(0); expect(study.fileTrials).toBeUndefined(); expect(study.arms).toEqual([]); expect(study.stopped).toBeDefined(); return
@@ -188,7 +210,7 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
     if (recover) {
       await handle.dispose(); await harness.ctx.fiber.dispose(); stopped = true
       writeFileSync(join(root, 'input.md'), 'current workspace changed')
-      const restarted = await mountPersistentHarness(join(root, 'sessions'), [])
+      const restarted = await (scenario.startsWith('feedback') ? mountFeedbackHarness : mountPersistentHarness)(join(root, 'sessions'), [])
       try {
         await restarted.ctx.plugin(SubagentRuntime); await restarted.ctx.plugin(spawn, { providerName: 'spawn' }); await applyRuntime(restarted.ctx, { evolutionRoot })
         if (scenario === 'recover-changed-native') {
@@ -197,6 +219,10 @@ it.each(['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-fa
             const saved = await inspect(id)
             return String(id) === baseline!.receipt.executionProof.sessionId ? { ...saved, events: saved.events.slice(0, -1) } : saved
           })
+        }
+        if (scenario === 'feedback-clue-recover') {
+          await restarted.ctx.plugin(TianwenMessageFeedbackBridgeService)
+          await restarted.ctx.plugin(TianwenConversationFeedbackService)
         }
         await restarted.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
         const resumed = await restarted.ctx.agents.resume({ resumeSessionId: SessionId('natural-files'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })

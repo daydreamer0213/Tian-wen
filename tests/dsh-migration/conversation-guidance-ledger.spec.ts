@@ -46,12 +46,13 @@ function ledgerRoot() {
 }
 
 // Synthetic native receipts exercise real ledger gates and disk replay; no model is run here.
-function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat'): ConversationTask {
+function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat', proposalCluePolicy = false, completeFiles = true): ConversationTask {
   const identity = { sessionId: 'ordinary-guidance', sessionLifecycleFingerprint: sha256('ordinary-guidance-lifecycle'), turn }
   const taskId = conversationTaskId(identity)
   const source = { kind: 'task-started' as const, taskId, ...identity, startSeq: turn * 10,
     userMessageIds: [`request-${turn}`], requestDigest: sha256(request), contextDigest: sha256([]),
-    scopeKey, consentRevision: 1, behaviorVersion: guidanceVersion(ledger.getConversationGuidance(scopeKey)) }
+    scopeKey, consentRevision: 1, behaviorVersion: guidanceVersion(ledger.getConversationGuidance(scopeKey)),
+    ...(proposalCluePolicy ? { proposalCluePolicy: 'feedback.v1' as const } : {}) }
   const admission: ConversationTaskAdmission = { kind: 'task-admitted', taskId, proof: proof(`admission:${turn}`), unavailableReason: null,
     ...(qualityContract === null ? {} : { qualityContract }),
     decision: { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the supplied duration.'],
@@ -60,9 +61,9 @@ function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' 
   const reviewChecks = ['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(qualityContract?.schemaVersion ?? '') ? auditedChecks(`review:${turn}`, verdict) : qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' ? auditedChecks(`review:${turn}`, verdict, 'v1') : checks(`review:${turn}`, verdict)
   const records: ConversationLearningRecord[] = [source, admission,
     ...models.map((modelConfigDigest, index) => ({ kind: 'task-model-observed' as const, taskId, headerSeq: turn * 10 + index, modelConfigDigest })),
-    ...(fileMode === undefined ? [] : [{ kind: 'task-file-input-captured' as const, taskId, path: 'pilot.txt', content: request, callSeq: turn * 10 + 2, callId: `read:${turn}` }]),
+    ...(fileMode === undefined || !completeFiles ? [] : [{ kind: 'task-file-input-captured' as const, taskId, path: 'pilot.txt', content: request, callSeq: turn * 10 + 2, callId: `read:${turn}` }]),
     { kind: 'task-finished', taskId, endSeq: turn * 10 + 8, status: 'completed', assistantMessageIds: [`answer-${turn}`], resultDigest, evidenceIds: [],
-      ...(fileMode === undefined ? {} : { files: { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: fileMode, inputsDigest: sha256([{ path: 'pilot.txt', content: request }]), captureSeq: turn * 10 + 7, entries: [{ path: 'pilot.txt', content: 'pilot result' }], outputPaths: fileMode === 'files' ? ['pilot.txt'] : [] } }) },
+      ...(fileMode === undefined || !completeFiles ? {} : { files: { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: fileMode, inputsDigest: sha256([{ path: 'pilot.txt', content: request }]), captureSeq: turn * 10 + 7, entries: [{ path: 'pilot.txt', content: 'pilot result' }], outputPaths: fileMode === 'files' ? ['pilot.txt'] : [] } }) },
     { kind: 'task-reviewed', taskId, admissionDigest: sha256(admission), resultDigest,
     verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
     evidenceQuotes: verdict === 'not-met' ? ['pilot'] : [], proof: proof(`review:${turn}`), unavailableReason: null,
@@ -322,6 +323,29 @@ function retract(ledger: EvolutionLedger, assessment: ReturnType<typeof nativeFe
   return ledger.recordLearningFeedbackRetraction({ sessionId: source.sessionId, messageId: source.messageId,
     retractedFeedbackVersion: source.feedbackVersion, sessionLifecycleFingerprint: source.sessionLifecycleFingerprint })
 }
+
+it('requires a current marked incomplete local-file task and its exact active feedback assessment for a proposal clue', () => {
+  const root = ledgerRoot(); const ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const sources = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, 'files')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const unmarked = task(ledger, 4, 'inconclusive', scope, 'incomplete clue request', undefined, undefined, undefined, 'files', false, false)
+  const marked = task(ledger, 5, 'inconclusive', scope, 'marked incomplete clue request', undefined, undefined, undefined, 'files', true, false)
+  const unmarkedAssessment = nativeFeedback(ledger, unmarked)
+  const markedAssessment = nativeFeedback(ledger, marked)
+  const withClue = (target: ConversationTask, assessment: ReturnType<typeof nativeFeedback>) => {
+    const { kind: _kind, studyId: _studyId, ...base } = fileOpening(sources)
+    const proposalClues = [{ taskId: target.source.taskId, assessmentId: assessment.started.assessmentId,
+      assessmentDigest: sha256(assessment.result), materialDigest: assessment.started.materialDigest }]
+    const body = { ...base, proposalClues }
+    return { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+  }
+  expect(() => ledger.recordConversationGuidance(withClue(unmarked, unmarkedAssessment))).toThrow(/clue|marker|support/i)
+  const opened = withClue(marked, markedAssessment)
+  expect(ledger.recordConversationGuidance(opened)).toEqual({ duplicate: false })
+  expect(ledger.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+  retract(ledger, markedAssessment)
+  expect(ledger.isConversationGuidanceSupported(opened.studyId)).toBe(false)
+})
 
 it('rejects an old met counterexample in a new-contract study and leaves its original proof untouched', () => {
   const { root, ledger, tasks } = seeded()
