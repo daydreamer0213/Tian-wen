@@ -249,15 +249,23 @@ export class TianwenConversationGuidanceLoopService extends Service {
               || sha256(source) !== frozen.materialDigest) throw new Error('invalid-judgment')
           }
         }
+        // Historical source-free studies have no clue dependency and retain
+        // their prior recovery surface. New clues, and the existing optional
+        // source-reference flow, require recovering the exact proposal packet.
+        const requiresFrozenProposalRecovery = proposalClues.length > 0 || study.sourceReference !== undefined
         const candidateValue = { guidance: guidanceRule(study.candidate.candidateSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind),
           ...(study.candidate.sourceUse === undefined ? {} : { sourceUse: study.candidate.sourceUse }) }
-        const candidate = await recoverConversationStructuredJudgment(this.ctx, study.candidate.proposalProof, candidateValue)
-        const candidateMaterial = candidate.material as Record<string, unknown> | null
-        if (candidateMaterial === null || typeof candidateMaterial !== 'object' || candidateMaterial.studyId !== study.opened.studyId
-          || sha256(candidateMaterial.sourceTaskIds ?? null) !== sha256(study.opened.sourceTaskIds)
-          || candidate.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('invalid-judgment')
-        assertFrozenProposalInput(candidateMaterial)
+        const candidate = requiresFrozenProposalRecovery
+          ? await recoverConversationStructuredJudgment(this.ctx, study.candidate.proposalProof, candidateValue) : undefined
+        if (candidate !== undefined) {
+          const candidateMaterial = candidate.material as Record<string, unknown> | null
+          if (candidateMaterial === null || typeof candidateMaterial !== 'object' || candidateMaterial.studyId !== study.opened.studyId
+            || sha256(candidateMaterial.sourceTaskIds ?? null) !== sha256(study.opened.sourceTaskIds)
+            || candidate.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('invalid-judgment')
+          assertFrozenProposalInput(candidateMaterial)
+        }
         if (study.sourceReference !== undefined) {
+          if (candidate === undefined) throw new Error('invalid-judgment')
           const read = study.sourceReference
           this.assertSourceAdmission(study.opened, read.reference)
           parseConversationSkillDefinition(read.definition, read.reference)
