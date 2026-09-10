@@ -9,7 +9,8 @@ export interface ConversationFileEntry {
 }
 
 export const CONVERSATION_FILE_MAX_COUNT = 8
-export const CONVERSATION_FILE_MAX_BYTES = 32768
+export const CONVERSATION_FILE_MAX_ENTRY_BYTES = 32768
+export const CONVERSATION_FILE_MAX_BYTES = 65536
 
 function pathSegments(path: string): string[] {
   if (path !== path.normalize('NFC') || path.includes('\\')) throw new Error('ambiguous conversation file path')
@@ -51,6 +52,7 @@ export function parseConversationFileEntries(value: unknown): readonly Conversat
       if (entry.content.includes('\0')) throw new Error('conversation file content contains NUL')
       const bytes = Buffer.from(entry.content, 'utf8')
       if (new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) !== entry.content) throw new Error('conversation file content is not exact UTF-8')
+      if (bytes.byteLength > CONVERSATION_FILE_MAX_ENTRY_BYTES) throw new Error('conversation file material exceeds the single-file byte limit')
       totalBytes += bytes.byteLength
       if (totalBytes > CONVERSATION_FILE_MAX_BYTES) throw new Error('conversation file material exceeds the byte limit')
     }
@@ -126,7 +128,7 @@ export function parseConversationFileTrialReceipt(value: unknown): ConversationF
   const input = exactObject(value, ['schemaVersion', 'outputKind', 'answer', 'files', 'outputDigest', 'workerMaterialDigest', 'executionProof'])
   if (input.schemaVersion !== 'tianwen.conversation-file-trial-receipt.v1'
     || (input.outputKind !== 'files' && input.outputKind !== 'chat')
-    || typeof input.answer !== 'string' || Buffer.byteLength(input.answer, 'utf8') > CONVERSATION_FILE_MAX_BYTES
+    || typeof input.answer !== 'string' || Buffer.byteLength(input.answer, 'utf8') > 32768
     || (input.outputKind === 'chat' && input.answer.trim().length === 0)) {
     throw new TypeError('conversation file trial receipt is invalid')
   }

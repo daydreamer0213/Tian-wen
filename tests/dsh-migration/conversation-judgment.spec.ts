@@ -146,7 +146,7 @@ it('allows an empty quote list when no nonblank raw fragment exists', () => {
 it('fails closed on excessive raw evidence instead of silently dropping its tail', () => {
   expect(() => conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, ['a'.repeat(CONVERSATION_MATERIAL_MAX_BYTES)]))
     .toThrow('material-too-large')
-  const manyLines = Array.from({ length: 14_500 }, (_, index) => String(index)).join('\n')
+  const manyLines = Array.from({ length: 35_000 }, (_, index) => String(index)).join('\n')
   expect(Buffer.byteLength(JSON.stringify([manyLines]), 'utf8')).toBeLessThan(CONVERSATION_MATERIAL_MAX_BYTES)
   expect(() => conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, [manyLines])).toThrow('material-too-large')
 })

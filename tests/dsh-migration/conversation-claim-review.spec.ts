@@ -10,7 +10,7 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
-import { recoverConversationJudgmentRequest, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { CONVERSATION_MATERIAL_MAX_BYTES, recoverConversationJudgmentRequest, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
@@ -131,7 +131,7 @@ describe('claim evidence projection', () => {
     expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: 'a'.repeat(32_769) })).toThrow('invalid-judgment')
     expect(() => projectClaimEvidence({ source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'x' }] })] },
       conversation: [{ id: 'a', role: 'assistant', content: [{ type: 'text', text: 'a'.repeat(32_769) }] }], toolEvidence: [] })).toThrow('invalid-judgment')
-    expect(() => projectClaimEvidence({ task: { prompt: 'x'.repeat(96 * 1024) }, answer: 'x' })).toThrow('material-too-large')
+    expect(() => projectClaimEvidence({ task: { prompt: 'x'.repeat(CONVERSATION_MATERIAL_MAX_BYTES) }, answer: 'x' })).toThrow('material-too-large')
     expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: `${'a\n'.repeat(128)}a` })).toThrow('invalid-judgment')
   })
 })
@@ -298,3 +298,40 @@ function changeFirst(audit: any, change: (first: any) => unknown) {
   const unit = audit.units[answerId]
   return { ...audit, units: { ...audit.units, [answerId]: { ...unit, firstClaim: change(unit.firstClaim) } } }
 }
+
+// Engineering-only synthetic contents and scripted LLM responses. This proves
+// packet delivery/persistence, not a real model verdict or a regrade of 024.
+it.each([31000, 45339])('delivers and recovers a complete multi-document review beyond 96 KiB: %i input bytes', async total => {
+  const base = process.platform === 'win32' ? 'E:/待清理/D盘迁移-2026-09-08/Tianwen-capacity-engineering' : '/tmp/tianwen-capacity-engineering'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-packet-')); roots.push(root)
+  const entries = [8614, 8231, total - 16845].map((size, index) => ({ path: `input-${index}.txt`, content: String(index).repeat(size) }))
+  const request = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Read these three files and explain what is known.' }] })
+  const source = { request: [request], context: [], objective: 'Explain the files.', criteria: ['Use all supplied documents.'],
+    files: { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd: root, entries, outputPaths: [] } }
+  const output = { answer: 'Uncertain.', files: entries }
+  const material = { source, evaluationMode: 'local-files', conversation: [{ id: 'answer', role: 'assistant', content: [{ type: 'text', text: output.answer }] }],
+    toolEvidence: [], fileResult: { ...output, outputDigest: sha256(output) } }
+  const evidence = projectClaimEvidence(material)
+  const packet = { original: material, claimEvidence: evidence }
+  const packetBytes = Buffer.byteLength(JSON.stringify(packet), 'utf8')
+  expect(packetBytes).toBeGreaterThan(98304)
+  expect(packetBytes).toBeLessThan(262144)
+  const value = { verdict: 'inconclusive', category: null, explanation: 'Synthetic transport check; no real judgment is claimed.', evidenceQuotes: [],
+    audit: auditFor(evidence, text => claim(text, 'source-fact', 'uncertain')) }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('capacity-first', 'structured_output', value), toolCallResponse('capacity-second', 'structured_output', value)])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('capacity-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Capacity engineering', material,
+      evidence: conversationEvidenceTexts(source as never, [output.answer], [], entries), signal: new AbortController().signal,
+      callConfig: { provider: 'tianwen-probe', model: 'scripted' } })
+    expect(result.verdict).toBe('inconclusive')
+    expect(result.reviewChecks).toHaveLength(2)
+    expect(new Set(result.reviewChecks.map(check => check.proof.sessionId)).size).toBe(2)
+    for (const check of result.reviewChecks) {
+      const recovered = await recoverConversationJudgmentRequest(harness.ctx, check)
+      expect(recovered.material).toEqual(packet)
+      await expect(verifyConversationReviewCheck(harness.ctx, check)).resolves.toBeUndefined()
+    }
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})

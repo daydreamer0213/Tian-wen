@@ -1,7 +1,7 @@
 import { lstat, mkdir, open, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { CONVERSATION_FILE_MAX_BYTES, parseConversationFileEntries, type ConversationFileEntry } from '@tianwen/evolution'
-export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial } from '@tianwen/evolution'
+import { CONVERSATION_FILE_MAX_ENTRY_BYTES, parseConversationFileEntries, type ConversationFileEntry } from '@tianwen/evolution'
+export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial } from '@tianwen/evolution'
 export type { ConversationFileEntry, ConversationFileMaterial } from '@tianwen/evolution'
 
 function slashPath(value: string): string {
@@ -67,16 +67,16 @@ export async function readConversationFile(root: string, candidate: string): Pro
   })
   if (pathStats === undefined) return { path, content: null }
   if (!pathStats.isFile() || pathStats.isSymbolicLink()) throw new Error('conversation file must be a regular file')
-  if (pathStats.size > BigInt(CONVERSATION_FILE_MAX_BYTES)) throw new Error('conversation file is too large')
+  if (pathStats.size > BigInt(CONVERSATION_FILE_MAX_ENTRY_BYTES)) throw new Error('conversation file is too large')
   const file = await open(target, 'r')
   try {
     const before = await file.stat({ bigint: true })
     const unchanged = (left: typeof before, right: typeof before) => left.dev === right.dev && left.ino === right.ino
       && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs
-    if (!before.isFile() || !unchanged(pathStats, before) || before.size > BigInt(CONVERSATION_FILE_MAX_BYTES)) {
+    if (!before.isFile() || !unchanged(pathStats, before) || before.size > BigInt(CONVERSATION_FILE_MAX_ENTRY_BYTES)) {
       throw new Error('conversation file changed before read')
     }
-    const bytes = Buffer.allocUnsafe(CONVERSATION_FILE_MAX_BYTES + 1)
+    const bytes = Buffer.allocUnsafe(CONVERSATION_FILE_MAX_ENTRY_BYTES + 1)
     let length = 0
     while (length < bytes.length) {
       const read = await file.read(bytes, length, bytes.length - length, length)
@@ -85,7 +85,7 @@ export async function readConversationFile(root: string, candidate: string): Pro
     }
     const after = await file.stat({ bigint: true })
     const finalPathStats = await lstat(target, { bigint: true }).catch(() => undefined)
-    if (length > CONVERSATION_FILE_MAX_BYTES || BigInt(length) !== before.size
+    if (length > CONVERSATION_FILE_MAX_ENTRY_BYTES || BigInt(length) !== before.size
       || finalPathStats === undefined || !unchanged(before, after) || !unchanged(before, finalPathStats)) {
       throw new Error('conversation file changed during read')
     }

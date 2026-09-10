@@ -21,7 +21,7 @@ import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { ConversationGuidanceState } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
-import { conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
@@ -987,7 +987,7 @@ it('keeps an accepted oversize natural feedback request exact and unavailable be
   // This remains below the admission-material limit with the short original
   // turn, but the recovered feedback material adds its frozen source binding
   // and crosses the judgment-material limit without a truncation path.
-  const directFeedback = `${marker}${'x'.repeat(93 * 1024 + 512)}`
+  const directFeedback = `${marker}${'x'.repeat(CONVERSATION_MATERIAL_MAX_BYTES - 2560)}`
   let harness: Awaited<ReturnType<typeof mountFeedbackHarness>>
   const script: ScriptEntry[] = [
     structured({ ...admission, objective: 'Repeat the supplied word.', criteria: ['Repeat exactly.'] }), textResponse('base.'), ...reviewPair(verdict(true, 'base')),
@@ -1015,7 +1015,7 @@ it('keeps an accepted oversize natural feedback request exact and unavailable be
     const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target?.source.taskId)[0]!
     const recovered = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
     expect(recovered.feedback.request).toEqual([feedbackMessage])
-    expect(Buffer.byteLength(JSON.stringify(recovered), 'utf8')).toBeGreaterThan(96 * 1024)
+    expect(Buffer.byteLength(JSON.stringify(recovered), 'utf8')).toBeGreaterThan(CONVERSATION_MATERIAL_MAX_BYTES)
     expect(assessment.result).toMatchObject({ classification: 'inconclusive', unavailableReason: 'material-too-large', proof: null })
     // The feedback turn needs its ordinary answer and admission only; a third
     // request here would be a forbidden truncated/replacement assessment call.

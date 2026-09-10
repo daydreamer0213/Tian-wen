@@ -1,8 +1,11 @@
 import { afterEach, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { parseConversationFileTrialReceipt } from '../../packages/tianwen-evolution/src/conversation-files.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import {
   CONVERSATION_FILE_MAX_BYTES,
+  CONVERSATION_FILE_MAX_ENTRY_BYTES,
   CONVERSATION_FILE_MAX_COUNT,
   conversationFilePath,
   parseConversationFileEntries,
@@ -33,6 +36,32 @@ it('captures exact UTF-8 file content and represents an absent file as null', as
 
   expect(await readConversationFile(root, 'input.md')).toEqual({ path: 'input.md', content: 'unchanged\r\n' })
   expect(await readConversationFile(root, 'output.md')).toEqual({ path: 'output.md', content: null })
+})
+
+it('retains three small documents totaling 45339 bytes without truncating their contents', () => {
+  const entries = [8614, 8231, 28494].map((size, index) => ({ path: `input-${index}.txt`, content: String(index).repeat(size) }))
+  const captured = parseConversationFileEntries(entries)
+  expect(captured).toEqual(entries)
+  expect(captured.map(entry => Buffer.byteLength(entry.content!, 'utf8'))).toEqual([8614, 8231, 28494])
+})
+
+it('accepts exactly 64 KiB across small UTF-8 files and rejects one extra byte', () => {
+  const entries = [{ path: 'one.txt', content: 'é'.repeat(16384) }, { path: 'two.txt', content: '界'.repeat(10922) + 'ab' }]
+  expect(parseConversationFileEntries(entries)).toEqual(entries)
+  expect(() => parseConversationFileEntries([...entries, { path: 'three.txt', content: 'x' }])).toThrow('byte limit')
+})
+
+it('does not expand the 32 KiB single-file capture or trial reply limit with aggregate capacity', async () => {
+  const root = fixtureRoot('single-file-capacity')
+  const answer = 'x'.repeat(32769)
+  writeFileSync(join(root, 'large.txt'), answer)
+  await expect(readConversationFile(root, 'large.txt')).rejects.toThrow('too large')
+  expect(() => parseConversationFileEntries([{ path: 'large.txt', content: answer }])).toThrow('byte limit')
+  const output = { answer, files: [] }
+  expect(() => parseConversationFileTrialReceipt({ schemaVersion: 'tianwen.conversation-file-trial-receipt.v1', outputKind: 'chat',
+    ...output, outputDigest: sha256(output), workerMaterialDigest: sha256('worker'),
+    executionProof: { sessionId: 'synthetic-proof', sessionDigest: sha256('session'), requestDigest: sha256('request') },
+  })).toThrow('receipt is invalid')
 })
 
 it('preserves UTF-8 BOM bytes through capture, parse and replica seeding', async () => {
@@ -84,7 +113,7 @@ it('rejects path escape, linked roots or descendants, reserved names and nonfile
 it('rejects invalid UTF-8 and content above the single-file byte limit', async () => {
   const root = fixtureRoot('file-bytes')
   writeFileSync(join(root, 'invalid.txt'), Buffer.from([0xc3, 0x28]))
-  writeFileSync(join(root, 'large.txt'), Buffer.alloc(CONVERSATION_FILE_MAX_BYTES + 1, 0x61))
+  writeFileSync(join(root, 'large.txt'), Buffer.alloc(CONVERSATION_FILE_MAX_ENTRY_BYTES + 1, 0x61))
 
   await expect(readConversationFile(root, 'invalid.txt')).rejects.toThrow()
   await expect(readConversationFile(root, 'large.txt')).rejects.toThrow()
