@@ -1,4 +1,9 @@
-# 024 候选：工程关闭、鲜包完成，真实界面入口待恢复
+# 024 候选与恢复记录（真实使用已结束）
+
+最新结论见[024真实使用结果](tianwen-local-file-learning-024-real-results-20260910.md)：
+IAB已恢复，两项真实普通任务完成，但F1判断提交失败、C1聚合材料超32KiB，完整
+文件学习均未通过。学习已关闭，原历史/文件保留，自有host已停止；未合并/升级。
+下文保留候选和入口恢复各时点，不把旧“尚未输入”当作当前状态。
 
 ## 当前结论
 
@@ -71,7 +76,7 @@ public Session export、完整原始字节、文件/辅助调用/评审证据；
 验收工具，没有改产品或重新打包。helper源码副本也保存在本环境evidence目录。
 恢复浏览器后复用这些材料；首次发送前只核对绑定仍有效及没有先前输入。
 
-## 当前阻点和下一步
+## 前次IAB阻点（已由本轮恢复取代）
 
 IAB控制会话真实创建页面返回`Browser is not available`，刷新表面为
 `apps:[]/browsers:[]`。根控制工具及已有备用Node工具均在初始化时返回
@@ -87,3 +92,45 @@ IAB控制会话真实创建页面返回`Browser is not available`，刷新表面
 
 本轮大产物与新独立环境均在E盘。本轮只读空间快照：D约12.73GiB、E约296.92GiB
 可用。未清理被保护规则拒绝的旧夹具，未绕过删除，也未删除本轮失败证据。
+
+## 本轮恢复：IAB已可用，原生目录选择随后由用户完成
+
+2026-09-10 09:24（本地）恢复同一公开打包host，PID12772，
+`http://127.0.0.1:55050/`，`observation.kind=observed`，自有终端会话95941。
+旧PID3228/端口50072均不存在，零会话文件且无账本；未发送过正式任务，所以没有
+重跑模型队列。复用同一包、已安装Profile、两份文件、请求、验证器和来源批准。
+恢复前共146份文件绑定通过；原live-host及所有冻结收据不覆盖，另写
+`pre-input-resume-1.json`（SHA-256
+`8098eedd9cf3313ea797704494df254fffc63f51bd082f288892e3a702dc0e6e`）和
+`live-host-resume-1.json`。首次核对失败来自旧builder元数据使用URL.pathname留下
+`/D:/...`；保留`resume-1-failure.json`，恢复脚本仅把该格式按file URL转换后核对原哈希。
+该恢复收据的checkedFiles.sha256保存的是含resolvedPath/sha256的对象，不是纯哈希字符串；
+按其实际结构读取，不改写原收据。没有产品代码修改、重新构建或重新安装。
+
+审计脚本只增加第三个显式live-host收据参数，原E盘冻结源码副本不改；新副本为
+`evidence/audit-024-use-resume-1.mjs`。待真正任务及评审终结后使用：
+`node audit-024-use-resume-1.mjs before-disable <绝对路径/live-host-resume-1.json>`，
+撤回后的after-disable同样显式传该收据。未提前执行一次性审计。
+
+根CUA已实际打开IAB浏览器1/页面1并进入DSH，之前的browser unavailable不再成立。
+点击添加/选择工作区后页面无弹层；已查明DSH native directory picker在宿主Windows
+打开`Select Workspace Directory`（真实两个worker子进程已确认），不是网页文件选择器。
+Windows computer-use已按技能加载，能读取原生窗口；点击报
+`coordinate input geometry is unavailable`，截图报
+`SetIsBorderRequired failed: 不支持此接口 (0x80004002)`，文本设值报
+`read UIA value read-only state: 所需属性不在 CacheRequest 中 (0x80070057)`。
+刷新后仍可读，Alt+D返回后焦点未离开搜索框；不据此宣称成功输入。
+没有自制Win32/UIA脚本、后台workspace.create、替换目录选择插件或改安全配置。
+
+已请用户在原生窗口选定
+`E:\待清理\D盘迁移-2026-09-08\Tianwen-本地文件学习-024\native-use\workspace`。
+这是一次具体人工界面操作，不是重复申请模型或项目权限。选定后继续同一IAB的
+consent/F1/C1/withdrawal各独立会话及真实DeepSeek调用；不得把本轮入口工具兼容
+失败记成学习功能失败。尚无024模型验收结果，main CI/Daily升级继续留待真实门禁。
+
+后续用户回复ok且UI/原生存储均确认选定正确E盘workspace。手选过程中曾加入E迁移
+父目录空工作区，保留未删除且不在其中发送任务；正式workspace的ID为
+`af2e255c-1e2e-481f-b6e3-11e25b8d1566`，首次空会话
+`session-487133a9-a78d-42fe-ae1f-1d935007a002`。09:35在该普通IAB会话发送原consent，
+真实DeepSeek调用学习工具开启revision1并完成披露。09:36新会话发送原F1一次，
+模型自然glob、pwsh、读取两文档并调用summarization；尚在执行，不提前判定学习通过。
