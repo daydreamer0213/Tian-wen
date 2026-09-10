@@ -6,7 +6,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
-import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
+import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
 import { runConversationFileTrial, recoverConversationFileTrial } from './conversation-file-trial.js'
 import { runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
@@ -139,7 +139,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private async proposalClues(scopeKey: string, first: ConversationTask, category: ConversationFailure, actualTaskIds: readonly string[]): Promise<EvidenceGroup['proposalClues']> {
     const firstAdmission = first.admission
     const firstDecision = firstAdmission?.decision
-    if (firstDecision?.kind !== 'task' || firstDecision.evaluationMode !== 'local-files') return []
+    if (firstDecision?.kind !== 'task') return []
     const feedback = this.ctx.get('tianwenConversationFeedback')
     if (feedback === undefined) return []
     const evolution = this.ctx.tianwenEvolution
@@ -147,15 +147,20 @@ export class TianwenConversationGuidanceLoopService extends Service {
     try { firstConfig = await recoverConversationTaskModel(this.ctx, first) } catch { return [] }
     const firstModelDigest = conversationTaskModelDigest(first)
     if (firstModelDigest === undefined || sha256(firstConfig) !== firstModelDigest) return []
-    const candidates = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
-      && task.source.proposalCluePolicy === 'feedback.v1' && !actualTaskIds.includes(task.source.taskId)
+    const candidates = evolution.listConversationTasks().filter(task => {
+      const decision = task.admission?.decision
+      const external = task.source.proposalCluePolicy === 'feedback.v2' && decision?.evaluationMode === 'external'
+      const incompleteFile = decision?.evaluationMode === 'local-files' && firstDecision.evaluationMode === 'local-files'
+        && decision.fileOutputKind === firstDecision.fileOutputKind
+        && (task.fileUnavailable !== undefined || task.completion?.files === undefined || (task.fileInputs?.length ?? 0) === 0)
+      return task.source.scopeKey === scopeKey && !actualTaskIds.includes(task.source.taskId)
+      && ['feedback.v1', 'feedback.v2'].includes(task.source.proposalCluePolicy ?? '')
       && task.source.consentRevision === first.source.consentRevision && task.source.behaviorVersion === first.source.behaviorVersion
-      && task.completion?.status === 'completed' && task.admission?.decision?.evaluationMode === 'local-files'
-      && task.admission.decision.fileOutputKind === firstDecision.fileOutputKind
-      && task.admission.decision.family === firstDecision.family
-      && sha256(task.admission.qualityContract ?? null) === sha256(firstAdmission?.qualityContract ?? null)
+      && task.completion?.status === 'completed' && decision?.family === firstDecision.family
+      && sha256(task.admission?.qualityContract ?? null) === sha256(firstAdmission?.qualityContract ?? null)
       && conversationTaskModelDigest(task) === conversationTaskModelDigest(first)
-      && (task.fileUnavailable !== undefined || task.completion.files === undefined || (task.fileInputs?.length ?? 0) === 0)).reverse()
+      && (external || incompleteFile)
+    }).reverse()
     const clues: { reference: GuidanceProposalClue, material: ConversationProposalClueMaterial }[] = []
     for (const task of candidates) {
       const all = evolution.listConversationFeedbackAssessments(task.source.taskId)
@@ -473,22 +478,38 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => conversationEvidenceTexts(material, [])).map(text => guidanceInputDigest(text)))
       if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
       cases.push(...independent)
-      const body: GuidanceStudyBody = {
+      const environmentDigest = this.sourceEnvironment()
+      const registry = this.ctx.get('skills') as Context['skills'] | undefined
+      const viewOptions = { cwd: agent.session.header.cwd, scope: agent, signal }
+      const loadCatalog = () => environmentDigest === undefined ? Promise.resolve({ complete: true, skills: [] }) : listConversationSkillReferences(
+        registry, this.sourceConfig.skillSources ?? [], source.source.scopeKey, environmentDigest, viewOptions)
+      // Optional clues must fit the exact initial packet, including its catalog.
+      // Keep the historical no-clue catalog lookup after opening the study.
+      let catalog = group.proposalClues.length === 0 ? undefined : await loadCatalog()
+      if (catalog !== undefined && !catalog.complete) throw new Error('source-unavailable')
+      const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
         scopeKey: source.source.scopeKey, family: source.admission!.decision!.family, failureCategory: group.category, consentRevision: source.source.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId], counterexampleTaskId: group.counterexample.source.taskId,
         cases, modelConfigDigest: sha256(callConfig), qualityContract: qualityContract!,
-        ...(group.proposalClues.length === 0 ? {} : { proposalClues: group.proposalClues.map(item => item.reference) }),
+        ...(proposalClues.length === 0 ? {} : { proposalClues: proposalClues.map(item => item.reference) }),
         ...(fileMode ? { evaluationMode: 'local-files' as const, fileOutputKind: fileConfig!.outputKind } : {}),
+      })
+      const fitted: EvidenceGroup['proposalClues'][number][] = []
+      for (const clue of group.proposalClues) {
+        const candidate = [...fitted, clue]
+        const candidateBody = bodyFor(candidate)
+        const packet = { studyId: guidanceStudyId(candidateBody), sourceTaskIds: candidateBody.sourceTaskIds,
+          family: candidateBody.family, failureCategory: candidateBody.failureCategory,
+          currentGuidance: guidanceRule(parentSnapshot, candidateBody.family, candidateBody.evaluationMode, candidateBody.fileOutputKind) ?? '',
+          sources, proposalClues: candidate.map(item => item.material), ...(catalog?.skills.length ? { sourceCatalog: catalog.skills } : {}) }
+        if (Buffer.byteLength(JSON.stringify(packet), 'utf8') <= CONVERSATION_MATERIAL_MAX_BYTES) fitted.push(clue)
       }
+      const body = bodyFor(fitted)
       opened = { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
       evolution.recordConversationGuidance(opened)
       const studyOpened = opened
       await this.assertCurrent(studyOpened, signal)
-      const environmentDigest = this.sourceEnvironment()
-      const registry = this.ctx.get('skills') as Context['skills'] | undefined
-      const viewOptions = { cwd: agent.session.header.cwd, scope: agent, signal }
-      const catalog = environmentDigest === undefined ? { complete: true, skills: [] } : await listConversationSkillReferences(
-        registry, this.sourceConfig.skillSources ?? [], studyOpened.scopeKey, environmentDigest, viewOptions)
+      catalog ??= await loadCatalog()
       await this.assertCurrent(studyOpened, signal)
       if (!catalog.complete) throw new Error('source-unavailable')
       const offers: readonly ConversationSkillOffer[] = catalog.skills
@@ -635,6 +656,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (assessment?.result === undefined || sha256(assessment.result) !== reference.assessmentDigest
         || assessment.started.materialDigest !== reference.materialDigest || task === undefined
         || sha256(await recoverConversationTaskModel(this.ctx, task)) !== study.modelConfigDigest) throw new Error('source-unavailable')
+      const decision = task.admission?.decision
+      const external = task.source.proposalCluePolicy === 'feedback.v2' && decision?.evaluationMode === 'external'
+      const incompleteFile = decision?.evaluationMode === 'local-files' && study.evaluationMode === 'local-files'
+        && decision.fileOutputKind === study.fileOutputKind
+        && (task.fileUnavailable !== undefined || task.completion?.files === undefined || (task.fileInputs?.length ?? 0) === 0)
+      if (!['feedback.v1', 'feedback.v2'].includes(task.source.proposalCluePolicy ?? '') || !(external || incompleteFile)) throw new Error('source-unavailable')
       const material = await feedback.proposalClueForAssessment(assessment)
       if (material.taskId !== reference.taskId) throw new Error('source-unavailable')
       clues.push(material)

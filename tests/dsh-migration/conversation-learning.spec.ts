@@ -158,9 +158,18 @@ describe('natural conversation task evidence', () => {
     for (const materialProjection of [null, undefined, 'surface-text.v2']) {
       expect(() => parseConversationLearningRecord({ ...legacy, materialProjection })).toThrow()
     }
-    for (const proposalCluePolicy of [null, undefined, 'feedback.v2']) {
+    for (const proposalCluePolicy of [null, undefined]) {
       expect(() => parseConversationLearningRecord({ ...legacy, proposalCluePolicy })).toThrow()
     }
+  })
+
+  it('round-trips the prospective feedback v2 marker while preserving v1 and markerless history', () => {
+    const legacy = start()
+    const v1 = { ...legacy, proposalCluePolicy: 'feedback.v1' as const }
+    const v2 = { ...legacy, proposalCluePolicy: 'feedback.v2' as const }
+    expect(parseConversationLearningRecord(legacy)).toEqual(legacy)
+    expect(parseConversationLearningRecord(v1)).toEqual(v1)
+    expect(parseConversationLearningRecord(v2)).toEqual(v2)
   })
 
   it('requires a frozen file output kind only for local-file admission without changing historical text records', () => {

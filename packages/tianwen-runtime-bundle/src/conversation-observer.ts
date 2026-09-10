@@ -200,7 +200,7 @@ export class TianwenConversationObserverService extends Service {
     const source: ConversationTaskSource = {
       kind: 'task-started', taskId, ...sourceIdentity, startSeq: boundary.seq,
       userMessageIds: direct.map(message => String(message.id)), requestDigest: sha256(direct), contextDigest: sha256(context),
-      scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot), materialProjection, proposalCluePolicy: 'feedback.v1',
+      scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot), materialProjection, proposalCluePolicy: 'feedback.v2',
     }
     this.ctx.tianwenEvolution.recordConversationLearning(source)
     const qualityContract = conversationQualityContract()

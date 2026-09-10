@@ -38,6 +38,111 @@ const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(valu
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
+it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', 'packet-catalog'] as const)('keeps external native feedback proposer-only in a complete text study: %s', async scenario => {
+  const budget = scenario.startsWith('packet-')
+  const policy = budget ? 'feedback.v2' : scenario
+  const clueCount = scenario === 'packet-two' ? 2 : 1
+  const expectedClues = scenario === 'packet-two' ? 1 : budget ? 0 : policy === 'feedback.v2' ? 1 : 0
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'external-text-'))
+  const material = (request: GenerateOptions) => {
+    const block = request.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))
+    if (block?.type !== 'text') throw new Error('missing packet')
+    return JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!)
+  }
+  const note = 'Keep the pilot scope; do not treat the external result as verified.'
+  const projected: any[] = [] // Test-only capacity payloads; native projection is verified separately.
+  const warnings: string[] = []
+  const warning = vi.spyOn(TianwenConversationGuidanceLoopService.prototype as never, 'warn' as never).mockImplementation((error: unknown) => { warnings.push(String(error)) })
+  const definition = { name: 'packet-reference', provider: 'owned-test-fixture', source: 'bundled', description: 'Scope reference', invocation: { modelInvocable: true, userInvocable: true }, content: 'Preserve source scope.' }
+  const sourceAdmission = { name: definition.name, provider: definition.provider, digest: sha256(definition), origin: 'https://example.invalid/owned-test-fixture', revision: 'fixture-v1', license: 'MIT' as const, reviewedAt: '2026-09-08T00:00:00.000Z', kind: 'self-contained-text' as const, runtime: '0.1.1-rc.2' as const, purpose: 'conversation-method-reference' as const, scopeKey: `conversation:${sha256({ cwd: root })}`, environmentDigest: sha256({ kind: 'tianwen.conversation-skill-environment.v1', evolutionRoot: join(root, 'evolution') }) }
+  const script: ScriptEntry[] = []
+  for (let i = 0; i < 3; i++) script.push(structured(admission), textResponse(`pilot answer ${i}`), ...reviewPair(verdict(i === 2, 'pilot')))
+  for (let i = 0; i < clueCount; i++) script.push(structured({ ...admission, evaluationMode: 'external' }), textResponse('pilot external attempt'), ...reviewPair(verdict(false, 'pilot')))
+  for (let i = 0; i < clueCount; i++) script.push(plainEvidenceResponse({ classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Preserve pilot scope.'], explanation: 'The direct feedback identifies scope loss.', evidenceQuotes: ['pilot'] }))
+  script.push(request => {
+      expect(material(request).proposalClues).toBeUndefined()
+      if (budget) {
+        const tasks = harness.ctx.tianwenEvolution.listConversationTasks()
+        const packet = { studyId: `guidance-study:${sha256('placeholder').slice(7)}`, sourceTaskIds: tasks.slice(0, 2).map(task => task.source.taskId), family: 'summarization', failureCategory: 'source-fidelity', currentGuidance: '', sources: material(request).sources, proposalClues: [projected[0]] }
+        for (const clue of projected) {
+          clue.answer = []
+          packet.proposalClues = [clue]
+          const capacity = scenario === 'packet-two' ? Math.floor(CONVERSATION_MATERIAL_MAX_BYTES * 0.55) : CONVERSATION_MATERIAL_MAX_BYTES - Buffer.byteLength(JSON.stringify(packet), 'utf8') + (scenario === 'packet-whole' ? 1 : 0)
+          // JSON string overhead is counted too; multibyte content catches code-unit counting.
+          const chars = Math.max(0, capacity - 2)
+          clue.answer = ['界'.repeat(Math.floor(chars / 3)) + 'x'.repeat(chars % 3)]
+          expect(Buffer.byteLength(JSON.stringify(clue), 'utf8')).toBeLessThan(CONVERSATION_MATERIAL_MAX_BYTES)
+        }
+        packet.proposalClues = projected
+        const bytes = Buffer.byteLength(JSON.stringify(packet), 'utf8')
+        if (scenario === 'packet-catalog') expect(bytes).toBe(CONVERSATION_MATERIAL_MAX_BYTES)
+        if (scenario !== 'packet-catalog') expect(bytes).toBeGreaterThan(CONVERSATION_MATERIAL_MAX_BYTES)
+      }
+      return structured({ adjacent: { prompt: 'Summarize adjacent laboratory result.', criteria: ['Preserve scope'] }, holdout: { prompt: 'Summarize independent field result.', criteria: ['Preserve scope'] } }) },
+    request => {
+      const packet = material(request)
+      if (expectedClues) expect(packet.proposalClues).toMatchObject([{ feedback: { rating: 'negative', note } }])
+      else expect(packet.proposalClues).toBeUndefined()
+      return structured({ guidance: 'Preserve the stated scope of each source.' })
+    })
+  for (let i = 0; i < 5; i++) for (const arm of ['baseline', 'candidate']) {
+    script.push(request => { expect(JSON.stringify(request.messages)).not.toContain('tianwen.proposal-clue.v1'); expect(JSON.stringify(request.messages)).not.toContain(note); return structured({ answer: `pilot trial ${i} ${arm}` }) })
+    for (const response of reviewPair(verdict(arm === 'candidate' || i > 0, 'pilot'))) script.push(request => {
+      expect(JSON.stringify(request.messages)).not.toContain(note)
+      expect(material(request).proposalClues).toBeUndefined()
+      return (response as (request: GenerateOptions) => ReturnType<typeof textResponse>)(request)
+    })
+  }
+  const harness = await mountFeedbackHarness(join(root, 'sessions'), script)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  if (scenario === 'packet-catalog') { await harness.ctx.plugin(SkillRegistry); harness.ctx.skills.register(definition) }
+  harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const record = harness.ctx.tianwenEvolution.recordConversationLearning.bind(harness.ctx.tianwenEvolution)
+  const marker = vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationLearning').mockImplementation(value => {
+    if (value.kind !== 'task-started' || policy === 'feedback.v2') return record(value)
+    const { proposalCluePolicy: _policy, ...rest } = value
+    return record(policy === 'absent' ? rest : { ...rest, proposalCluePolicy: policy })
+  })
+  await harness.ctx.plugin(TianwenConversationObserverService)
+  await harness.ctx.plugin(TianwenMessageFeedbackBridgeService)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('external-text'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    for (let i = 0; i < 3 + clueCount; i++) {
+      handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `Summarize pilot source ${i}.` }] }))
+      await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    }
+    const before = harness.ctx.tianwenEvolution.listConversationTasks()
+    const target = before[3]!
+    expect(target.admission!.decision!.fileOutputKind).toBeUndefined()
+    expect(target.source.proposalCluePolicy).toBe(policy === 'absent' ? undefined : policy)
+    for (const clue of before.slice(3)) await harness.ctx.messageFeedback.put({ sessionId: handle.agent.session.id, messageId: MessageId(clue.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+    await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('external-text')
+    await harness.ctx.plugin(TianwenConversationFeedbackService)
+    await harness.ctx.tianwenConversationFeedback.scheduleForSession('external-text')
+    if (budget) {
+      const original = harness.ctx.tianwenConversationFeedback.proposalClueForAssessment.bind(harness.ctx.tianwenConversationFeedback)
+      vi.spyOn(harness.ctx.tianwenConversationFeedback, 'proposalClueForAssessment').mockImplementation(async assessment => {
+        const native = await original(assessment)
+        let clue = projected.find(item => item.taskId === native.taskId)
+        if (clue === undefined) { clue = structuredClone(native); projected.push(clue) }
+        return clue
+      })
+    }
+    await harness.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), ...(scenario === 'packet-catalog' ? { skillSources: [sourceAdmission] } : {}) })
+    await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+    if (study?.decision?.verdict !== 'accepted') throw new Error(`Study failed: ${JSON.stringify({ warnings, opened: study?.opened.proposalClues, stopped: study?.stopped })}`)
+    expect(study.opened.sourceTaskIds).not.toContain(target.source.taskId)
+    expect(study.opened.counterexampleTaskId).toBe(before[2]!.source.taskId)
+    expect(study.opened.cases).toHaveLength(5)
+    expect(study.arms).toHaveLength(10)
+    expect(study.opened.proposalClues?.length ?? 0).toBe(expectedClues)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
+  } finally { warning.mockRestore(); marker.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['explicit', 'default'] as const)('forwards the actual %s runtime environment and independent natural admissions', async setting => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'bundle-config-'))

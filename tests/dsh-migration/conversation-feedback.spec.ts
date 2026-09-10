@@ -157,7 +157,7 @@ const nativeAdmission = { kind: 'task', objective: 'Summarize the supplied pilot
 const nativeReview = { verdict: 'met', category: null, explanation: 'The duration is preserved.', evidenceQuotes: ['5 days'] }
 const nativeAssessment = { classification: 'attributable-problem', category: 'source-fidelity',
   supplementalCriteria: ['Retain the pilot-only scope.'], explanation: 'The request limits the duration to the pilot.', evidenceQuotes: ['pilot'] }
-async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
+async function mount(script: Parameters<typeof mountFeedbackHarness>[1], policy?: 'feedback.v1') {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-feedback-tests' : '/tmp/tianwen-conversation-feedback-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'feedback-')); roots.push(root)
@@ -167,6 +167,9 @@ async function mount(script: Parameters<typeof mountFeedbackHarness>[1]) {
   await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
   harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const record = harness.ctx.tianwenEvolution.recordConversationLearning.bind(harness.ctx.tianwenEvolution)
+  if (policy !== undefined) vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationLearning').mockImplementation(value =>
+    record(value.kind === 'task-started' ? { ...value, proposalCluePolicy: policy } : value))
   await harness.ctx.plugin(TianwenConversationObserverService)
   await harness.ctx.plugin(TianwenMessageFeedbackBridgeService)
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('feedback-main'), meta: { cwd: root },
@@ -197,9 +200,9 @@ describe('native feedback assessment adapter', () => {
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
-  it('rejects an 8193-byte projected clue without truncating the frozen native feedback', async () => {
+  it.each(['feedback.v1', 'feedback.v2'] as const)('uses the native projection budget for %s above 8192 bytes without truncation', async policy => {
     const answer = `It took 5 days. ${'x'.repeat(8193)}`
-    const harness = await mount([structured(nativeAdmission), textResponse(answer), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)])
+    const harness = await mount([structured(nativeAdmission), textResponse(answer), claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), evidenceResponse(nativeAssessment)], policy === 'feedback.v1' ? policy : undefined)
     try {
       await harness.ctx.plugin(TianwenConversationFeedbackService)
       const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
@@ -210,7 +213,15 @@ describe('native feedback assessment adapter', () => {
       await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
       const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
       expect(JSON.stringify(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment))).toContain(answer)
-      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('material-too-large')
+      expect(target.source.proposalCluePolicy).toBe(policy)
+      const requests = harness.adapter.requests.length
+      if (policy === 'feedback.v1') await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('material-too-large')
+      else {
+        const clue = await harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)
+        expect(Buffer.byteLength(JSON.stringify(clue), 'utf8')).toBeGreaterThan(8192)
+        expect(JSON.stringify(clue.answer)).toContain(answer)
+      }
+      expect(harness.adapter.requests).toHaveLength(requests)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
@@ -254,7 +265,7 @@ describe('native feedback assessment adapter', () => {
       const { kind: _kind, assessmentId: _assessmentId, taskId: _taskId, proof: _proof, unavailableReason: _unavailableReason, ...captured } = assessment.result!
       const judgment = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, captured)
       expect(target.source.materialProjection).toBe('surface-text.v1')
-      expect(target.source.proposalCluePolicy).toBe('feedback.v1')
+      expect(target.source.proposalCluePolicy).toBe('feedback.v2')
       expect(JSON.stringify(material.answer)).toContain('It took 5 days.')
       expect(JSON.stringify(material.answer)).not.toContain('HIDDEN-FEEDBACK-REASONING-')
       expect(JSON.stringify(judgment.material)).toContain('It took 5 days.')

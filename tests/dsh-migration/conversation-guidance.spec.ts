@@ -298,7 +298,7 @@ describe('proposal-only feedback clues', () => {
     expect(() => parseConversationGuidanceRecord({ kind, ...overlap, studyId: guidanceStudyId(overlap) })).toThrow(/clue|source/i)
     const text = opening('proposal-clue-text'); const { kind: textKind, studyId: _textId, ...textBase } = text
     const textBody = { ...textBase, proposalClues: [ref] }
-    expect(() => parseConversationGuidanceRecord({ kind: textKind, ...textBody, studyId: guidanceStudyId(textBody) })).toThrow(/local|clue/i)
+    expect(parseConversationGuidanceRecord({ kind: textKind, ...textBody, studyId: guidanceStudyId(textBody) })).toMatchObject({ proposalClues: [ref] })
   })
 })
 

@@ -9,7 +9,7 @@ import {
   type ConversationFeedbackStarted, type ConversationTask, type ConversationUnavailable,
 } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, recoverConversationStructuredJudgment, runConversationJudgment } from './conversation-judgment.js'
+import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, recoverConversationStructuredJudgment, runConversationJudgment } from './conversation-judgment.js'
 import { conversationEvidenceTexts, conversationMessages, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import type { ConversationFileTrialOutput } from '@tianwen/evolution'
 
@@ -142,7 +142,9 @@ export class TianwenConversationFeedbackService extends Service {
     const clue: ConversationProposalClueMaterial = { schemaVersion: 'tianwen.proposal-clue.v1', taskId: assessment.started.taskId,
       request: material.original.request, answer: material.answer, feedback, classification: result.classification,
       category: result.category, supplementalCriteria: result.supplementalCriteria }
-    if (Buffer.byteLength(JSON.stringify(clue), 'utf8') > 8192) throw new Error('material-too-large')
+    const policy = this.ctx.tianwenEvolution.listConversationTasks().find(task => task.source.taskId === assessment.started.taskId)?.source.proposalCluePolicy
+    const budget = policy === 'feedback.v1' ? 8192 : policy === 'feedback.v2' ? CONVERSATION_MATERIAL_MAX_BYTES : 0
+    if (Buffer.byteLength(JSON.stringify(clue), 'utf8') > budget) throw new Error('material-too-large')
     return clue
   }
 

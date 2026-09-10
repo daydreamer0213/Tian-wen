@@ -3105,15 +3105,18 @@ export class EvolutionLedger {
     }
     for (const clue of study.proposalClues ?? []) {
       const task = tasks.find(item => item.source.taskId === clue.taskId)
-      if (study.evaluationMode !== 'local-files' || task === undefined || task.source.proposalCluePolicy !== 'feedback.v1'
+      const decision = task?.admission?.decision
+      const external = task?.source.proposalCluePolicy === 'feedback.v2' && decision?.evaluationMode === 'external'
+      const incompleteFile = decision?.evaluationMode === 'local-files' && study.evaluationMode === 'local-files'
+        && decision.fileOutputKind === study.fileOutputKind
+        && (task?.fileUnavailable !== undefined || task?.completion?.files === undefined || (task?.fileInputs?.length ?? 0) === 0)
+      if (task === undefined || !['feedback.v1', 'feedback.v2'].includes(task.source.proposalCluePolicy ?? '') || !(external || incompleteFile)
         || task.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
         || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
-        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== 'local-files'
-        || task.admission.decision.fileOutputKind !== study.fileOutputKind
-        || sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
-        || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
-        || (task.fileUnavailable === undefined && task.completion.files !== undefined && (task.fileInputs?.length ?? 0) > 0)) {
-        throw new LedgerIntegrityError('proposal clue requires a marked compatible completed task with incomplete file evidence')
+        || decision?.family !== study.family
+        || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
+        || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) {
+        throw new LedgerIntegrityError('proposal clue requires a marked compatible completed task with eligible feedback evidence')
       }
       const all = this.#conversationFeedback.list(task.source.taskId)
       if (all.some(item => item.result === undefined)) throw new LedgerIntegrityError('proposal clue has a pending replacement assessment')

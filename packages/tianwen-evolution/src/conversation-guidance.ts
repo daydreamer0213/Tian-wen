@@ -265,7 +265,6 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
   const quality = Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}
   const proposalClues = Object.hasOwn(input, 'proposalClues') ? list(input.proposalClues, parseProposalClue, 2) : []
   if (Object.hasOwn(input, 'proposalClues') && proposalClues.length === 0) throw new TypeError('proposal clues must be nonempty when present')
-  if (proposalClues.length > 0 && mode.evaluationMode !== 'local-files') throw new TypeError('proposal clues require a local-files study')
   if (proposalClues.length > 0 && (new Set(proposalClues.map(item => item.taskId)).size !== proposalClues.length
     || new Set(proposalClues.map(item => item.assessmentId)).size !== proposalClues.length
     || proposalClues.some(item => sourceTaskIds.includes(item.taskId) || item.taskId === counterexampleTaskId))) throw new TypeError('proposal clues must be unique and disjoint from actual sources')
