@@ -36,7 +36,7 @@ offline independently; never regrade it.
 - Modify packages/tianwen-runtime-bundle/src/conversation-observer.ts (future marker).
 - Modify packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.ts (policy-specific projection budget).
 - Modify packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts (eligibility, initial packet fitting, frozen recovery).
-- Test affected conversation-learning, conversation-guidance, conversation-guidance-ledger, conversation-feedback, conversation-guidance-loop and conversation-file-learning specs under tests/dsh-probe; resolve their exact existing locations with rg --files.
+- Test affected conversation-learning, conversation-guidance, conversation-guidance-ledger, conversation-feedback, conversation-guidance-loop and conversation-file-learning specs under tests/dsh-migration.
 
 **Interfaces:** Existing proposalClueForAssessment(assessment), GuidanceProposalClue,
 GuidanceStudyBody, recoverProposalClues(study) remain; do not add a public service.
