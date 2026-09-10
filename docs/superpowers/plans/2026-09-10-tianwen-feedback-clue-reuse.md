@@ -4,6 +4,13 @@
 
 **Goal:** Deliver the approved A/B/C increment without treating partial files as complete evidence.
 
+**Execution closeout (2026-09-10):** Task1 implementation and independent review complete
+at8382384; Task2 fixed genuine IAB/DeepSeek acceptance executed on eeb84dc, but the
+new connection gate was not met (external admission and oversized clue); Task3
+NO-GO, preserve Daily022, no merge/install/automatic027. See
+`docs/operations/tianwen-feedback-clue-026-results-20260910.md`. Checklists below
+are the frozen execution instructions, not an automatic pending-work queue.
+
 **Architecture:** Add bounded, provenance-bound proposal references to the existing study, using the existing feedback material recovery. Keep complete source eligibility, independent case design, paired execution, reviewers and activation rules. No separate clue service.
 
 **Tech Stack:** TypeScript, installed DSH 0.1.1-rc.2, native persistence and Agent judgments, Vitest; Windows PowerShell and Codex IAB for actual product acceptance.
