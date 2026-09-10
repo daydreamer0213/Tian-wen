@@ -82,3 +82,14 @@ Commands use `D:/hermes/node/node.exe node_modules/vitest/vitest.mjs run` plus
 the exact above test paths. Typecheck/build entries are taken from each package's
 current package.json; use existing resolved executables, not a new pnpm install.
 Engineering completion does not close the outstanding real file-learning gate.
+
+## Execution checkpoint
+
+27f264b implements the eight-file scoped delta. New checks RED4fail/1pass; the
+first post-edit run still consumed stale Evolution dist (retained). After the
+Evolution build, GREEN5/5. Affected six suites113/113, targeted shared-limit
+feedback1/1, Evolution/Runtime typechecks0, full Runtime build14 stages0.
+One scoped independent review is closed: Critical/Important/Minor all zero.
+No new candidate or live model run. All Task 1 checks above are completed; the
+checkbox wording is retained as the original execution plan, not an open queue.
+See the [engineering result](../../operations/tianwen-file-material-capacity-20260910.md).

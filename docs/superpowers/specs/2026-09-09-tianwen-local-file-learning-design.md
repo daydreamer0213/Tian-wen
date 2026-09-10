@@ -1,5 +1,10 @@
 # Natural learning from actual local-file work
 
+Prospective capacity amendment (2026-09-10): the observed 024 multi-document
+gap is addressed by [the bounded capacity design](2026-09-10-tianwen-file-material-capacity-design.md).
+It supersedes only the capacity numbers below for future builds; historical
+023/024 results, evidence schemas and the original ownership boundaries stay exact.
+
 Status: implementing the owner's 2026-09-09 instruction to continue the recommended
 product-gap repair and targeted real-model acceptance. This is not a completion
 or efficacy report. Baseline is c13bad79052541751907a105d72ac43d7a5cd3c4.
