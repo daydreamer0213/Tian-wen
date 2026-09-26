@@ -62,6 +62,7 @@ function generatedCases(value: unknown, qualityContract: ConversationQualityCont
 export class TianwenConversationGuidanceLoopService extends Service {
   static inject = ['agents', 'sessions', 'sessionPersistence', 'subagents', 'tianwenEvolution', 'llm'] as const
   private readonly lanes = new Map<string, Promise<void>>()
+  private readonly persistedWakes = new Map<string, Promise<void>>()
   private readonly dirty = new Set<string>()
   private readonly controllers = new Set<AbortController>()
   private readonly recoverable = new Set<string>()
@@ -94,12 +95,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
     }
     const offReview = this.ctx.on('tianwen/conversation-task-reviewed', taskId => {
       const task = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === taskId)
-      const agent = task === undefined ? undefined : this.ctx.agents.get(SessionId(task.source.sessionId))
-      if (agent !== undefined) void this.schedule(agent).catch(error => this.warn(error))
+      if (task !== undefined) void this.wakeTask(task).catch(error => this.warn(error))
     })
     const wakeSession = (sessionId: string) => {
       const agent = this.ctx.agents.get(SessionId(sessionId))
       if (agent !== undefined) void this.schedule(agent).catch(error => this.warn(error))
+      else for (const task of this.ctx.tianwenEvolution.listConversationTasks().filter(item => item.source.sessionId === sessionId))
+        void this.wakeTask(task).catch(error => this.warn(error))
     }
     const offFeedback = this.ctx.on('tianwen/conversation-feedback-reconciled', wakeSession)
     const offAssessment = this.ctx.on('tianwen/conversation-feedback-assessed', assessmentId => {
@@ -182,7 +184,33 @@ export class TianwenConversationGuidanceLoopService extends Service {
     return clues
   }
   private warn(error: unknown): void { this.ctx.logger.warn('Natural learning study unavailable: %s', error instanceof Error ? error.message : String(error)) }
-  async whenIdle(): Promise<void> { while (this.lanes.size > 0) await Promise.allSettled([...this.lanes.values()]) }
+  async whenIdle(): Promise<void> {
+    while (this.lanes.size > 0 || this.persistedWakes.size > 0)
+      await Promise.allSettled([...this.lanes.values(), ...this.persistedWakes.values()])
+  }
+  private wakeTask(task: ConversationTask): Promise<void> {
+    const live = this.ctx.agents.get(SessionId(task.source.sessionId))
+    if (live !== undefined) return this.schedule(live)
+    const scopeKey = task.source.scopeKey
+    const existing = this.persistedWakes.get(scopeKey)
+    if (existing !== undefined) return existing
+    const work = Promise.resolve().then(async () => {
+      if (!this.accepting) return
+      const evidence = await this.select(scopeKey)
+      if (evidence === undefined) return
+      const current = this.ctx.agents.list().find(agent => root(agent)
+        && `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}` === scopeKey)
+      if (current !== undefined) { await this.schedule(current); return }
+      const source = evidence.sources[0]
+      const config = await recoverConversationTaskModel(this.ctx, source)
+      const handle = await this.ctx.agents.resume({ resumeSessionId: SessionId(source.source.sessionId), agentOptions: {
+        provider: config.provider, model: config.model, ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
+      } })
+      try { await this.schedule(handle.agent) } finally { await handle.dispose() }
+    }).finally(() => { if (this.persistedWakes.get(scopeKey) === work) this.persistedWakes.delete(scopeKey) })
+    this.persistedWakes.set(scopeKey, work)
+    return work
+  }
   async schedule(agent: Agent): Promise<void> {
     if (!this.accepting || !root(agent)) return Promise.resolve()
     const scopeKey = `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}`
@@ -192,16 +220,23 @@ export class TianwenConversationGuidanceLoopService extends Service {
     this.dirty.add(scopeKey)
     const existing = this.lanes.get(scopeKey)
     if (existing !== undefined) return existing
+    let vanished = false
     const work = Promise.resolve().then(async () => {
       while (this.accepting && this.dirty.delete(scopeKey)) {
         await agent.whenIdle()
-        if (this.ctx.agents.get(agent.session.id) !== agent) return
+        if (this.ctx.agents.get(agent.session.id) !== agent) { vanished = true; return }
         this.rollbackIfNeeded(scopeKey)
         await this.recoverAccepted(scopeKey)
         const evidence = await this.select(scopeKey)
         if (evidence !== undefined) await this.study(agent, evidence)
       }
-    }).finally(() => this.lanes.delete(scopeKey))
+    }).finally(() => {
+      this.lanes.delete(scopeKey)
+      if (vanished && this.accepting) {
+        const task = [...this.ctx.tianwenEvolution.listConversationTasks()].reverse().find(item => item.source.scopeKey === scopeKey && item.completion?.status === 'completed')
+        if (task !== undefined) void this.wakeTask(task).catch(error => this.warn(error))
+      }
+    })
     this.lanes.set(scopeKey, work)
     return work
   }

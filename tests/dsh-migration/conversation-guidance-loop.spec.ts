@@ -39,6 +39,49 @@ const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(valu
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
 
+it('wakes a completed study source after its ordinary root agent has been released', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'released-root-'))
+  const harness = await mountFeedbackHarness(join(root, 'sessions'), [structured(admission), textResponse('pilot answer'), ...reviewPair(verdict(true, 'pilot'))])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  await harness.ctx.plugin(TianwenConversationObserverService)
+  await harness.ctx.plugin(TianwenConversationGuidanceLoopService)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('released-root'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize the pilot source.' }] }))
+    await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.review?.verdict).toBe('met')
+    const service = harness.ctx.tianwenConversationGuidanceLoop as unknown as { select: (scope: string) => Promise<unknown>, study: (agent: unknown, evidence: unknown) => Promise<void> }
+    const select = vi.spyOn(service, 'select').mockResolvedValueOnce({ sources: [task, task] })
+      .mockResolvedValueOnce({ sources: [task, task] }).mockResolvedValue(undefined)
+    const study = vi.spyOn(service, 'study').mockResolvedValue(undefined)
+    await handle.dispose()
+    expect(harness.ctx.agents.get(SessionId('released-root'))).toBeUndefined()
+    harness.ctx.emit('tianwen/conversation-task-reviewed', task.source.taskId)
+    await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(select).toHaveBeenCalled()
+    expect(study).toHaveBeenCalledOnce()
+    expect(harness.ctx.agents.get(SessionId('released-root'))).toBeUndefined()
+  } finally { await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it('retries persisted evidence if a live root disappears while waiting for idle', async () => {
+  const scopeKey = `conversation:${sha256({ cwd: 'D:/DevData/stale-root' })}`
+  const task = { source: { taskId: 'stale-task', scopeKey }, completion: { status: 'completed' } }
+  const agent = { session: { id: SessionId('stale-root'), header: { cwd: 'D:/DevData/stale-root' } }, whenIdle: async () => {} }
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService & Record<string, unknown>
+  Object.assign(service, { ctx: { agents: { get: () => undefined }, tianwenEvolution: { listConversationTasks: () => [task] } },
+    lanes: new Map(), dirty: new Set(), accepting: true })
+  vi.spyOn(service as never, 'rollbackIfNeeded' as never).mockImplementation(() => {})
+  vi.spyOn(service as never, 'recoverAccepted' as never).mockResolvedValue(undefined)
+  const wake = vi.spyOn(service as never, 'wakeTask' as never).mockResolvedValue(undefined)
+  await service.schedule(agent as never)
+  expect(wake).toHaveBeenCalledWith(task)
+})
+
 it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', 'packet-catalog'] as const)('keeps external native feedback proposer-only in a complete text study: %s', async scenario => {
   const budget = scenario.startsWith('packet-')
   const policy = budget ? 'feedback.v2' : scenario
