@@ -39,6 +39,8 @@ export interface ConversationTaskMaterial {
   readonly qualityContract?: ConversationQualityContract
   readonly files?: ConversationFileMaterial
   readonly ancillaryContext?: ConversationFileAncillaryContext
+  /** Host-verified original-task actions, never carried into a method trial. */
+  readonly fileExecution?: ConversationFileExecutionEvidence
   /** Present only on fresh study material, never on the original task review. */
   readonly feedbackStandard?: {
     readonly assessmentId: string
@@ -49,8 +51,38 @@ export interface ConversationTaskMaterial {
   }
 }
 
+export interface ConversationFileExecutionEvidence {
+  readonly schemaVersion: 'tianwen.file-execution-evidence.v1'
+  readonly capturedInputsUnchanged: true
+  readonly toolCalls: readonly string[]
+  readonly directoryObservations: readonly { readonly command: string; readonly stdout: string }[]
+}
+
+export function parseFileExecutionEvidence(value: unknown): ConversationFileExecutionEvidence {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid file execution evidence')
+  const row = value as Record<string, unknown>
+  if (Object.keys(row).sort().join(',') !== 'capturedInputsUnchanged,directoryObservations,schemaVersion,toolCalls'
+    || row.schemaVersion !== 'tianwen.file-execution-evidence.v1' || row.capturedInputsUnchanged !== true
+    || !Array.isArray(row.toolCalls)
+    || row.toolCalls.some(item => typeof item !== 'string' || item.length === 0 || item.length > 80)
+    || !Array.isArray(row.directoryObservations) || row.directoryObservations.length > 16
+    || row.directoryObservations.some(item => item === null || typeof item !== 'object' || Array.isArray(item)
+      || Object.keys(item).sort().join(',') !== 'command,stdout' || typeof item.command !== 'string'
+      || typeof item.stdout !== 'string' || Buffer.byteLength(item.command, 'utf8') > 8192
+      || Buffer.byteLength(item.stdout, 'utf8') > 8192)) throw new Error('invalid file execution evidence')
+  return value as ConversationFileExecutionEvidence
+}
+
+export function fileExecutionTexts(value: ConversationFileExecutionEvidence): string[] {
+  return [
+    `Verified native task tool calls in order: ${value.toolCalls.join(', ')}.`,
+    'No write or edit tool call occurred in this captured task. Captured input files matched initial bytes at the task capture boundary.',
+    ...value.directoryObservations.map(item => `Certified read-only directory command: ${item.command}\nDirectory stdout:\n${item.stdout}`),
+  ]
+}
+
 /** Quotable source text, excluding judgment-derived fields and native metadata. */
-export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial, 'request' | 'context' | 'files' | 'ancillaryContext'>, answers: readonly string[], toolEvents: readonly SessionEvent[] = [], finalEntries?: readonly ConversationFileEntry[]): string[] {
+export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial, 'request' | 'context' | 'files' | 'ancillaryContext' | 'fileExecution'>, answers: readonly string[], toolEvents: readonly SessionEvent[] = [], finalEntries?: readonly ConversationFileEntry[]): string[] {
   return [
     ...[...source.request, ...source.context].flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])),
     ...answers,
@@ -59,6 +91,7 @@ export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial,
       : [`Workspace root: ${source.files.cwd}`,
         ...source.files.entries.flatMap(entry => entry.content === null ? [] : [entry.content]),
         ...(source.ancillaryContext?.facts ?? []).map(fact => `Captured initial file ${fact.path}: bytes=${fact.bytes}; lines=${fact.lines}; sha256=${fact.sha256}`),
+        ...(source.fileExecution === undefined ? [] : fileExecutionTexts(source.fileExecution)),
         ...(source.files.outputKind === 'files' ? (finalEntries ?? []).flatMap(entry => source.files!.outputPaths.includes(entry.path) && entry.content !== null ? [entry.content] : []) : [])]),
   ]
 }
@@ -98,9 +131,31 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
   const files = recoverFiles(ctx, saved.meta.cwd, saved.events, task)
   const ancillaryContext = files === undefined ? undefined : projectConversationFileAncillaryContext(task.fileAncillary ?? [], files.entries)
+  const fileExecution = files?.outputKind === 'chat' ? recoverFileExecution(saved.events, task) : undefined
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
     ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }),
-    ...(files === undefined ? {} : { files }), ...(ancillaryContext === undefined ? {} : { ancillaryContext }) }
+    ...(files === undefined ? {} : { files }), ...(ancillaryContext === undefined ? {} : { ancillaryContext }),
+    ...(fileExecution === undefined ? {} : { fileExecution }) }
+}
+
+function recoverFileExecution(events: readonly SessionEvent[], task: ConversationTask): ConversationFileExecutionEvidence {
+  const calls = events.filter((event): event is Extract<SessionEvent, { type: 'tool/call' }> =>
+    event.seq >= task.source.startSeq && event.seq <= task.completion!.files!.captureSeq && event.type === 'tool/call')
+  const ancillary = new Map((task.fileAncillary ?? []).map(item => [item.callSeq, item.payload]))
+  const toolCalls = calls.map(call => {
+    const payload = ancillary.get(call.seq)
+    return payload?.tool === 'pwsh' ? 'pwsh (certified read-only directory)' : payload?.tool === 'pwsh-denied'
+      ? 'pwsh (denied before execution)' : call.data.name
+  })
+  const directoryObservations = (task.fileAncillary ?? []).flatMap(item => {
+    if (item.payload.tool !== 'pwsh') return []
+    const value = JSON.parse(item.payload.nativeValueJson) as { stdout?: { text?: unknown; truncated?: unknown } }
+    const receipt = JSON.parse(item.payload.nativeReceiptJson) as { command: string }
+    const stdout = value.stdout
+    return stdout?.truncated === false && typeof stdout.text === 'string' && Buffer.byteLength(stdout.text, 'utf8') <= 8192
+      ? [{ command: receipt.command, stdout: stdout.text }] : [{ command: receipt.command, stdout: '[output unavailable for review]' }]
+  })
+  return { schemaVersion: 'tianwen.file-execution-evidence.v1', capturedInputsUnchanged: true, toolCalls, directoryObservations }
 }
 
 function recordedToolPath(cwd: string, candidate: unknown): string | undefined {

@@ -19,7 +19,7 @@ import { TianwenNativeToolObservationService } from '../../packages/tianwen-runt
 import { NativeObservedPwshExecutor } from '../../packages/tianwen-runtime-bundle/src/native-pwsh-observer.js'
 import { runConversationFileTrial, recoverConversationFileTrial } from '../../packages/tianwen-runtime-bundle/src/conversation-file-trial.js'
 import { ConversationFileAncillaryCapture, verifyConversationFileAncillary } from '../../packages/tianwen-runtime-bundle/src/conversation-file-ancillary.js'
-import { runConversationClaimReview } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { projectClaimEvidence, runConversationClaimReview } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { canonicalJson } from '../../packages/tianwen-evolution/src/learning-intake.js'
 
 const nativeRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
@@ -349,15 +349,35 @@ it('keeps admitted method and positive locations in an independent replica trial
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
-it.skipIf(process.platform !== 'win32')('binds actual native pwsh directory terminal and foreground result before read', async () => {
-  const h = await runNativeAncillaryTask([glob(), toolCallResponse('directory', 'pwsh', { command: 'Get-Location', description: 'DESCRIPTION_CANARY' }), read()], undefined, { pwsh: true })
+it.skipIf(process.platform !== 'win32')('projects only verified directory output and read-only capture facts into original review', async () => {
+  const command = 'Get-ChildItem -Force | Select-Object Mode, Length, Name'
+  const h = await runNativeAncillaryTask([glob(), toolCallResponse('directory', 'pwsh', { command, description: 'DESCRIPTION_CANARY' }), read()], undefined, { pwsh: true })
   try {
     expect(h.task.fileUnavailable).toBeUndefined()
     expect(h.task.fileAncillary?.map(record => record.payload.tool)).toEqual(['glob', 'pwsh'])
     const recovered = await recoverConversationTaskMaterial(h.ctx, h.task)
     expect(recovered.files?.entries).toEqual([{ path: 'input.md', content: original }])
     expect(Object.hasOwn(recovered, 'ancillaryContext')).toBe(false)
-    expect(JSON.stringify(recovered)).not.toContain('Get-Location'); expect(JSON.stringify(recovered)).not.toContain('DESCRIPTION_CANARY')
+    expect(recovered.fileExecution).toMatchObject({ capturedInputsUnchanged: true,
+      directoryObservations: [{ command, stdout: expect.stringContaining('input.md') }] })
+    expect(JSON.stringify(recovered)).not.toContain('DESCRIPTION_CANARY')
+    const output = { answer: 'saved ORIGINAL_ANSWER_CANARY', files: recovered.files!.entries }
+    const evidence = projectClaimEvidence({ source: recovered, evaluationMode: 'local-files', conversation: [
+      { id: 'answer', role: 'assistant', content: [{ type: 'text', text: output.answer }] }], toolEvidence: [],
+      fileResult: { ...output, outputDigest: sha256(output) } })
+    expect(evidence.items.filter(item => item.role === 'tool').map(item => item.text).join('')).toContain('input.md')
+    expect(evidence.items.filter(item => item.role === 'tool').map(item => item.text).join('')).toContain('Captured input files matched initial bytes at the task capture boundary.')
+    const trial = projectClaimEvidence({ task: recovered, answer: output.answer,
+      fileResult: { ...output, outputDigest: sha256(output) } })
+    expect(trial.items.filter(item => item.role === 'tool').map(item => item.text).join('')).not.toContain('Certified read-only directory command')
+    const directory = h.task.fileAncillary!.find(item => item.payload.tool === 'pwsh')!
+    if (directory.payload.tool !== 'pwsh') throw new Error('directory record missing')
+    const altered = JSON.parse(directory.payload.nativeValueJson)
+    altered.stdout.text = 'INVENTED_LISTING_CANARY'
+    const changed = { ...directory, valueDigest: sha256(altered), payload: { ...directory.payload, nativeValueJson: canonicalJson(altered) } }
+    const rejected = await recoverConversationTaskMaterial(h.ctx, { ...h.task, fileAncillary: h.task.fileAncillary!.map(item => item === directory ? changed : item) })
+    expect(rejected.files).toBeUndefined()
+    expect(rejected.fileExecution).toBeUndefined()
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
