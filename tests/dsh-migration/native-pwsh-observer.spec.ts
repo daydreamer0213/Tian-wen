@@ -214,6 +214,14 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
       expect(() => observed.shell.start(observed.shell.resolve({ command: 'Get-Location' }))).toThrow(/not certifiable/u)
     }, { strict: true })
   })
+  it('does not certify a denial after another native command already ran in the capture', async () => {
+    const captured = await observed.tianwenNativeToolObservation.capture(identity, async () => {
+      await observed.shell.run(observed.shell.resolve({ command: 'Get-Location' }))
+      await expect(observed.shell.run(observed.shell.resolve({ command: 'Set-Content -LiteralPath late.txt -Value forbidden' }))).rejects.toThrow(/not certifiable/u)
+    }, { strict: true })
+    expect(captured.receipt).toBeUndefined()
+    expect(captured.denial).toBeUndefined()
+  })
   it('rejects ancestor junctions and paths outside the workspace',async () => {
     const outside=await mkdtemp(join(workspace,'..','outside-'))
     const link=join(workspace,'escape');await symlink(outside,link,'junction')

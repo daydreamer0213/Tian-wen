@@ -82,8 +82,10 @@ export class NativeObservedPwshExecutor extends SandboxPwshExecutor {
     return argv
   }
   override start(spec: ShellExecSpec): ShellProcess {
-    if (this.ctx.get('tianwenNativeToolObservation')?.current()?.strict) throw uncertifiableLocalFileCommand()
-    this.ctx.get('tianwenNativeToolObservation')?.begin()
+    const service = this.ctx.get('tianwenNativeToolObservation')
+    const scope = service?.current()
+    if (scope?.strict) { service!.deny(scope, spec.command, 'background'); throw uncertifiableLocalFileCommand() }
+    service?.begin()
     this.prefixes.delete(spec)
     return super.start(spec)
   }
@@ -134,15 +136,16 @@ export class NativeObservedPwshExecutor extends SandboxPwshExecutor {
     const service = this.ctx.get('tianwenNativeToolObservation')
     const scope = service?.begin()
     if (!scope) return super.run(spec)
+    const reject = () => { service!.deny(scope, spec.command, 'foreground'); throw uncertifiableLocalFileCommand() }
     if (process.platform !== 'win32' || scope.runs !== 1 || spec.timeoutMs < 5000
       || Buffer.byteLength(spec.command) > 8192 || spec.signal?.aborted) {
-      if (scope.strict) throw uncertifiableLocalFileCommand()
+      if (scope.strict) return reject()
       return super.run(spec)
     }
     const commands = await this.qualify(spec)
     const root = spec.sandboxPolicy?.workspaceRoot
     if (!commands || !root || !await admittedPaths(root, spec.workdir, commands).catch(() => false)) {
-      if (scope.strict) throw uncertifiableLocalFileCommand()
+      if (scope.strict) return reject()
       return super.run(spec)
     }
     const nonce = randomUUID(); const pipe = `tianwen-native-directory-${nonce}`

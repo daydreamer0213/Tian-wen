@@ -361,12 +361,13 @@ it.skipIf(process.platform !== 'win32')('binds actual native pwsh directory term
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
-it.skipIf(process.platform !== 'win32')('rejects a free-form pwsh count before execution and fails file review closed', async () => {
+it.skipIf(process.platform !== 'win32')('records a denied free-form pwsh count without losing certified file input', async () => {
   const h = await runNativeAncillaryTask([read(), toolCallResponse('count', 'pwsh', { command: "@('a','b').Count", description: 'Count draft items.' })], undefined, { pwsh: true })
   try {
-    expect(h.task.fileUnavailable?.reason).toBe('material-unavailable')
+    expect(h.task.fileUnavailable).toBeUndefined()
     expect(h.task.completion?.status).toBe('completed')
-    expect(h.task.completion?.files).toBeUndefined()
+    expect(h.task.completion?.files?.entries).toEqual([{ path: 'input.md', content: original }])
+    expect(h.task.fileAncillary?.map(record => record.payload.tool)).toEqual(['pwsh-denied'])
     const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'count')
     expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(true)
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
@@ -380,7 +381,19 @@ it.skipIf(process.platform !== 'win32')('blocks an uncertifiable pwsh command be
     expect(existsSync(join(h.root, 'probe-created.txt'))).toBe(false)
     const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'create-probe')
     expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(true)
-    expect(h.task.completion?.files).toBeUndefined()
+    expect(h.task.completion?.files?.entries).toEqual([{ path: 'input.md', content: original }])
+    expect(h.task.fileAncillary?.map(record => record.payload.tool)).toEqual(['pwsh-denied'])
+    expect(h.task.review?.verdict).toBe('met')
+    expect(h.task.review?.reviewChecks).toHaveLength(2)
+    const recovered = await recoverConversationTaskMaterial(h.ctx, h.task)
+    expect(recovered.files?.entries).toEqual([{ path: 'input.md', content: original }])
+    expect(recovered.ancillaryContext).toBeUndefined()
+    const denial = h.task.fileAncillary![0]!
+    if (denial.payload.tool !== 'pwsh-denied') throw new Error('denial record unavailable')
+    const changed = { ...denial, payload: { ...denial.payload,
+      nativeDenialJson: canonicalJson({ ...JSON.parse(denial.payload.nativeDenialJson), commandDigest: sha256('another command') }) } }
+    expect((await recoverConversationTaskMaterial(h.ctx, { ...h.task, fileAncillary: [changed] })).files).toBeUndefined()
+    expect((await recoverConversationTaskMaterial(h.ctx, { ...h.task, fileAncillary: [] })).files).toBeUndefined()
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 

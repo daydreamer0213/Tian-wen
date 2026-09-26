@@ -17,7 +17,7 @@ const ANCILLARY_CONTEXT_MAX_BYTES = 24576
 export interface ConversationAncillaryProducer {
   readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh' | '@tianwen/runtime-bundle'
   readonly version: '0.1.1-rc.2' | '1'
-  readonly adapter: 'tianwen.file-ancillary.v1' | 'tianwen.captured-file-facts.v1'
+  readonly adapter: 'tianwen.file-ancillary.v1' | 'tianwen.captured-file-facts.v1' | 'tianwen.pwsh-denial.v1'
 }
 
 export type ConversationAncillaryPayload =
@@ -25,6 +25,7 @@ export type ConversationAncillaryPayload =
   | { readonly tool: 'grep'; readonly matches: readonly { readonly path: string; readonly lineNumber: number; readonly line: string }[]; readonly nativeValueJson?: string }
   | { readonly tool: 'skill'; readonly reference: ConversationSkillAdmission; readonly definition: Readonly<Record<string, unknown>> }
   | { readonly tool: 'pwsh'; readonly nativeReceiptJson: string; readonly nativeValueJson: string }
+  | { readonly tool: 'pwsh-denied'; readonly nativeDenialJson: string }
   | { readonly tool: typeof CAPTURED_FILE_FACTS_TOOL; readonly facts: CapturedFileFacts; readonly inputDigest: Sha256Digest }
 
 export interface ConversationTaskFileAncillary {
@@ -133,7 +134,8 @@ function assertConsistentPaths(paths: readonly string[], duplicateAllowed = fals
 
 function parseProducer(value: unknown): ConversationAncillaryProducer {
   const input = exactObject(value, ['package', 'version', 'adapter'])
-  if (input.package === '@tianwen/runtime-bundle' && input.version === '1' && input.adapter === 'tianwen.captured-file-facts.v1') {
+  if (input.package === '@tianwen/runtime-bundle' && input.version === '1'
+    && (input.adapter === 'tianwen.captured-file-facts.v1' || input.adapter === 'tianwen.pwsh-denial.v1')) {
     return { package: input.package, version: input.version, adapter: input.adapter }
   }
   if ((input.package !== '@deepseek-ai/dsh-tool-fs-search' && input.package !== '@deepseek-ai/dsh-tool-skill'
@@ -192,6 +194,10 @@ function parsePayload(value: unknown): ConversationAncillaryPayload {
     return { tool, nativeReceiptJson: canonicalObjectJson(input.nativeReceiptJson, 'native receipt JSON'),
       nativeValueJson: canonicalObjectJson(input.nativeValueJson, 'native value JSON') }
   }
+  if (tool === 'pwsh-denied') {
+    const input = exactObject(value, ['tool', 'nativeDenialJson'])
+    return { tool, nativeDenialJson: canonicalObjectJson(input.nativeDenialJson, 'native denial JSON') }
+  }
   if (tool === CAPTURED_FILE_FACTS_TOOL) {
     const input = exactObject(value, ['tool', 'facts', 'inputDigest'])
     const facts = exactObject(input.facts, ['path', 'bytes', 'lines', 'sha256'])
@@ -214,8 +220,10 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
   const payload = parsePayload(input.payload)
   const expectedPackage = payload.tool === 'skill' ? '@deepseek-ai/dsh-tool-skill'
     : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh'
-      : payload.tool === CAPTURED_FILE_FACTS_TOOL ? '@tianwen/runtime-bundle' : '@deepseek-ai/dsh-tool-fs-search'
+      : payload.tool === CAPTURED_FILE_FACTS_TOOL || payload.tool === 'pwsh-denied' ? '@tianwen/runtime-bundle' : '@deepseek-ai/dsh-tool-fs-search'
   if (producer.package !== expectedPackage) throw new TypeError('conversation file ancillary producer does not match its tool')
+  if (payload.tool === 'pwsh-denied' && producer.adapter !== 'tianwen.pwsh-denial.v1') throw new TypeError('conversation file denial producer is invalid')
+  if (payload.tool === CAPTURED_FILE_FACTS_TOOL && producer.adapter !== 'tianwen.captured-file-facts.v1') throw new TypeError('conversation file facts producer is invalid')
   const result: ConversationTaskFileAncillary = {
     kind: input.kind, taskId: identity(input.taskId, 'task identity'), callId: identity(input.callId, 'call identity'),
     callSeq: positiveInteger(input.callSeq, 'call'), resultSeq: positiveInteger(input.resultSeq, 'result'),

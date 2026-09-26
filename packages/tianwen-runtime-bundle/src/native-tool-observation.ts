@@ -21,6 +21,12 @@ export interface NativeDirectoryReceipt {
   readonly nativeResultDigest: string
   readonly frames: readonly (readonly string[])[]
 }
+export interface NativePwshDenial {
+  readonly schemaVersion: 'tianwen.native-pwsh-denial.v1'
+  readonly identity: NativeToolCaptureIdentity
+  readonly commandDigest: string
+  readonly mode: 'foreground' | 'background'
+}
 
 const implementations: Record<string, readonly [string, string]> = {
   'get-location': ['GetLocationCommand', 'Management'],
@@ -133,7 +139,17 @@ export function parseNativeDirectoryReceipt(value: unknown): NativeDirectoryRece
   return structuredClone(value) as NativeDirectoryReceipt
 }
 
-interface CaptureScope { readonly identity: NativeToolCaptureIdentity; readonly strict: boolean; runs: number; closed: boolean; receipt?: NativeDirectoryReceipt }
+export function parseNativePwshDenial(value: unknown): NativePwshDenial {
+  const row = object(value, ['schemaVersion', 'identity', 'commandDigest', 'mode'])
+  assert(row.schemaVersion === 'tianwen.native-pwsh-denial.v1'
+    && (row.mode === 'foreground' || row.mode === 'background'))
+  const identity = object(row.identity, ['taskId', 'sessionId', 'callId'])
+  for (const item of Object.values(identity)) text(item)
+  digest(row.commandDigest)
+  return structuredClone(value) as NativePwshDenial
+}
+
+interface CaptureScope { readonly identity: NativeToolCaptureIdentity; readonly strict: boolean; runs: number; closed: boolean; receipt?: NativeDirectoryReceipt; denial?: NativePwshDenial }
 declare module '@deepseek-ai/cordis' { interface Context { tianwenNativeToolObservation: TianwenNativeToolObservationService } }
 export class TianwenNativeToolObservationService extends Service {
   private readonly storage = new AsyncLocalStorage<CaptureScope>()
@@ -147,16 +163,26 @@ export class TianwenNativeToolObservationService extends Service {
   record(scope: CaptureScope, receipt: NativeDirectoryReceipt): void {
     try {
       const parsed = parseNativeDirectoryReceipt(receipt)
-      if (scope.closed || scope.runs !== 1 || JSON.stringify(parsed.identity) !== JSON.stringify(scope.identity)) return
+      if (scope.closed || scope.denial !== undefined || scope.runs !== 1 || JSON.stringify(parsed.identity) !== JSON.stringify(scope.identity)) return
       scope.receipt = parsed
     } catch { delete scope.receipt }
   }
-  async capture<T>(identity: NativeToolCaptureIdentity, next: () => Promise<T>, options: { readonly strict?: boolean } = {}): Promise<{ readonly result: T; readonly receipt?: NativeDirectoryReceipt }> {
+  deny(scope: CaptureScope, command: string, mode: NativePwshDenial['mode']): void {
+    // A denial may certify non-execution only when this is the first native
+    // launch attempt in the capture. A later rejected attempt cannot erase an
+    // earlier process that already ran under the same tool call.
+    if (scope !== this.current() || !scope.strict || scope.denial !== undefined || scope.receipt !== undefined
+      || scope.runs !== (mode === 'foreground' ? 1 : 0)) return
+    scope.denial = parseNativePwshDenial({ schemaVersion: 'tianwen.native-pwsh-denial.v1', identity: scope.identity,
+      commandDigest: sha256(command), mode })
+  }
+  async capture<T>(identity: NativeToolCaptureIdentity, next: () => Promise<T>, options: { readonly strict?: boolean } = {}): Promise<{ readonly result: T; readonly receipt?: NativeDirectoryReceipt; readonly denial?: NativePwshDenial }> {
     const id = object(identity, ['taskId','sessionId','callId']); Object.values(id).forEach(value => { text(value); assert(value.length <= 512) })
     const scope: CaptureScope = { identity: { ...identity }, strict: options.strict === true, runs: 0, closed: false }
     return this.storage.run(scope, async () => {
-      try { const result = await next(); return { result, ...(scope.runs === 1 && scope.receipt ? { receipt: scope.receipt } : {}) } }
-      finally { scope.closed = true; delete scope.receipt }
+      try { const result = await next(); return { result, ...(scope.runs === 1 && scope.receipt ? { receipt: scope.receipt } : {}),
+        ...(scope.denial ? { denial: scope.denial } : {}) } }
+      finally { scope.closed = true; delete scope.receipt; delete scope.denial }
     })
   }
 }

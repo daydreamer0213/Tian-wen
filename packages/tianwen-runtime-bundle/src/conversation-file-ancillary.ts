@@ -9,7 +9,7 @@ import { parseConversationTaskFileAncillary, parseConversationSkillAdmission, pa
   projectConversationFileAncillaryContext, sha256, type ConversationSkillAdmission, type ConversationTask,
   CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type ConversationTaskFileAncillary, type ConversationAncillaryPayload, type ConversationAncillaryProducer } from '@tianwen/evolution'
 import { conversationFilePath } from './conversation-file-material.js'
-import { parseNativeDirectoryReceipt, type NativeDirectoryReceipt } from './native-tool-observation.js'
+import { parseNativeDirectoryReceipt, parseNativePwshDenial, type NativeDirectoryReceipt, type NativePwshDenial } from './native-tool-observation.js'
 import type { NativeToolRegistrationProducer } from './native-tools-observer.js'
 
 export interface ConversationFileAncillaryConfig {
@@ -26,11 +26,13 @@ interface Pending {
   readonly argumentsDigest: ReturnType<typeof sha256>
   method?: Extract<ConversationAncillaryPayload, { tool: 'skill' }>
   receipt?: NativeDirectoryReceipt
+  denial?: NativePwshDenial
   result?: ToolExecutionResult
   settled: boolean
 }
 const ancillaryNames = new Set(['glob', 'grep', 'skill', 'pwsh', CAPTURED_FILE_FACTS_TOOL])
 const factsProducer = { package: '@tianwen/runtime-bundle', version: '1', adapter: 'tianwen.captured-file-facts.v1' } as const
+const denialProducer = { package: '@tianwen/runtime-bundle', version: '1', adapter: 'tianwen.pwsh-denial.v1' } as const
 export function isFileAncillaryTool(name: string): boolean { return ancillaryNames.has(name) }
 function assert(value: unknown): asserts value { if (!value) throw new Error('native file ancillary evidence is unavailable') }
 function object(value: unknown): Record<string, unknown> {
@@ -73,7 +75,7 @@ function registration(ctx: Context, definition: ToolDefinition): NativeToolRegis
   const runtime = ctx.tools as Context['tools'] & { nativeRegistration?: (definition: ToolDefinition) => NativeToolRegistrationProducer | undefined }
   return runtime.nativeRegistration?.(definition)
 }
-function resultFor(events: readonly SessionEvent[], call: Call, boundary: number): Result {
+function resultFor(events: readonly SessionEvent[], call: Call, boundary: number, denied = false): Result {
   const matches = events.filter((event): event is Result => event.type === 'tool/result'
     && String(event.data.message.source.callId) === String(call.data.callId))
   assert(matches.length === 1)
@@ -81,7 +83,7 @@ function resultFor(events: readonly SessionEvent[], call: Call, boundary: number
   assert(isAppendSurfaceEvent(event) && event.seq > call.seq && event.seq <= boundary
     && event.sourceEventSeqs?.length === 1 && event.sourceEventSeqs[0] === call.seq
     && event.data.turn === call.data.turn && event.data.step === call.data.step
-    && event.data.error === undefined && event.data.message.content[0].isError !== true)
+    && event.data.error === undefined && (event.data.message.content[0].isError === true) === denied)
   return event
 }
 function eventProjection(event: Result): unknown {
@@ -146,8 +148,9 @@ export function verifyConversationFileAncillary(task: ConversationTask, cwd: str
     const record = parseConversationTaskFileAncillary(raw)
     const call = calls.find(item => item.seq === record.callSeq)
     assert(call !== undefined && record.taskId === task.source.taskId && record.callId === String(call.data.callId)
-      && call.data.name === record.payload.tool && record.argumentsDigest === sha256(JSON.parse(call.data.arguments)))
-    const result = resultFor(events, call, boundary)
+      && call.data.name === (record.payload.tool === 'pwsh-denied' ? 'pwsh' : record.payload.tool)
+      && record.argumentsDigest === sha256(JSON.parse(call.data.arguments)))
+    const result = resultFor(events, call, boundary, record.payload.tool === 'pwsh-denied')
     assert(result.seq === record.resultSeq && sha256(result) === record.resultDigest)
     let value: unknown
     switch (record.payload.tool) {
@@ -178,6 +181,17 @@ export function verifyConversationFileAncillary(task: ConversationTask, cwd: str
         if (config !== undefined) admitted(record.payload.reference, task, config)
         value = skillValue(record.payload); break
       case 'pwsh': value = verifyDirectory(record.payload, task, cwd, call); break
+      case 'pwsh-denied': {
+        const denial = parseNativePwshDenial(JSON.parse(record.payload.nativeDenialJson))
+        const args = object(JSON.parse(call.data.arguments))
+        assert(denial.identity.taskId === task.source.taskId && denial.identity.sessionId === task.source.sessionId
+          && denial.identity.callId === String(call.data.callId) && denial.commandDigest === sha256(args.command)
+          && (denial.mode === 'background') === (args.run_in_background === true))
+        const content = result.data.message.content[0].content
+        assert(content.length === 1 && content[0]?.type === 'text'
+          && content[0].text === 'Error: PowerShell command is not certifiable for this local-file task; use read, glob, grep, or tianwen_captured_file_facts.')
+        value = denial; break
+      }
       case CAPTURED_FILE_FACTS_TOOL: {
         const payload = record.payload
         const args = exact(JSON.parse(call.data.arguments), ['file_path'])
@@ -210,7 +224,7 @@ export class ConversationFileAncillaryCapture {
     this.invalid = true
     // Async prepare/execute can still hold a row after removal from the map.
     for (const pending of this.pending.values()) {
-      delete pending.method; delete pending.result; delete pending.receipt
+      delete pending.method; delete pending.result; delete pending.receipt; delete pending.denial
     }
     this.pending.clear()
   }
@@ -252,6 +266,7 @@ export class ConversationFileAncillaryCapture {
       if (service === undefined) return await next()
       const captured = await service.capture({ taskId: this.task.source.taskId, sessionId: this.task.source.sessionId, callId: String(exec.callId) }, next, { strict: true })
       if (!this.invalid && this.pending.get(String(exec.callId)) === pending && captured.receipt !== undefined) pending.receipt = captured.receipt
+      if (!this.invalid && this.pending.get(String(exec.callId)) === pending && captured.denial !== undefined) pending.denial = captured.denial
       return captured.result
     } finally { if (pending !== undefined) pending.settled = true }
   }
@@ -266,7 +281,8 @@ export class ConversationFileAncillaryCapture {
         && (exec.name === CAPTURED_FILE_FACTS_TOOL
           ? this.ctx.get('tianwenConversationFileObserver')?.isFactsDefinition(pending.definition) === true
           : !isFileAncillaryTool(exec.name) || sha256(registration(this.ctx, pending.definition) ?? null) === sha256(pending.producer))
-        && pending.result === undefined && Object.isFrozen(exec) && Object.isFrozen(result) && !result.isError)
+        && pending.result === undefined && Object.isFrozen(exec) && Object.isFrozen(result)
+        && result.isError === (pending.denial !== undefined))
       pending.result = structuredClone(result)
     } catch { this.invalid = true }
   }
@@ -279,8 +295,16 @@ export class ConversationFileAncillaryCapture {
     for (const call of calls) {
       const pending = this.pending.get(String(call.data.callId))
       assert(pending !== undefined && pending.settled && pending.result !== undefined && sha256(call) === sha256(pending.call))
-      const event = resultFor(events, call, boundary)
+      const event = resultFor(events, call, boundary, pending.denial !== undefined)
       assert(sha256(eventProjection(event)) === sha256(finalProjection(pending.result)))
+      if (pending.denial !== undefined) {
+        assert(call.data.name === 'pwsh' && pending.receipt === undefined && pending.result.isError)
+        records.push(parseConversationTaskFileAncillary({ kind: 'task-file-ancillary-captured', taskId: task.source.taskId,
+          callId: String(call.data.callId), callSeq: call.seq, resultSeq: event.seq, argumentsDigest: pending.argumentsDigest,
+          resultDigest: sha256(event), valueDigest: sha256(pending.denial), producer: denialProducer,
+          payload: { tool: 'pwsh-denied', nativeDenialJson: canonicalJson(pending.denial) } }))
+        continue
+      }
       if (!isFileAncillaryTool(call.data.name)) continue
       const value = object(pending.result.value)
       let payload: ConversationAncillaryPayload
