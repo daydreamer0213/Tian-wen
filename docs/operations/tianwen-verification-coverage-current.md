@@ -1,5 +1,9 @@
 # 天问验证总表：已有证明、剩余缺口与补测必要性
 
+## 2026-09-26 单条来源核对诊断：八题正确，产品门槛尚未建立
+
+新隔离配置档对事先冻结的八条单断言各运行一次真实 DeepSeek V4 Flash / High 复核。五条来源越界均判 `unsupported`，一条明确允许的可能性判 `permitted-fallible`，两条用户提供的事实判 `supported-fact`；八份原生证明和九份会话通过只读审计。旧六题的离线筛选能在双 `met` 案例中选中 036-S1、R6-W3 的已知错误单元，但同样选中正常 W8 的两个单元。单断言由人工挑选，不能证明长答案自动抽取、稳定效果、成本或完整产品连接。见[诊断与下一步门槛](tianwen-atomic-source-diagnostic-results-20260926.md)。main/Daily NO-GO。
+
 ## 2026-09-26 来源边界提示候选前瞻：关键旧题仍误放行
 
 候选 `185ce30` 在冻结的旧六题与新 H1–H6 上得到 12 份首次双评审结果、24 份有效原生证明。新题 H1–H3 均 `not-met/not-met`、H4–H6 均 `met/met`，但 036-S1、R6-W3 仍 `met/met`，W1 本次也 `met/met`；预设门槛未过。工程 40 项测试和类型检查通过只证明代码完整性。该候选产品指令撤回，不上线；真实自然采纳、方法效果和日常交付仍未证明。见[结果](tianwen-semantic-boundary-candidate-results-20260926.md)。main/Daily NO-GO。
