@@ -264,13 +264,41 @@ it('continues the actual user task when admission is unavailable and never backf
 })
 
 it('does not promote a model opinion about external effects to verified completion', async () => {
-  const harness = await mount([structured({ ...admission, evaluationMode: 'external' }), textResponse('预计 5 天完成。'), ...reviewPair(review)])
+  const harness = await mount([structured({ ...admission, evaluationMode: 'external' }), structured({ ...admission, evaluationMode: 'external' }), textResponse('预计 5 天完成。'), ...reviewPair(review)])
   try {
     harness.handle.agent.followup(direct('把计划写入文件，写明预计 5 天完成。'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]
     expect(task?.review?.verdict).toBe('inconclusive')
     expect(task?.review?.proof).not.toBeNull()
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('rechecks an external admission for a read-only workspace file query before the answer', async () => {
+  const local = { kind: 'task', objective: 'Report local source file facts in chat', criteria: ['Read files', 'Report exact file facts', 'Do not change files'],
+    family: 'other', evaluationMode: 'local-files', fileOutputKind: 'chat', relatedTaskId: null, feedback: null }
+  const harness = await mount([structured({ ...local, evaluationMode: 'external', fileOutputKind: undefined }), structured(local), textResponse('已读取文件。')])
+  try {
+    harness.handle.agent.followup(direct('查看当前工作区的 TypeScript 文件，实际读取后报告每个文件的行数、字节数和 SHA-256，只在对话中回答，不改文件。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.decision).toMatchObject({ evaluationMode: 'local-files', fileOutputKind: 'chat' })
+    expect(task.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[1]?.sessionId))
+    expect((await recoverConversationAdmissionJudgment(harness.ctx, task.admission!.proof!, task.admission!.decision)).instruction)
+      .toContain('Verify the evaluation mode independently')
+    expect(harness.adapter.requests).toHaveLength(3)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps an external file task external when the recheck is unavailable', async () => {
+  const external = { ...admission, evaluationMode: 'external' }
+  const harness = await mount([structured(external), new Error('recheck unavailable'), textResponse('没有执行测试。'), ...reviewPair(review)])
+  try {
+    harness.handle.agent.followup(direct('读取工作区文件并运行测试，把测试结果报告给我。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.decision?.evaluationMode).toBe('external')
+    expect(task.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[0]?.sessionId))
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 

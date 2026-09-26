@@ -85,7 +85,9 @@ for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover'
   const script: ScriptEntry[] = []
   for (let i = 1; i <= 3; i++) script.push(structured({ ...admission, ...(clueOnly && i === 3 ? { family: 'writing' } : {}), fileOutputKind: chat ? 'chat' : 'files' }), toolCallResponse(`read-${i}`, 'read', { file_path: 'input.md' }),
     ...(chat ? [] : [toolCallResponse(`write-${i}`, 'write', { file_path: 'output.md', content: `pilot original ${i}` })]), textResponse('pilot saved'), ...pair(i === 3 ? 'met' : 'not-met'))
-  if (scenario.startsWith('feedback-clue')) script.push(structured(externalClue ? { ...admission, evaluationMode: 'external', fileOutputKind: undefined } : admission), toolCallResponse('read-clue', 'read', { file_path: 'input.md' }), textResponse('partial reply without a saved output'), ...(externalClue ? pair('inconclusive') : []))
+  if (scenario.startsWith('feedback-clue')) script.push(structured(externalClue ? { ...admission, evaluationMode: 'external', fileOutputKind: undefined } : admission),
+    ...(externalClue ? [structured({ ...admission, evaluationMode: 'external', fileOutputKind: undefined })] : []),
+    toolCallResponse('read-clue', 'read', { file_path: 'input.md' }), textResponse('partial reply without a saved output'), ...(externalClue ? pair('inconclusive') : []))
   if (scenario.startsWith('feedback')) script.push(structured({ classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain pilot scope.'], explanation: 'The original output contains the claimed issue.', evidenceQuotes: [scenario.startsWith('feedback-clue') ? 'partial reply without a saved output' : 'pilot original 1'] }))
   const generated = (kind: string) => ({ prompt: `Summarize ${kind} pilot input.`, criteria: ['Preserve pilot scope.'], files: { entries: [{ path: 'input.md', content: `pilot ${kind}` }, ...(chat ? [] : [{ path: 'output.md', content: null }])], outputPaths: chat ? [] : ['output.md'] } })
   if (!clueOnly) script.push(request => {
