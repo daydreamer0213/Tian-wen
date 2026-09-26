@@ -97,7 +97,7 @@ export class TianwenConversationFileObserverService extends Service {
     const service = this
     const definition = defineTool({
       name: CAPTURED_FILE_FACTS_TOOL,
-      description: 'For an ordinary local-file task, get exact byte length, physical line count and SHA-256 for one UTF-8 workspace file. Use this instead of PowerShell counting or hashing. The result is tied to the captured initial file; give a relative file path.',
+      description: 'For an ordinary local-file task, get exact byte length, physical line count and SHA-256 for one UTF-8 workspace file from its captured initial content. Give a relative file path. Use these native facts directly; a PowerShell count, hash or cross-check cannot be certified as local-file evidence. Physical lines are LF-delimited: empty content has 0 lines, one LF has 1 line, and a\\nb\\nc has 3 lines; a terminal LF adds no extra blank line.',
       parameters: { file_path: { type: 'string', required: true } },
       output: {
         schema: { type: 'object', properties: {
