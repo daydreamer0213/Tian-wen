@@ -1,5 +1,9 @@
 # 天问验证总表：已有证明、剩余缺口与补测必要性
 
+## 2026-09-26 E038 真实项目排查：一次反馈可归因，研究未打开
+
+全新隔离配置档中，天问实际读取 E037 账本和源码副本完成一次排查；控制者针对首答的证据越界只给一次纠正。产品独立评为 `attributable-problem / verification`，反馈原生证明可恢复；原任务复核 `inconclusive`，文件证据另记 `material-unavailable`。九份原生会话导出、冻结材料与包字节通过只读审计。学习已关闭，研究与方法激活均为零。E037 另核三份分析子会话请求头均在关闭前；该结论限于已保存的原生记录。详见[038 结果](tianwen-real-task-038-results-20260926.md)。下一阶段先诊断文件证据和不确定复核，再继续来源—研究—采用—未来任务的分段验收；main/Daily NO-GO。
+
 ## 2026-09-26 学习就绪状态：两种桌面状态通过，链路仍 NO-GO
 
 全新 E037 从提交 `7064967` 重新打包安装，真实模型在主会话调用状态工具，四次原始返回依次是 `analysis-disabled`、`awaiting-compatible-sources`、`awaiting-compatible-sources`、`analysis-disabled`；同意状态依次为关、开、开、关。冻结输入、六次原生工具调用和结果、安装文件与账本均经只读审计，学习关闭、host 退出。没有相容证据、研究或方法采用；其他三种就绪状态没有本轮桌面证据。见[037 结果](tianwen-guidance-readiness-037-results-20260926.md)。完整反馈链路、方法安全和 Daily 交付仍未证明，main/Daily NO-GO。
