@@ -62,6 +62,8 @@ function generatedCases(value: unknown, qualityContract: ConversationQualityCont
 export class TianwenConversationGuidanceLoopService extends Service {
   static inject = ['agents', 'sessions', 'sessionPersistence', 'subagents', 'tianwenEvolution', 'llm'] as const
   private readonly lanes = new Map<string, Promise<void>>()
+  private readonly laneAgents = new Map<string, Agent>()
+  private readonly laneInterrupts = new Map<string, () => void>()
   private readonly persistedWakes = new Map<string, Promise<void>>()
   private readonly dirty = new Set<string>()
   private readonly controllers = new Set<AbortController>()
@@ -110,13 +112,18 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (task !== undefined) wakeSession(task.source.sessionId)
     })
     const offCreated = this.ctx.on('agent/created', ({ agent }) => { if (root(agent)) void this.schedule(agent).catch(error => this.warn(error)) })
+    const offDisposed = this.ctx.on('agent/disposed', ({ agent }) => {
+      const scopeKey = `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}`
+      if (this.laneAgents.get(scopeKey) === agent) this.laneInterrupts.get(scopeKey)?.()
+    })
     const offConsent = this.ctx.on('tianwen/learning-consent-changed', () => {
       for (const controller of this.controllers) controller.abort()
       for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
     })
     for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
     this.ctx.effect(() => async () => {
-      this.accepting = false; offReview(); offCreated(); offConsent(); offFeedback(); offAssessment()
+      this.accepting = false; offReview(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
+      for (const interrupt of this.laneInterrupts.values()) interrupt()
       for (const controller of this.controllers) controller.abort()
       await this.whenIdle()
     }, 'tianwen-conversation-guidance-loop.dispose')
@@ -219,11 +226,23 @@ export class TianwenConversationGuidanceLoopService extends Service {
     this.rollbackIfNeeded(scopeKey)
     this.dirty.add(scopeKey)
     const existing = this.lanes.get(scopeKey)
-    if (existing !== undefined) return existing
+    if (existing !== undefined) {
+      if (this.laneAgents.get(scopeKey) !== agent) {
+        this.laneInterrupts.get(scopeKey)?.()
+        return existing.then(() => this.schedule(agent))
+      }
+      return existing
+    }
+    let interrupt!: () => void
+    const interrupted = new Promise<'interrupted'>(resolve => { interrupt = () => resolve('interrupted') })
+    this.laneAgents.set(scopeKey, agent)
+    this.laneInterrupts.set(scopeKey, interrupt)
     let vanished = false
     const work = Promise.resolve().then(async () => {
       while (this.accepting && this.dirty.delete(scopeKey)) {
-        await agent.whenIdle()
+        if (this.ctx.agents.get(agent.session.id) !== agent) { vanished = true; return }
+        const idle = await Promise.race([agent.whenIdle().then(() => 'idle' as const), interrupted])
+        if (idle === 'interrupted') { vanished = this.ctx.agents.get(agent.session.id) !== agent; return }
         if (this.ctx.agents.get(agent.session.id) !== agent) { vanished = true; return }
         this.rollbackIfNeeded(scopeKey)
         await this.recoverAccepted(scopeKey)
@@ -232,6 +251,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
       }
     }).finally(() => {
       this.lanes.delete(scopeKey)
+      this.laneAgents.delete(scopeKey)
+      this.laneInterrupts.delete(scopeKey)
       if (vanished && this.accepting) {
         const task = [...this.ctx.tianwenEvolution.listConversationTasks()].reverse().find(item => item.source.scopeKey === scopeKey && item.completion?.status === 'completed')
         if (task !== undefined) void this.wakeTask(task).catch(error => this.warn(error))

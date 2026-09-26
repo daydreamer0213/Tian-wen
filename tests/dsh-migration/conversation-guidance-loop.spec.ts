@@ -74,12 +74,35 @@ it('retries persisted evidence if a live root disappears while waiting for idle'
   const agent = { session: { id: SessionId('stale-root'), header: { cwd: 'D:/DevData/stale-root' } }, whenIdle: async () => {} }
   const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService & Record<string, unknown>
   Object.assign(service, { ctx: { agents: { get: () => undefined }, tianwenEvolution: { listConversationTasks: () => [task] } },
-    lanes: new Map(), dirty: new Set(), accepting: true })
+    lanes: new Map(), laneAgents: new Map(), laneInterrupts: new Map(), dirty: new Set(), accepting: true })
   vi.spyOn(service as never, 'rollbackIfNeeded' as never).mockImplementation(() => {})
   vi.spyOn(service as never, 'recoverAccepted' as never).mockResolvedValue(undefined)
   const wake = vi.spyOn(service as never, 'wakeTask' as never).mockResolvedValue(undefined)
   await service.schedule(agent as never)
   expect(wake).toHaveBeenCalledWith(task)
+})
+
+it('lets a fresh root schedule work while a prior root never reaches idle', async () => {
+  const cwd = 'D:/DevData/stale-root'
+  let releaseOld!: () => void
+  const old = { session: { id: SessionId('prior-root'), header: { cwd } }, whenIdle: () => new Promise<void>(resolve => { releaseOld = resolve }) }
+  const fresh = { session: { id: SessionId('fresh-root'), header: { cwd } }, whenIdle: vi.fn(async () => {}) }
+  let oldLive = true
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService & Record<string, unknown>
+  Object.assign(service, { ctx: { agents: { get: (id: string) => id === 'fresh-root' ? fresh : oldLive && id === 'prior-root' ? old : undefined },
+    tianwenEvolution: { listConversationTasks: () => [] }, on: () => () => {} },
+    lanes: new Map(), laneAgents: new Map(), laneInterrupts: new Map(), dirty: new Set(), accepting: true })
+  vi.spyOn(service as never, 'rollbackIfNeeded' as never).mockImplementation(() => {})
+  vi.spyOn(service as never, 'recoverAccepted' as never).mockResolvedValue(undefined)
+  vi.spyOn(service as never, 'select' as never).mockResolvedValue(undefined)
+  const pending = service.schedule(old as never)
+  await Promise.resolve()
+  try {
+    oldLive = false
+    const latest = service.schedule(fresh as never)
+    expect(await Promise.race([latest.then(() => true), new Promise(resolve => setTimeout(() => resolve(false), 100))])).toBe(true)
+    expect(fresh.whenIdle).toHaveBeenCalled()
+  } finally { releaseOld(); await pending }
 })
 
 it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', 'packet-catalog'] as const)('keeps external native feedback proposer-only in a complete text study: %s', async scenario => {
