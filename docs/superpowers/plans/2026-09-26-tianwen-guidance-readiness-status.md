@@ -44,4 +44,4 @@
 **Files:** `docs/operations/tianwen-current-project-handoff.md`, `docs/operations/tianwen-verification-coverage-current.md`.
 
 - [x] Record exact verification and the fact that semantic safety and complete chain remain unproved.
-- [ ] Run `git diff --check`, inspect final diff, commit and push this branch.
+- [x] Run `git diff --check`, inspect final diff, commit and push this branch.
