@@ -27,7 +27,8 @@ import { conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
-const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output', value)
+const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output',
+  'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const evidenceResponse = auditedEvidenceResponse
 const plainEvidenceResponse = (value: Record<string, unknown> & { evidenceQuotes: readonly string[] }) => (request: GenerateOptions) => {
   const schema = request.tools?.find(tool => tool.name === 'structured_output')?.parameters as ObjectJsonSchema | undefined

@@ -31,7 +31,8 @@ const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-su
 const localFs = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-fs-local')).href)
 const presets = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-agent-presets')).href)
 const fileToolsPath = cliRequire.resolve('@deepseek-ai/dsh-tool-fs').replaceAll('\\', '/')
-const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output', value)
+const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output',
+  'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const admission = { kind: 'task', objective: 'Write a file summary.', criteria: ['Preserve the pilot scope.'], family: 'summarization', evaluationMode: 'local-files', fileOutputKind: 'files', relatedTaskId: null, feedback: null }
 const review = (verdict: 'met' | 'not-met' | 'inconclusive') => ({ verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Checked pilot source scope.', evidenceQuotes: ['pilot'] })
 const pair = (verdict: 'met' | 'not-met' | 'inconclusive'): ScriptEntry[] => [auditedEvidenceResponse(review(verdict)), auditedEvidenceResponse(review(verdict))]

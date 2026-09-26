@@ -8,7 +8,7 @@ import { MessageId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/
 import { SessionId, SkillRegistry, applySkillTool, createUserMessage, mountFeedbackHarness, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
-import { recoverConversationStructuredJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { recoverConversationAdmissionJudgment, recoverConversationStructuredJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { TianwenResearchSummaryAdmissionService } from '../../packages/tianwen-runtime-bundle/src/research-summary-admission.js'
@@ -22,7 +22,8 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 const direct = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 const admission = { kind: 'task', objective: 'Summarize the supplied facts', criteria: ['Preserve all supplied facts'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const review = { verdict: 'met', category: null, explanation: 'The facts are preserved.', evidenceQuotes: ['5 天'] }
-const structured = (value: Record<string, unknown>) => toolCallResponse('judgment', 'structured_output', value)
+const structured = (value: Record<string, unknown>) => toolCallResponse('judgment', 'structured_output',
+  'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const evidenceResponse = auditedEvidenceResponse
 const reasoningTextResponse = (reasoning: string, text: string): readonly StreamChunk[] => [
   { type: 'block-start', index: 0, blockType: 'reasoning' },
@@ -116,12 +117,13 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(harness.adapter.requests).toHaveLength(8)
     expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({
       type: 'object', additionalProperties: false,
-      required: ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback'],
-      properties: { kind: { type: 'string', enum: ['task', 'conversation'] }, relatedTaskId: { type: 'null' } },
+      required: ['decision'], properties: { decision: { oneOf: [
+        { properties: { kind: { type: 'string', enum: ['task', 'conversation'] }, relatedTaskId: { type: 'null' } } },
+        { properties: { relatedTaskId: { type: 'null' } }, required: expect.arrayContaining(['fileOutputKind']) },
+      ] } },
     })
-    expect(harness.adapter.requests[4]?.tools?.[0]?.parameters).toMatchObject({
-      properties: { relatedTaskId: { oneOf: [{ type: 'string', enum: [tasks[0]!.source.taskId] }, { type: 'null' }] } },
-    })
+    expect(harness.adapter.requests[4]?.tools?.[0]?.parameters?.properties?.decision?.oneOf?.[0]?.properties?.relatedTaskId)
+      .toEqual({ oneOf: [{ type: 'string', enum: [tasks[0]!.source.taskId] }, { type: 'null' }] })
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(2)
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
@@ -146,7 +148,7 @@ it('uses surface-only material for a later admission and both native reviews aft
     expect(task.completion?.status).toBe('completed')
     expect(task.review?.verdict).toBe('met')
     const recovered = await recoverConversationTaskMaterial(harness.ctx, task)
-    const admissionMaterial = await recoverConversationStructuredJudgment(harness.ctx, task.admission!.proof!, task.admission!.decision)
+    const admissionMaterial = await recoverConversationAdmissionJudgment(harness.ctx, task.admission!.proof!, task.admission!.decision)
     const reviewMaterials = await Promise.all(task.review!.reviewChecks!.map(check => recoverConversationStructuredJudgment(harness.ctx, check.proof, {
       verdict: check.verdict, category: check.category, explanation: check.explanation, evidenceQuotes: check.evidenceQuotes, audit: check.audit,
     })))

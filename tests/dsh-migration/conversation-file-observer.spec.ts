@@ -23,7 +23,8 @@ afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: 
 const direct = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
 const admission = { kind: 'task', objective: 'Rewrite input.md', criteria: ['The requested file contains the new text'], family: 'writing',
   evaluationMode: 'local-files', fileOutputKind: 'files', relatedTaskId: null, feedback: null }
-const structured = (value: Record<string, unknown>) => toolCallResponse('judgment', 'structured_output', value)
+const structured = (value: Record<string, unknown>) => toolCallResponse('judgment', 'structured_output',
+  'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const review = { verdict: 'met', category: null, explanation: 'The claimed result is present.', evidenceQuotes: ['saved'] }
 const reviewPair = () => [auditedEvidenceResponse(review), auditedEvidenceResponse(review)]
 const parallelCalls = (calls: readonly { readonly id: string, readonly name: string, readonly arguments: Record<string, unknown> }[]): StreamChunk[] => [

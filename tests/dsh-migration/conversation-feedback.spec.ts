@@ -134,7 +134,8 @@ const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-su
 const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const direct = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } })
-const structured = (value: object) => toolCallResponse('feedback-judgment', 'structured_output', value)
+const structured = (value: object) => toolCallResponse('feedback-judgment', 'structured_output',
+  'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const reasoningTextResponse = (reasoning: string, text: string): readonly StreamChunk[] => [
   { type: 'block-start', index: 0, blockType: 'reasoning' },
   { type: 'block-end', index: 0, block: { type: 'reasoning', text: reasoning } },

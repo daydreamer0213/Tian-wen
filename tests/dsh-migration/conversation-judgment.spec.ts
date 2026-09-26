@@ -7,7 +7,7 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { assertObjectJsonSchema, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
-import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, conversationProposalSchema, recoverConversationStructuredJudgment, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationAdmissionSchema, conversationEvidenceSchema, conversationProposalSchema, recoverConversationAdmissionJudgment, recoverConversationStructuredJudgment, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 
 // Resolve the CLI's public provider entry: exercise the installed DSH composition,
 // not a test reimplementation of spawning, restrictions or structured output.
@@ -15,6 +15,72 @@ const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepse
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
+it('rejects a file output kind on a text admission before native capture', () => {
+  const schema = conversationAdmissionSchema(['earlier-task'])
+  const decision = { kind: 'task', objective: 'Summarize the facts.', criteria: ['Preserve the facts.'],
+    family: 'summarization', evaluationMode: 'text', relatedTaskId: 'earlier-task', feedback: null }
+  expect(() => assertObjectJsonSchema(schema)).not.toThrow()
+  expect(validateJsonSchemaValue(schema, { decision })).toEqual([])
+  expect(validateJsonSchemaValue(schema, { decision: { ...decision, fileOutputKind: 'chat' } })).not.toEqual([])
+  expect(validateJsonSchemaValue(schema, { decision: { ...decision, evaluationMode: 'local-files', fileOutputKind: 'chat' } })).toEqual([])
+  expect(validateJsonSchemaValue(schema, { decision: { ...decision, evaluationMode: 'local-files' } })).not.toEqual([])
+  expect(validateJsonSchemaValue(schema, decision)).not.toEqual([])
+})
+
+it('recovers legacy flat and current wrapped admission proofs without changing either captured value', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'admission-shapes-')); roots.push(root)
+  const decision = { kind: 'task', objective: 'Summarize the facts.', criteria: ['Preserve the facts.'],
+    family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('old-admission', 'structured_output', decision),
+    toolCallResponse('new-admission', 'structured_output', { decision }),
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('admission-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const input = { label: 'Tianwen admission', instruction: 'Report the decision.', material: { request: 'Summarize the facts.' },
+      signal: new AbortController().signal }
+    const old = await runConversationJudgment(harness.ctx, handle.agent, { ...input,
+      outputSchema: { type: 'object', properties: {}, required: [], additionalProperties: true } })
+    const current = await runConversationJudgment(harness.ctx, handle.agent, { ...input,
+      outputSchema: conversationAdmissionSchema([]) })
+    expect(old.value).toEqual(decision)
+    expect(current.value).toEqual({ decision })
+    expect(await recoverConversationAdmissionJudgment(harness.ctx, old.proof, decision)).toMatchObject({ material: input.material })
+    expect(await recoverConversationAdmissionJudgment(harness.ctx, current.proof, decision)).toMatchObject({ material: input.material })
+    await expect(recoverConversationAdmissionJudgment(harness.ctx, old.proof, { ...decision, objective: 'Changed.' })).rejects.toThrow('invalid-judgment')
+    await expect(recoverConversationAdmissionJudgment(harness.ctx, current.proof, { ...decision, objective: 'Changed.' })).rejects.toThrow('invalid-judgment')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('records only the corrected native admission after a text/file combination is rejected', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'admission-rejection-')); roots.push(root)
+  const decision = { kind: 'task', objective: 'Summarize the facts.', criteria: ['Preserve the facts.'],
+    family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('invalid-admission', 'structured_output', { decision: { ...decision, fileOutputKind: 'chat' } }),
+    toolCallResponse('valid-admission', 'structured_output', { decision }),
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('admission-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Tianwen admission', instruction: 'Report the decision.', material: { request: 'Summarize the facts.' },
+      signal: new AbortController().signal, outputSchema: conversationAdmissionSchema([]),
+    })
+    expect(result.value).toEqual({ decision })
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    const results = saved.events.filter(event => event.type === 'tool/result')
+    expect(results.some(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError === true))).toBe(true)
+    expect(await recoverConversationAdmissionJudgment(harness.ctx, result.proof, decision)).toMatchObject({ material: { request: 'Summarize the facts.' } })
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 it('bounds native source selection and declarations to the supplied name and read digest', () => {
   const readDigest = `sha256:${'a'.repeat(64)}` as const
   const initial = conversationProposalSchema(['one'], true, { sourceNames: ['reviewed'] })

@@ -22,19 +22,20 @@ const verdict = choices(['met', 'not-met', 'inconclusive'])
 // Describe the actual result fields to the native capture tool. An open object
 // let the real model emit schema metadata (`type`) instead of the required `kind`.
 // Native validation and the stricter evidence/domain checks both remain active.
-const CONVERSATION_ADMISSION_SCHEMA: ObjectJsonSchema = {
-  type: 'object', additionalProperties: false,
-  required: ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback'],
-  properties: {
-    kind: choices(['task', 'conversation']), objective: string, criteria: { ...strings, description: 'Separate observable user requirements. Preserve every explicit output-only restriction, exclusion, condition, uncertainty and decision boundary; do not reduce an output restriction to merely selecting source content.' },
-    family: choices(CONVERSATION_FAMILIES), evaluationMode: choices(['text', 'external', 'subjective', 'local-files']),
-    fileOutputKind: choices(['files', 'chat']), relatedTaskId: nullable(string),
-    feedback: nullable(object({ kind: choices(['correction', 'positive', 'preference', 'requirement-change']), quote: string, category })),
-  },
+const ADMISSION_COMMON_PROPERTIES: Record<string, JsonSchemaNode> = {
+  kind: choices(['task', 'conversation']), objective: string, criteria: { ...strings, description: 'Separate observable user requirements. Preserve every explicit output-only restriction, exclusion, condition, uncertainty and decision boundary; do not reduce an output restriction to merely selecting source content.' },
+  family: choices(CONVERSATION_FAMILIES), relatedTaskId: nullable(string),
+  feedback: nullable(object({ kind: choices(['correction', 'positive', 'preference', 'requirement-change']), quote: string, category })),
 }
 export function conversationAdmissionSchema(relatedTaskIds: readonly string[]): ObjectJsonSchema {
-  return { ...CONVERSATION_ADMISSION_SCHEMA, properties: { ...CONVERSATION_ADMISSION_SCHEMA.properties,
-    relatedTaskId: relatedTaskIds.length === 0 ? { type: 'null' } : nullable(choices(relatedTaskIds)),
+  const relatedTaskId = relatedTaskIds.length === 0 ? { type: 'null' as const } : nullable(choices(relatedTaskIds))
+  const branch = (evaluationMode: JsonSchemaNode, fileOutputKind?: JsonSchemaNode): ObjectJsonSchema => ({
+    type: 'object', additionalProperties: false,
+    required: [...Object.keys(ADMISSION_COMMON_PROPERTIES), 'evaluationMode', ...(fileOutputKind === undefined ? [] : ['fileOutputKind'])],
+    properties: { ...ADMISSION_COMMON_PROPERTIES, evaluationMode, relatedTaskId, ...(fileOutputKind === undefined ? {} : { fileOutputKind }) },
+  })
+  return { type: 'object', additionalProperties: false, required: ['decision'], properties: {
+    decision: { oneOf: [branch(choices(['text', 'external', 'subjective'])), branch(choices(['local-files']), choices(['files', 'chat']))] },
   } }
 }
 export const CONVERSATION_REVIEW_SCHEMA = object({ verdict, category, explanation: string, evidenceQuotes: strings })
@@ -166,6 +167,16 @@ export async function recoverConversationStructuredJudgment(ctx: Context, proof:
   if (headers.length === 0 || requests[0]!.seq >= headers[0]!.seq || headers.some(event => event.seq < requests[0]!.seq || event.seq > captureSeq)
     || saved.events.some(event => event.type === 'request/header' && (event.seq < start.seq || event.seq >= end.seq))) throw new Error('invalid-judgment')
   return { instruction: text.slice(0, delimiter), material, modelConfigDigests: headers.map(event => sha256(event.data.header.config)) }
+}
+
+/** Older admissions captured a flat decision; current admissions capture an
+ * object-rooted envelope. Both paths still require an exact native value. */
+export async function recoverConversationAdmissionJudgment(ctx: Context, proof: ConversationJudgmentProof, decision: unknown) {
+  try { return await recoverConversationStructuredJudgment(ctx, proof, { decision }) }
+  catch (error) {
+    if (!(error instanceof Error) || error.message !== 'invalid-judgment') throw error
+    return recoverConversationStructuredJudgment(ctx, proof, decision)
+  }
 }
 
 /** Same frozen evidence, two isolated native Sessions; no vote or answer is fed
