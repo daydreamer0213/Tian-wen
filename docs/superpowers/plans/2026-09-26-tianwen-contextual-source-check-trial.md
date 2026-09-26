@@ -1,5 +1,7 @@
 # Contextual Source Check Trial Implementation Plan
 
+> **Closed as failed (2026-09-26).** The frozen first run hit its semantic stop condition on R6-W3 and its full audit failed on T4. Do not execute any product-integration follow-up from this plan. See [result](../../operations/tianwen-contextual-source-trial-results-20260926.md).
+
 > **For agentic workers:** Implement inline in this session. This is a finite diagnostic, not a product verdict change.
 
 **Goal:** Falsify whether one source review that sees each existing inference together with its full answer unit can distinguish old source overreach from normal advice.
