@@ -282,6 +282,17 @@ it.skipIf(process.platform !== 'win32')('binds actual native pwsh directory term
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
+it.skipIf(process.platform !== 'win32')('fails closed when a free-form pwsh count has no native directory receipt', async () => {
+  const h = await runNativeAncillaryTask([read(), toolCallResponse('count', 'pwsh', { command: "@('a','b').Count", description: 'Count draft items.' })], undefined, { pwsh: true })
+  try {
+    expect(h.task.fileUnavailable?.reason).toBe('material-unavailable')
+    expect(h.task.completion?.status).toBe('completed')
+    expect(h.task.completion?.files).toBeUndefined()
+    const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'count')
+    expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(false)
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
 it.each(['unknown', 'body', 'provider', 'resource', 'scope', 'environment'] as const)('refuses an unadmitted %s method', async mismatch => {
   const h = await runNativeAncillaryTask([toolCallResponse('load-method', 'skill', { name: mismatch === 'unknown' ? 'unknown-method' : method.name }), read()], h => {
     if (mismatch === 'scope') h.reference.scopeKey = `conversation:${sha256('other')}`

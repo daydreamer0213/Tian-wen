@@ -31,5 +31,5 @@
 **Files:** `docs/operations/tianwen-current-project-handoff.md`
 
 - [x] Run the conversation review/capture/persistence suites and the direct package type checks. Inspect the final diff and working tree.
-- [ ] Record only the engineering gate in the handoff; do not claim real-model double-review success.
-- [ ] Commit and push the exact candidate for a separate fresh-profile desktop acceptance.
+- [x] Record only the engineering gate in the handoff; do not claim real-model double-review success.
+- [x] Commit and push the exact candidate for a separate fresh-profile desktop acceptance.
