@@ -112,6 +112,8 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v6')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('self-contained summaries, translations and rewrites')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('Writing is not automatically subjective')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen_captured_file_facts')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('inspect, count or hash local files and answer in chat is local-files/chat')
     expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v6')
     expect(tasks[0]?.source.taskId).not.toBe(tasks[1]?.source.taskId)
     expect(harness.adapter.requests).toHaveLength(8)

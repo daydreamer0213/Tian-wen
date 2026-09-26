@@ -6,4 +6,4 @@
 
 这仍是**工程候选，不是产品链路验收**。现有自由 PowerShell 计数或哈希命令依旧不被认证；聊天输出任务中的 `write` 仍会使文件证据失效。下一步必须用此准确提交的新隔离配置档启动前瞻真实普通任务，让模型自然完成目录查看、读取、行数与哈希查询，并独立核对原生会话、两位审核者、账本、终态文件、同意与研究状态。若模型仍选不支持的命令，或最终事实/审核不正确，按失败记录，不回填旧任务。main/Daily 继续 NO-GO。
 
-E050 的事前输入已经准备在 `D:/DevData/tianwen-acceptance-runs/050-captured-file-facts/native-use`，尚未启动模型、host 或同意。准确代码提交为 `b3bc69db1b36c18b164e9d98bb5767215e1834fa`；三份输入共 38,002 字节，任务要求自然查看目录、读取源文件并给出每份文件的物理行数、UTF-8 字节数与 SHA-256，且只在对话中回答。`freeze.json` 已独立复核其提交、三份文件与任务文本，SHA-256 为 `44a108d848e525d07a146fe14db8421d0f9fec4e9279ea7a45607e701a9e27d6`。此状态仅为 **prepared-no-model-call**，绝不算真实验收结果。
+E050 的事前输入冻结在 `D:/DevData/tianwen-acceptance-runs/050-captured-file-facts/native-use`。准确代码提交为 `b3bc69db1b36c18b164e9d98bb5767215e1834fa`；三份输入共 38,002 字节，`freeze.json` SHA-256 为 `44a108d848e525d07a146fe14db8421d0f9fec4e9279ea7a45607e701a9e27d6`。实际前瞻运行及失败原因见 [E050 结果](tianwen-real-task-050-results-20260927.md)；它没有完成产品链路验收。
