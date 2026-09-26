@@ -273,19 +273,13 @@ it('does not promote a model opinion about external effects to verified completi
 })
 
 it.each([admission.criteria[0], admission.objective, 'evaluationMode'])('rejects a review whose evidence quotes only derived task data: %s', async quote => {
-  let rejectedRequest: GenerateOptions | undefined
-  const harness = await mount([structured(admission), textResponse('预计 5 天完成。'), structured({
+  const harness = await mount([structured(admission), textResponse('预计 5 天完成。'), auditedEvidenceResponse({
     verdict: 'not-met', category: 'source-fidelity', explanation: 'The response omitted a required fact.', evidenceQuotes: [quote],
-  }), request => {
-    rejectedRequest = request
-    return textResponse('No valid evidence quote is available.')
-  }])
+  }, 'empty', false)])
   try {
     harness.handle.agent.followup(direct('概括：预计 5 天完成。'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
-    expect(rejectedRequest?.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result'))
-      .toEqual(expect.arrayContaining([expect.objectContaining({ toolCallId: 'judgment', isError: true,
-        content: [{ type: 'text', text: expect.stringContaining('evidenceQuotes') }] })]))
+    expect(harness.adapter.requests).toHaveLength(3)
     const result = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review
     expect(result?.verdict).toBe('inconclusive')
     expect(result?.unavailableReason).toBe('invalid-judgment')
@@ -445,7 +439,7 @@ it('starts and cancels a new main task while an older recovered native review is
 })
 
 it('keeps oversized observation material unavailable without changing the actual task input', async () => {
-  const large = '材料'.repeat(50_000)
+  const large = '材料'.repeat(180_000)
   const harness = await mount([request => {
     expect(JSON.stringify(request.messages)).toContain(large)
     return textResponse('正常回答')

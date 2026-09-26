@@ -143,14 +143,8 @@ const reasoningTextResponse = (reasoning: string, text: string): readonly Stream
   { type: 'block-end', index: 1, block: { type: 'text', text } },
   { type: 'finish', reason: { kind: 'stop' } },
 ]
-const evidenceResponse = (value: Record<string, unknown> & { evidenceQuotes: readonly string[] }) => (request: GenerateOptions) => {
-  const schema = request.tools?.find(tool => tool.name === 'structured_output')?.parameters as ObjectJsonSchema | undefined
-  const choices = schema?.properties?.evidenceQuotes?.items?.enum ?? []
-  return structured({ ...value, evidenceQuotes: value.evidenceQuotes.map(quote => {
-    const raw = choices.find(item => typeof item === 'string' && item.includes(quote))
-    expect(raw, `No raw evidence choice contains ${quote}`).toBeDefined()
-    return raw
-  }) })
+const evidenceResponse = (value: Record<string, unknown> & { evidenceQuotes: readonly string[] }) => (_request: GenerateOptions) => {
+  return structured(value)
 }
 const claimReviewResponse = auditedEvidenceResponse
 const nativeAdmission = { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the five-day duration.'],
@@ -343,9 +337,7 @@ describe('native feedback assessment adapter', () => {
         rating: 'negative', note: 'You omitted the pilot scope.', ifVersion: null })
       await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
       await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
-      expect(rejectedRequest?.messages.flatMap(message => message.content).filter(block => block.type === 'tool-result'))
-        .toEqual(expect.arrayContaining([expect.objectContaining({ toolCallId: 'feedback-judgment', isError: true,
-          content: [{ type: 'text', text: expect.stringContaining('evidenceQuotes') }] })]))
+      expect(rejectedRequest).toBeUndefined()
       expect(harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]?.result)
         .toMatchObject({ classification: 'inconclusive', supplementalCriteria: [], unavailableReason: 'invalid-judgment', proof: null })
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }

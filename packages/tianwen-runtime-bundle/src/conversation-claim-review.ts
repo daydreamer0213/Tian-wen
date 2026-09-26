@@ -258,6 +258,8 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus), outputSchema: schema })
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
+    if (!Array.isArray(result.value.evidenceQuotes) || result.value.evidenceQuotes.some(quote =>
+      typeof quote !== 'string' || quote.length === 0 || !evidence.items.some(item => item.text.includes(quote)))) throw new Error('invalid-judgment')
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
     const { audit: _audit, ...summary } = result.value
     raw.push({ ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck)

@@ -241,7 +241,7 @@ it.each([false, true])('uses a native, read-only, persisted child with exact sam
 
 it('lets native capture reject schema-shaped metadata before accepting an actual result', () => checkNativeJudgment(false, true))
 
-it.each([CONVERSATION_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_BLIND_REVIEW_SCHEMA])('restricts quotes to raw evidence without changing the base schema', base => {
+it.each([CONVERSATION_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_BLIND_REVIEW_SCHEMA])('keeps quote source text out of the native schema without changing the base schema', base => {
   const original = structuredClone(base)
   const raw = '  **原定日期，未改期、未确认**  '
   const schema = conversationEvidenceSchema(base, [raw, '\n\t', raw])
@@ -250,27 +250,27 @@ it.each([CONVERSATION_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_
   expect(schema).not.toBe(base)
   expect(schema.properties).not.toBe(base.properties)
   expect(schema.required).toEqual(original.required)
-  expect(schema.properties?.evidenceQuotes).toMatchObject({ type: 'array', items: { type: 'string', enum: [raw] } })
+  expect(schema.properties?.evidenceQuotes).toMatchObject({ type: 'array', items: { type: 'string' } })
+  expect(schema.properties?.evidenceQuotes?.items).not.toHaveProperty('enum')
   for (const [key, value] of Object.entries(original.properties!)) if (key !== 'evidenceQuotes') expect(schema.properties?.[key]).toEqual(value)
   const quotes = schema.properties!.evidenceQuotes!
   expect(validateJsonSchemaValue(quotes, [raw])).toEqual([])
-  expect(validateJsonSchemaValue(quotes, [`用户任务：${raw}`])).not.toEqual([])
-  expect(validateJsonSchemaValue(quotes, [raw.replaceAll('**', '')])).not.toEqual([])
-  expect(validateJsonSchemaValue(quotes, [raw.trim()])).not.toEqual([])
+  expect(validateJsonSchemaValue(quotes, [`用户任务：${raw}`])).toEqual([])
 })
 
-it('covers the whole long line with intact Unicode code points and exact raw fragments', () => {
+it('does not enumerate long Unicode lines in native quote choices', () => {
   const line = `${'甲'.repeat(383)}😀${'乙'.repeat(383)}🚀末尾`
   const evidence = [`\t标题\r\n${line}\n  尾行  `]
   const schema = conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, evidence)
-  const fragments = schema.properties!.evidenceQuotes!.items!.enum as string[]
-  expect(fragments).toEqual(['\t标题', `${'甲'.repeat(383)}😀`, `${'乙'.repeat(383)}🚀`, '末尾', '  尾行  '])
-  expect(fragments.slice(1, 4).join('')).toBe(line)
-  for (const fragment of fragments) {
-    expect([...fragment].length).toBeLessThanOrEqual(384)
-    expect(Buffer.byteLength(fragment, 'utf8')).toBeLessThanOrEqual(2048)
-    expect(evidence.some(raw => raw.includes(fragment))).toBe(true)
-  }
+  expect(schema.properties!.evidenceQuotes!.items).toEqual({ type: 'string' })
+  expect(JSON.stringify(schema)).not.toContain(line)
+})
+
+it('does not repeat long raw evidence in native tool parameters or error choices', () => {
+  const raw = Array.from({ length: 757 }, (_, index) => `line-${index}: ${'甲'.repeat(30)}`).join('\n')
+  const schema = conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, [raw])
+  expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThan(2_000)
+  expect(schema.properties!.evidenceQuotes!.items).toEqual({ type: 'string' })
 })
 
 it('allows an empty quote list when no nonblank raw fragment exists', () => {
@@ -286,11 +286,8 @@ it('fails closed on excessive raw evidence instead of silently dropping its tail
     .toThrow('material-too-large')
   const manyLines = Array.from({ length: 70_000 }, (_, index) => String(index)).join('\n')
   expect(Buffer.byteLength(JSON.stringify([manyLines]), 'utf8')).toBeLessThan(CONVERSATION_MATERIAL_MAX_BYTES)
-  expect(() => conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, [manyLines])).toThrow('material-too-large')
+  expect(conversationEvidenceSchema(CONVERSATION_REVIEW_SCHEMA, [manyLines]).properties!.evidenceQuotes!.items).toEqual({ type: 'string' })
 })
-
-it('lets native capture reject a labeled quote and accept a raw fragment in the same Turn', () =>
-  checkNativeJudgment(false, true, '**原定日期，未改期、未确认**'))
 
 it.each(['invalid-judgment', 'model-unavailable', 'cancelled'] as const)('classifies an uncaptured native result as %s without generating proof', async expected => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
@@ -304,7 +301,7 @@ it.each(['invalid-judgment', 'model-unavailable', 'cancelled'] as const)('classi
     : expected === 'cancelled'
       ? [() => { controller.abort(); return textResponse('Cancelled.') }]
       : [toolCallResponse('invalid-quote', 'structured_output', { verdict: 'inconclusive', category: null,
-          explanation: 'No valid quote.', evidenceQuotes: ['用户任务：原始证据'] }), textResponse('No valid structured result.')]
+          explanation: 'No valid quote.', evidenceQuotes: [42] }), textResponse('No valid structured result.')]
   const harness = await mountPersistentHarness(root, script)
   await harness.ctx.plugin(SubagentRuntime)
   await harness.ctx.plugin(spawn, { providerName: 'spawn' })
