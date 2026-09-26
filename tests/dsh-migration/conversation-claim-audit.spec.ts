@@ -28,8 +28,8 @@ const v1Pair = legacyPair.map(check => ({ ...check, audit: audit() }))
 const v2Pair = legacyPair.map(check => ({ ...check, audit: auditV2() }))
 
 describe('conversation claim audit domain boundary', () => {
-  it('preserves literal v4/v5 while making only v6 current with semantic clarification', () => {
-    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v6')
+  it('preserves literal v4/v5 while making only v7 current with semantic clarification', () => {
+    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v7')
     expect(conversationQualityContract().criterion).toContain('actor, time, scope, commitment and premise')
     expect(parseConversationQualityContract(literalV4)).toEqual(literalV4)
     expect(parseConversationQualityContract(literalV5)).toEqual(literalV5)

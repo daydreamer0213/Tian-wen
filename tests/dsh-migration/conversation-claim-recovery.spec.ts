@@ -55,7 +55,9 @@ it('persists v5 and v6 producer instructions and rejects swapped or changed feed
     const currentInstruction = (await recoverConversationJudgmentRequest(harness.ctx, v6.reviewChecks[0]!)).instruction
     expect(oldInstruction).toBe(historicalV5MethodStudyInstruction)
     expect(currentInstruction).toContain('originalFeedback takes precedence over a conflicting derived feedback criterion')
+    expect(currentInstruction).not.toContain('Reconstruct substantive claims that span adjacent answer units')
     expect(currentInstruction).not.toBe(oldInstruction)
+    for (const check of v6.reviewChecks) await expect(verifyConversationClaimReviewCheck(harness.ctx, check, expected(v6Material))).resolves.toBeUndefined()
 
     const capture = async (label: string, instruction: string, material: unknown) => {
       const raw = await runConversationJudgment(harness.ctx, handle.agent, { label, instruction, material, outputSchema: captureSchema,

@@ -251,6 +251,7 @@ const V6_PURPOSE = {
   'method-study': `${PURPOSE['method-study']} When task.feedbackStandard.originalFeedback is present, originalFeedback takes precedence over a conflicting derived feedback criterion for its attributed continuing preference or supported problem. It remains feedback about an earlier assistant answer: preserve its speaker, actor, negation, exception and unresolved references; do not turn every new request in it into a permanent rule.`,
 } as const
 const V6_COMMON = `${COMMON} For current qualityContract, check the actor, time, scope, commitment and premise actually asserted. A labeled inference or courtesy does not establish an unverified current state, past event, external effect, decision or commitment; optional advice, grounded fallible inference, fiction and task-compatible courtesy remain permitted. For claims about your own tool use, file writes or absence of writes, cite a frozen user or tool source that directly establishes the claim. If no supplied source establishes it, mark the source-fact unsupported or uncertain, even when other claims already justify not-met. Never mark a source-fact supported with an empty sourceIds list.`
+const V7_COMMON = `${V6_COMMON} Reconstruct substantive claims that span adjacent answer units from the complete supplied answer before judging their meaning; keep each audit quote bound to the exact text in its own unit. For statements about all, none or successful tool calls, inspect the cited code and frozen call evidence for filtering and excluded cases. A property checked for a filtered subset is not established for every original call.`
 
 function claimReviewInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
   if (!record(material)) throw new Error('invalid-judgment')
@@ -264,11 +265,11 @@ function claimReviewInstruction(material: unknown, purpose: 'original-result' | 
   let contract
   try { contract = parseConversationQualityContract(quality) }
   catch { throw new Error('invalid-judgment') }
-  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
   if (purpose === 'method-study' && source.feedbackStandard !== undefined) {
     if (!record(source.feedbackStandard) || !Object.hasOwn(source.feedbackStandard, 'originalFeedback') || source.feedbackStandard.originalFeedback === undefined) throw new Error('invalid-judgment')
   }
-  return `${V6_PURPOSE[purpose]}\n\n${V6_COMMON}\n\n${FOCUS[focus]}`
+  return `${V6_PURPOSE[purpose]}\n\n${contract.schemaVersion === 'tianwen.conversation-quality.v7' ? V7_COMMON : V6_COMMON}\n\n${FOCUS[focus]}`
 }
 
 type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema'> & {

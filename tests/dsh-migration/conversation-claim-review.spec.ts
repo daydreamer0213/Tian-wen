@@ -281,6 +281,8 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(recovered.instruction).toContain('Review purpose: method-study')
       expect(recovered.instruction).toContain('originalFeedback takes precedence over a conflicting derived feedback criterion')
       expect(recovered.instruction).toContain('actor, time, scope, commitment and premise')
+      expect(recovered.instruction).toContain('Reconstruct substantive claims that span adjacent answer units')
+      expect(recovered.instruction).toContain('A property checked for a filtered subset is not established for every original call')
       expect(recovered.instruction).toContain('Independently reconstruct all original requirements')
       expect(recovered.modelConfigDigests).toEqual([sha256({ provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 })])
       if (mode === 'permitted-inference') expect(checks.map(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2' ? check.audit.units['answer-1']!.firstClaim : undefined)).toEqual([
