@@ -209,6 +209,7 @@ export class TianwenConversationObserverService extends Service {
     try {
       const result = await runConversationJudgment(this.ctx, agent, {
         label: `Tianwen admission ${taskId}`, instruction: ADMISSION_INSTRUCTION, outputSchema: conversationAdmissionSchema(earlier.map(task => task.source.taskId)),
+        captureReminder: true,
         material: { request: direct, context, qualityContract, priorTasks: earlier.map(task => ({ taskId: task.source.taskId, objective: task.admission?.decision?.objective, answerIds: task.completion!.assistantMessageIds })) }, signal,
       })
       if (!this.authorized(consent.revision)) throw new Error('cancelled')

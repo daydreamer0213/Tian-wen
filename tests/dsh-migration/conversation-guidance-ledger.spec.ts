@@ -672,7 +672,7 @@ it.each(['active', 'active-loop', 'accepted', 'mixed-counter'] as const)('keeps 
   const harness = await mountPersistentHarness(join(root, 'native-sessions'), [
     () => {
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(scopeKey).rules).toEqual({})
-      return toolCallResponse('new-admission', 'structured_output', tasks[0].admission!.decision!)
+      return toolCallResponse('new-admission', 'structured_output', { decision: tasks[0].admission!.decision! })
     },
     () => {
       // Disk, not merely in-memory state, already has the pre-answer contract

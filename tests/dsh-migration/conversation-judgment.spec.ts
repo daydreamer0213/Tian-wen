@@ -70,7 +70,7 @@ it('records only the corrected native admission after a text/file combination is
   try {
     const result = await runConversationJudgment(harness.ctx, handle.agent, {
       label: 'Tianwen admission', instruction: 'Report the decision.', material: { request: 'Summarize the facts.' },
-      signal: new AbortController().signal, outputSchema: conversationAdmissionSchema([]),
+      signal: new AbortController().signal, outputSchema: conversationAdmissionSchema([]), captureReminder: true,
     })
     expect(result.value).toEqual({ decision })
     expect(harness.adapter.requests).toHaveLength(2)
@@ -79,6 +79,55 @@ it('records only the corrected native admission after a text/file combination is
     const results = saved.events.filter(event => event.type === 'tool/result')
     expect(results.some(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError === true))).toBe(true)
     expect(await recoverConversationAdmissionJudgment(harness.ctx, result.proof, decision)).toMatchObject({ material: { request: 'Summarize the facts.' } })
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+it('reminds an admission once in the same native session when the model answers in plain text', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'admission-reminder-')); roots.push(root)
+  const decision = { kind: 'task', objective: 'Summarize the facts.', criteria: ['Preserve the facts.'],
+    family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
+  const harness = await mountPersistentHarness(root, [
+    textResponse(JSON.stringify({ decision })),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('structured_output')
+      return toolCallResponse('reminded-admission', 'structured_output', { decision })
+    },
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('reminder-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Tianwen admission', instruction: 'Report the decision.', material: { request: 'Summarize the facts.' },
+      signal: new AbortController().signal, outputSchema: conversationAdmissionSchema([]), captureReminder: true,
+    })
+    expect(result.value).toEqual({ decision })
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-conversation-admission')).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'tool/call' && event.data.name === 'structured_output').map(event => event.data.arguments)).toEqual([JSON.stringify({ decision })])
+    expect(await recoverConversationStructuredJudgment(harness.ctx, result.proof, { decision }, true)).toMatchObject({ material: { request: 'Summarize the facts.' } })
+    await expect(recoverConversationStructuredJudgment(harness.ctx, result.proof, { decision })).rejects.toThrow('invalid-judgment')
+    expect(await recoverConversationAdmissionJudgment(harness.ctx, result.proof, decision)).toMatchObject({ material: { request: 'Summarize the facts.' } })
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('fails closed after one admission reminder without a native capture', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'admission-reminder-fail-')); roots.push(root)
+  const harness = await mountPersistentHarness(root, [textResponse('{"decision":{}}'), textResponse('Still no tool call.')])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('reminder-fail-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Tianwen admission', instruction: 'Report the decision.', material: { request: 'Summarize the facts.' },
+      signal: new AbortController().signal, outputSchema: conversationAdmissionSchema([]), captureReminder: true,
+    })).rejects.toThrow('invalid-judgment')
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 it('bounds native source selection and declarations to the supplied name and read digest', () => {
