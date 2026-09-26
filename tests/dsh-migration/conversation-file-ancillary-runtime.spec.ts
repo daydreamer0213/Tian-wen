@@ -53,7 +53,7 @@ async function mount(calls: Parameters<typeof mountPersistentHarness>[1], option
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'ancillary-')); roots.push(root)
   writeFileSync(join(root, 'input.md'), original)
-  const script = [toolCallResponse('admit', 'structured_output', { ...admission, fileOutputKind: options.outputKind ?? 'chat' }),
+  const script = [toolCallResponse('admit', 'structured_output', { decision: { ...admission, fileOutputKind: options.outputKind ?? 'chat' } }),
     ...calls, textResponse('saved ORIGINAL_ANSWER_CANARY'), auditedEvidenceResponse(review), auditedEvidenceResponse(review)]
   const h = await mountPersistentHarness(join(root, 'sessions'), script)
   // Replace the engineering harness provider before any tool registration.
