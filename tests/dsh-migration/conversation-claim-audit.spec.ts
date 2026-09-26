@@ -81,7 +81,20 @@ describe('conversation claim audit domain boundary', () => {
     ])).toThrow(/digest/i)
     expect(() => parseClaimAudit({ ...audit(), units: Array.from({ length: 129 }, (_, index) => ({ ...audit().units[0], answerId: `answer-${index}` })) }, 'not-met')).toThrow()
     expect(() => parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: Array.from({ length: 513 }, () => claim) }] }, 'not-met')).toThrow()
-    expect(() => parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: [{ ...claim, explanation: 'x'.repeat(33_000) }] }] }, 'not-met')).toThrow()
+    expect(() => parseClaimAudit({ ...audit(), units: [{ answerId: 'answer-1', claims: [{ ...claim, explanation: 'x'.repeat(129 * 1024) }] }] }, 'not-met')).toThrow()
+  })
+
+  it('accepts a bounded full audit for a 114-unit answer while retaining a total byte cap', () => {
+    const firstClaim = auditV2().units['answer-1']!.firstClaim
+    const units = Object.fromEntries(Array.from({ length: 114 }, (_, index) => [
+      `answer-${index + 1}`,
+      index < 78 ? { firstClaim: { ...firstClaim, explanation: 'Checked against the captured source. '.repeat(15) }, additionalClaims: [] } : null,
+    ]))
+    const value = { ...auditV2(), units }
+    const bytes = Buffer.byteLength(JSON.stringify(value), 'utf8')
+    expect(bytes).toBeGreaterThan(32 * 1024)
+    expect(bytes).toBeLessThan(128 * 1024)
+    expect(parseClaimAudit(value, 'met')).toBe(value)
   })
 
   it('validates exact v2 fixed-unit syntax without normalizing the captured value', () => {

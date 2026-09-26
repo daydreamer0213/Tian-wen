@@ -202,7 +202,7 @@ describe('claim audit validation', () => {
     many.units['answer-1']!.additionalClaims = Array.from({ length: 512 }, () => claim('原料', 'source-fact', 'supported', ['request-1']))
     expect(() => validateClaimAudit(many, evidence, 'not-met')).toThrow('invalid-judgment')
     const large = auditFor(evidence)
-    large.units['answer-1']!.firstClaim.explanation = 'x'.repeat(32 * 1024)
+    large.units['answer-1']!.firstClaim.explanation = 'x'.repeat(128 * 1024)
     expect(() => validateClaimAudit(large, evidence, 'not-met')).toThrow('invalid-judgment')
   })
 })
