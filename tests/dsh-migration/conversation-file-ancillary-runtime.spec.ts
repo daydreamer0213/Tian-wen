@@ -155,6 +155,22 @@ it('refuses a captured fact when the file changes before the terminal snapshot',
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
+it('refuses to return captured facts when the current file changed after the read', async () => {
+  let factsError: boolean | undefined
+  const h = await runNativeAncillaryTask([read(), facts()], h => {
+    h.ctx.on('tools/result', (exec, result) => {
+      if (exec.name === 'read') writeFileSync(join(h.root, 'input.md'), 'changed after read\n')
+      if (exec.name === CAPTURED_FILE_FACTS_TOOL) factsError = result.isError
+    })
+  })
+  try {
+    expect(factsError).toBe(true)
+    expect(h.task.fileUnavailable?.reason).toBe('capture-interrupted')
+    expect(h.task.completion?.files).toBeUndefined()
+    expect(h.task.review?.verdict).toBe('inconclusive')
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
 it('refuses facts from an oversized source before a native read', async () => {
   const h = await runNativeAncillaryTask([facts(), read()], h => { writeFileSync(join(h.root, 'input.md'), 'x'.repeat(98_305)) })
   try {

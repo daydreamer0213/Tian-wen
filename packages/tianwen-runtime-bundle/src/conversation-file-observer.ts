@@ -97,7 +97,7 @@ export class TianwenConversationFileObserverService extends Service {
     const service = this
     const definition = defineTool({
       name: CAPTURED_FILE_FACTS_TOOL,
-      description: 'For an ordinary local-file task, get exact byte length, physical line count and SHA-256 for one UTF-8 workspace file from its captured initial content. Give a relative file path. Use these native facts directly; a PowerShell count, hash or cross-check cannot be certified as local-file evidence. Physical lines are LF-delimited: empty content has 0 lines, one LF has 1 line, and a\\nb\\nc has 3 lines; a terminal LF adds no extra blank line.',
+      description: 'For an ordinary local-file task, get exact byte length, physical line count and SHA-256 for one UTF-8 workspace file from its captured initial content. Give a relative file path. Before returning, this tool re-reads the current file and rejects any change; the host checks it again at task end. Use these native facts directly; a PowerShell count, hash or cross-check cannot be certified as local-file evidence and ends file review. Physical lines are LF-delimited: empty content has 0 lines, one LF has 1 line, and a\\nb\\nc has 3 lines; a terminal LF adds no extra blank line. CRLF and LF give the same line count for the same text; CR bytes still affect byte length and SHA-256.',
       parameters: { file_path: { type: 'string', required: true } },
       output: {
         schema: { type: 'object', properties: {
@@ -122,6 +122,8 @@ export class TianwenConversationFileObserverService extends Service {
     const input = this.ctx.tianwenEvolution.listConversationTasks(String(exec.agent!.session.id))
       .find(item => item.source.taskId === current.task.source.taskId)?.fileInputs?.find(item => item.path === path)
     if (input === undefined) throw new Error('captured file preimage is unavailable')
+    const disk = await readConversationFile(current.state.cwd, path)
+    if (disk.path !== input.path || disk.content !== input.content) throw new Error('captured file changed before facts query')
     return capturedFileFacts(input)
   }
 
