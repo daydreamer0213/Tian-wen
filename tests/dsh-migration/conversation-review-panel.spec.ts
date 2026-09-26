@@ -42,11 +42,13 @@ it('requires exactly two ordered independent native proofs and evidence for conc
   }
 })
 
-it('bounds two tolerated native explanations within the stored consensus limit', () => {
-  const explanation = 'a'.repeat(1920)
+it('bounds the combined summary while retaining two native explanations up to their individual limit', () => {
+  const explanation = 'a'.repeat(4096)
   const first = { ...check('requirements', 'met'), explanation }
   const second = { ...check('grounding', 'met'), explanation }
   const checks = parseConversationReviewChecks([first, second])
   expect(Buffer.byteLength(conversationReviewConsensus(checks).explanation, 'utf8')).toBeLessThanOrEqual(4096)
+  expect(checks[0].explanation).toBe(explanation)
+  expect(checks[1].explanation).toBe(explanation)
   expect(() => parseConversationReviewChecks([{ ...first, explanation: `${explanation}a` }, second])).toThrow()
 })

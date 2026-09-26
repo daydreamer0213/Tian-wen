@@ -115,6 +115,30 @@ describe('natural conversation task evidence', () => {
     ledger.recordConversationLearning({ ...review, reviewChecks })
     expect(ledger.listConversationTasks()[0]?.review).toMatchObject({ verdict: 'inconclusive', reviewChecks })
   })
+  it('retains longer native review explanations while bounding only the stored consensus summary', () => {
+    const checks = auditedChecks().map((check, index) => ({ ...check,
+      explanation: index === 0 ? '证'.repeat(663) + 'a' : 'b'.repeat(1285),
+    }))
+    expect(Buffer.byteLength(checks[0]!.explanation, 'utf8')).toBe(1990)
+    const parsed = parseConversationAuditedReviewChecks(checks)
+    expect(parsed[0].explanation).toBe(checks[0]!.explanation)
+    expect(conversationReviewConsensus(parsed).explanation).toContain(checks[0]!.explanation)
+
+    const longChecks = parseConversationAuditedReviewChecks(auditedChecks().map(check => ({ ...check,
+      explanation: '界'.repeat(1365),
+    })))
+    const consensus = conversationReviewConsensus(longChecks)
+    expect(Buffer.byteLength(consensus.explanation, 'utf8')).toBeLessThanOrEqual(4096)
+    expect(consensus.explanation).toContain('…\nGrounding check')
+    expect(longChecks.every(check => Buffer.byteLength(check.explanation, 'utf8') === 4095)).toBe(true)
+    expect(() => parseConversationAuditedReviewChecks(auditedChecks().map(check => ({ ...check,
+      explanation: 'x'.repeat(4097),
+    })))).toThrow(/text is invalid/i)
+    const source = start(), admitted = admission(source.taskId)
+    const review = { kind: 'task-reviewed' as const, taskId: source.taskId, admissionDigest: sha256(admitted),
+      resultDigest: sha256('answer'), ...consensus, unavailableReason: null, reviewChecks: longChecks }
+    expect(parseConversationLearningRecord(review)).toEqual(review)
+  })
   it('rejects a newly appended task admission without the current host contract while retaining unavailable admissions', () => {
     const ledger = ledgerWithConsent()
     const source = start()

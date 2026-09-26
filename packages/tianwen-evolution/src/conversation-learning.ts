@@ -76,8 +76,7 @@ export function parseConversationReviewChecks(value: unknown): ConversationRevie
     if (proof === null) throw new TypeError('review check requires native proof')
     const result: ConversationReviewCheck = { focus: oneOf(input.focus, ['requirements', 'grounding']),
       verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']), category: input.category === null ? null : oneOf(input.category, CONVERSATION_FAILURES),
-      // Allow a small native-output overrun; two maximal checks still fit the 4096-byte stored consensus.
-      explanation: text(input.explanation, 1920), evidenceQuotes: list(input.evidenceQuotes, item => text(item, 2048), 6), proof }
+      explanation: text(input.explanation), evidenceQuotes: list(input.evidenceQuotes, item => text(item, 2048), 6), proof }
     if (result.verdict !== 'inconclusive' && result.evidenceQuotes.length === 0) throw new TypeError('conclusive review check requires source evidence')
     if (result.verdict === 'not-met' && result.category === null) throw new TypeError('failed review check requires an attributable category')
     if (result.verdict === 'met' && result.category !== null) throw new TypeError('successful review check cannot assert a failure category')
@@ -118,9 +117,27 @@ export function parseConversationQualityReviewChecks(value: unknown, quality: Co
 export function conversationReviewConsensus(checks: ConversationStoredReviewChecks) {
   const [first, second] = parseStoredConversationReviewChecks(checks)
   const verdict = first.verdict === second.verdict ? first.verdict : 'inconclusive'
+  const firstPrefix = `Requirements check (${first.verdict}): `
+  const secondPrefix = `\nGrounding check (${second.verdict}): `
+  const available = 4096 - Buffer.byteLength(firstPrefix + secondPrefix, 'utf8')
+  const firstBytes = Buffer.byteLength(first.explanation, 'utf8')
+  const secondBytes = Buffer.byteLength(second.explanation, 'utf8')
+  const firstBudget = Math.min(firstBytes, available - Math.min(secondBytes, Math.floor(available / 2)))
   return { verdict, category: verdict === 'not-met' ? first.category : null,
-    explanation: `Requirements check (${first.verdict}): ${first.explanation}\nGrounding check (${second.verdict}): ${second.explanation}`,
+    explanation: `${firstPrefix}${reviewSummaryExcerpt(first.explanation, firstBudget)}${secondPrefix}${reviewSummaryExcerpt(second.explanation, available - firstBudget)}`,
     evidenceQuotes: [...new Set([...first.evidenceQuotes, ...second.evidenceQuotes])], proof: first.proof }
+}
+
+function reviewSummaryExcerpt(value: string, maxBytes: number): string {
+  if (Buffer.byteLength(value, 'utf8') <= maxBytes) return value
+  let excerpt = '', bytes = 0
+  for (const character of value) {
+    const size = Buffer.byteLength(character, 'utf8')
+    if (bytes + size > maxBytes - 3) break
+    excerpt += character
+    bytes += size
+  }
+  return `${excerpt}…`
 }
 
 export interface ConversationTaskSource {
