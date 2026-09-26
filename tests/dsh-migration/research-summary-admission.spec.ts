@@ -862,6 +862,10 @@ describe('research summary first-step admission', () => {
       await waitForIdle(harness.ctx, handle.agent)
 
       expect(harness.adapter.requests).toHaveLength(1)
+      if (_label === 'non-matching message') {
+        expect(JSON.stringify(harness.adapter.requests[0]!.messages))
+          .toContain(RESEARCH_SUMMARY_BASE_SKILL.description)
+      }
       expect(harness.adapter.requests[0]!.tools?.map(tool => tool.name) ?? [])
         .not.toContain(RESEARCH_SUMMARY_TOOL_NAME)
       expect(harness.ctx.tianwenEvolution
