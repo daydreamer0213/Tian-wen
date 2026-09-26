@@ -1,5 +1,9 @@
 # Tianwen 当前项目权威交接
 
+## 最新真实桌面验收：缺文件证据时跳过无来源审核，回答仍有事实错误
+
+全新 E039 隔离配置档从准确提交 `6faf5d6` 构建并安装，事先冻结三份真实项目材料和一次排查任务。真实 DeepSeek-V4-Flash / High 完成普通回答，原生读取四次；其中 68,047 字节源码超过单文件证据上限。产品把 `local-files` 复核记为 `inconclusive / file-evidence-unavailable`、空证明，且没有复核启动记录或审核模型子会话。三份原生会话、安装字节与冻结输入通过只读审计；学习关闭，host 已停。**这只让失败关闭机制获得真实产品证明：**回答给出的后续核验把 `consentRevision` 错指到 `task-admitted`，实际字段在 `task-started`；内容未完全通过。大文件与复杂命令仍无完整可复核来源，研究和方法激活为零，main/Daily 继续 NO-GO。见[E039 结果](tianwen-real-task-039-results-20260926.md)。下一项分别设计可绑定的有界文件读取证据，并跟进本次独立发现的事实定位错误。
+
 ## 最新工程增量：缺文件证据时停止无来源复核
 
 E038 追加审计发现，两份原结果审核拿不到完整文件材料，其中一份还自称“检查了工作区文件”，但原生子会话没有读取调用。当前开发分支据此增加失败关闭：已完成的 `local-files` 任务若恢复不到完整 `source.files`，直接记 `inconclusive / file-evidence-unavailable`、空证明，不生成复核启动记录或调用两次模型。普通任务结果与独立反馈仍保留；完整文件任务仍走原来的双审核。新用例先失败后通过，会话相关 **21 组、556/556 项测试通过**，八个包的类型检查通过；这只是工程验证，未重新打包或做新真实模型验收。单文件 32,768 字节上限及复杂 PowerShell 认证范围均未改变；main/Daily NO-GO。见[设计](../superpowers/specs/2026-09-26-tianwen-incomplete-file-review-design.md)和[E038 结果](tianwen-real-task-038-results-20260926.md)。
