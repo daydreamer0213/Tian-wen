@@ -75,7 +75,8 @@ export function parseConversationReviewChecks(value: unknown): ConversationRevie
     if (proof === null) throw new TypeError('review check requires native proof')
     const result: ConversationReviewCheck = { focus: oneOf(input.focus, ['requirements', 'grounding']),
       verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']), category: input.category === null ? null : oneOf(input.category, CONVERSATION_FAILURES),
-      explanation: text(input.explanation, 1536), evidenceQuotes: list(input.evidenceQuotes, item => text(item, 2048), 6), proof }
+      // Allow a small native-output overrun; two maximal checks still fit the 4096-byte stored consensus.
+      explanation: text(input.explanation, 1920), evidenceQuotes: list(input.evidenceQuotes, item => text(item, 2048), 6), proof }
     if (result.verdict !== 'inconclusive' && result.evidenceQuotes.length === 0) throw new TypeError('conclusive review check requires source evidence')
     if (result.verdict === 'not-met' && result.category === null) throw new TypeError('failed review check requires an attributable category')
     if (result.verdict === 'met' && result.category !== null) throw new TypeError('successful review check cannot assert a failure category')

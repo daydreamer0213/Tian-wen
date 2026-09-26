@@ -212,6 +212,29 @@ it.each(['met', 'not-met', 'inconclusive', 'unavailable'] as const)('keeps revie
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('retains native review explanations slightly over the requested length without losing independent proofs', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-length-')); roots.push(root)
+  const request = '请用一句话汇报 030 结果。'
+  const answer = '030 的普通摘要检查通过。'
+  const explanation = 'The answer follows the supplied request and stays within the evidenced 030 result. '.repeat(22)
+  expect(Buffer.byteLength(explanation, 'utf8')).toBeGreaterThan(1536)
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('requirements-length', 'structured_output', { verdict: 'met', category: null, explanation, evidenceQuotes: [request] }),
+    toolCallResponse('grounding-length', 'structured_output', { verdict: 'met', category: null, explanation, evidenceQuotes: [answer] }),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('review-length-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const review = await runConversationReview(harness.ctx, handle.agent, { label: 'Tianwen review length',
+      material: { request, answer }, evidence: [request, answer], signal: new AbortController().signal })
+    expect(review.verdict).toBe('met')
+    expect(review.reviewChecks).toHaveLength(2)
+    expect(new Set(review.reviewChecks.map(check => check.proof.sessionId)).size).toBe(2)
+    for (const check of review.reviewChecks) await expect(verifyConversationReviewCheck(harness.ctx, check)).resolves.toBeUndefined()
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each([false, true])('uses a native, read-only, persisted child with exact sampling configuration: %s', configured => {
   return checkNativeJudgment(configured)
 })

@@ -41,3 +41,12 @@ it('requires exactly two ordered independent native proofs and evidence for conc
     expect(() => parseConversationReviewChecks(invalid)).toThrow()
   }
 })
+
+it('bounds two tolerated native explanations within the stored consensus limit', () => {
+  const explanation = 'a'.repeat(1920)
+  const first = { ...check('requirements', 'met'), explanation }
+  const second = { ...check('grounding', 'met'), explanation }
+  const checks = parseConversationReviewChecks([first, second])
+  expect(Buffer.byteLength(conversationReviewConsensus(checks).explanation, 'utf8')).toBeLessThanOrEqual(4096)
+  expect(() => parseConversationReviewChecks([{ ...first, explanation: `${explanation}a` }, second])).toThrow()
+})
