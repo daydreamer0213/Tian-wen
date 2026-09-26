@@ -195,7 +195,7 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
   const answers = evidence.items.filter(item => item.role === 'answer')
   const sourceIds = evidence.items.filter(item => item.role !== 'answer').map(item => item.id)
   const quoteChoices = new Map(answers.filter(item => item.text.trim() !== '').map(item => [item.id, answerQuoteChoices(item.text)]))
-  const boundedChoices = [...quoteChoices.values()].reduce((bytes, values) => bytes + 2 * Buffer.byteLength(JSON.stringify(values), 'utf8'), 0) <= 65_536
+  const boundedChoices = [...quoteChoices.values()].reduce((bytes, values) => bytes + 2 * Buffer.byteLength(JSON.stringify(values), 'utf8'), 0) <= 98_304
   const claimFor = (answer: ClaimEvidenceItem) => object({
     quote: { ...(boundedChoices ? choices(quoteChoices.get(answer.id)!) : string), description: boundedChoices
       ? 'Select an exact supplied quote from this answer unit. Do not change its Markdown, whitespace, punctuation or scope.'
