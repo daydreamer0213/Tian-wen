@@ -18,7 +18,7 @@ import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runt
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
-import { ConversationGuidanceState } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { ConversationGuidanceState, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
@@ -38,6 +38,51 @@ const plainEvidenceResponse = (value: Record<string, unknown> & { evidenceQuotes
 const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(value), evidenceResponse(value)]
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
+
+it('reports the existing study-selection gates without starting work or reading proposal clues', async () => {
+  const scopeKey = 'conversation:readiness-test'
+  const snapshot = { schemaVersion: 'tianwen.conversation-guidance.v1' as const, scopeKey, rules: {} }
+  const behaviorVersion = guidanceVersion(snapshot)
+  const task = (id: string, family = 'summarization', met = false) => ({
+    source: { taskId: id, scopeKey, consentRevision: 1, behaviorVersion, requestDigest: sha256(id) },
+    admission: { decision: { family, evaluationMode: 'text' }, qualityContract: conversationQualityContract() },
+    completion: { status: 'completed' }, models: [{ modelConfigDigest: sha256('same-model') }],
+    ...(met ? { review: { verdict: 'met', proof: { sessionId: 'proof' } } } : {}),
+  })
+  const s1 = task('source-1'), s2 = task('source-2'), otherFamily = task('other-family', 'writing'), counter = task('counter', 'summarization', true)
+  let tasks = [s1] as ReturnType<typeof task>[]
+  let studies: unknown[] = []
+  let enabled = true
+  const record = vi.fn()
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService & Record<string, unknown>
+  Object.assign(service, { ctx: { tianwenEvolution: {
+    getLearningAnalysisConsent: () => ({ enabled, policyVersion: 'tianwen-auto-analysis.v3', revision: 1 }),
+    getConversationGuidance: () => snapshot,
+    listConversationTasks: () => tasks,
+    listConversationGuidanceStudies: () => studies,
+    listLearningIntakeStatuses: () => [],
+    recordConversationGuidance: record,
+  } } })
+  vi.spyOn(service as never, 'support' as never).mockImplementation((candidate: { source: { taskId: string } }) =>
+    candidate.source.taskId.startsWith('source-') ? { category: 'source-fidelity' } : undefined)
+  const clues = vi.spyOn(service as never, 'proposalClues' as never).mockImplementation(() => { throw new Error('readiness must not inspect proposal clues') })
+  const readiness = () => (service as unknown as { readiness(scope: string): Promise<{ state: string }> }).readiness(scopeKey)
+
+  enabled = false
+  expect(await readiness()).toEqual({ state: 'analysis-disabled' })
+  enabled = true
+  expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
+  tasks = [s1, otherFamily]
+  expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
+  tasks = [s1, s2]
+  expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
+  tasks = [s1, s2, counter]
+  expect(await readiness()).toEqual({ state: 'ready-to-schedule' })
+  studies = [{ opened: { sourceTaskIds: [s1.source.taskId, s2.source.taskId] } }]
+  expect(await readiness()).toEqual({ state: 'already-studied' })
+  expect(clues).not.toHaveBeenCalled()
+  expect(record).not.toHaveBeenCalled()
+})
 
 it('wakes a completed study source after its ordinary root agent has been released', async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')

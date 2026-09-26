@@ -15,6 +15,7 @@ import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import {
   guidanceVersion,
   parseLearningSkillAdmission,
+  sha256,
   type ConversationFeedbackAssessment,
   type ConversationTask,
   type GuidanceStudy,
@@ -69,7 +70,8 @@ const STATUS_CATALOG_LIMIT = 8
 const LEARNING_HISTORY_SCOPE = 'Skill-bound Runs and Outcomes retain their legacy totals. Natural conversation observation, reviews, and attributed feedback are counted separately for this profile.'
 const LEARNING_ANALYSIS_SCOPE = 'Recorded analyses include explicit-feedback analyses from ordinary conversations; these totals do not establish causality from the counted Outcomes.'
 const LEARNING_SOURCES_SCOPE = 'Optional host-reviewed reusable external Skill sources; not feedback or Outcome input and not required for automatic analysis.'
-const LEARNING_STATUS_GUIDANCE = 'This bounded snapshot is sufficient to answer learning status, history, and source availability now. Tianwen Runtime owns evaluation and activation; the analysis child owns analysis only. Unchanged counts do not prove unchanged evaluation. Use tianwen_learning_continue for a user\'s natural continuation request. Do not use filesystem verification or inspect Profile stores, raw feedback, Session logs, ledger files, runtime bundles, or shared dependencies to expand it. If detail is not exposed, say it is unavailable; explicit user-requested file debugging is a separate task. Counts and consent are not proof that learning has already improved Skills.'
+const GUIDANCE_READINESS_STATES = new Set(['analysis-disabled', 'awaiting-compatible-sources', 'awaiting-counterexample', 'already-studied', 'ready-to-schedule'])
+const LEARNING_STATUS_GUIDANCE = 'This bounded snapshot is sufficient to answer learning status, history, and source availability now. Guidance readiness describes only current-workspace evidence selection, not study execution, acceptance, activation or improvement. Tianwen Runtime owns evaluation and activation; the analysis child owns analysis only. Unchanged counts do not prove unchanged evaluation. Use tianwen_learning_continue for a user\'s natural continuation request. Do not use filesystem verification or inspect Profile stores, raw feedback, Session logs, ledger files, runtime bundles, or shared dependencies to expand it. If detail is not exposed, say it is unavailable; explicit user-requested file debugging is a separate task. Counts and consent are not proof that learning has already improved Skills.'
 const LEARNING_CONTINUE_GUIDANCE = 'Scheduling does not imply evaluation success. Tianwen Runtime owns evaluation and activation; the analysis child owns analysis only.'
 
 declare module '@deepseek-ai/cordis' {
@@ -183,6 +185,8 @@ function conversationFeedbackStatus(assessments: readonly ConversationFeedbackAs
 
 function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVersions: ReadonlyMap<string, string | null>) {
   const scopes = new Set(studies.map(study => study.opened.scopeKey))
+  const stopped = studies.filter(study => study.stopped !== undefined)
+  const stoppedCount = (reason: NonNullable<GuidanceStudy['stopped']>['reason']) => stopped.filter(study => study.stopped?.reason === reason).length
   const activeScopes = new Set(studies.filter(study => study.activation !== undefined
     && study.rollback === undefined && study.candidate !== undefined
     && guidanceVersion(study.candidate.candidateSnapshot) === activeVersions.get(study.opened.scopeKey))
@@ -191,7 +195,15 @@ function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVer
     scope: 'Waiting means no final decision or stop yet; stopped means execution ended without a decision. Accepted is a historical evaluation result, not proof of improvement or current activation. Currently active counts matching stored guidance snapshots once per scope; rolled back counts withdrawals. These counts overlap. Unavailable scopes could not be checked. Current Session counts cover its observed task scopes, not only studies sourced in that Session.',
     total: studies.length,
     waiting: studies.filter(study => study.decision === undefined && study.stopped === undefined).length,
-    stopped: studies.filter(study => study.stopped !== undefined).length,
+    stopped: stopped.length,
+    stoppedReasons: {
+      insufficientEvidence: stoppedCount('insufficient-evidence'),
+      cancelled: stoppedCount('cancelled'),
+      invalidJudgment: stoppedCount('invalid-judgment'),
+      modelUnavailable: stoppedCount('model-unavailable'),
+      sourceUnavailable: stoppedCount('source-unavailable'),
+      scopeChanged: stoppedCount('scope-changed'),
+    },
     rejected: studies.filter(study => study.decision?.verdict === 'rejected').length,
     accepted: studies.filter(study => study.decision?.verdict === 'accepted').length,
     inconclusive: studies.filter(study => study.decision?.verdict === 'inconclusive').length,
@@ -671,6 +683,7 @@ export class TianwenLearningConsentAgentService extends Service {
 
   private async learningStatus(agent: Agent, signal?: AbortSignal) {
     signal?.throwIfAborted()
+    const guidanceReadiness = await this.guidanceReadiness(agent, signal)
     const snapshot: Record<string, JsonValue> = {
       guidance: LEARNING_STATUS_GUIDANCE,
       consent: statusSnapshot(this.ctx.tianwenEvolution.getLearningAnalysisConsent()),
@@ -724,6 +737,7 @@ export class TianwenLearningConsentAgentService extends Service {
     const currentSession = {
       naturalConversation: {
         ...naturalConversationStatus(currentConversationTasks, conversationFeedback),
+        guidanceReadiness,
         feedbackAssessments: conversationFeedbackStatus(feedbackAssessments.filter(item => currentTaskIds.has(item.started.taskId))),
         guidanceStudies: conversationGuidanceStatus(guidanceStudies.filter(study => currentScopes.has(study.opened.scopeKey)), guidanceVersions),
       },
@@ -832,6 +846,23 @@ export class TianwenLearningConsentAgentService extends Service {
         ...(eligible.length > STATUS_CATALOG_LIMIT ? { truncated: true } : {}),
         available: true,
       },
+    }
+  }
+
+  private async guidanceReadiness(agent: Agent, signal?: AbortSignal): Promise<{ readonly state: string }> {
+    signal?.throwIfAborted()
+    const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
+    if (consent?.enabled !== true || consent.policyVersion !== POLICY_VERSION) return { state: 'analysis-disabled' }
+    try {
+      const loop = this.ctx.get('tianwenConversationGuidanceLoop')
+      if (loop === undefined) return { state: 'unavailable' }
+      const scopeKey = `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}`
+      const { state } = await loop.readiness(scopeKey)
+      signal?.throwIfAborted()
+      return { state: GUIDANCE_READINESS_STATES.has(state) ? state : 'unavailable' }
+    } catch {
+      signal?.throwIfAborted()
+      return { state: 'unavailable' }
     }
   }
 

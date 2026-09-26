@@ -628,6 +628,7 @@ describe('Tianwen main-chat learning consent tool', () => {
             scope: expect.stringMatching(/historical.*not.*original.*review/iu) },
           guidanceStudies: { total: 10, waiting: 1, stopped: 1, rejected: 1, accepted: 6,
             inconclusive: 1, currentlyActive: 2, rolledBack: 1, unavailableScopes: 0,
+            stoppedReasons: { insufficientEvidence: 0, cancelled: 1, invalidJudgment: 0, modelUnavailable: 0, sourceUnavailable: 0, scopeChanged: 0 },
             scope: expect.stringMatching(/accepted.*historical.*not.*improvement/iu) },
         } },
         currentSession: { naturalConversation: {
@@ -635,7 +636,8 @@ describe('Tianwen main-chat learning consent tool', () => {
           feedbackAssessments: { total: 7, pending: 1, unavailable: 1, attributableProblems: 1,
             preferences: 1, positive: 1, requirementChanges: 1, inconclusive: 1 },
           guidanceStudies: { total: 9, waiting: 1, stopped: 1, rejected: 1, accepted: 5,
-            inconclusive: 1, currentlyActive: 1, rolledBack: 1, unavailableScopes: 0 },
+            inconclusive: 1, currentlyActive: 1, rolledBack: 1, unavailableScopes: 0,
+            stoppedReasons: { insufficientEvidence: 0, cancelled: 1, invalidJudgment: 0, modelUnavailable: 0, sourceUnavailable: 0, scopeChanged: 0 } },
         } },
       } })
       expect(getGuidance).toHaveBeenCalledTimes(2)
@@ -654,6 +656,48 @@ describe('Tianwen main-chat learning consent tool', () => {
       await child.dispose()
       await main.dispose()
       await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports current-workspace readiness without exposing learning material or requesting a model', async () => {
+    const mounted = await mountConsentRuntime('guidance-readiness-status')
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+      const readiness = vi.fn(async () => ({ state: 'awaiting-compatible-sources' as const, secret: 'PRIVATE feedback' }))
+      const get = mounted.ctx.get.bind(mounted.ctx)
+      vi.spyOn(mounted.ctx, 'get').mockImplementation((name: string) => name === 'tianwenConversationGuidanceLoop'
+        ? { readiness } as never : get(name as never))
+      const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl')
+      const beforeLedger = readFileSync(ledgerPath, 'utf8')
+
+      const result = await executeLearningStatus(mounted.ctx, main.agent)
+
+      expect(result).toMatchObject({ isError: false, value: { currentSession: { naturalConversation: {
+        guidanceReadiness: { state: 'awaiting-compatible-sources' },
+      } } } })
+      expect(readiness).toHaveBeenCalledWith(`conversation:${sha256({ cwd: null })}`)
+      expect(JSON.stringify(result.value)).not.toContain('PRIVATE')
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.adapter.requests).toHaveLength(0)
+
+      readiness.mockRejectedValueOnce(new Error('PRIVATE scan failure'))
+      const unavailable = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(unavailable).toMatchObject({ isError: false, value: { currentSession: { naturalConversation: {
+        guidanceReadiness: { state: 'unavailable' },
+      } } } })
+      expect(JSON.stringify(unavailable.value)).not.toContain('PRIVATE')
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.adapter.requests).toHaveLength(0)
+
+      readiness.mockResolvedValueOnce({ state: 'PRIVATE state' as never, secret: 'PRIVATE feedback' })
+      const malformed = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(malformed).toMatchObject({ isError: false, value: { currentSession: { naturalConversation: {
+        guidanceReadiness: { state: 'unavailable' },
+      } } } })
+      expect(JSON.stringify(malformed.value)).not.toContain('PRIVATE')
+    } finally {
+      await child.dispose(); await main.dispose(); await mounted.ctx.fiber.dispose()
     }
   })
 

@@ -19,6 +19,8 @@ declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationGuidanceLoop: TianwenConversationGuidanceLoopService }
 }
 interface EvidenceGroup { readonly sources: readonly [ConversationTask, ConversationTask], readonly counterexample: ConversationTask, readonly category: ConversationFailure, readonly assessments: readonly (ConversationFeedbackAssessment | undefined)[], readonly proposalClues: readonly { readonly reference: GuidanceProposalClue, readonly material: ConversationProposalClueMaterial }[] }
+type GuidanceReadinessState = 'analysis-disabled' | 'awaiting-compatible-sources' | 'awaiting-counterexample' | 'already-studied' | 'ready-to-schedule'
+type SelectionScan = { readonly state: GuidanceReadinessState, readonly group?: Omit<EvidenceGroup, 'proposalClues'> }
 
 const RAW_FEEDBACK_GUIDANCE = 'When a source has feedbackStandard.originalFeedback, it is exact attributed feedback to an earlier assistant answer. Preserve its speaker, actor, negation, exception and unresolved references; use it to interpret only the attributed continuing preference or supported problem, never every new request in the feedback. The current evaluated task instruction remains authoritative, and feedback is not factual source evidence.'
 
@@ -414,10 +416,20 @@ export class TianwenConversationGuidanceLoopService extends Service {
       finally { this.controllers.delete(controller) }
     }
   }
+  async readiness(scopeKey: string): Promise<{ readonly state: GuidanceReadinessState }> {
+    return { state: (await this.scan(scopeKey)).state }
+  }
   private async select(scopeKey: string): Promise<EvidenceGroup | undefined> {
+    const { group } = await this.scan(scopeKey)
+    if (group === undefined) return undefined
+    const proposalClues = await this.proposalClues(scopeKey, group.sources[1], group.category,
+      [...group.sources, group.counterexample].map(task => task.source.taskId))
+    return { ...group, proposalClues }
+  }
+  private async scan(scopeKey: string): Promise<SelectionScan> {
     const evolution = this.ctx.tianwenEvolution
     const consent = evolution.getLearningAnalysisConsent()
-    if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3') return undefined
+    if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3') return { state: 'analysis-disabled' }
     const version = guidanceVersion(evolution.getConversationGuidance(scopeKey))
     const candidates = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
       && task.source.consentRevision === consent.revision && task.source.behaviorVersion === version
@@ -444,22 +456,25 @@ export class TianwenConversationGuidanceLoopService extends Service {
       && sha256(task.admission!.qualityContract ?? null) === sha256(first.admission!.qualityContract ?? null)
     const studies = evolution.listConversationGuidanceStudies(scopeKey)
     const failed = tasks.filter(task => this.support(task) !== undefined).reverse()
+    let paired = false
+    let unstudied = false
     for (const first of failed) {
       const second = failed.find(task => task.source.taskId !== first.source.taskId && inputIdentity(task) !== inputIdentity(first) && compatible(task, first)
         && conversationTaskModelDigest(task) === conversationTaskModelDigest(first)
         && task.admission!.decision!.family === first.admission!.decision!.family && this.support(task)!.category === this.support(first)!.category)
       if (second === undefined) continue
+      paired = true
       const sources: [ConversationTask, ConversationTask] = [second, first]
       if (studies.some(study => sources.every(task => study.opened.sourceTaskIds.includes(task.source.taskId)))) continue
+      unstudied = true
       const counterexample = tasks.find(task => task.review?.verdict === 'met' && task.review.proof !== null && this.support(task) === undefined && !this.negativeFeedback(task)
         && compatible(task, first) && conversationTaskModelDigest(task) === conversationTaskModelDigest(first) && task.admission!.decision!.family === first.admission!.decision!.family)
       if (counterexample !== undefined) {
         const category = this.support(first)!.category
-        const proposalClues = await this.proposalClues(scopeKey, first, category, [...sources, counterexample].map(task => task.source.taskId))
-        return { sources, counterexample, category, assessments: sources.map(task => this.support(task)?.assessment), proposalClues }
+        return { state: 'ready-to-schedule', group: { sources, counterexample, category, assessments: sources.map(task => this.support(task)?.assessment) } }
       }
     }
-    return undefined
+    return { state: unstudied ? 'awaiting-counterexample' : paired ? 'already-studied' : 'awaiting-compatible-sources' }
   }
   private rollbackIfNeeded(scopeKey: string): void {
     const evolution = this.ctx.tianwenEvolution
