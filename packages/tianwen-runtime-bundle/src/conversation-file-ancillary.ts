@@ -7,7 +7,7 @@ import { lstat, realpath } from 'node:fs/promises'
 import { canonicalJson } from '@tianwen/evolution/learning-intake'
 import { parseConversationTaskFileAncillary, parseConversationSkillAdmission, parseConversationSkillDefinition,
   projectConversationFileAncillaryContext, sha256, type ConversationSkillAdmission, type ConversationTask,
-  type ConversationTaskFileAncillary, type ConversationAncillaryPayload } from '@tianwen/evolution'
+  CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type ConversationTaskFileAncillary, type ConversationAncillaryPayload, type ConversationAncillaryProducer } from '@tianwen/evolution'
 import { conversationFilePath } from './conversation-file-material.js'
 import { parseNativeDirectoryReceipt, type NativeDirectoryReceipt } from './native-tool-observation.js'
 import type { NativeToolRegistrationProducer } from './native-tools-observer.js'
@@ -22,14 +22,15 @@ interface Pending {
   readonly execution: ToolDispatchExecution
   readonly call: Call
   readonly definition: ToolDefinition
-  readonly producer?: NativeToolRegistrationProducer
+  readonly producer?: ConversationAncillaryProducer
   readonly argumentsDigest: ReturnType<typeof sha256>
   method?: Extract<ConversationAncillaryPayload, { tool: 'skill' }>
   receipt?: NativeDirectoryReceipt
   result?: ToolExecutionResult
   settled: boolean
 }
-const ancillaryNames = new Set(['glob', 'grep', 'skill', 'pwsh'])
+const ancillaryNames = new Set(['glob', 'grep', 'skill', 'pwsh', CAPTURED_FILE_FACTS_TOOL])
+const factsProducer = { package: '@tianwen/runtime-bundle', version: '1', adapter: 'tianwen.captured-file-facts.v1' } as const
 export function isFileAncillaryTool(name: string): boolean { return ancillaryNames.has(name) }
 function assert(value: unknown): asserts value { if (!value) throw new Error('native file ancillary evidence is unavailable') }
 function object(value: unknown): Record<string, unknown> {
@@ -177,6 +178,21 @@ export function verifyConversationFileAncillary(task: ConversationTask, cwd: str
         if (config !== undefined) admitted(record.payload.reference, task, config)
         value = skillValue(record.payload); break
       case 'pwsh': value = verifyDirectory(record.payload, task, cwd, call); break
+      case CAPTURED_FILE_FACTS_TOOL: {
+        const payload = record.payload
+        const args = exact(JSON.parse(call.data.arguments), ['file_path'])
+        const input = task.fileInputs?.find(item => item.path === payload.facts.path && item.content !== null)
+        assert(typeof args.file_path === 'string' && !isAbsolute(args.file_path)
+          && recordedFilePath(cwd, args.file_path) === payload.facts.path && input !== undefined
+          && payload.inputDigest === sha256({ path: input.path, content: input.content })
+          && sha256(capturedFileFacts(input)) === sha256(payload.facts)
+          && input.callSeq <= record.callSeq
+          && !events.some(event => event.type === 'tool/call' && event.seq >= input.callSeq && event.seq <= record.resultSeq
+            && (event.data.name === 'write' || event.data.name === 'edit')
+            && recordedFilePath(cwd, object(JSON.parse(event.data.arguments)).file_path)?.toLowerCase() === input.path.toLowerCase()))
+        value = capturedFileFacts(input)
+        break
+      }
     }
     assert(sha256(value) === record.valueDigest)
   }
@@ -209,7 +225,9 @@ export class ConversationFileAncillaryCapture {
       assert(call?.type === 'tool/call' && definition !== undefined && !this.pending.has(String(exec.callId)))
       const argumentsDigest = sha256(exec.arguments)
       assert(call.data.name === exec.name && call.data.turn === this.task.source.turn && sha256(JSON.parse(call.data.arguments)) === argumentsDigest)
-      const producer = isFileAncillaryTool(exec.name) ? registration(this.ctx, definition) : undefined
+      const producer = exec.name === CAPTURED_FILE_FACTS_TOOL
+        ? this.ctx.get('tianwenConversationFileObserver')?.isFactsDefinition(definition) ? factsProducer : undefined
+        : isFileAncillaryTool(exec.name) ? registration(this.ctx, definition) : undefined
       assert(!isFileAncillaryTool(exec.name) || producer !== undefined)
       const pending: Pending = { execution: exec, call: structuredClone(call), definition, argumentsDigest,
         ...(producer === undefined ? {} : { producer }), settled: false }
@@ -245,7 +263,9 @@ export class ConversationFileAncillaryCapture {
       assert(exec.token === pending.execution.token && exec.agent?.session.id === pending.execution.agent?.session.id
         && exec.name === pending.call.data.name && sha256(exec.arguments) === pending.argumentsDigest
         && this.ctx.tools.get(exec.name, exec.agent) === pending.definition
-        && (!isFileAncillaryTool(exec.name) || sha256(registration(this.ctx, pending.definition) ?? null) === sha256(pending.producer))
+        && (exec.name === CAPTURED_FILE_FACTS_TOOL
+          ? this.ctx.get('tianwenConversationFileObserver')?.isFactsDefinition(pending.definition) === true
+          : !isFileAncillaryTool(exec.name) || sha256(registration(this.ctx, pending.definition) ?? null) === sha256(pending.producer))
         && pending.result === undefined && Object.isFrozen(exec) && Object.isFrozen(result) && !result.isError)
       pending.result = structuredClone(result)
     } catch { this.invalid = true }
@@ -281,6 +301,13 @@ export class ConversationFileAncillaryCapture {
       } else if (call.data.name === 'skill') {
         assert(pending.method !== undefined && sha256(value) === sha256(skillValue(pending.method)))
         admitted(pending.method.reference, task, this.config); payload = pending.method
+      } else if (call.data.name === CAPTURED_FILE_FACTS_TOOL) {
+        const args = exact(JSON.parse(call.data.arguments), ['file_path'])
+        assert(typeof args.file_path === 'string' && !isAbsolute(args.file_path))
+        const path = recordedFilePath(this.cwd, args.file_path)
+        const input = task.fileInputs?.find(item => item.path === path && item.content !== null)
+        assert(input !== undefined && sha256(value) === sha256(capturedFileFacts(input)))
+        payload = { tool: CAPTURED_FILE_FACTS_TOOL, facts: capturedFileFacts(input), inputDigest: sha256({ path: input.path, content: input.content }) }
       } else {
         assert(pending.receipt !== undefined)
         payload = { tool: 'pwsh', nativeReceiptJson: canonicalJson(pending.receipt), nativeValueJson: canonicalJson(value) }

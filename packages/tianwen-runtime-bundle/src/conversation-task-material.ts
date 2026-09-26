@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
+import { CAPTURED_FILE_FACTS_TOOL, learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
 import { isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
@@ -50,13 +50,14 @@ export interface ConversationTaskMaterial {
 }
 
 /** Quotable source text, excluding judgment-derived fields and native metadata. */
-export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial, 'request' | 'context' | 'files'>, answers: readonly string[], toolEvents: readonly SessionEvent[] = [], finalEntries?: readonly ConversationFileEntry[]): string[] {
+export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial, 'request' | 'context' | 'files' | 'ancillaryContext'>, answers: readonly string[], toolEvents: readonly SessionEvent[] = [], finalEntries?: readonly ConversationFileEntry[]): string[] {
   return [
     ...[...source.request, ...source.context].flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])),
     ...answers,
     ...(source.files === undefined ? toolEvents.flatMap(event => event.type === 'tool/result' && isAppendSurfaceEvent(event)
       ? event.data.message.content[0].content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
       : [...source.files.entries.flatMap(entry => entry.content === null ? [] : [entry.content]),
+        ...(source.ancillaryContext?.facts ?? []).map(fact => `Captured initial file ${fact.path}: bytes=${fact.bytes}; lines=${fact.lines}; sha256=${fact.sha256}`),
         ...(source.files.outputKind === 'files' ? (finalEntries ?? []).flatMap(entry => source.files!.outputPaths.includes(entry.path) && entry.content !== null ? [entry.content] : []) : [])]),
   ]
 }
@@ -133,8 +134,9 @@ function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly Se
     || sha256(evidenceIds) !== sha256(completion.evidenceIds)) return
   const calls = span.flatMap(event => {
     if (event.type !== 'tool/call') return []
-    if (isFileAncillaryTool(event.data.name)) return []
-    if (event.data.name !== 'read' && event.data.name !== 'write' && event.data.name !== 'edit') return [{ event, path: undefined }]
+    if (isFileAncillaryTool(event.data.name) && event.data.name !== CAPTURED_FILE_FACTS_TOOL) return []
+    if (event.data.name !== 'read' && event.data.name !== 'write' && event.data.name !== 'edit'
+      && event.data.name !== CAPTURED_FILE_FACTS_TOOL) return [{ event, path: undefined }]
     let args: unknown
     try { args = JSON.parse(event.data.arguments) } catch { return [{ event, path: undefined }] }
     const path = recordedToolPath(cwd, args !== null && typeof args === 'object' ? (args as Record<string, unknown>).file_path : undefined)

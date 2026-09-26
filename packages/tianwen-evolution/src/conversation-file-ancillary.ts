@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path'
 import { parseConversationFileEntries, type ConversationFileEntry } from './conversation-files.js'
 import { canonicalJson, sha256 } from './learning-intake.js'
+import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type CapturedFileFacts } from './conversation-file-facts.js'
 import type { Sha256Digest } from './ledger.js'
 import {
   parseConversationSkillAdmission,
@@ -14,9 +15,9 @@ const ANCILLARY_RESULT_MAX_COUNT = 256
 const ANCILLARY_CONTEXT_MAX_BYTES = 24576
 
 export interface ConversationAncillaryProducer {
-  readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh'
-  readonly version: '0.1.1-rc.2'
-  readonly adapter: 'tianwen.file-ancillary.v1'
+  readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh' | '@tianwen/runtime-bundle'
+  readonly version: '0.1.1-rc.2' | '1'
+  readonly adapter: 'tianwen.file-ancillary.v1' | 'tianwen.captured-file-facts.v1'
 }
 
 export type ConversationAncillaryPayload =
@@ -24,6 +25,7 @@ export type ConversationAncillaryPayload =
   | { readonly tool: 'grep'; readonly matches: readonly { readonly path: string; readonly lineNumber: number; readonly line: string }[]; readonly nativeValueJson?: string }
   | { readonly tool: 'skill'; readonly reference: ConversationSkillAdmission; readonly definition: Readonly<Record<string, unknown>> }
   | { readonly tool: 'pwsh'; readonly nativeReceiptJson: string; readonly nativeValueJson: string }
+  | { readonly tool: typeof CAPTURED_FILE_FACTS_TOOL; readonly facts: CapturedFileFacts; readonly inputDigest: Sha256Digest }
 
 export interface ConversationTaskFileAncillary {
   readonly kind: 'task-file-ancillary-captured'
@@ -39,7 +41,7 @@ export interface ConversationTaskFileAncillary {
 }
 
 export interface ConversationFileAncillaryContext {
-  readonly schemaVersion: 'tianwen.file-ancillary-context.v1'
+  readonly schemaVersion: 'tianwen.file-ancillary-context.v1' | 'tianwen.file-ancillary-context.v2'
   readonly methods: readonly {
     readonly reference: ConversationSkillAdmission
     readonly definition: Readonly<Record<string, unknown>>
@@ -49,6 +51,7 @@ export interface ConversationFileAncillaryContext {
     readonly inputDigest: Sha256Digest
     readonly lines: readonly number[]
   }[]
+  readonly facts?: readonly CapturedFileFacts[]
 }
 
 function exactObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -130,6 +133,9 @@ function assertConsistentPaths(paths: readonly string[], duplicateAllowed = fals
 
 function parseProducer(value: unknown): ConversationAncillaryProducer {
   const input = exactObject(value, ['package', 'version', 'adapter'])
+  if (input.package === '@tianwen/runtime-bundle' && input.version === '1' && input.adapter === 'tianwen.captured-file-facts.v1') {
+    return { package: input.package, version: input.version, adapter: input.adapter }
+  }
   if ((input.package !== '@deepseek-ai/dsh-tool-fs-search' && input.package !== '@deepseek-ai/dsh-tool-skill'
       && input.package !== '@deepseek-ai/dsh-tool-pwsh')
     || input.version !== '0.1.1-rc.2' || input.adapter !== 'tianwen.file-ancillary.v1') {
@@ -186,6 +192,14 @@ function parsePayload(value: unknown): ConversationAncillaryPayload {
     return { tool, nativeReceiptJson: canonicalObjectJson(input.nativeReceiptJson, 'native receipt JSON'),
       nativeValueJson: canonicalObjectJson(input.nativeValueJson, 'native value JSON') }
   }
+  if (tool === CAPTURED_FILE_FACTS_TOOL) {
+    const input = exactObject(value, ['tool', 'facts', 'inputDigest'])
+    const facts = exactObject(input.facts, ['path', 'bytes', 'lines', 'sha256'])
+    const path = parseMetadataPath(facts.path)
+    if (!Number.isSafeInteger(facts.bytes) || (facts.bytes as number) < 0 || !Number.isSafeInteger(facts.lines) || (facts.lines as number) < 0
+      || typeof facts.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(facts.sha256)) throw new TypeError('conversation file facts are invalid')
+    return { tool, facts: { path, bytes: facts.bytes as number, lines: facts.lines as number, sha256: facts.sha256 }, inputDigest: digest(input.inputDigest) }
+  }
   throw new TypeError('conversation file ancillary payload tool is invalid')
 }
 
@@ -199,7 +213,8 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
   const producer = parseProducer(input.producer)
   const payload = parsePayload(input.payload)
   const expectedPackage = payload.tool === 'skill' ? '@deepseek-ai/dsh-tool-skill'
-    : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh' : '@deepseek-ai/dsh-tool-fs-search'
+    : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh'
+      : payload.tool === CAPTURED_FILE_FACTS_TOOL ? '@tianwen/runtime-bundle' : '@deepseek-ai/dsh-tool-fs-search'
   if (producer.package !== expectedPackage) throw new TypeError('conversation file ancillary producer does not match its tool')
   const result: ConversationTaskFileAncillary = {
     kind: input.kind, taskId: identity(input.taskId, 'task identity'), callId: identity(input.callId, 'call identity'),
@@ -223,8 +238,11 @@ export function parseConversationFileAncillaryContext(
   entries: readonly ConversationFileEntry[],
 ): ConversationFileAncillaryContext {
   const captured = parseConversationFileEntries(entries)
-  const input = exactObject(value, ['schemaVersion', 'methods', 'positiveLocations'])
-  if (input.schemaVersion !== 'tianwen.file-ancillary-context.v1') throw new TypeError('conversation file ancillary context version is invalid')
+  const row = value as Record<string, unknown>
+  const version = row?.schemaVersion
+  const input = exactObject(value, version === 'tianwen.file-ancillary-context.v2'
+    ? ['schemaVersion', 'methods', 'positiveLocations', 'facts'] : ['schemaVersion', 'methods', 'positiveLocations'])
+  if (input.schemaVersion !== 'tianwen.file-ancillary-context.v1' && input.schemaVersion !== 'tianwen.file-ancillary-context.v2') throw new TypeError('conversation file ancillary context version is invalid')
   const methodKeys = new Set<string>()
   const methods = exactArray(input.methods, ANCILLARY_RECORD_MAX_COUNT, 'context method').map(value => {
     const method = exactObject(value, ['reference', 'definition'])
@@ -254,8 +272,18 @@ export function parseConversationFileAncillaryContext(
     return { path, inputDigest, lines }
   })
   assertConsistentPaths(locationPaths)
-  if (methods.length === 0 && positiveLocations.length === 0) throw new TypeError('conversation file ancillary context cannot be blank')
-  const context: ConversationFileAncillaryContext = { schemaVersion: input.schemaVersion, methods, positiveLocations }
+  const facts = input.schemaVersion === 'tianwen.file-ancillary-context.v2'
+    ? exactArray(input.facts, ANCILLARY_RECORD_MAX_COUNT, 'facts').map(value => {
+      const row = exactObject(value, ['path', 'bytes', 'lines', 'sha256'])
+      const path = parseMetadataPath(row.path)
+      const entry = captured.find(item => item.path === path)
+      if (entry?.content === null || entry === undefined || sha256(row) !== sha256(capturedFileFacts(entry))) throw new TypeError('conversation file facts do not match captured input')
+      return capturedFileFacts(entry)
+    }) : []
+  if (new Set(facts.map(item => item.path.toLowerCase())).size !== facts.length) throw new TypeError('duplicate conversation file facts')
+  if (methods.length === 0 && positiveLocations.length === 0 && facts.length === 0) throw new TypeError('conversation file ancillary context cannot be blank')
+  const context: ConversationFileAncillaryContext = { schemaVersion: input.schemaVersion, methods, positiveLocations,
+    ...(input.schemaVersion === 'tianwen.file-ancillary-context.v2' ? { facts } : {}) }
   if (serializedBytes(context) > ANCILLARY_CONTEXT_MAX_BYTES) throw new TypeError('conversation file ancillary context exceeds the byte limit')
   return context
 }
@@ -283,9 +311,18 @@ export function projectConversationFileAncillaryContext(
 
   const methodsByReference = new Map<string, { readonly reference: ConversationSkillAdmission; readonly definition: Readonly<Record<string, unknown>> }>()
   const positiveLines = new Map<string, Set<number>>()
+  const factsByPath = new Map<string, CapturedFileFacts>()
   for (const record of parsed) {
     if (record.payload.tool === 'skill') {
       methodsByReference.set(canonicalJson(record.payload.reference), { reference: record.payload.reference, definition: record.payload.definition })
+      continue
+    }
+    if (record.payload.tool === CAPTURED_FILE_FACTS_TOOL) {
+      const path = record.payload.facts.path
+      const entry = captured.find(item => item.path === path)
+      if (entry?.content === null || entry === undefined || record.payload.inputDigest !== sha256(entry)
+        || sha256(record.payload.facts) !== sha256(capturedFileFacts(entry))) throw new TypeError('conversation file facts do not match preimage')
+      factsByPath.set(path, capturedFileFacts(entry))
       continue
     }
     if (record.payload.tool !== 'grep') continue
@@ -304,6 +341,8 @@ export function projectConversationFileAncillaryContext(
     const content = captured.find(entry => entry.path === path)!.content!
     return { path, inputDigest: sha256({ path, content }), lines: [...lines].sort((left, right) => left - right) }
   })
-  if (methods.length === 0 && positiveLocations.length === 0) return undefined
-  return parseConversationFileAncillaryContext({ schemaVersion: 'tianwen.file-ancillary-context.v1', methods, positiveLocations }, captured)
+  if (methods.length === 0 && positiveLocations.length === 0 && factsByPath.size === 0) return undefined
+  const facts = [...factsByPath.values()].sort((left, right) => compareText(left.path, right.path))
+  return parseConversationFileAncillaryContext({ schemaVersion: facts.length === 0 ? 'tianwen.file-ancillary-context.v1' : 'tianwen.file-ancillary-context.v2',
+    methods, positiveLocations, ...(facts.length === 0 ? {} : { facts }) }, captured)
 }

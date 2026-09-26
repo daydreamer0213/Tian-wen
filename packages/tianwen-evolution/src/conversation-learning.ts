@@ -3,6 +3,7 @@ import type { Sha256Digest } from './ledger.js'
 import { parseClaimAudit, type ClaimAudit } from './conversation-claim-audit.js'
 import { parseConversationTaskFileAncillary, projectConversationFileAncillaryContext, type ConversationTaskFileAncillary } from './conversation-file-ancillary.js'
 import { parseConversationFileEntries, parseConversationFileResult, type ConversationFileResult, type ConversationTaskFileInput, type ConversationTaskFileUnavailable } from './conversation-files.js'
+import { CAPTURED_FILE_FACTS_TOOL } from './conversation-file-facts.js'
 
 export const CONVERSATION_FAMILIES = ['summarization', 'writing', 'planning', 'code', 'other'] as const
 export const CONVERSATION_FAILURES = ['source-fidelity', 'instruction-following', 'task-understanding', 'verification', 'tool-use', 'user-preference'] as const
@@ -380,7 +381,9 @@ export class ConversationLearningState {
     if (record.kind === 'task-file-ancillary-captured') {
       return task?.fileAncillary?.find(item => item.callId === record.callId || item.callSeq === record.callSeq || item.resultSeq === record.resultSeq
         || item.callSeq === record.resultSeq || item.resultSeq === record.callSeq)
-        ?? task?.fileInputs?.find(input => input.callId === record.callId || input.callSeq === record.callSeq || input.callSeq === record.resultSeq)
+        ?? task?.fileInputs?.find(input => !(record.payload.tool === CAPTURED_FILE_FACTS_TOOL
+          && input.callId === record.callId && input.callSeq === record.callSeq && input.path === record.payload.facts.path)
+          && (input.callId === record.callId || input.callSeq === record.callSeq || input.callSeq === record.resultSeq))
     }
     if (record.kind === 'task-file-evidence-unavailable') return task?.fileUnavailable
     return task?.review

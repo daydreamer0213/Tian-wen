@@ -9,7 +9,7 @@ import { ToolRuntime } from '@deepseek-ai/dsh-tools'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
-import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { NativeObservedToolRuntime } from '../../packages/tianwen-runtime-bundle/src/native-tools-observer.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
@@ -95,11 +95,74 @@ async function mount(calls: Parameters<typeof mountPersistentHarness>[1], option
 const read = () => toolCallResponse('read-input', 'read', { file_path: 'input.md' })
 const glob = () => toolCallResponse('find-input', 'glob', { pattern: '*.md' })
 const grep = () => toolCallResponse('grep-input', 'grep', { pattern: 'needle|QUERY_CANARY', path: 'input.md' })
+const facts = (id = 'facts-input') => toolCallResponse(id, CAPTURED_FILE_FACTS_TOOL, { file_path: 'input.md' })
 const parallel = (calls: readonly { id: string; name: string; arguments: Record<string, unknown> }[]): StreamChunk[] => [
   ...calls.flatMap((call, index) => [{ type: 'block-start' as const, index, blockType: 'tool-call' as const },
     { type: 'block-end' as const, index, block: { type: 'tool-call' as const, id: call.id as never, name: call.name, arguments: JSON.stringify(call.arguments) } }]),
   { type: 'finish', reason: { kind: 'tool-calls' } },
 ]
+
+it.each(['before', 'after'] as const)('certifies captured file facts %s the native read and rechecks cold recovery', async order => {
+  const h = await runNativeAncillaryTask(order === 'before' ? [facts(), read()] : [read(), facts()])
+  try {
+    const expected = capturedFileFacts({ path: 'input.md', content: original })
+    expect(h.task.fileUnavailable).toBeUndefined()
+    expect(h.task.review?.verdict).toBe('met')
+    expect(h.task.review?.reviewChecks).toHaveLength(2)
+    expect(h.adapter.requests.filter(request => JSON.stringify(request.messages).includes(`Captured initial file input.md: bytes=${expected.bytes}; lines=${expected.lines}; sha256=${expected.sha256}`))).toHaveLength(2)
+    expect(h.task.fileAncillary?.[0]?.payload).toMatchObject({ tool: CAPTURED_FILE_FACTS_TOOL, facts: expected })
+    expect((await recoverConversationTaskMaterial(h.ctx, h.task)).ancillaryContext?.facts).toEqual([expected])
+    rmSync(join(h.root, 'input.md'))
+    expect((await recoverConversationTaskMaterial(h.ctx, h.task)).ancillaryContext?.facts).toEqual([expected])
+    const record = h.task.fileAncillary![0]!
+    expect((await recoverConversationTaskMaterial(h.ctx, { ...h.task, fileAncillary: [{ ...record,
+      payload: { ...record.payload, facts: { ...expected, lines: expected.lines + 1 } } }] })).files).toBeUndefined()
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it('deduplicates repeated fact queries while retaining both native result records', async () => {
+  const h = await runNativeAncillaryTask([facts('first-facts'), read(), facts('second-facts')])
+  try {
+    expect(h.task.fileAncillary).toHaveLength(2)
+    expect((await recoverConversationTaskMaterial(h.ctx, h.task)).ancillaryContext?.facts).toEqual([capturedFileFacts({ path: 'input.md', content: original })])
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it('canonicalizes a relative dot path without changing the captured file identity', async () => {
+  const h = await runNativeAncillaryTask([toolCallResponse('dot-facts', CAPTURED_FILE_FACTS_TOOL, { file_path: './input.md' }), read()])
+  try {
+    expect(h.task.fileUnavailable).toBeUndefined()
+    expect((await recoverConversationTaskMaterial(h.ctx, h.task)).ancillaryContext?.facts?.[0]?.path).toBe('input.md')
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it.each(['../outside.md', 'missing.md'] as const)('refuses uncertified file facts for %s', async path => {
+  const h = await runNativeAncillaryTask([read(), toolCallResponse('bad-facts', CAPTURED_FILE_FACTS_TOOL, { file_path: path })])
+  try {
+    expect(h.task.completion?.files).toBeUndefined()
+    expect(h.task.review?.verdict).toBe('inconclusive')
+    expect(h.task.fileAncillary).toBeUndefined()
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it('refuses a captured fact when the file changes before the terminal snapshot', async () => {
+  const h = await runNativeAncillaryTask([read(), facts()], h => {
+    h.ctx.on('tools/result', exec => { if (exec.name === CAPTURED_FILE_FACTS_TOOL) writeFileSync(join(h.root, 'input.md'), 'changed\n') })
+  })
+  try {
+    expect(h.task.completion?.files).toBeUndefined()
+    expect(h.task.review?.verdict).toBe('inconclusive')
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it('refuses facts from an oversized source before a native read', async () => {
+  const h = await runNativeAncillaryTask([facts(), read()], h => { writeFileSync(join(h.root, 'input.md'), 'x'.repeat(98_305)) })
+  try {
+    expect(h.task.fileUnavailable?.reason).toBe('material-unavailable')
+    expect(h.task.completion?.files).toBeUndefined()
+    expect(h.task.review?.reviewChecks).toBeUndefined()
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
 
 it('keeps discovery and reads in one native batch eligible when native scheduling serializes the search', async () => {
   for (const name of ['glob', 'grep']) {

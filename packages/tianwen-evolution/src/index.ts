@@ -5,6 +5,8 @@ export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERS
 export type { ConversationFileEntry, ConversationFileMaterial, ConversationFileResult, ConversationFileTrialOutput, ConversationFileTrialReceipt, ConversationTaskFileInput, ConversationTaskFileUnavailable } from './conversation-files.js'
 export { parseConversationTaskFileAncillary, parseConversationFileAncillaryContext, projectConversationFileAncillaryContext } from './conversation-file-ancillary.js'
 export type { ConversationAncillaryProducer, ConversationAncillaryPayload, ConversationTaskFileAncillary, ConversationFileAncillaryContext } from './conversation-file-ancillary.js'
+export { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts } from './conversation-file-facts.js'
+export type { CapturedFileFacts } from './conversation-file-facts.js'
 export { parseClaimAudit } from './conversation-claim-audit.js'
 export type { ClaimAssessment, ClaimAudit, ClaimAuditV1, ClaimAuditV2 } from './conversation-claim-audit.js'
 export { baselineGuidanceSnapshot, guidanceInputDigest, guidanceRule, guidanceVersion, guidanceStudyId, parseGuidanceSnapshot, parseConversationGuidanceRecord } from './conversation-guidance.js'

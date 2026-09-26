@@ -1,7 +1,9 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
-import { parseConversationFileEntries, parseConversationFileResult, sha256, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
+import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
+import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, parseConversationFileEntries, parseConversationFileResult, sha256, type CapturedFileFacts, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
+import { isAbsolute } from 'node:path'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationFilePath, readConversationFile } from './conversation-file-material.js'
 import { ConversationFileAncillaryCapture, isFileAncillaryTool, verifyConversationFileAncillary, type ConversationFileAncillaryConfig } from './conversation-file-ancillary.js'
@@ -39,6 +41,8 @@ function nativePath(exec: ToolDispatchExecution): string | undefined {
 export class TianwenConversationFileObserverService extends Service {
   static inject = ['agents', 'tools', 'sessions', 'tianwenEvolution'] as const
   private readonly states = new Map<string, CaptureState>()
+  private readonly factDefinitions = new WeakSet<ToolDefinition>()
+  private readonly installations = new Map<Agent, () => Promise<void>>()
 
   constructor(ctx: Context, private readonly config: ConversationFileAncillaryConfig = {}) { super(ctx, 'tianwenConversationFileObserver') }
 
@@ -47,6 +51,13 @@ export class TianwenConversationFileObserverService extends Service {
   }
 
   protected [Service.init](): void {
+    for (const agent of this.ctx.agents.list()) this.installFacts(agent)
+    const offAgent = this.ctx.on('agent/created', ({ agent }) => this.installFacts(agent))
+    const offDisposed = this.ctx.on('agent/disposed', ({ agent }) => {
+      const dispose = this.installations.get(agent)
+      this.installations.delete(agent)
+      void dispose?.()
+    })
     const offExecute = this.ctx.on('tools/execute', async (exec, next) => this.observe(exec, next))
     // Native emit does not await listeners. Retain the frozen final value now.
     const offResult = this.ctx.on('tools/result', (exec, result) => {
@@ -72,7 +83,46 @@ export class TianwenConversationFileObserverService extends Service {
         if (!this.authorized(state.consentRevision)) { state.revoked = true; state.native.discard(); delete state.final }
       }
     })
-    this.ctx.effect(() => () => { offExecute(); offResult(); offStopping(); offConsent(); this.states.clear() }, 'tianwen-conversation-file-observer.dispose')
+    this.ctx.effect(() => async () => {
+      offExecute(); offResult(); offStopping(); offConsent(); offAgent(); offDisposed()
+      await Promise.all([...this.installations.values()].map(dispose => dispose()))
+      this.installations.clear(); this.states.clear()
+    }, 'tianwen-conversation-file-observer.dispose')
+  }
+
+  isFactsDefinition(definition: ToolDefinition): boolean { return this.factDefinitions.has(definition) }
+
+  private installFacts(agent: Agent): void {
+    if (!isRoot(agent) || this.installations.has(agent)) return
+    const service = this
+    const definition = defineTool({
+      name: CAPTURED_FILE_FACTS_TOOL,
+      description: 'For an ordinary local-file task, get exact byte length, physical line count and SHA-256 for one UTF-8 workspace file. Use this instead of PowerShell counting or hashing. The result is tied to the captured initial file; give a relative file path.',
+      parameters: { file_path: { type: 'string', required: true } },
+      output: {
+        schema: { type: 'object', properties: {
+          path: { type: 'string', required: true }, bytes: { type: 'integer', required: true },
+          lines: { type: 'integer', required: true }, sha256: { type: 'string', required: true },
+        }, additionalProperties: false },
+        render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      },
+      async execute(args, exec) { return service.factFor(args, exec) },
+    })
+    this.factDefinitions.add(definition)
+    const dispose = agent.ctx.effect(function* () { yield agent.ctx.tools.register(definition) })
+    this.installations.set(agent, dispose)
+  }
+
+  private async factFor(args: { file_path: string }, exec: ToolDispatchExecution): Promise<CapturedFileFacts> {
+    if (Object.keys(args).length !== 1 || typeof args.file_path !== 'string' || isAbsolute(args.file_path)) throw new Error('captured file facts require one relative file path')
+    const current = this.current(exec)
+    if (current === undefined || current.state.revoked || current.state.unavailable || !this.authorized(current.state.consentRevision)) throw new Error('captured file facts require an active authorized local-file task')
+    const path = await conversationFilePath(current.state.cwd, args.file_path)
+    await current.state.captures.get(path.toLowerCase())
+    const input = this.ctx.tianwenEvolution.listConversationTasks(String(exec.agent!.session.id))
+      .find(item => item.source.taskId === current.task.source.taskId)?.fileInputs?.find(item => item.path === path)
+    if (input === undefined) throw new Error('captured file preimage is unavailable')
+    return capturedFileFacts(input)
   }
 
   takeResult(taskId: string): ConversationFileResult | undefined {
@@ -114,15 +164,15 @@ export class TianwenConversationFileObserverService extends Service {
     if (state.revoked || !this.authorized(state.consentRevision)) { state.revoked = true; state.native.discard(); return next() }
     try { await state.native.prepare(exec) }
     catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error) }
-    if (isFileAncillaryTool(exec.name)) return state.native.execute(exec, next)
-    const supported = exec.name === 'read' || exec.name === 'write' || exec.name === 'edit'
+    if (isFileAncillaryTool(exec.name) && exec.name !== CAPTURED_FILE_FACTS_TOOL) return state.native.execute(exec, next)
+    const supported = exec.name === 'read' || exec.name === 'write' || exec.name === 'edit' || exec.name === CAPTURED_FILE_FACTS_TOOL
     if (!supported || exec.parent !== undefined || String(exec.rootCallId) !== String(exec.callId)
-      || state.outputKind === 'chat' && exec.name !== 'read') {
+      || state.outputKind === 'chat' && exec.name !== 'read' && exec.name !== CAPTURED_FILE_FACTS_TOOL) {
       this.unavailable(state, 'unsupported-tool')
       return next()
     }
     const candidate = nativePath(exec)
-    if (candidate === undefined) {
+    if (candidate === undefined || exec.name === CAPTURED_FILE_FACTS_TOOL && isAbsolute(candidate)) {
       this.unavailable(state, 'material-unavailable')
       return next()
     }
