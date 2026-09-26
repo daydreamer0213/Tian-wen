@@ -35,7 +35,7 @@ export interface ConversationFeedbackResult {
   readonly explanation: string
   readonly evidenceQuotes: readonly string[]
   readonly proof: ConversationJudgmentProof | null
-  readonly unavailableReason: ConversationUnavailable | null
+  readonly unavailableReason: Exclude<ConversationUnavailable, 'file-evidence-unavailable'> | null
 }
 export type ConversationFeedbackRecord = ConversationFeedbackStarted | ConversationFeedbackResult
 export interface ConversationFeedbackAssessment {

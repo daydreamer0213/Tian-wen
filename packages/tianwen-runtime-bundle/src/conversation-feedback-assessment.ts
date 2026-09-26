@@ -6,7 +6,7 @@ import {
   conversationFeedbackAssessmentId, learningFeedbackFingerprint, learningSessionLifecycleFingerprint,
   parseConversationFeedbackRecord, sha256,
   type ConversationFeedbackAssessment, type ConversationFeedbackResult, type ConversationFeedbackSource,
-  type ConversationFeedbackStarted, type ConversationTask, type ConversationUnavailable,
+  type ConversationFeedbackStarted, type ConversationTask,
 } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, recoverConversationStructuredJudgment, runConversationJudgment } from './conversation-judgment.js'
@@ -56,7 +56,7 @@ function isRoot(agent: Agent): boolean {
   return agent.session.header.parentSession === undefined && agent.session.header.origin !== 'subagent'
     && agent.session.header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET
 }
-function unavailable(error: unknown, signal: AbortSignal): ConversationUnavailable {
+function unavailable(error: unknown, signal: AbortSignal): NonNullable<ConversationFeedbackResult['unavailableReason']> {
   if (signal.aborted || error instanceof Error && error.message === 'cancelled') return 'cancelled'
   if (error instanceof Error && error.message === 'material-too-large') return 'material-too-large'
   if (error instanceof TypeError || error instanceof Error && error.message === 'invalid-judgment') return 'invalid-judgment'
@@ -199,7 +199,7 @@ export class TianwenConversationFeedbackService extends Service {
       ...(output === undefined ? {} : { fileResult: { ...output, outputDigest: sha256(output) } }) }
   }
 
-  private unavailableResult(started: ConversationFeedbackStarted, reason: ConversationUnavailable): ConversationFeedbackResult {
+  private unavailableResult(started: ConversationFeedbackStarted, reason: NonNullable<ConversationFeedbackResult['unavailableReason']>): ConversationFeedbackResult {
     return { kind: 'feedback-assessed', assessmentId: started.assessmentId, taskId: started.taskId,
       classification: 'inconclusive', category: null, supplementalCriteria: [],
       explanation: 'Feedback assessment could not establish a result; original task criteria and review remain unchanged.',

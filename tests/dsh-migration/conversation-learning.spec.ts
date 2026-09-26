@@ -183,6 +183,22 @@ describe('natural conversation task evidence', () => {
     expect(() => parseConversationLearningRecord({ ...local, decision: missingKind })).toThrow(/output|kind|file/i)
   })
 
+  it('accepts an explicit unavailable result review when local file evidence is incomplete', () => {
+    const source = start()
+    const admitted = admission(source.taskId, 'local-files')
+    const record = { kind: 'task-reviewed' as const, taskId: source.taskId,
+      admissionDigest: sha256(admitted), resultDigest: sha256('result'), verdict: 'inconclusive' as const,
+      category: null, explanation: 'Verified local file evidence is unavailable.', evidenceQuotes: [],
+      proof: null, unavailableReason: 'file-evidence-unavailable' as const }
+    expect(parseConversationLearningRecord(record)).toEqual(record)
+  })
+
+  it('reserves file evidence unavailability for result reviews, not admission', () => {
+    const source = start()
+    expect(() => parseConversationLearningRecord({ kind: 'task-admitted', taskId: source.taskId,
+      decision: null, proof: null, unavailableReason: 'file-evidence-unavailable' })).toThrow(/admission|unavailable/i)
+  })
+
   it('retains distinct later tasks in the same native Session and restores them without legacy Run bindings', () => {
     const directory = root()
     const ledger = ledgerWithConsent(directory)

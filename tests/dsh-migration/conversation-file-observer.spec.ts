@@ -211,6 +211,7 @@ it('keeps missing output and unavailable capture ineligible without blocking ord
     await missingOutput.handle.agent.whenIdle(); await missingOutput.ctx.tianwenConversationObserver.whenIdle()
     const task = missingOutput.ctx.tianwenEvolution.listConversationTasks()[0]!
     expect(task.completion?.files).toBeUndefined()
+    expect(task.review?.explanation).toContain('material-not-recovered')
     writeFileSync(join(missingOutput.root, 'output.md'), 'created after completion')
     expect((await recoverConversationTaskMaterial(missingOutput.ctx, task)).files).toBeUndefined()
   } finally { await missingOutput.handle.dispose(); await missingOutput.ctx.fiber.dispose() }
@@ -227,6 +228,50 @@ it('keeps missing output and unavailable capture ineligible without blocking ord
     expect(task.completion?.files).toBeUndefined()
     expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', expect.stringMatching(/too large/i))
   } finally { warning.mockRestore(); await unavailable.handle.dispose(); await unavailable.ctx.fiber.dispose() }
+})
+
+it('does not launch a source-blind review after an oversized read-to-chat file', async () => {
+  const chat = { ...admission, objective: 'Answer from source.md', fileOutputKind: 'chat' }
+  const harness = await mount([structured(chat), toolCallResponse('large-read', 'read', { file_path: 'source.md' }),
+    textResponse('Answer delivered from the source.'), ...reviewPair()])
+  writeFileSync(join(harness.root, 'source.md'), 'x'.repeat(32769))
+  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
+  try {
+    harness.handle.agent.followup(direct('Read source.md and answer here.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.completion?.status).toBe('completed')
+    expect(task.fileUnavailable?.reason).toBe('material-unavailable')
+    expect(task.completion?.files).toBeUndefined()
+    expect(task.review).toMatchObject({ verdict: 'inconclusive', proof: null, unavailableReason: 'file-evidence-unavailable' })
+    expect(task.review?.reviewChecks).toBeUndefined()
+    expect(task.reviewIntent).toBeUndefined()
+    expect(harness.adapter.requests).toHaveLength(3)
+  } finally { warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps a consent withdrawal during file-review preparation classified as cancelled', async () => {
+  const chat = { ...admission, objective: 'Answer from source.md', fileOutputKind: 'chat' }
+  const harness = await mount([structured(chat), toolCallResponse('revoked-large-read', 'read', { file_path: 'source.md' }),
+    textResponse('The ordinary answer completes.'), ...reviewPair()])
+  writeFileSync(join(harness.root, 'source.md'), 'x'.repeat(32769))
+  const originalFlush = harness.ctx.sessions.flush.bind(harness.ctx.sessions)
+  let withdrew = false
+  const flush = vi.spyOn(harness.ctx.sessions, 'flush').mockImplementation(async (...args) => {
+    const result = await originalFlush(...args)
+    if (!withdrew && harness.ctx.tianwenEvolution.listConversationTasks()[0]?.completion !== undefined) {
+      withdrew = true
+      harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    }
+    return result
+  })
+  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
+  try {
+    harness.handle.agent.followup(direct('Read source.md and answer here.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(withdrew).toBe(true)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review).toMatchObject({ verdict: 'inconclusive', proof: null, unavailableReason: 'cancelled' })
+  } finally { flush.mockRestore(); warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('records ordinary completion when a successful write disappears before final capture', async () => {

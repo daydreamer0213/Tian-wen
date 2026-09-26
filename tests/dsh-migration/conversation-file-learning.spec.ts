@@ -85,7 +85,7 @@ for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover'
   const script: ScriptEntry[] = []
   for (let i = 1; i <= 3; i++) script.push(structured({ ...admission, ...(clueOnly && i === 3 ? { family: 'writing' } : {}), fileOutputKind: chat ? 'chat' : 'files' }), toolCallResponse(`read-${i}`, 'read', { file_path: 'input.md' }),
     ...(chat ? [] : [toolCallResponse(`write-${i}`, 'write', { file_path: 'output.md', content: `pilot original ${i}` })]), textResponse('pilot saved'), ...pair(i === 3 ? 'met' : 'not-met'))
-  if (scenario.startsWith('feedback-clue')) script.push(structured(externalClue ? { ...admission, evaluationMode: 'external', fileOutputKind: undefined } : admission), toolCallResponse('read-clue', 'read', { file_path: 'input.md' }), textResponse('partial reply without a saved output'), ...pair('inconclusive'))
+  if (scenario.startsWith('feedback-clue')) script.push(structured(externalClue ? { ...admission, evaluationMode: 'external', fileOutputKind: undefined } : admission), toolCallResponse('read-clue', 'read', { file_path: 'input.md' }), textResponse('partial reply without a saved output'), ...(externalClue ? pair('inconclusive') : []))
   if (scenario.startsWith('feedback')) script.push(structured({ classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain pilot scope.'], explanation: 'The original output contains the claimed issue.', evidenceQuotes: [scenario.startsWith('feedback-clue') ? 'partial reply without a saved output' : 'pilot original 1'] }))
   const generated = (kind: string) => ({ prompt: `Summarize ${kind} pilot input.`, criteria: ['Preserve pilot scope.'], files: { entries: [{ path: 'input.md', content: `pilot ${kind}` }, ...(chat ? [] : [{ path: 'output.md', content: null }])], outputPaths: chat ? [] : ['output.md'] } })
   if (!clueOnly) script.push(request => {
@@ -160,6 +160,7 @@ for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover'
         writeFileSync(join(root, 'input.md'), 'partial clue source')
         handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize this partial file task without writing an output.' }] }))
         await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+        if (!externalClue) expect(harness.ctx.tianwenEvolution.listConversationTasks()[3]?.review).toMatchObject({ verdict: 'inconclusive', proof: null, unavailableReason: 'file-evidence-unavailable' })
       }
       const target = harness.ctx.tianwenEvolution.listConversationTasks()[scenario.startsWith('feedback-clue') ? 3 : 0]!
       const feedback = await harness.ctx.messageFeedback.put({ sessionId: handle.agent.session.id, messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note: 'The output lost the pilot scope.', ifVersion: null })

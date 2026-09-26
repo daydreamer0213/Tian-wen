@@ -28,7 +28,7 @@ function isRoot(agent: Agent): boolean {
   return agent.session.header.parentSession === undefined && agent.session.header.origin !== 'subagent'
     && agent.session.header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET
 }
-function unavailable(error: unknown, signal: AbortSignal): ConversationUnavailable {
+function unavailable(error: unknown, signal: AbortSignal): Exclude<ConversationUnavailable, 'file-evidence-unavailable'> {
   if (signal.aborted || error instanceof Error && error.message === 'cancelled') return 'cancelled'
   if (error instanceof Error && error.message === 'material-too-large') return 'material-too-large'
   if (error instanceof TypeError || error instanceof Error && error.message === 'invalid-judgment') return 'invalid-judgment'
@@ -247,6 +247,14 @@ export class TianwenConversationObserverService extends Service {
       }
       if (!await this.ctx.sessions.flush(agent.session)) throw new Error('task persistence unavailable')
       const source = await recoverConversationTaskMaterial(this.ctx, task)
+      if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
+      if (task.admission.decision.evaluationMode === 'local-files' && source.files === undefined) {
+        const capture = task.fileUnavailable?.reason ?? 'material-not-recovered'
+        this.ctx.tianwenEvolution.recordConversationLearning({ ...base, verdict: 'inconclusive', category: null,
+          explanation: `Complete local-file evidence is unavailable (${capture}); automatic result review was not attempted.`,
+          evidenceQuotes: [], proof: null, unavailableReason: 'file-evidence-unavailable' })
+        return
+      }
       const callConfig = await recoverConversationTaskModel(this.ctx, task)
       const conversation = visible(events, task.source.materialProjection)
       const answer = conversation.filter(message => message.role === 'assistant').flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join('')

@@ -8,7 +8,7 @@ export const CONVERSATION_FAMILIES = ['summarization', 'writing', 'planning', 'c
 export const CONVERSATION_FAILURES = ['source-fidelity', 'instruction-following', 'task-understanding', 'verification', 'tool-use', 'user-preference'] as const
 export type ConversationFamily = typeof CONVERSATION_FAMILIES[number]
 export type ConversationFailure = typeof CONVERSATION_FAILURES[number]
-export type ConversationUnavailable = 'model-unavailable' | 'material-too-large' | 'cancelled' | 'invalid-judgment'
+export type ConversationUnavailable = 'model-unavailable' | 'material-too-large' | 'cancelled' | 'invalid-judgment' | 'file-evidence-unavailable'
 
 /** Host policy, not a model-authored criterion or a reinterpretation of old proof. */
 export interface ConversationQualityContract {
@@ -161,7 +161,7 @@ export interface ConversationTaskAdmission {
   readonly taskId: string
   readonly decision: ConversationAdmissionDecision | null
   readonly proof: ConversationJudgmentProof | null
-  readonly unavailableReason: ConversationUnavailable | null
+  readonly unavailableReason: Exclude<ConversationUnavailable, 'file-evidence-unavailable'> | null
   /** Absent on legacy records; never backfilled during replay or recovery. */
   readonly qualityContract?: ConversationQualityContract
 }
@@ -268,7 +268,7 @@ function nullableProof(value: unknown): ConversationJudgmentProof | null {
   return { sessionId: text(input.sessionId, 512), sessionDigest: digest(input.sessionDigest), requestDigest: digest(input.requestDigest) }
 }
 function unavailable(value: unknown): ConversationUnavailable | null {
-  return value === null ? null : oneOf(value, ['model-unavailable', 'material-too-large', 'cancelled', 'invalid-judgment'])
+  return value === null ? null : oneOf(value, ['model-unavailable', 'material-too-large', 'cancelled', 'invalid-judgment', 'file-evidence-unavailable'])
 }
 
 export function parseConversationAdmission(value: unknown): ConversationAdmissionDecision {
@@ -315,6 +315,7 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
     const decision = input.decision === null ? null : parseConversationAdmission(input.decision)
     const proof = nullableProof(input.proof)
     const reason = unavailable(input.unavailableReason)
+    if (reason === 'file-evidence-unavailable') throw new TypeError('admission cannot cite unavailable result-file evidence')
     if ((decision !== null) !== (proof !== null && reason === null) || (decision === null && reason === null)) throw new TypeError('admission requires a judgment or an unavailable reason')
     return { kind: 'task-admitted', taskId: text(input.taskId, 512), decision, proof, unavailableReason: reason,
       ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}) }
