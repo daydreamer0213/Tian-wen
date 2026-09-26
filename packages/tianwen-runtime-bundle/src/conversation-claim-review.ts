@@ -177,11 +177,29 @@ const choices = (values: readonly string[]): JsonSchemaNode => ({ type: 'string'
 const object = (properties: Record<string, JsonSchemaNode>): ObjectJsonSchema => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false })
 const array = (items: JsonSchemaNode): JsonSchemaNode => ({ type: 'array', items })
 
+function answerQuoteChoices(text: string): string[] {
+  const pieces: string[] = []
+  let start = 0
+  for (let index = 0; index < text.length && pieces.length < 15; index++) {
+    if (!'。！？!?；;'.includes(text[index]!)) continue
+    const piece = text.slice(start, index + 1).trim()
+    if (piece !== '') pieces.push(piece)
+    start = index + 1
+  }
+  const tail = text.slice(start).trim()
+  if (tail !== '') pieces.push(tail)
+  return [...new Set([text, ...pieces])]
+}
+
 function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
   const answers = evidence.items.filter(item => item.role === 'answer')
   const sourceIds = evidence.items.filter(item => item.role !== 'answer').map(item => item.id)
-  const claim = object({
-    quote: { type: 'string', description: 'Copy an exact non-empty substring from this answer unit. Preserve its original bytes and do not paraphrase or add a label.' },
+  const quoteChoices = new Map(answers.filter(item => item.text.trim() !== '').map(item => [item.id, answerQuoteChoices(item.text)]))
+  const boundedChoices = [...quoteChoices.values()].reduce((bytes, values) => bytes + 2 * Buffer.byteLength(JSON.stringify(values), 'utf8'), 0) <= 65_536
+  const claimFor = (answer: ClaimEvidenceItem) => object({
+    quote: { ...(boundedChoices ? choices(quoteChoices.get(answer.id)!) : string), description: boundedChoices
+      ? 'Select an exact supplied quote from this answer unit. Do not change its Markdown, whitespace, punctuation or scope.'
+      : 'Copy an exact non-empty substring from this answer unit. Preserve its original bytes and do not paraphrase or add a label.' },
     kind: { ...choices(kinds), description: 'Classify the claim as source-fact, advice, inference, fiction, general-knowledge or non-factual.' },
     status: { ...choices(statuses), description: 'Use supported only for a source-fact with authoritative supplied evidence; use permitted for task-compatible non-source-facts such as advice or fiction.' },
     sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : string), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources. The host checks every ID against the frozen source items.' },
@@ -190,8 +208,8 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
   const unitProperties: Record<string, JsonSchemaNode> = Object.fromEntries(answers.map(item => [item.id, item.text.trim() === ''
     ? { type: 'null' as const, description: 'This entire answer unit is whitespace, so record it explicitly as null.' }
     : { ...object({
-    firstClaim: claim,
-    additionalClaims: { ...array(claim), description: 'Additional assessments for this same answer unit; use an empty array when its first claim covers the whole nonblank unit.' },
+    firstClaim: claimFor(item),
+    additionalClaims: { ...array(claimFor(item)), description: 'Additional assessments for this same answer unit; use an empty array when its first claim covers the whole nonblank unit.' },
   }), description: 'Assess this complete nonblank answer unit with at least its required first claim.' }]))
   return object({
     schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]),

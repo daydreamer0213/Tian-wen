@@ -301,6 +301,53 @@ function changeFirst(audit: any, change: (first: any) => unknown) {
   return { ...audit, units: { ...audit.units, [answerId]: { ...unit, firstClaim: change(unit.firstClaim) } } }
 }
 
+it('offers bounded exact quote choices from each answer unit to the native reviewer', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-quote-')); roots.push(root)
+  const answer = 'L271–292 恢复校验；研究确认。\n后续状态。\n'
+  const material = { task: { prompt: answer }, answer }
+  const evidence = projectClaimEvidence(material)
+  const value = { verdict: 'met', category: null, explanation: 'Exact source-backed answer.', evidenceQuotes: ['L271–292 恢复校验'],
+    audit: auditFor(evidence) }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('quote-first', 'structured_output', value), toolCallResponse('quote-second', 'structured_output', value)])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('quote-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Exact quote choices', material,
+      evidence: [answer], signal: new AbortController().signal, callConfig: { provider: 'tianwen-probe', model: 'scripted' } })
+    expect(result.reviewChecks).toHaveLength(2)
+    const schema: any = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
+    const units = schema.properties.audit.properties.units.properties
+    const firstChoices: string[] = units['answer-1'].properties.firstClaim.properties.quote.enum
+    const additionalChoices: string[] = units['answer-1'].properties.additionalClaims.items.properties.quote.enum
+    expect(firstChoices).toEqual(additionalChoices)
+    expect(firstChoices).toContain(evidence.items.find(item => item.id === 'answer-1')?.text)
+    expect(firstChoices).toContain('L271–292 恢复校验；')
+    expect(firstChoices).not.toContain('`L271–292` 恢复校验；')
+    expect(firstChoices).not.toContain('研究确认。\n后续状态。')
+    expect(firstChoices.every(quote => evidence.items.find(item => item.id === 'answer-1')?.text.includes(quote))).toBe(true)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps native quote choices bounded at the largest admitted answer-unit count', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-quote-size-')); roots.push(root)
+  const answer = Array.from({ length: 128 }, (_, index) => `${index}: ${'x'.repeat(246)}；\n`).join('')
+  expect(Buffer.byteLength(answer, 'utf8')).toBeLessThan(32_768)
+  const material = { task: { prompt: 'Review this answer.' }, answer }
+  const harness = await mountPersistentHarness(root, [new Error('stop after capturing request')])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('quote-size-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationClaimReview(harness.ctx, handle.agent, { label: 'Quote size', material,
+      evidence: [answer], signal: new AbortController().signal, callConfig: { provider: 'tianwen-probe', model: 'scripted' } })).rejects.toThrow('model-unavailable')
+    const schema = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
+    const units: any[] = Object.values((schema as any).properties.audit.properties.units.properties)
+    expect(units.filter(unit => unit.properties).every(unit => unit.properties.firstClaim.properties.quote.enum === undefined)).toBe(true)
+    expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThan(400_000)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 // Engineering-only synthetic contents and scripted LLM responses. This proves
 // packet delivery/persistence, not a real model verdict or a regrade of 024.
 it.each([31000, 45339, 74744])('delivers and recovers a complete multi-document review beyond 96 KiB: %i input bytes', async total => {

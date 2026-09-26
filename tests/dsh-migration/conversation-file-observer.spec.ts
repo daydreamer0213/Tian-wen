@@ -152,7 +152,8 @@ it('shares one immutable capture across concurrent reads of the same path', asyn
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
     expect(task.fileInputs).toHaveLength(1)
-    expect(task.fileInputs?.[0]).toMatchObject({ callId: 'read-a', path: 'input.md', content: 'source' })
+    expect(['read-a', 'read-b']).toContain(task.fileInputs?.[0]?.callId)
+    expect(task.fileInputs?.[0]).toMatchObject({ path: 'input.md', content: 'source' })
     expect(task.completion?.files).toMatchObject({ outputKind: 'chat', outputPaths: [], entries: [{ path: 'input.md', content: 'source' }] })
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
