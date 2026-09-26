@@ -133,7 +133,7 @@ export function parseNativeDirectoryReceipt(value: unknown): NativeDirectoryRece
   return structuredClone(value) as NativeDirectoryReceipt
 }
 
-interface CaptureScope { readonly identity: NativeToolCaptureIdentity; runs: number; closed: boolean; receipt?: NativeDirectoryReceipt }
+interface CaptureScope { readonly identity: NativeToolCaptureIdentity; readonly strict: boolean; runs: number; closed: boolean; receipt?: NativeDirectoryReceipt }
 declare module '@deepseek-ai/cordis' { interface Context { tianwenNativeToolObservation: TianwenNativeToolObservationService } }
 export class TianwenNativeToolObservationService extends Service {
   private readonly storage = new AsyncLocalStorage<CaptureScope>()
@@ -151,9 +151,9 @@ export class TianwenNativeToolObservationService extends Service {
       scope.receipt = parsed
     } catch { delete scope.receipt }
   }
-  async capture<T>(identity: NativeToolCaptureIdentity, next: () => Promise<T>): Promise<{ readonly result: T; readonly receipt?: NativeDirectoryReceipt }> {
+  async capture<T>(identity: NativeToolCaptureIdentity, next: () => Promise<T>, options: { readonly strict?: boolean } = {}): Promise<{ readonly result: T; readonly receipt?: NativeDirectoryReceipt }> {
     const id = object(identity, ['taskId','sessionId','callId']); Object.values(id).forEach(value => { text(value); assert(value.length <= 512) })
-    const scope: CaptureScope = { identity: { ...identity }, runs: 0, closed: false }
+    const scope: CaptureScope = { identity: { ...identity }, strict: options.strict === true, runs: 0, closed: false }
     return this.storage.run(scope, async () => {
       try { const result = await next(); return { result, ...(scope.runs === 1 && scope.receipt ? { receipt: scope.receipt } : {}) } }
       finally { scope.closed = true; delete scope.receipt }

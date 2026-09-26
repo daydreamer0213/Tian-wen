@@ -209,6 +209,11 @@ describe.skipIf(process.platform !== 'win32')('native product gate', () => {
       expect(value.receipt).toBeUndefined()
     } finally {receiver.mockRestore();argv.mockRestore()}
   })
+  it('rejects background start in a strict local-file capture', async () => {
+    await observed.tianwenNativeToolObservation.capture(identity, async () => {
+      expect(() => observed.shell.start(observed.shell.resolve({ command: 'Get-Location' }))).toThrow(/not certifiable/u)
+    }, { strict: true })
+  })
   it('rejects ancestor junctions and paths outside the workspace',async () => {
     const outside=await mkdtemp(join(workspace,'..','outside-'))
     const link=join(workspace,'escape');await symlink(outside,link,'junction')

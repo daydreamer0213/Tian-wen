@@ -250,7 +250,7 @@ export class ConversationFileAncillaryCapture {
       if (this.invalid || pending === undefined) return await next()
       const service = exec.name === 'pwsh' ? this.ctx.get('tianwenNativeToolObservation') : undefined
       if (service === undefined) return await next()
-      const captured = await service.capture({ taskId: this.task.source.taskId, sessionId: this.task.source.sessionId, callId: String(exec.callId) }, next)
+      const captured = await service.capture({ taskId: this.task.source.taskId, sessionId: this.task.source.sessionId, callId: String(exec.callId) }, next, { strict: true })
       if (!this.invalid && this.pending.get(String(exec.callId)) === pending && captured.receipt !== undefined) pending.receipt = captured.receipt
       return captured.result
     } finally { if (pending !== undefined) pending.settled = true }

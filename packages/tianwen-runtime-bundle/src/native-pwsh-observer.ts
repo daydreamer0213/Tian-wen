@@ -68,6 +68,10 @@ function successful(result: ShellRunResult): boolean {
   return result.exitCode === 0 && result.signal === null && !result.timedOut && !result.aborted && !result.stdout.truncated && !result.stderr.truncated && result.stderr.text === '' && result.sandbox?.denied === false && !result.sandbox.runnerFailed
 }
 
+function uncertifiableLocalFileCommand(): Error {
+  return new Error('PowerShell command is not certifiable for this local-file task; use read, glob, grep, or tianwen_captured_file_facts.')
+}
+
 /** The native parent retains sandboxing, process ownership, output and cancellation. */
 export class NativeObservedPwshExecutor extends SandboxPwshExecutor {
   private readonly prefixes = new WeakMap<ShellExecSpec, string>()
@@ -78,6 +82,7 @@ export class NativeObservedPwshExecutor extends SandboxPwshExecutor {
     return argv
   }
   override start(spec: ShellExecSpec): ShellProcess {
+    if (this.ctx.get('tianwenNativeToolObservation')?.current()?.strict) throw uncertifiableLocalFileCommand()
     this.ctx.get('tianwenNativeToolObservation')?.begin()
     this.prefixes.delete(spec)
     return super.start(spec)
@@ -128,10 +133,18 @@ export class NativeObservedPwshExecutor extends SandboxPwshExecutor {
   override async run(spec: ShellExecSpec): Promise<ShellRunResult> {
     const service = this.ctx.get('tianwenNativeToolObservation')
     const scope = service?.begin()
-    if (!scope || process.platform !== 'win32' || scope.runs !== 1 || spec.timeoutMs < 5000 || Buffer.byteLength(spec.command) > 8192 || spec.signal?.aborted) return super.run(spec)
+    if (!scope) return super.run(spec)
+    if (process.platform !== 'win32' || scope.runs !== 1 || spec.timeoutMs < 5000
+      || Buffer.byteLength(spec.command) > 8192 || spec.signal?.aborted) {
+      if (scope.strict) throw uncertifiableLocalFileCommand()
+      return super.run(spec)
+    }
     const commands = await this.qualify(spec)
     const root = spec.sandboxPolicy?.workspaceRoot
-    if (!commands || !root || !await admittedPaths(root, spec.workdir, commands).catch(() => false)) return super.run(spec)
+    if (!commands || !root || !await admittedPaths(root, spec.workdir, commands).catch(() => false)) {
+      if (scope.strict) throw uncertifiableLocalFileCommand()
+      return super.run(spec)
+    }
     const nonce = randomUUID(); const pipe = `tianwen-native-directory-${nonce}`
     const commandDigest = sha256(spec.command)
     this.prefixes.set(spec, observationPrefix(pipe, nonce, [scope.identity.taskId,scope.identity.sessionId,scope.identity.callId], commandDigest))

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -361,14 +361,38 @@ it.skipIf(process.platform !== 'win32')('binds actual native pwsh directory term
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
-it.skipIf(process.platform !== 'win32')('fails closed when a free-form pwsh count has no native directory receipt', async () => {
+it.skipIf(process.platform !== 'win32')('rejects a free-form pwsh count before execution and fails file review closed', async () => {
   const h = await runNativeAncillaryTask([read(), toolCallResponse('count', 'pwsh', { command: "@('a','b').Count", description: 'Count draft items.' })], undefined, { pwsh: true })
   try {
     expect(h.task.fileUnavailable?.reason).toBe('material-unavailable')
     expect(h.task.completion?.status).toBe('completed')
     expect(h.task.completion?.files).toBeUndefined()
     const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'count')
-    expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(false)
+    expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(true)
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it.skipIf(process.platform !== 'win32')('blocks an uncertifiable pwsh command before it can create a workspace file', async () => {
+  const h = await runNativeAncillaryTask([read(), toolCallResponse('create-probe', 'pwsh', {
+    command: 'Set-Content -LiteralPath probe-created.txt -Value forbidden', description: 'Check a workspace file.',
+  })], undefined, { pwsh: true })
+  try {
+    expect(existsSync(join(h.root, 'probe-created.txt'))).toBe(false)
+    const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'create-probe')
+    expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(true)
+    expect(h.task.completion?.files).toBeUndefined()
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it.skipIf(process.platform !== 'win32')('blocks background pwsh before it can create a workspace file', async () => {
+  const h = await runNativeAncillaryTask([read(), toolCallResponse('background-probe', 'pwsh', {
+    command: 'Set-Content -LiteralPath background-created.txt -Value forbidden', description: 'Check a workspace file.', run_in_background: true,
+  })], undefined, { pwsh: true })
+  try {
+    expect(existsSync(join(h.root, 'background-created.txt'))).toBe(false)
+    const result = h.handle.agent.session.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'background-probe')
+    expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(true)
+    expect(h.task.completion?.files).toBeUndefined()
   } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
 })
 
