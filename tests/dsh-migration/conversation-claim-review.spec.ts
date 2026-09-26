@@ -207,7 +207,7 @@ describe('claim audit validation', () => {
   })
 })
 
-it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quote', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled', 'before-first', 'before-second'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
+it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quote', 'invalid-source', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled', 'before-first', 'before-second'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-review-')); roots.push(root)
   const originalFeedback = { source: { kind: 'native', sessionId: 'old-feedback-session', sessionLifecycleFingerprint: sha256('old-feedback-lifecycle'), messageId: 'old-answer', feedbackVersion: 'v1', feedbackFingerprint: sha256('negative: raw marker') }, rating: 'negative' as const, note: 'RAW FEEDBACK ONLY: do not reverse the actor or erase the exception.' }
@@ -232,6 +232,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
         ? { ...claim(text, 'inference', 'permitted', ['request-1']), explanation: 'Directly derived from request-1 and retained as a permitted inference.' }
         : claim(text, 'source-fact', 'supported', ['request-1']))
     if (mode === 'invalid' && index === 0) audit.evidenceDigest = sha256('tampered')
+    if (mode === 'invalid-source' && index === 0) audit.units['answer-1']!.firstClaim.sourceIds = ['foreign-1']
     const value: Record<string, unknown> = { verdict, category: verdict === 'not-met' || mode === 'contradictory' ? 'source-fidelity' : null, explanation: `review-${index}`, evidenceQuotes: ['原料已送达。'], audit }
     if (mode === 'invalid-quote' && index === 0) value.evidenceQuotes = ['标签：原料已送达。']
     if (mode === 'missing' && index === 0) delete value.audit
@@ -251,7 +252,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(harness.adapter.requests).toHaveLength(mode === 'before-first' ? 0 : 1)
     }
     else if (mode === 'contradictory') expect(result).toMatchObject({ message: 'successful review check cannot assert a failure category' })
-    else if (mode === 'invalid' || mode === 'invalid-quote' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
+    else if (mode === 'invalid' || mode === 'invalid-quote' || mode === 'invalid-source' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
     else if (mode === 'provider') expect(result).toMatchObject({ message: 'model-unavailable' })
     else if (mode === 'cancelled') expect(result).toMatchObject({ message: 'cancelled' })
     else {
@@ -289,7 +290,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(supplied[0]).toEqual([{ original: material, claimEvidence: evidence }])
       expect(supplied[1]).toEqual(supplied[0])
     }
-    if (mode === 'invalid-status' || mode === 'invalid-quote') expect(harness.adapter.requests).toHaveLength(1)
+    if (mode === 'invalid-status' || mode === 'invalid-quote' || mode === 'invalid-source') expect(harness.adapter.requests).toHaveLength(1)
     expect(harness.ctx.agents.list()).toHaveLength(1)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
@@ -315,7 +316,9 @@ it.each([31000, 45339, 74744])('delivers and recovers a complete multi-document 
   const request = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Read these three files and explain what is known.' }] })
   const source = { request: [request], context: [], objective: 'Explain the files.', criteria: ['Use all supplied documents.'],
     files: { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd: root, entries, outputPaths: [] } }
-  const output = { answer: 'Uncertain.', files: entries }
+  const output = { answer: total === 74744
+    ? Array.from({ length: 64 }, (_, index) => `Answer unit ${index + 1}: uncertain source claim.\n`).join('')
+    : 'Uncertain.', files: entries }
   const material = { source, evaluationMode: 'local-files', conversation: [{ id: 'answer', role: 'assistant', content: [{ type: 'text', text: output.answer }] }],
     toolEvidence: [], fileResult: { ...output, outputDigest: sha256(output) } }
   const evidence = projectClaimEvidence(material)
@@ -335,6 +338,10 @@ it.each([31000, 45339, 74744])('delivers and recovers a complete multi-document 
       callConfig: { provider: 'tianwen-probe', model: 'scripted' } })
     expect(result.verdict).toBe('inconclusive')
     expect(result.reviewChecks).toHaveLength(2)
+    if (total === 74744) {
+      const schema = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
+      expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThan(200_000)
+    }
     expect(new Set(result.reviewChecks.map(check => check.proof.sessionId)).size).toBe(2)
     for (const check of result.reviewChecks) {
       const recovered = await recoverConversationJudgmentRequest(harness.ctx, check)

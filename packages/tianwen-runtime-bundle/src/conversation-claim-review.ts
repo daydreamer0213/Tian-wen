@@ -184,7 +184,7 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
     quote: { type: 'string', description: 'Copy an exact non-empty substring from this answer unit. Preserve its original bytes and do not paraphrase or add a label.' },
     kind: { ...choices(kinds), description: 'Classify the claim as source-fact, advice, inference, fiction, general-knowledge or non-factual.' },
     status: { ...choices(statuses), description: 'Use supported only for a source-fact with authoritative supplied evidence; use permitted for task-compatible non-source-facts such as advice or fiction.' },
-    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : choices(sourceIds)), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources.' },
+    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : string), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources. The host checks every ID against the frozen source items.' },
     explanation: { type: 'string', description: 'Explain the scope, time, certainty, commitment and source-authority check for this claim.' },
   })
   const unitProperties: Record<string, JsonSchemaNode> = Object.fromEntries(answers.map(item => [item.id, item.text.trim() === ''
