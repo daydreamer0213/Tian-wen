@@ -1,5 +1,10 @@
 # Bounded multi-document learning material capacity
 
+Prospective larger-file amendment (2026-09-26): E039 exposed a 68,047-byte
+single-file gap and a larger review-packet requirement. See
+[the bounded larger-file design](2026-09-26-tianwen-bounded-large-file-evidence-design.md).
+The historical 024 scope and numbers below remain its original decision record.
+
 Status: selected implementation detail under the owner's standing direction to
 repair observed normal-use learning gaps without repeated routine approvals.
 Base: e942b96. This does not regrade 024 or authorize a new model cohort yet.

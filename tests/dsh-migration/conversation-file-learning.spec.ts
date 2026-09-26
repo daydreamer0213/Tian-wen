@@ -55,8 +55,8 @@ it('preserves every old v1 file shape and digest when ancillary fields are absen
     executionProof: { sessionId: 'worker-fixture', sessionDigest: sha256('session'), requestDigest: sha256('request') } }
   expect(parseConversationFileEntries(Array.from({ length: 8 }, (_, index) => ({ path: `input-${index}.md`, content: null })))).toHaveLength(8)
   expect(() => parseConversationFileEntries(Array.from({ length: 9 }, (_, index) => ({ path: `input-${index}.md`, content: null })))).toThrow(/count|limit/i)
-  expect(parseConversationFileEntries([{ path: 'bounded.txt', content: 'x'.repeat(32768) }])).toHaveLength(1)
-  expect(() => parseConversationFileEntries([{ path: 'overflow.txt', content: 'x'.repeat(32769) }])).toThrow(/byte|limit/i)
+  expect(parseConversationFileEntries([{ path: 'bounded.txt', content: 'x'.repeat(98304) }])).toHaveLength(1)
+  expect(() => parseConversationFileEntries([{ path: 'overflow.txt', content: 'x'.repeat(98305) }])).toThrow(/byte|limit/i)
   expect(parseConversationFileMaterial(files)).toEqual(files)
   expect(parseConversationFileResult(result)).toEqual(result)
   expect(parseConversationFileTrialReceipt(receipt)).toEqual(receipt)

@@ -170,5 +170,6 @@ function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly Se
   } else return
   const entries = inputs.map(({ path, content }) => ({ path, content }))
   if (result.inputsDigest !== sha256(entries) || sha256(result.entries.map(entry => entry.path)) !== sha256(entries.map(entry => entry.path))) return
+  if (outputKind === 'chat' && sha256(result.entries) !== sha256(entries)) return
   return { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind, cwd, entries, outputPaths: result.outputPaths }
 }

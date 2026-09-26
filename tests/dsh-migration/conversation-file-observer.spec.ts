@@ -217,7 +217,7 @@ it('keeps missing output and unavailable capture ineligible without blocking ord
   } finally { await missingOutput.handle.dispose(); await missingOutput.ctx.fiber.dispose() }
 
   const unavailable = await mount([structured(admission), toolCallResponse('large-write', 'write', { file_path: 'large.md', content: 'actual result' }), textResponse('saved'), ...reviewPair()])
-  writeFileSync(join(unavailable.root, 'large.md'), 'x'.repeat(32769))
+  writeFileSync(join(unavailable.root, 'large.md'), 'x'.repeat(98305))
   const warning = vi.spyOn(unavailable.ctx.logger, 'warn').mockImplementation(() => undefined)
   try {
     unavailable.handle.agent.followup(direct('Replace large.md.'))
@@ -234,7 +234,7 @@ it('does not launch a source-blind review after an oversized read-to-chat file',
   const chat = { ...admission, objective: 'Answer from source.md', fileOutputKind: 'chat' }
   const harness = await mount([structured(chat), toolCallResponse('large-read', 'read', { file_path: 'source.md' }),
     textResponse('Answer delivered from the source.'), ...reviewPair()])
-  writeFileSync(join(harness.root, 'source.md'), 'x'.repeat(32769))
+  writeFileSync(join(harness.root, 'source.md'), 'x'.repeat(98305))
   const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
   try {
     harness.handle.agent.followup(direct('Read source.md and answer here.'))
@@ -250,11 +250,55 @@ it('does not launch a source-blind review after an oversized read-to-chat file',
   } finally { warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('captures a bounded 68 KiB source read in two native windows for review', async () => {
+  const chat = { ...admission, objective: 'Answer from source.md', fileOutputKind: 'chat' }
+  const source = Array.from({ length: 757 }, (_, index) => `${index + 1}: ${'x'.repeat(85)}`).join('\n')
+  expect(Buffer.byteLength(source, 'utf8')).toBeGreaterThan(68047)
+  const harness = await mount([structured(chat),
+    toolCallResponse('read-first', 'read', { file_path: 'source.md', limit: 400 }),
+    toolCallResponse('read-second', 'read', { file_path: 'source.md', offset: 401, limit: 400 }),
+    textResponse('saved'), ...reviewPair()])
+  writeFileSync(join(harness.root, 'source.md'), source)
+  try {
+    harness.handle.agent.followup(direct('Read source.md and answer here.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.completion?.status).toBe('completed')
+    expect(task.fileUnavailable).toBeUndefined()
+    expect(task.fileInputs?.[0]?.content).toBe(source)
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files?.entries[0]?.content).toBe(source)
+    const changedFinal = { ...task, completion: { ...task.completion!, files: {
+      ...task.completion!.files!, entries: [{ path: 'source.md', content: 'changed final snapshot' }],
+    } } }
+    expect((await recoverConversationTaskMaterial(harness.ctx, changedFinal)).files).toBeUndefined()
+    expect(task.review?.reviewChecks).toHaveLength(2)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('rejects a read-to-chat snapshot when its source changes after the read', async () => {
+  const chat = { ...admission, objective: 'Answer from source.md', fileOutputKind: 'chat' }
+  const harness = await mount([structured(chat), toolCallResponse('source-read', 'read', { file_path: 'source.md' }),
+    textResponse('saved'), ...reviewPair()])
+  writeFileSync(join(harness.root, 'source.md'), 'original source')
+  const offResult = harness.ctx.on('tools/result', exec => {
+    if (exec.name === 'read') writeFileSync(join(harness.root, 'source.md'), 'changed after read')
+  })
+  try {
+    harness.handle.agent.followup(direct('Read source.md and answer here.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.completion?.status).toBe('completed')
+    expect(task.fileUnavailable?.reason).toBe('material-unavailable')
+    expect(task.completion?.files).toBeUndefined()
+    expect(task.review).toMatchObject({ verdict: 'inconclusive', proof: null, unavailableReason: 'file-evidence-unavailable' })
+  } finally { offResult(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('keeps a consent withdrawal during file-review preparation classified as cancelled', async () => {
   const chat = { ...admission, objective: 'Answer from source.md', fileOutputKind: 'chat' }
   const harness = await mount([structured(chat), toolCallResponse('revoked-large-read', 'read', { file_path: 'source.md' }),
     textResponse('The ordinary answer completes.'), ...reviewPair()])
-  writeFileSync(join(harness.root, 'source.md'), 'x'.repeat(32769))
+  writeFileSync(join(harness.root, 'source.md'), 'x'.repeat(98305))
   const originalFlush = harness.ctx.sessions.flush.bind(harness.ctx.sessions)
   let withdrew = false
   const flush = vi.spyOn(harness.ctx.sessions, 'flush').mockImplementation(async (...args) => {

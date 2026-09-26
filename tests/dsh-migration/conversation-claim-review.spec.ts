@@ -301,10 +301,16 @@ function changeFirst(audit: any, change: (first: any) => unknown) {
 
 // Engineering-only synthetic contents and scripted LLM responses. This proves
 // packet delivery/persistence, not a real model verdict or a regrade of 024.
-it.each([31000, 45339])('delivers and recovers a complete multi-document review beyond 96 KiB: %i input bytes', async total => {
+it.each([31000, 45339, 74744])('delivers and recovers a complete multi-document review beyond 96 KiB: %i input bytes', async total => {
   const base = process.platform === 'win32' ? 'E:/待清理/D盘迁移-2026-09-08/Tianwen-capacity-engineering' : '/tmp/tianwen-capacity-engineering'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-packet-')); roots.push(root)
-  const entries = [8614, 8231, total - 16845].map((size, index) => ({ path: `input-${index}.txt`, content: String(index).repeat(size) }))
+  const largeLines = Array.from({ length: 757 }, (_, index) => `${index + 1}: ${'x'.repeat(80)}`)
+  const missing = 68047 - Buffer.byteLength(largeLines.join('\n'), 'utf8')
+  for (let index = 0; index < missing; index++) largeLines[index % largeLines.length] += 'x'
+  const entries = total === 74744
+    ? [5767, 930].map((size, index) => ({ path: `input-${index}.txt`, content: String(index).repeat(size) }))
+      .concat({ path: 'input-2.txt', content: largeLines.join('\n') })
+    : [8614, 8231, total - 16845].map((size, index) => ({ path: `input-${index}.txt`, content: String(index).repeat(size) }))
   const request = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Read these three files and explain what is known.' }] })
   const source = { request: [request], context: [], objective: 'Explain the files.', criteria: ['Use all supplied documents.'],
     files: { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'chat', cwd: root, entries, outputPaths: [] } }
@@ -315,7 +321,8 @@ it.each([31000, 45339])('delivers and recovers a complete multi-document review 
   const packet = { original: material, claimEvidence: evidence }
   const packetBytes = Buffer.byteLength(JSON.stringify(packet), 'utf8')
   expect(packetBytes).toBeGreaterThan(98304)
-  expect(packetBytes).toBeLessThan(262144)
+  expect(packetBytes).toBeLessThan(total === 74744 ? 524288 : 262144)
+  if (total === 74744) expect(packetBytes).toBeGreaterThan(262144)
   const value = { verdict: 'inconclusive', category: null, explanation: 'Synthetic transport check; no real judgment is claimed.', evidenceQuotes: [],
     audit: auditFor(evidence, text => claim(text, 'source-fact', 'uncertain')) }
   const harness = await mountPersistentHarness(root, [toolCallResponse('capacity-first', 'structured_output', value), toolCallResponse('capacity-second', 'structured_output', value)])

@@ -9,8 +9,8 @@ export interface ConversationFileEntry {
 }
 
 export const CONVERSATION_FILE_MAX_COUNT = 8
-export const CONVERSATION_FILE_MAX_ENTRY_BYTES = 32768
-export const CONVERSATION_FILE_MAX_BYTES = 65536
+export const CONVERSATION_FILE_MAX_ENTRY_BYTES = 96 * 1024
+export const CONVERSATION_FILE_MAX_BYTES = 128 * 1024
 
 function pathSegments(path: string): string[] {
   if (path !== path.normalize('NFC') || path.includes('\\')) throw new Error('ambiguous conversation file path')

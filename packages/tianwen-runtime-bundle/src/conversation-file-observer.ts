@@ -166,6 +166,7 @@ export class TianwenConversationFileObserverService extends Service {
     if (inputs.length === 0 || state.outputKind === 'files' && state.outputPaths.size === 0
       || state.outputKind === 'chat' && state.successfulReads.size === 0) return
     const entries = parseConversationFileEntries(await Promise.all(inputs.map(entry => readConversationFile(state.cwd, entry.path))))
+    if (state.outputKind === 'chat' && sha256(entries) !== sha256(inputs)) throw new Error('conversation read-only file changed before capture boundary')
     const captureSeq = agent.session.events.at(-1)?.seq
     if (captureSeq === undefined) throw new Error('native file capture boundary is unavailable')
     const current = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === task.source.taskId)!
