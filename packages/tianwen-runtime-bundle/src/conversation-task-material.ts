@@ -56,7 +56,8 @@ export function conversationEvidenceTexts(source: Pick<ConversationTaskMaterial,
     ...answers,
     ...(source.files === undefined ? toolEvents.flatMap(event => event.type === 'tool/result' && isAppendSurfaceEvent(event)
       ? event.data.message.content[0].content.flatMap(block => block.type === 'text' ? [block.text] : []) : [])
-      : [...source.files.entries.flatMap(entry => entry.content === null ? [] : [entry.content]),
+      : [`Workspace root: ${source.files.cwd}`,
+        ...source.files.entries.flatMap(entry => entry.content === null ? [] : [entry.content]),
         ...(source.ancillaryContext?.facts ?? []).map(fact => `Captured initial file ${fact.path}: bytes=${fact.bytes}; lines=${fact.lines}; sha256=${fact.sha256}`),
         ...(source.files.outputKind === 'files' ? (finalEntries ?? []).flatMap(entry => source.files!.outputPaths.includes(entry.path) && entry.content !== null ? [entry.content] : []) : [])]),
   ]

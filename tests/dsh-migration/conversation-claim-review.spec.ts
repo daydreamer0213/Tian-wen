@@ -36,16 +36,18 @@ describe('claim evidence projection', () => {
     const withContext = projectClaimEvidence({ task, answer: '', fileResult: fileResult('Original fact.') })
     const { ancillaryContext: _ancillary, ...plain } = task
     expect(withContext).toEqual(projectClaimEvidence({ task: plain, answer: '', fileResult: fileResult('Original fact.') }))
-    expect(conversationEvidenceTexts(task as never, ['Original fact.'])).toEqual(['Write the supplied fact.', 'Original fact.', 'Original fact.'])
+    expect(conversationEvidenceTexts(task as never, ['Original fact.'])).toEqual([
+      'Write the supplied fact.', 'Original fact.', `Workspace root: ${fileMaterial.cwd}`, 'Original fact.'])
   })
   it('projects preimages as sources and only declared final files as answers with path membership', () => {
     const evidence = projectClaimEvidence({ task: { prompt: 'Write the supplied fact.', files: fileMaterial }, answer: '', fileResult: fileResult('Unsupported invention.') })
     expect(evidence.items.map(item => ({ role: item.role, text: item.text, filePath: item.filePath, fileStage: item.fileStage }))).toEqual([
       { role: 'user', text: 'Write the supplied fact.', filePath: undefined, fileStage: undefined },
+      { role: 'tool', text: `Workspace root: ${fileMaterial.cwd}`, filePath: undefined, fileStage: undefined },
       { role: 'tool', text: 'Original fact.', filePath: 'input.txt', fileStage: 'initial' },
       { role: 'answer', text: 'Unsupported invention.', filePath: 'output.txt', fileStage: 'final' },
     ])
-    expect(evidence.items.map(item => item.id)).toEqual(['request-1', 'tool-1', 'answer-1'])
+    expect(evidence.items.map(item => item.id)).toEqual(['request-1', 'tool-1', 'tool-2', 'answer-1'])
   })
   it('preserves actual empty output membership with null audit but rejects absent output and empty text', () => {
     const evidence = projectClaimEvidence({ task: { prompt: 'Create an empty file.', files: fileMaterial }, answer: '', fileResult: fileResult('') })
@@ -59,7 +61,8 @@ describe('claim evidence projection', () => {
     const tool = Session.create(SessionId('file-projection-tool'))
     tool.append('tool/result', { turn: 1, step: 1, message: createToolResultMessage({ callId: CallId('readback'), isError: false, content: [{ type: 'text', text: 'Unsupported invention.' }] }) }, { surfaceOp: 'append' })
     const evidence = projectClaimEvidence({ source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Write the supplied fact.' }] })], files: fileMaterial }, evaluationMode: 'local-files', conversation: [], toolEvidence: tool.events, fileResult: fileResult('Unsupported invention.') })
-    expect(evidence.items.filter(item => item.role !== 'answer').map(item => item.text)).toEqual(['Write the supplied fact.', 'Original fact.'])
+    expect(evidence.items.filter(item => item.role !== 'answer').map(item => item.text)).toEqual([
+      'Write the supplied fact.', `Workspace root: ${fileMaterial.cwd}`, 'Original fact.'])
   })
   it('keeps file chat inputs out of answer units and binds complete output bytes', () => {
     const files = { ...fileMaterial, outputKind: 'chat', outputPaths: [], entries: [fileMaterial.entries[0]!] }
@@ -67,6 +70,19 @@ describe('claim evidence projection', () => {
     const evidence = projectClaimEvidence({ task: { prompt: 'Read the file.', files }, answer: output.answer, fileResult: { ...output, outputDigest: sha256(output) } })
     expect(evidence.items.filter(item => item.role === 'answer')).toEqual([{ id: 'answer-1', role: 'answer', origin: 'answer', text: 'Original fact.' }])
     expect(() => projectClaimEvidence({ task: { prompt: 'Read the file.', files }, answer: output.answer, fileResult: { ...output, outputDigest: sha256('wrong') } })).toThrow()
+  })
+  it('makes the native workspace root a quotable source for a file-chat answer', () => {
+    const files = { ...fileMaterial, outputKind: 'chat', outputPaths: [], entries: [fileMaterial.entries[0]!] }
+    const answer = `Workspace: ${files.cwd}`
+    const output = { answer, files: files.entries }
+    const evidence = projectClaimEvidence({ task: { prompt: 'Report the workspace.', files }, answer,
+      fileResult: { ...output, outputDigest: sha256(output) } })
+    const rootSource = evidence.items.find(item => item.role === 'tool' && item.text === `Workspace root: ${files.cwd}`)
+    expect(rootSource).toMatchObject({ role: 'tool', origin: 'tool', toolStatus: 'success' })
+    expect(validateClaimAudit(auditFor(evidence, text => claim(text, 'source-fact', 'supported', [rootSource!.id])), evidence, 'met')).toBeDefined()
+    expect(conversationEvidenceTexts({ request: [createUserMessage({ source: { kind: 'user' },
+      content: [{ type: 'text', text: 'Report the workspace.' }] })], context: [], files }, [answer]))
+      .toContain(`Workspace root: ${files.cwd}`)
   })
   it('projects study prompts and every answer unit without criteria', () => {
     const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: ['不得作为事实来源'] }, answer: '原料已送达。' }

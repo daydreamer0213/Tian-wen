@@ -67,7 +67,10 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
     for (const text of content === '' ? [''] : splitText(content)) items.push({ id: `${origin}-${++counters[origin]}`, origin, role: origin,
       text, filePath: path, fileStage: stage, ...(stage === 'initial' ? { toolStatus: 'success' as const } : {}) })
   }
-  const preimages = () => { for (const entry of files?.entries ?? []) if (entry.content !== null) addFile(entry.path, entry.content, 'initial') }
+  const preimages = () => {
+    if (files !== undefined) add('tool', 'tool', `Workspace root: ${files.cwd}`, 'success')
+    for (const entry of files?.entries ?? []) if (entry.content !== null) addFile(entry.path, entry.content, 'initial')
+  }
   const fileFacts = () => {
     if (files === undefined || !record(source?.ancillaryContext) || !Array.isArray(source.ancillaryContext.facts)
       || source.ancillaryContext.facts.length === 0) return
@@ -325,5 +328,5 @@ function fileClaimInstruction(material: unknown, purpose: 'original-result' | 'm
   if (record(source) && record(source.ancillaryContext) && Array.isArray(source.ancillaryContext.facts)
     && source.ancillaryContext.facts.length > 0) base += '\n\nCaptured file fact tool items are host-recomputed from frozen initial file bytes. They support only the stated path, byte length, physical line count and SHA-256, not an interpretation of the file.'
   if (material.evaluationMode !== 'local-files' && (!record(source) || source.files === undefined)) return base
-  return `${base}\n\nFile provenance: initial file entries are frozen preimages and may ground facts. Only declared final output paths and the assistant reply are answers; input-only files and chat-mode inputs are not extra answer units. Post-write readback and write-success text never verify generated facts. Host capture proves only file existence and exact bytes, not factual truth. Check every required output exists; absent capture is inconclusive and an absent output is not an empty file. An actual empty file has an explicit empty answer unit with null audit, which establishes coverage only, not task success.`
+  return `${base}\n\nFile provenance: the host-verified workspace root appears as a tool source and supports only the directory identity; cite its source ID for workspace-path claims. Initial file entries are frozen preimages and may ground facts. Only declared final output paths and the assistant reply are answers; input-only files and chat-mode inputs are not extra answer units. Post-write readback and write-success text never verify generated facts. Host capture proves only file existence and exact bytes, not factual truth. Check every required output exists; absent capture is inconclusive and an absent output is not an empty file. An actual empty file has an explicit empty answer unit with null audit, which establishes coverage only, not task success.`
 }
