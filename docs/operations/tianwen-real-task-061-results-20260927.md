@@ -1,0 +1,13 @@
+# E061：同版本双任务范围对照；v7 量词修复仍未得到证明
+
+**结论：main/Daily NO-GO。**从准确提交 `884fbebcfdbaec8ca098333b43ce7b5cab859daf` 在两个新隔离配置档安装同一产品包，预先冻结相同的两份源码，分别提交开放式维护说明任务与显式限定筛选范围的维护说明任务。两项均由真实 DeepSeek-V4-Flash / High 完成，均进入两位独立 v7 原生审核并保存有效逐单元审计。两项最终都为 `not-met`，但理由不同。此轮证明双审可运行并识别明确的格式、文件归属错误；**不能证明** v7 已修复 E059 的“对筛选后集合成立，被说成所有原始调用”的语义漏判。
+
+隔离根目录：`D:/DevData/tianwen-acceptance-runs/061-quantifier-pair`。开放任务 452 字节 / SHA-256 `5f4956d4cfe01890f1266d39acdc776e268c8dd9432c58886c5ee050721a6947`；限定范围任务 519 字节 / `97d57fab77d83dca80119840440eeb1510fa1b8d484b31daf36c1e70d1f8709d`。两个任务及源码均在第一次模型调用前冻结。两组输入相同：`conversation-task-material.ts` 17,299 字节 / `463bc43985a7e831ce49030375372a1769e68dd5a8a6f6ce66984008c5f2d605`，`conversation-file-ancillary.ts` 23,253 字节 / `f21927bf65b7838bcf325377328274216ddea832b090270fcf9cdf68026814ae`。两组终态输入哈希仍一致。产品包 SHA-256 `f3aa66af0470242326da66e77caa6c47c770e58f4da15792f4cf204b109428ba`；打包前及两组安装后的 `runtime.js` 均为 `42159ca99051ef4944c527d28fcdddfde32e714aa69b775f594dd347d54050cc`。
+
+开放组原任务 `conversation-task:a0cd9fcbd70d9f0fe021ff9246ae7b955dc30a391e01f086a0385a90193516d3`，真实工具顺序 `glob, glob, read, read`，无错误工具结果。主答的路径要点写：“只认 read/write/edit/facts，缺路径即全弃。”源码中 `recoverFiles` 先跳过辅助调用（facts 除外），然后对留下的文件调用检查路径与成功结果。两位审核者都明确提到先过滤辅助调用，并把该句理解为“留下的调用缺路径即放弃”，将该片段列为 `supported`。这种上下文读法有依据；该句没有明确声称“所有原始 tool/call”，所以不能把它定为 E059 式确定错误或确定漏判。两位审核者都因第 3、4 个要点没有按要求各附文件名和函数名而判 `not-met / instruction-following`；宿主合议相同。每份审核含 8 个答案单元，原生请求均含 v7 跨单元及筛选范围指令。
+
+限定范围组原任务 `conversation-task:8e8982e3d6f88ad00a161760edaa89c8284038dea21f7e562d87f8a27d381ac6`，真实工具顺序 `glob, glob, read, read, pwsh`；最后一次 `pwsh` 在执行前被拒，原生结果为错误。主答明确写 `recoverFiles` 排除辅助调用后才检查 read/write/edit/facts，并说明被拒 `pwsh` 不充当成功 `read`；两审核均支持这段机制。它同时把 `recoverFileExecution` 放在 `conversation-file-ancillary.ts` 的要点标题下，实际函数定义在 `conversation-task-material.ts`。两审核均抓到该文件归属错误，判 `not-met / source-fidelity`，宿主合议相同。每份审核含 5 个答案单元，原生请求均含 v7 指令。该组实际的成功 `read` 发生在被拒 `pwsh` **之前**；答案说的是代码中两者的关系，不是本次“拒绝后又成功读取”的执行顺序。
+
+每组五份原生 Session 已解码为只读摘要：开放组 `evidence/audit-061-open-native.json` SHA-256 `6147d9da0890494fb374dbd4232580a309a81459d2320055fadb1a5c910a362a`；限定组 `evidence/audit-061-scoped-native.json` SHA-256 `5e1cdb594bf731dfbe26e3380d7e5cb8bafafa650c687b1f5c2a06a167ccfc8e`。两组自动分析同意均由 revision 1 / `enabled:true` 关闭到 revision 2 / `enabled:false`。关闭消息自身各作为另一任务被观测，终态 `inconclusive / cancelled`，不计入原任务判断。两 host PID 2120、10184 均退出，临时浏览器页已关闭；账本无研究或方法激活事件。开放组终态账本 SHA-256 `a08ed4c2bfd69682923c65bb3ab93a05799084755813f32d1b61592ea8b0d125`，限定组 `ce8d884f59215f41ee1247fc6550bd02bf5eca53febff0344b821bed8a5aed05`。
+
+**下一步：**保留 v7 作为未验收候选，不凭这两项继续改提示。针对 E059 明确的“所有原始调用”过宽断言，建立可独立判断的前瞻场景，并保证正确限定范围的对照回答不因范围本身误拒；再看真实双审是否能区分。任务回答本身的格式或文件归属错误要单独记录，不能替代目标语义的验收。完整学习效果和 main/Daily 仍为 NO-GO。
