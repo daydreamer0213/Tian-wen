@@ -417,6 +417,37 @@ it('rechecks a future-only preference already linked to the right answer but mis
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('rechecks a future-only preference initially labeled a requirement change without losing its source target', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const quote = '从下一份同类内部摘要开始长期使用的写法偏好：固定两句'
+  const initialFeedback = { kind: 'requirement-change', quote, category: 'user-preference' }
+  const linked = () => ({ ...admission, kind: 'task', objective: 'Confirm receipt of a new requirement',
+    criteria: ['Only briefly confirm receipt'], family: 'writing',
+    relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
+    feedback: initialFeedback })
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    () => structured(linked()),
+    () => structured({ ...linked(), kind: 'conversation', objective: 'Record a future preference',
+      family: 'other', evaluationMode: 'subjective', feedback: { ...initialFeedback, kind: 'preference' } }),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('do not reproduce or rewrite the completed answer')
+      return textResponse('收到。')
+    },
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct(`刚才那份内容准确。我有一个${quote}。请不要修改刚才那份；这次只简短确认收到。`))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(feedbackTask?.admission?.decision).toMatchObject({ kind: 'conversation',
+      relatedTaskId: target?.source.taskId, feedback: { ...initialFeedback, kind: 'preference' } })
+    expect(feedbackTask?.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[5]?.sessionId))
+    expect(harness.adapter.requests).toHaveLength(7)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('keeps an explicit current rewrite task when a preference recheck does not classify it as feedback-only', async () => {
   let harness: Awaited<ReturnType<typeof mount>>
   const quote = '以后同类摘要请分三句写'
