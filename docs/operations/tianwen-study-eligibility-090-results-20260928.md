@@ -14,7 +14,7 @@ S1、S2、C 分别在主界面的不同会话提交；原答案均准确保留�
 
 ## 试验与停止点
 
-原生账本顺序是：S1 baseline `not-met/not-met`、candidate `met/met`；S2 同样；C 同样；`adjacent/baseline` 为 `not-met/not-met`。七条试验的执行 Session 均有唯一成功的结构化答案捕获，执行证明、答案摘要和账本一致。逐条读取完整答案时，前三个 baseline 主要违背未来两句偏好的形式，三个 candidate 均给出两句、保留数字和不确定性，未见新增事实。这个观察只涉及已入账七条，不能扩展到完整十臂或语义安全通过。
+原生账本顺序是：S1 baseline `not-met/not-met`、candidate `met/met`；S2 同样；C 同样；`adjacent/baseline` 为 `not-met/not-met`。七条试验的执行 Session 均有唯一成功的结构化答案捕获，执行证明、答案摘要和账本一致。逐条读取完整答案时，前三个 baseline 主要违背未来两句偏好的形式，三个 candidate 均给出两句、保留数字和不确定性，未见新增事实。这个观察只涉及已入账七条，不能扩展到完整十臂或语义安全通过。尤其是事前生成的 holdout 明确要求整份摘要只写一句、不得强套两句偏好；该臂尚未运行，候选方法虽写了“当前用户要求优先”，但缺少这项冲突场景的实际验证。
 
 第八条的执行 Session `42d32a22-a948-4109-887a-7efc0c1d2054` 摘要为 `sha256:be1c73d1681189c3a15ae40ebf91c6f84978600ceb91300c7f570b1bedbcd5b2`。它的普通 assistant 文本是 `{"answer":"本周核对的 27 项事项中，18 项已完成。其余 9 项等待合规评审，尚未判定通过或失败；内部迁移演练已完成；后端切换尚未开始；内部上线日期尚未确定。"}`，但原生 `structured_output` 调用数为 **0**。故该臂没有有效交付，账本在七臂后记录 `study-stopped / invalid-judgment`。不能把可读文本等同被工具接受的证明，也不能重启补足该臂或把七臂推断成 `accepted`。
 
@@ -23,3 +23,5 @@ S1、S2、C 分别在主界面的不同会话提交；原答案均准确保留�
 `D:/DevData/tianwen-study-eligibility-090-20260928/native-use/evidence/audit-final.json` SHA-256 `cb6697f75d7b3407e5133dcfe8bfcf2e8782ad5d848755e188facae3b81c69f0`；它核对冻结材料、Profile、安装包与运行 JS 哈希全部相符，八条预写／读后冻结的直接用户消息各出现一次且无额外直接输入，46 份原生 Session、唯一研究七臂、无裁决或激活、空工作区、撤销同意 `revision:2 / enabled:false` 和宿主正常停止。补充的准入、任务族票与反馈评估原生证明审计 `audit-proof.json` SHA-256 `ef6037d01eda8072f4770ebdb33cbe8442a71ec7515411955e78d9c292ac4b32`，结果全通过；七臂完整答案与执行证明保存在 `partial-arms.json`（SHA-256 `a9a6f4d06d183542d39fadbcad3c73572640233503fc026c34ee81b0ce102672`），只作部分诊断，不是正式待放行审查包。
 
 这轮证明产品能在新材料上把真实反馈、两条同族来源和成功对照接到研究入口，也证明无结构化交付时会失败关闭。窄诊断确认当前试验指令已明确要求通过 `structured_output` 交付，原生子会话正常结束却没有调用该工具；一条模型失手不足以证明提示词或工具配置有系统性缺陷。本轮不放宽证明要求，也不加入重试来补完该研究。新的完整研究仍须新的事前冻结任务和首次运行，不能重跑 E090 凑满十臂。语义安全、一次性放行、真实激活和后续任务效果仍各自未过门槛。
+
+状态展示的只读核对：现有 `tianwen_learning_status` 会把已停止研究、`invalidJudgment` 原因、历史 `accepted` 与 `currentlyActive` 分开计数，并明确“来源准备状态”不代表研究执行或方法生效。E090 的终态是停止 1、无裁决、当前生效 0；现有状态字段足以说明该研究未生效，本轮不增加状态界面。
