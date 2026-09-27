@@ -298,6 +298,78 @@ it('rechecks an explicitly targeted preference left unlinked by the first admiss
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('rechecks an initially misclassified future-only preference before replying and attributes it to the prior answer', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const quote = '以后同类摘要请分三句写'
+  const feedback = { kind: 'preference', quote, category: 'user-preference' }
+  const initial = { ...admission, kind: 'task', objective: 'Acknowledge the new preference',
+    criteria: ['Do not rewrite the completed answer'], family: 'other', relatedTaskId: null, feedback }
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    structured(initial),
+    () => structured({ ...initial, kind: 'conversation', objective: 'Record future preference without revising the answer',
+      relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId }),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('do not reproduce or rewrite the completed answer')
+      return textResponse('已了解未来写法偏好；刚才那份不重写。')
+    },
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct(`刚才这份事实正确。${quote}。从下一份开始采用；这一份不用改，也不要再给我一版。`))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(feedbackTask?.admission?.decision).toMatchObject({ kind: 'conversation', relatedTaskId: target?.source.taskId, feedback })
+    expect(feedbackTask?.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[5]?.sessionId))
+    expect(harness.adapter.requests).toHaveLength(7)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps an explicit current rewrite task when a preference recheck does not classify it as feedback-only', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const quote = '以后同类摘要请分三句写'
+  const initial = { ...admission, kind: 'task', objective: 'Rewrite this answer in three sentences',
+    criteria: ['Produce a revised answer now'], family: 'writing', relatedTaskId: null,
+    feedback: { kind: 'preference', quote, category: 'user-preference' } }
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    structured(initial), structured(initial),
+    request => {
+      expect(JSON.stringify(request.messages)).not.toContain('do not reproduce or rewrite the completed answer')
+      return textResponse('试点预计 5 天完成。其余事项待确认。发布日期未定。')
+    }, ...reviewPair(review),
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct(`刚才那份请现在改成三句。${quote}。`))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[1]?.admission?.decision?.kind).toBe('task')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('does not invent a feedback target when a task-classified preference remains ambiguous on recheck', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const feedback = { kind: 'preference', quote: '以后摘要尽量简短', category: 'user-preference' }
+  const initial = { ...admission, kind: 'task', objective: 'Acknowledge a general preference',
+    family: 'other', relatedTaskId: null, feedback }
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    structured(initial), structured({ ...initial, kind: 'conversation' }),
+    textResponse('已了解这项偏好。'), ...reviewPair(review),
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct('以后摘要尽量简短。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[1]?.admission?.decision).toMatchObject({
+      kind: 'task', relatedTaskId: null, feedback,
+    })
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['ambiguous', 'changed-feedback', 'unavailable'] as const)('keeps an unlinked preference unbound when the optional recheck is %s', async outcome => {
   let harness: Awaited<ReturnType<typeof mount>>
   const userText = outcome === 'ambiguous' ? '以后写摘要尽量简短。' : '针对刚才这份摘要，以后先给结论。'

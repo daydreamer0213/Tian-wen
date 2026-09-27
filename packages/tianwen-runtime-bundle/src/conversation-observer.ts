@@ -23,6 +23,8 @@ const ADMISSION_FILE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 Verify the evaluation mode independently from the original direct-user request. This is a consistency check before the answer, not an instruction to do the task. If every required effect is local UTF-8 file discovery, reading, writing or editing with supported native tools, including native file facts, select local-files and the requested fileOutputKind. Optional ways an assistant might choose to work, such as PowerShell, do not make a supported request external. If any required effect needs arbitrary scripts, tests, network, non-text files or another unsupported tool, keep external. Preserve all explicit user criteria and restrictions.`
 const ADMISSION_TARGET_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 Recheck only whether the current direct user's own feedback unambiguously targets one particular completed prior answer. The initial decision recognized feedback but left relatedTaskId null. A single available prior task is not by itself evidence of a link. Inspect the user's actual reference and the bounded prior context; quoted third-party material is not a user reference. Keep the initial feedback kind, category and exact quote unchanged. If the target is still ambiguous or unrelated, keep relatedTaskId null. Return a complete admission decision through structured_output; do not perform the user task.`
+const ADMISSION_FUTURE_PREFERENCE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
+The initial decision identified a preference but classified this turn as a new task with no related prior answer. Recheck the direct user's actual request before the main reply. If the user only specifies a format for future work, explicitly declines revising the completed answer, and refers unambiguously to one completed prior answer, classify this turn as conversation feedback linked to that exact prior task. A request to acknowledge the preference is not by itself a request for a new deliverable. If the user requests a revision or other deliverable now, keep kind task. Do not infer a target merely because only one prior task is available; if the reference is ambiguous, leave relatedTaskId null. Preserve the initial feedback kind, category and exact quote. Preserve every explicit user restriction in criteria. Return a complete admission decision through structured_output; do not perform the user task.`
 const LOCAL_FILE_RECHECK_HINT = /文件|目录|工作区|源码|仓库|路径|\b(?:file|files|directory|folder|workspace|repository|source code)\b|\.[cm]?[jt]sx?\b/i
 
 declare module '@deepseek-ai/cordis' {
@@ -232,10 +234,13 @@ export class TianwenConversationObserverService extends Service {
         if (candidate.feedback !== null && !directText(direct).includes(candidate.feedback.quote)) throw new TypeError('feedback quote is not in current direct user input')
       }
       validLinks(decision)
-      if (decision.kind === 'conversation' && decision.feedback !== null && decision.relatedTaskId === null && earlier.length > 0) {
+      if (decision.feedback !== null && decision.relatedTaskId === null && earlier.length > 0
+        && (decision.kind === 'conversation' || decision.kind === 'task' && decision.feedback.kind === 'preference')) {
         try {
           const recheck = await runConversationJudgment(this.ctx, agent, {
-            label: `Tianwen feedback target recheck ${taskId}`, instruction: ADMISSION_TARGET_RECHECK_INSTRUCTION, outputSchema,
+            label: `Tianwen feedback target recheck ${taskId}`,
+            instruction: decision.kind === 'task' ? ADMISSION_FUTURE_PREFERENCE_RECHECK_INSTRUCTION : ADMISSION_TARGET_RECHECK_INSTRUCTION,
+            outputSchema,
             captureReminder: true, material: { ...material, initialDecision: decision }, signal,
           })
           if (!this.authorized(consent.revision)) throw new Error('cancelled')
