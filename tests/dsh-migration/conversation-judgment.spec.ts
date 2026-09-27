@@ -37,6 +37,7 @@ it('recovers an exact text trial answer without calling a model and rejects drif
     await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, modelConfigDigest: sha256('changed') })).rejects.toThrow('invalid-judgment')
     await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, guidance: '错误指导。' })).rejects.toThrow('invalid-judgment')
     await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionDigest: sha256('changed') }, expected)).rejects.toThrow('source-unavailable')
+    await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionId: String(SessionId('missing-trial-session')) }, expected)).rejects.toThrow()
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 it('rejects a file output kind on a text admission before native capture', () => {

@@ -12,6 +12,7 @@ import { apply as applyBundle } from '../../packages/tianwen-runtime-bundle/src/
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
+import { recoverTextGuidanceArmForReview } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
@@ -257,6 +258,15 @@ it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', '
     expect(study.arms).toHaveLength(10)
     expect(study.opened.proposalClues?.length ?? 0).toBe(expectedClues)
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
+    if (scenario === 'feedback.v1') {
+      const requestCount = harness.adapter.requests.length
+      const recovered = await Promise.all(study.arms.map(arm => recoverTextGuidanceArmForReview(harness.ctx, study, arm)))
+      expect(recovered).toHaveLength(10)
+      expect(recovered.every(item => item.answer.startsWith('pilot trial ') && item.reviews.length === 2)).toBe(true)
+      expect(recovered.every(item => item.reviewStatus === 'diagnostic-historical')).toBe(true)
+      expect(harness.adapter.requests).toHaveLength(requestCount)
+      await expect(recoverTextGuidanceArmForReview(harness.ctx, study, { ...study.arms[0]!, outputDigest: sha256('changed') })).rejects.toThrow('source-unavailable')
+    }
   } finally { warning.mockRestore(); marker.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
@@ -865,6 +875,11 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     expect(study?.decision?.verdict).toBe('accepted')
     if (scenario === 'activation-quarantined') {
       expect(study.activation).toBeUndefined()
+      const reviewRequests = harness.adapter.requests.length
+      const reviewArm = await recoverTextGuidanceArmForReview(harness.ctx, study, study.arms[1]!)
+      expect(reviewArm.reviewStatus).toBe('unreviewed')
+      expect(reviewArm.answer).toBe('保留来源范围 0')
+      expect(harness.adapter.requests).toHaveLength(reviewRequests)
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
       const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
         .map(line => JSON.parse(line))
