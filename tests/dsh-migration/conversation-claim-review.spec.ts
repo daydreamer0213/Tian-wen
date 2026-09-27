@@ -268,8 +268,8 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(harness.adapter.requests).toHaveLength(mode === 'before-first' ? 0 : 1)
     }
     else if (mode === 'contradictory') expect(result).toMatchObject({ message: 'successful review check cannot assert a failure category' })
-    else if (mode === 'invalid' || mode === 'invalid-quote' || mode === 'invalid-source' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
-    else if (mode === 'provider') expect(result).toMatchObject({ message: 'model-unavailable' })
+    else if (mode === 'invalid' || mode === 'invalid-quote' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
+    else if (mode === 'provider' || mode === 'invalid-source') expect(result).toMatchObject({ message: 'model-unavailable' })
     else if (mode === 'cancelled') expect(result).toMatchObject({ message: 'cancelled' })
     else {
       expect(result).toMatchObject({ verdict: mode === 'disagree' ? 'inconclusive' : verdicts[0], category: mode === 'not-met' ? 'source-fidelity' : null })
@@ -281,6 +281,9 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       const reviewSchema: any = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
       const evidenceQuoteExamples: string[] | undefined = reviewSchema?.properties?.evidenceQuotes?.items?.examples
       expect(evidenceQuoteExamples).toContain('原料已送达。')
+      const sourceIdChoices: string[] | undefined = reviewSchema?.properties?.audit?.properties?.units?.properties?.['answer-1']?.properties?.firstClaim?.properties?.sourceIds?.items?.enum
+      expect(sourceIdChoices).toEqual(evidence.items.filter(item => item.role !== 'answer').map(item => item.id))
+      expect(sourceIdChoices).not.toContain('answer-1')
       expect(evidenceQuoteExamples?.some(quote => quote.includes('RAW FEEDBACK ONLY'))).toBe(false)
       expect(reviewSchema?.properties?.evidenceQuotes?.items?.enum).toBeUndefined()
       expect(recovered.instruction).toContain('Review purpose: method-study')
@@ -319,7 +322,8 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(supplied[0]).toEqual([{ original: material, claimEvidence: evidence }])
       expect(supplied[1]).toEqual(supplied[0])
     }
-    if (mode === 'invalid-status' || mode === 'invalid-quote' || mode === 'invalid-source') expect(harness.adapter.requests).toHaveLength(1)
+    if (mode === 'invalid-status' || mode === 'invalid-quote') expect(harness.adapter.requests).toHaveLength(1)
+    if (mode === 'invalid-source') expect(harness.adapter.requests).toHaveLength(3)
     expect(harness.ctx.agents.list()).toHaveLength(1)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
@@ -405,7 +409,8 @@ it('keeps native quote choices bounded at the largest admitted answer-unit count
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-quote-size-')); roots.push(root)
   const answer = Array.from({ length: 128 }, (_, index) => `${index}: ${'x'.repeat(246)}；\n`).join('')
   expect(Buffer.byteLength(answer, 'utf8')).toBeLessThan(32_768)
-  const material = { task: { prompt: 'Review this answer.' }, answer }
+  const material = { task: { context: Array.from({ length: 10 }, (_, index) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `Earlier source ${index + 1}.` }] })),
+    request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Review this answer.' }] })] }, answer }
   const harness = await mountPersistentHarness(root, [new Error('stop after capturing request')])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('quote-size-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
@@ -415,6 +420,7 @@ it('keeps native quote choices bounded at the largest admitted answer-unit count
     const schema = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
     const units: any[] = Object.values((schema as any).properties.audit.properties.units.properties)
     expect(units.filter(unit => unit.properties).every(unit => unit.properties.firstClaim.properties.quote.enum === undefined)).toBe(true)
+    expect(units.filter(unit => unit.properties).every(unit => unit.properties.firstClaim.properties.sourceIds.items.enum === undefined)).toBe(true)
     expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThan(400_000)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })

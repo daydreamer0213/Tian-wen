@@ -216,13 +216,14 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
   const sourceIds = evidence.items.filter(item => item.role !== 'answer').map(item => item.id)
   const quoteChoices = new Map(answers.filter(item => item.text.trim() !== '').map(item => [item.id, answerQuoteChoices(item.text)]))
   const boundedChoices = [...quoteChoices.values()].reduce((bytes, values) => bytes + 2 * Buffer.byteLength(JSON.stringify(values), 'utf8'), 0) <= 98_304
+  const boundedSourceIds = sourceIds.length > 0 && 2 * quoteChoices.size * Buffer.byteLength(JSON.stringify(sourceIds), 'utf8') <= 8_192
   const claimFor = (answer: ClaimEvidenceItem) => object({
     quote: { ...(boundedChoices ? choices(quoteChoices.get(answer.id)!) : string), description: boundedChoices
       ? 'Select an exact supplied quote from this answer unit. Do not change its Markdown, whitespace, punctuation or scope.'
       : 'Copy an exact non-empty substring from this answer unit. Preserve its original bytes and do not paraphrase or add a label.' },
     kind: { ...choices(kinds), description: 'Classify the claim as source-fact, advice, inference, fiction, general-knowledge or non-factual.' },
     status: { ...choices(statuses), description: 'Use supported only for a source-fact with authoritative supplied evidence; use permitted for task-compatible non-source-facts such as advice or fiction.' },
-    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : string), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources. The host checks every ID against the frozen source items.' },
+    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : boundedSourceIds ? choices(sourceIds) : string), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources. The host checks every ID against the frozen source items.' },
     explanation: { type: 'string', description: 'Explain the scope, time, certainty, commitment and source-authority check for this claim.' },
   })
   const unitProperties: Record<string, JsonSchemaNode> = Object.fromEntries(answers.map(item => [item.id, item.text.trim() === ''
