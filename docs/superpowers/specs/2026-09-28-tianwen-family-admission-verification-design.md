@@ -1,6 +1,6 @@
 # Task-family admission verification after E084 and E086
 
-Status: proposed design; no classifier change has been implemented or validated by this document.
+Status: implemented behind an opt-in `familyVerification` switch; prospective model validation remains pending.
 
 ## Evidence and goal
 
@@ -16,7 +16,7 @@ The next goal is to make family decisions reliable enough to route future guidan
 
 ## Implementation boundary
 
-Version the new admission behavior for prospective tasks; retain exact v11 replay. Record the initial family, its native proof, the focused check result and proof, any tie-break result and proof, and the resolved family without changing the initial judgment. The resolved family must be chosen before the main answer so the correct guidance route is used. Do not run family rechecks for conversation-only feedback, local-file or external tasks. Do not copy a recheck's revised objective or criteria into the admission; focused checks may return only family and quote. An unresolved family keeps the direct task answer possible but cannot select family-specific guidance or enter same-family study support. Existing learning selector gates continue to require valid feedback or a supported failure, and same-family study support; the new check cannot invent feedback, success controls or a method.
+Mark prospective tasks with `tianwen.family-verification.v1` when the opt-in switch is enabled; retain exact v11 answer-quality replay. Record the initial family, its native proof, the focused check result and proof, any tie-break result and proof, and the resolved family without changing the initial judgment. The resolved family must be chosen before the main answer so the correct guidance route is used. Do not run family rechecks for conversation-only feedback, local-file or external tasks. Do not copy a recheck's revised objective or criteria into the admission; focused checks may return only family and quote. An unresolved or generic `other` family keeps the direct task answer possible but cannot select family-specific guidance or enter same-family study support. Study sources, counterexample, proposal clues and regression evidence must share the admission policy marker, so historical and prospective classifications do not form a mixed evidence group. Existing learning selector gates continue to require valid feedback or a supported failure; the new check cannot invent feedback, success controls or a method.
 
 There is a cost trade-off: one extra model judgment for every eligible text task, plus a third only on disagreement. Keep the scope explicit and measure the latency in a prospective isolated run. If cost is unacceptable, a separately proved trigger can later narrow the check; do not silently use keyword gating in this repair.
 

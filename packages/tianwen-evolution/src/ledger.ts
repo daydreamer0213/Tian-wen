@@ -15,7 +15,7 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
-import { ConversationLearningState, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
+import { ConversationLearningState, effectiveConversationFamily, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
 import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
 import { ConversationFeedbackState, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
@@ -3082,11 +3082,13 @@ export class EvolutionLedger {
 
   #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
     const tasks = this.#conversationLearning.list()
+    const sourcePolicy = tasks.find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
     for (const taskId of [...study.sourceTaskIds, study.counterexampleTaskId]) {
       const task = tasks.find(item => item.source.taskId === taskId)
       if (task?.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
         || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
-        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== (study.evaluationMode ?? 'text')
+        || effectiveConversationFamily(task) !== study.family || task.admission?.decision?.evaluationMode !== (study.evaluationMode ?? 'text')
+        || task.source.admissionPolicy !== sourcePolicy
         || task.admission.decision.fileOutputKind !== study.fileOutputKind
         || (study.evaluationMode === 'local-files' && (task.fileUnavailable !== undefined || task.completion.files === undefined || !task.fileInputs?.length
           || task.completion.files.outputKind !== study.fileOutputKind))) throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
@@ -3119,7 +3121,8 @@ export class EvolutionLedger {
       if (task === undefined || !['feedback.v1', 'feedback.v2'].includes(task.source.proposalCluePolicy ?? '') || !(external || incompleteFile)
         || task.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
         || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
-        || decision?.family !== study.family
+        || effectiveConversationFamily(task) !== study.family
+        || task.source.admissionPolicy !== sourcePolicy
         || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
         || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) {
         throw new LedgerIntegrityError('proposal clue requires a marked compatible completed task with eligible feedback evidence')
@@ -3175,11 +3178,13 @@ export class EvolutionLedger {
       if (record.reason === 'consent-disabled' && consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3') throw new LedgerIntegrityError('enabled natural learning cannot claim disabled consent')
       if (record.reason === 'regression') {
         const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
+        const sourcePolicy = this.#conversationLearning.list().find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
         if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
-          || task.source.behaviorVersion !== record.expectedCurrentVersion || task.admission?.decision?.family !== study.family
-          || task.admission.decision.evaluationMode !== (study.evaluationMode ?? 'text') || task.admission.decision.fileOutputKind !== study.fileOutputKind
-          || sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
+          || task.source.behaviorVersion !== record.expectedCurrentVersion || effectiveConversationFamily(task) !== study.family
+          || task.source.admissionPolicy !== sourcePolicy
+          || task.admission?.decision?.evaluationMode !== (study.evaluationMode ?? 'text') || task.admission?.decision?.fileOutputKind !== study.fileOutputKind
+          || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
           || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
           || new Set(failures.map(task => task!.source.requestDigest)).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')

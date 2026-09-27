@@ -35,7 +35,7 @@ const reasoningTextResponse = (reasoning: string, text: string): readonly Stream
 
 const reviewPair = (value: typeof review) => [evidenceResponse(value), evidenceResponse(value)]
 
-async function mount(script: Parameters<typeof mountPersistentHarness>[1], policy = 'tianwen-auto-analysis.v3', feedback = false, legacy = false) {
+async function mount(script: Parameters<typeof mountPersistentHarness>[1], policy = 'tianwen-auto-analysis.v3', feedback = false, legacy = false, familyVerification = false) {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'observer-')); roots.push(root)
@@ -48,7 +48,7 @@ async function mount(script: Parameters<typeof mountPersistentHarness>[1], polic
     await harness.ctx.plugin(SkillRegistry); await harness.ctx.plugin(applySkillTool)
     await harness.ctx.plugin(TianwenResearchSummaryAdmissionService)
   }
-  await harness.ctx.plugin(TianwenConversationObserverService)
+  await harness.ctx.plugin(TianwenConversationObserverService, { familyVerification })
   if (feedback) await harness.ctx.plugin(TianwenMessageFeedbackBridgeService)
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('ordinary-chat'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
   return { ...harness, handle }
@@ -691,5 +691,116 @@ it('keeps oversized observation material unavailable without changing the actual
     expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.admission?.unavailableReason).toBe('material-too-large')
     expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.completion?.status).toBe('completed')
     expect(harness.adapter.requests).toHaveLength(1)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps the initial admission and resolves a summary family with two independent focused votes before answering', async () => {
+  const requestText = '请根据这些记录写一段简短摘要：试点预计 5 天。'
+  let harness: Awaited<ReturnType<typeof mount>>
+  harness = await mount([
+    structured({ ...admission, family: 'other' }),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('family-only')
+      expect(JSON.stringify(request.messages)).not.toContain('initialDecision')
+      return structured({ family: 'summarization', quote: '写一段简短摘要' })
+    },
+    request => {
+      expect(JSON.stringify(request.messages)).not.toContain('initialDecision')
+      return structured({ family: 'summarization', quote: '写一段简短摘要' })
+    },
+    request => {
+      const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]
+      expect(task?.admission?.decision?.family).toBe('other')
+      expect(task?.admission?.familyVerification?.resolvedFamily).toBe('summarization')
+      expect(task?.source.admissionPolicy).toBe('tianwen.family-verification.v1')
+      return textResponse('试点预计 5 天。')
+    }, ...reviewPair(review),
+  ], 'tianwen-auto-analysis.v3', false, false, true)
+  try {
+    harness.handle.agent.followup(direct(requestText))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.review?.verdict).toBe('met')
+    expect(task.admission?.familyVerification?.checks).toHaveLength(2)
+    expect(new Set([task.admission?.proof?.sessionId, ...task.admission!.familyVerification!.checks.map(check => check.proof.sessionId)]).size).toBe(3)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('confirms a real writing task with one focused vote and leaves its requested list intact', async () => {
+  const harness = await mount([
+    structured({ ...admission, family: 'writing', objective: 'Draft a status note' }),
+    structured({ family: 'writing', quote: '一个标题和三条要点' }),
+    textResponse('# 状态\n- 试点预计 5 天。'), ...reviewPair(review),
+  ], 'tianwen-auto-analysis.v3', false, false, true)
+  try {
+    harness.handle.agent.followup(direct('请写一个标题和三条要点，说明试点预计 5 天。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.familyVerification?.resolvedFamily).toBe('writing')
+    expect(task.admission?.familyVerification?.checks).toHaveLength(1)
+    expect(harness.adapter.requests).toHaveLength(5)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('answers but leaves family unresolved when three votes differ', async () => {
+  const harness = await mount([
+    structured({ ...admission, family: 'other' }),
+    structured({ family: 'summarization', quote: '简短摘要' }),
+    structured({ family: 'writing', quote: '简短摘要' }),
+    textResponse('试点预计 5 天。'), ...reviewPair(review),
+  ], 'tianwen-auto-analysis.v3', false, false, true)
+  try {
+    harness.handle.agent.followup(direct('请根据记录写简短摘要：试点预计 5 天。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.familyVerification?.resolvedFamily).toBeNull()
+    expect(task.completion?.status).toBe('completed')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('fails family routing closed when a native check cites text outside the direct request', async () => {
+  const harness = await mount([
+    structured(admission), structured({ family: 'summarization', quote: 'not in the request' }),
+    textResponse('试点预计 5 天。'), ...reviewPair(review),
+  ], 'tianwen-auto-analysis.v3', false, false, true)
+  try {
+    harness.handle.agent.followup(direct('请概括：试点预计 5 天。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.familyVerification).toMatchObject({ resolvedFamily: null, unavailableReason: 'invalid-judgment', checks: [] })
+    expect(task.completion?.status).toBe('completed')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('does not complete family verification after the profile consent is disabled mid-check', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  harness = await mount([
+    structured(admission), () => {
+      harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+      return structured({ family: 'summarization', quote: '请概括' })
+    }, textResponse('试点预计 5 天。'),
+  ], 'tianwen-auto-analysis.v3', false, false, true)
+  try {
+    harness.handle.agent.followup(direct('请概括：试点预计 5 天。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.unavailableReason).toBe('cancelled')
+    expect(task.admission?.familyVerification).toBeUndefined()
+    expect(task.completion?.status).toBe('completed')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('does not request family votes for a non-text task', async () => {
+  const harness = await mount([
+    structured({ ...admission, evaluationMode: 'external' }),
+    textResponse('没有执行外部操作。'), ...reviewPair(review),
+  ], 'tianwen-auto-analysis.v3', false, false, true)
+  try {
+    harness.handle.agent.followup(direct('请访问外部网站后概括试点状态。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.decision?.evaluationMode).toBe('external')
+    expect(task.admission?.familyVerification).toBeUndefined()
+    expect(harness.adapter.requests).toHaveLength(3)
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })

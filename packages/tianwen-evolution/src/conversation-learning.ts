@@ -177,6 +177,8 @@ export interface ConversationTaskSource {
   readonly materialProjection?: 'surface-text.v1'
   /** Omission is historical and is never recruited as a feedback proposal clue. */
   readonly proposalCluePolicy?: 'feedback.v1' | 'feedback.v2'
+  /** Omission preserves the historical single-admission family route. */
+  readonly admissionPolicy?: 'tianwen.family-verification.v1'
 }
 
 export interface ConversationAdmissionDecision {
@@ -202,6 +204,20 @@ export interface ConversationTaskAdmission {
   readonly unavailableReason: Exclude<ConversationUnavailable, 'file-evidence-unavailable'> | null
   /** Absent on legacy records; never backfilled during replay or recovery. */
   readonly qualityContract?: ConversationQualityContract
+  /** Keeps the initial decision/proof intact while verifying prospective text-task family routing. */
+  readonly familyVerification?: ConversationFamilyVerification
+}
+
+export interface ConversationFamilyCheck {
+  readonly family: ConversationFamily
+  readonly quote: string
+  readonly proof: ConversationJudgmentProof
+}
+export interface ConversationFamilyVerification {
+  readonly schemaVersion: 'tianwen.family-verification.v1'
+  readonly checks: readonly ConversationFamilyCheck[]
+  readonly resolvedFamily: ConversationFamily | null
+  readonly unavailableReason: Exclude<ConversationUnavailable, 'file-evidence-unavailable'> | null
 }
 
 export interface ConversationTaskCompletion {
@@ -264,6 +280,14 @@ export interface ConversationTask {
   readonly fileUnavailable?: ConversationTaskFileUnavailable
 }
 
+export function effectiveConversationFamily(task: ConversationTask): ConversationFamily | null {
+  const decision = task.admission?.decision
+  if (decision?.kind !== 'task') return null
+  if (task.source.admissionPolicy !== 'tianwen.family-verification.v1' || decision.evaluationMode !== 'text') return decision.family
+  const family = task.admission?.familyVerification?.resolvedFamily
+  return family === 'other' ? null : family ?? null
+}
+
 export function conversationTaskId(source: Pick<ConversationTaskSource, 'sessionId' | 'sessionLifecycleFingerprint' | 'turn'>): string {
   return `conversation-task:${sha256({ sessionId: source.sessionId, lifecycle: source.sessionLifecycleFingerprint, turn: source.turn }).slice(7)}`
 }
@@ -309,6 +333,37 @@ function unavailable(value: unknown): ConversationUnavailable | null {
   return value === null ? null : oneOf(value, ['model-unavailable', 'material-too-large', 'cancelled', 'invalid-judgment', 'file-evidence-unavailable'])
 }
 
+export function parseConversationFamilyVerification(value: unknown, initialFamily: ConversationFamily,
+  initialProof: ConversationJudgmentProof): ConversationFamilyVerification {
+  const input = object(value, ['schemaVersion', 'checks', 'resolvedFamily', 'unavailableReason'])
+  if (input.schemaVersion !== 'tianwen.family-verification.v1') throw new TypeError('family verification version is invalid')
+  const checks = list(input.checks, item => {
+    const check = object(item, ['family', 'quote', 'proof'])
+    const proof = nullableProof(check.proof)
+    if (proof === null) throw new TypeError('family verification requires native proof')
+    return { family: oneOf(check.family, CONVERSATION_FAMILIES), quote: text(check.quote, 2048), proof }
+  }, 2)
+  const reason = unavailable(input.unavailableReason)
+  if (reason === 'file-evidence-unavailable') throw new TypeError('family verification cannot cite file evidence')
+  const ids = [initialProof.sessionId, ...checks.map(check => check.proof.sessionId)]
+  if (new Set(ids).size !== ids.length) throw new TypeError('family checks require independent native Sessions')
+  let resolvedFamily: ConversationFamily | null = null
+  if (checks.length === 0) {
+    if (reason === null) throw new TypeError('missing family check needs an unavailable reason')
+  } else if (checks[0]!.family === initialFamily) {
+    if (checks.length !== 1 || reason !== null) throw new TypeError('agreeing family check needs no tie-break')
+    resolvedFamily = initialFamily
+  } else if (checks.length === 1) {
+    if (reason === null) throw new TypeError('disagreeing family check needs a tie-break or unavailable reason')
+  } else {
+    if (reason !== null) throw new TypeError('completed family checks cannot be unavailable')
+    resolvedFamily = checks[1]!.family === initialFamily ? initialFamily
+      : checks[1]!.family === checks[0]!.family ? checks[0]!.family : null
+  }
+  if (input.resolvedFamily !== resolvedFamily) throw new TypeError('family verification disagrees with native votes')
+  return { schemaVersion: 'tianwen.family-verification.v1', checks, resolvedFamily, unavailableReason: reason }
+}
+
 export function parseConversationAdmission(value: unknown): ConversationAdmissionDecision {
   const input = object(value, ['kind', 'objective', 'criteria', 'family', 'evaluationMode', 'relatedTaskId', 'feedback', ...(Object.hasOwn(value as object, 'fileOutputKind') ? ['fileOutputKind'] : [])])
   let feedback: ConversationAdmissionDecision['feedback'] = null
@@ -336,7 +391,7 @@ export function parseConversationAdmission(value: unknown): ConversationAdmissio
 export function parseConversationLearningRecord(value: unknown): ConversationLearningRecord {
   if (value === null || typeof value !== 'object' || !('kind' in value)) throw new TypeError('conversation learning record is invalid')
   if (value.kind === 'task-started') {
-    const input = object(value, ['kind', 'taskId', 'sessionId', 'sessionLifecycleFingerprint', 'turn', 'startSeq', 'userMessageIds', 'requestDigest', 'contextDigest', 'scopeKey', 'consentRevision', 'behaviorVersion', ...(Object.hasOwn(value, 'materialProjection') ? ['materialProjection'] : []), ...(Object.hasOwn(value, 'proposalCluePolicy') ? ['proposalCluePolicy'] : [])])
+    const input = object(value, ['kind', 'taskId', 'sessionId', 'sessionLifecycleFingerprint', 'turn', 'startSeq', 'userMessageIds', 'requestDigest', 'contextDigest', 'scopeKey', 'consentRevision', 'behaviorVersion', ...(Object.hasOwn(value, 'materialProjection') ? ['materialProjection'] : []), ...(Object.hasOwn(value, 'proposalCluePolicy') ? ['proposalCluePolicy'] : []), ...(Object.hasOwn(value, 'admissionPolicy') ? ['admissionPolicy'] : [])])
     const source: ConversationTaskSource = {
       kind: 'task-started', taskId: text(input.taskId, 512), sessionId: text(input.sessionId, 512),
       sessionLifecycleFingerprint: digest(input.sessionLifecycleFingerprint), turn: integer(input.turn), startSeq: integer(input.startSeq),
@@ -344,19 +399,24 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
       scopeKey: text(input.scopeKey, 512), consentRevision: integer(input.consentRevision), behaviorVersion: digest(input.behaviorVersion),
       ...(Object.hasOwn(input, 'materialProjection') ? { materialProjection: oneOf(input.materialProjection, ['surface-text.v1']) } : {}),
       ...(Object.hasOwn(input, 'proposalCluePolicy') ? { proposalCluePolicy: oneOf(input.proposalCluePolicy, ['feedback.v1', 'feedback.v2']) } : {}),
+      ...(Object.hasOwn(input, 'admissionPolicy') ? { admissionPolicy: oneOf(input.admissionPolicy, ['tianwen.family-verification.v1']) } : {}),
     }
     if (source.taskId !== conversationTaskId(source) || source.userMessageIds.length === 0) throw new TypeError('conversation task identity does not match its source')
     return source
   }
   if (value.kind === 'task-admitted') {
-    const input = object(value, ['kind', 'taskId', 'decision', 'proof', 'unavailableReason', ...(Object.hasOwn(value, 'qualityContract') ? ['qualityContract'] : [])])
+    const input = object(value, ['kind', 'taskId', 'decision', 'proof', 'unavailableReason', ...(Object.hasOwn(value, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(value, 'familyVerification') ? ['familyVerification'] : [])])
     const decision = input.decision === null ? null : parseConversationAdmission(input.decision)
     const proof = nullableProof(input.proof)
     const reason = unavailable(input.unavailableReason)
     if (reason === 'file-evidence-unavailable') throw new TypeError('admission cannot cite unavailable result-file evidence')
     if ((decision !== null) !== (proof !== null && reason === null) || (decision === null && reason === null)) throw new TypeError('admission requires a judgment or an unavailable reason')
+    if (Object.hasOwn(input, 'familyVerification') && (decision?.kind !== 'task' || proof === null)) throw new TypeError('family verification requires an admitted task')
     return { kind: 'task-admitted', taskId: text(input.taskId, 512), decision, proof, unavailableReason: reason,
-      ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}) }
+      ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}),
+      ...(Object.hasOwn(input, 'familyVerification') ? {
+        familyVerification: parseConversationFamilyVerification(input.familyVerification, decision!.family, proof!),
+      } : {}) }
   }
   if (value.kind === 'task-finished') {
     const input = object(value, ['kind', 'taskId', 'endSeq', 'status', 'assistantMessageIds', 'resultDigest', 'evidenceIds', ...(Object.hasOwn(value, 'files') ? ['files'] : [])])
@@ -437,6 +497,9 @@ export class ConversationLearningState {
     if (task === undefined) throw new Error('unknown conversation task source')
     if (record.kind === 'task-admitted') {
       if (task.completion !== undefined) throw new Error('task criteria must be frozen before the completed result')
+      const needsFamily = task.source.admissionPolicy === 'tianwen.family-verification.v1'
+        && record.decision?.kind === 'task' && record.decision.evaluationMode === 'text'
+      if (needsFamily !== (record.familyVerification !== undefined)) throw new Error('family verification does not match its source admission policy')
       const targetId = record.decision?.relatedTaskId
       if (targetId !== null && targetId !== undefined) {
         const target = this.tasks.get(targetId)

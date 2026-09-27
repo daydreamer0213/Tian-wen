@@ -53,6 +53,8 @@ export { inject, name, SUPPORTED_DSH_VERSION }
 
 export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string
+  /** Experimental prospective admission policy; old sessions retain their original family. */
+  readonly familyVerification?: boolean
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
@@ -485,7 +487,7 @@ export async function apply(
   ctx.plugin(TianwenNativeToolObservationService)
   ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }) })
-  ctx.plugin(TianwenConversationObserverService)
+  ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true })
   ctx.plugin(TianwenConversationFeedbackService)
   ctx.plugin(TianwenConversationGuidanceLoopService, {
     ...(evolutionRoot === undefined ? {} : { evolutionRoot }),

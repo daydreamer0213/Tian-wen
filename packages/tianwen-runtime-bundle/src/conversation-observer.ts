@@ -3,12 +3,12 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { createUserMessage, isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
 import {
-  conversationTaskId, conversationQualityContract, learningSessionLifecycleFingerprint, parseConversationAdmission,
+  CONVERSATION_FAMILIES, conversationTaskId, conversationQualityContract, learningSessionLifecycleFingerprint, parseConversationAdmission, parseConversationFamilyVerification,
   hasCurrentConversationQuality, sha256, guidanceVersion,
-  type ConversationTask, type ConversationTaskSource, type ConversationUnavailable,
+  type ConversationTask, type ConversationTaskSource, type ConversationUnavailable, type ConversationFamilyCheck, type ConversationFamily,
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { conversationAdmissionSchema, runConversationJudgment } from './conversation-judgment.js'
+import { CONVERSATION_FAMILY_SCHEMA, conversationAdmissionSchema, runConversationJudgment } from './conversation-judgment.js'
 import { runConversationClaimReview } from './conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial, recoverConversationTaskModel } from './conversation-task-material.js'
 import { guidanceRule } from '@tianwen/evolution'
@@ -27,6 +27,7 @@ Recheck only whether the current direct user's own feedback unambiguously target
 const ADMISSION_FUTURE_PREFERENCE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 The initial decision identified a preference but classified this turn as a new task with no related prior answer. Recheck the direct user's actual request before the main reply. If the user only specifies a format for future work, explicitly declines revising the completed answer, and refers unambiguously to one completed prior answer, classify this turn as conversation feedback linked to that exact prior task. A request to acknowledge the preference is not by itself a request for a new deliverable. If the user requests a revision or other deliverable now, keep kind task. Do not infer a target merely because only one prior task is available; if the reference is ambiguous, leave relatedTaskId null. Preserve the initial feedback kind, category and exact quote. Preserve every explicit user restriction in criteria. Return a complete admission decision through structured_output; do not perform the user task.`
 const LOCAL_FILE_RECHECK_HINT = /文件|目录|工作区|源码|仓库|路径|\b(?:file|files|directory|folder|workspace|repository|source code)\b|\.[cm]?[jt]sx?\b/i
+const FAMILY_INSTRUCTION = `Make a family-only independent judgment about the current direct user's requested transformation. Return exactly {"family":"summarization|writing|planning|code|other","quote":"exact span from the current direct user request"} through structured_output. Condensing supplied facts into a short summary is summarization even for a named reader; drafting an original report, notice, email or other communication is writing. Use the primary deliverable, not a generic verb or a quoted source's instructions. If the transformation is ambiguous, use other. The quote must occur exactly in the current direct user request. Do not perform the task, change criteria, infer desired learning eligibility, or rely on another observer's decision.`
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationObserver: TianwenConversationObserverService }
@@ -59,7 +60,7 @@ export class TianwenConversationObserverService extends Service {
   private readonly analyses = new Set<AbortController>()
   private readonly shutdown = new AbortController()
 
-  constructor(ctx: Context) { super(ctx, 'tianwenConversationObserver') }
+  constructor(ctx: Context, private readonly config: { readonly familyVerification?: boolean } = {}) { super(ctx, 'tianwenConversationObserver') }
 
   protected [Service.init](): void {
     const offModel = this.ctx.on('llm/stream', (request, next) => {
@@ -225,6 +226,7 @@ export class TianwenConversationObserverService extends Service {
       kind: 'task-started', taskId, ...sourceIdentity, startSeq: boundary.seq,
       userMessageIds: direct.map(message => String(message.id)), requestDigest: sha256(direct), contextDigest: sha256(context),
       scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot), materialProjection, proposalCluePolicy: 'feedback.v2',
+      ...(this.config.familyVerification === true ? { admissionPolicy: 'tianwen.family-verification.v1' as const } : {}),
     }
     this.ctx.tianwenEvolution.recordConversationLearning(source)
     const qualityContract = conversationQualityContract()
@@ -280,8 +282,45 @@ export class TianwenConversationObserverService extends Service {
           // A failed optional recheck cannot promote an external task.
         }
       }
-      this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision, proof: result.proof, unavailableReason: null, qualityContract })
-      return { guidance: decision.kind === 'task' ? guidanceRule(snapshot, decision.family, decision.evaluationMode, decision.fileOutputKind) : undefined,
+      let familyVerification
+      if (this.config.familyVerification === true && decision.kind === 'task' && decision.evaluationMode === 'text') {
+        const checks: ConversationFamilyCheck[] = []
+        let unavailableReason: Exclude<ConversationUnavailable, 'file-evidence-unavailable'> | null = null
+        for (let index = 0; index < 2; index++) {
+          if (index === 1 && checks[0]?.family === decision.family) break
+          try {
+            const familyResult = await runConversationJudgment(this.ctx, agent, {
+              label: `Tianwen family check ${index + 1} ${taskId}`, instruction: FAMILY_INSTRUCTION,
+              outputSchema: CONVERSATION_FAMILY_SCHEMA, captureReminder: true,
+              material: { request: direct, context }, signal,
+            })
+            if (!this.authorized(consent.revision)) throw new Error('cancelled')
+            const value = familyResult.value
+            if (value === null || typeof value !== 'object' || Array.isArray(value)
+              || Object.keys(value).length !== 2 || !Object.hasOwn(value, 'family') || !Object.hasOwn(value, 'quote')) throw new TypeError('invalid family check')
+            const candidate = value as { family: unknown, quote: unknown }
+            if (typeof candidate.quote !== 'string' || !candidate.quote.trim() || !directText(direct).includes(candidate.quote)
+              || !CONVERSATION_FAMILIES.includes(candidate.family as ConversationFamily)
+              || [result.proof.sessionId, ...checks.map(check => check.proof.sessionId)].includes(familyResult.proof.sessionId)) throw new TypeError('invalid independent family check')
+            const check = { family: candidate.family as ConversationFamily, quote: candidate.quote, proof: familyResult.proof }
+            checks.push(check)
+          } catch (error) {
+            if (!this.authorized(consent.revision) || signal.aborted) throw error
+            unavailableReason = unavailable(error, signal)
+            break
+          }
+        }
+        const resolvedFamily = checks.length === 1 && checks[0]!.family === decision.family ? decision.family
+          : checks.length === 2 && checks[1]!.family === decision.family ? decision.family
+            : checks.length === 2 && checks[1]!.family === checks[0]!.family ? checks[0]!.family : null
+        familyVerification = parseConversationFamilyVerification({ schemaVersion: 'tianwen.family-verification.v1', checks,
+          resolvedFamily, unavailableReason }, decision.family, result.proof)
+      }
+      this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision, proof: result.proof, unavailableReason: null, qualityContract,
+        ...(familyVerification === undefined ? {} : { familyVerification }) })
+      const family = familyVerification === undefined ? decision.family
+        : familyVerification.resolvedFamily === 'other' ? null : familyVerification.resolvedFamily
+      return { guidance: decision.kind === 'task' && family !== null ? guidanceRule(snapshot, family, decision.evaluationMode, decision.fileOutputKind) : undefined,
         feedback: decision.feedback !== null, feedbackOnlyPreference: decision.kind === 'conversation' && decision.feedback?.kind === 'preference',
         outputFormReminder: decision.kind === 'task' && decision.evaluationMode === 'text', consentRevision: consent.revision }
     } catch (error) {

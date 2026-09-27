@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
+import { effectiveConversationFamily, hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
@@ -150,7 +150,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private async proposalClues(scopeKey: string, first: ConversationTask, category: ConversationFailure, actualTaskIds: readonly string[]): Promise<EvidenceGroup['proposalClues']> {
     const firstAdmission = first.admission
     const firstDecision = firstAdmission?.decision
-    if (firstDecision?.kind !== 'task') return []
+    if (firstDecision?.kind !== 'task' || effectiveConversationFamily(first) === null) return []
     const feedback = this.ctx.get('tianwenConversationFeedback')
     if (feedback === undefined) return []
     const evolution = this.ctx.tianwenEvolution
@@ -167,7 +167,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
       return task.source.scopeKey === scopeKey && !actualTaskIds.includes(task.source.taskId)
       && ['feedback.v1', 'feedback.v2'].includes(task.source.proposalCluePolicy ?? '')
       && task.source.consentRevision === first.source.consentRevision && task.source.behaviorVersion === first.source.behaviorVersion
-      && task.completion?.status === 'completed' && decision?.family === firstDecision.family
+      && task.completion?.status === 'completed' && effectiveConversationFamily(task) === effectiveConversationFamily(first)
+      && task.source.admissionPolicy === first.source.admissionPolicy
       && sha256(task.admission?.qualityContract ?? null) === sha256(firstAdmission?.qualityContract ?? null)
       && conversationTaskModelDigest(task) === conversationTaskModelDigest(first)
       && (external || incompleteFile)
@@ -435,7 +436,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const candidates = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
       && task.source.consentRevision === consent.revision && task.source.behaviorVersion === version
       && hasCurrentConversationQuality(task.admission?.qualityContract)
-      && task.admission?.decision?.feedback == null
+      && task.admission?.decision?.feedback == null && effectiveConversationFamily(task) !== null
       && ['text', 'local-files'].includes(task.admission?.decision?.evaluationMode ?? '') && task.completion?.status === 'completed' && conversationTaskModelDigest(task) !== undefined)
     const materials = new Map<string, ConversationTaskMaterial>()
     const tasks: ConversationTask[] = []
@@ -454,6 +455,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       return material === undefined ? task.source.requestDigest : guidanceInputDigest(conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files)
     }
     const compatible = (task: ConversationTask, first: ConversationTask) => task.admission!.decision!.evaluationMode === first.admission!.decision!.evaluationMode
+      && task.source.admissionPolicy === first.source.admissionPolicy
       && task.admission!.decision!.fileOutputKind === first.admission!.decision!.fileOutputKind
       && sha256(task.admission!.qualityContract ?? null) === sha256(first.admission!.qualityContract ?? null)
     const studies = evolution.listConversationGuidanceStudies(scopeKey)
@@ -463,14 +465,14 @@ export class TianwenConversationGuidanceLoopService extends Service {
     for (const first of failed) {
       const second = failed.find(task => task.source.taskId !== first.source.taskId && inputIdentity(task) !== inputIdentity(first) && compatible(task, first)
         && conversationTaskModelDigest(task) === conversationTaskModelDigest(first)
-        && task.admission!.decision!.family === first.admission!.decision!.family && this.support(task)!.category === this.support(first)!.category)
+        && effectiveConversationFamily(task) === effectiveConversationFamily(first) && this.support(task)!.category === this.support(first)!.category)
       if (second === undefined) continue
       paired = true
       const sources: [ConversationTask, ConversationTask] = [second, first]
       if (studies.some(study => sources.every(task => study.opened.sourceTaskIds.includes(task.source.taskId)))) continue
       unstudied = true
       const counterexample = tasks.find(task => task.review?.verdict === 'met' && task.review.proof !== null && this.support(task) === undefined && !this.negativeFeedback(task)
-        && compatible(task, first) && conversationTaskModelDigest(task) === conversationTaskModelDigest(first) && task.admission!.decision!.family === first.admission!.decision!.family)
+        && compatible(task, first) && conversationTaskModelDigest(task) === conversationTaskModelDigest(first) && effectiveConversationFamily(task) === effectiveConversationFamily(first))
       if (counterexample !== undefined) {
         const category = this.support(first)!.category
         return { state: 'ready-to-schedule', group: { sources, counterexample, category, assessments: sources.map(task => this.support(task)?.assessment) } }
@@ -490,12 +492,14 @@ export class TianwenConversationGuidanceLoopService extends Service {
         || guidanceVersion(evolution.getConversationGuidance(scopeKey)) !== guidanceVersion(study.candidate.candidateSnapshot)) continue
       const disabled = consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3'
       const retracted = !evolution.isConversationGuidanceSupported(study.opened.studyId)
+      const sourcePolicy = evolution.listConversationTasks().find(task => task.source.taskId === study.opened.sourceTaskIds[0])?.source.admissionPolicy
       const failures = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
         && task.source.behaviorVersion === guidanceVersion(study.candidate!.candidateSnapshot) && task.recordedAt > study.activatedAt!
         && conversationTaskModelDigest(task) === study.opened.modelConfigDigest
         && sha256(task.admission?.qualityContract ?? null) === sha256(study.opened.qualityContract ?? null)
         && task.admission?.decision?.evaluationMode === (study.opened.evaluationMode ?? 'text') && task.admission.decision.fileOutputKind === study.opened.fileOutputKind
-        && task.admission?.decision?.family === study.opened.family && task.review?.verdict === 'not-met')
+        && effectiveConversationFamily(task) === study.opened.family && task.review?.verdict === 'not-met')
+        .filter(task => task.source.admissionPolicy === sourcePolicy)
       const distinct = failures.filter((task, index) => failures.findIndex(item => item.source.requestDigest === task.source.requestDigest) === index)
       if (!disabled && !retracted && distinct.length < 2) continue
       evolution.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
@@ -539,7 +543,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         instruction: fileMode
           ? `Design exactly two independent bounded local-file evaluation tasks, adjacent and holdout, for outputKind ${fileConfig!.outputKind}. Each has prompt, criteria, and files with entries [{path,content}] and exact outputPaths. Paths are relative, at most eight UTF-8 files, 32768 total content bytes; absent initial files use null. For files output declare every output path among entries; for chat output use readable inputs and empty outputPaths. Supply initial inputs, never answers. The host supplies cwd, outputKind and schemaVersion; do not include them. Use different facts, no personal identifiers, copied problems, proposed guidance or reviewer instructions. ${RAW_FEEDBACK_GUIDANCE}`
           : `Design exactly two independent text-only evaluation tasks for the observed task family and failure category. Return {"adjacent":{"prompt":"complete self-contained task with all source facts","criteria":["checkable criterion"]},"holdout":{"prompt":"different complete self-contained task","criteria":["checkable criterion"]}}. Preserve neither personal identifiers nor verbatim source problems. Include no answer, candidate instruction, tool request, or instruction to the reviewer. The holdout must use different facts and expose over-generalization. These are explicitly synthetic test cases, not real user outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
-        material: { family: source.admission!.decision!.family, failureCategory: group.category, sources },
+        material: { family: effectiveConversationFamily(source)!, failureCategory: group.category, sources },
       })
       const cases: GuidanceCase[] = [...group.sources, group.counterexample].map((task, index) => {
         const material = index < 2 ? sources[index]! : counter
@@ -561,7 +565,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       let catalog = group.proposalClues.length === 0 ? undefined : await loadCatalog()
       if (catalog !== undefined && !catalog.complete) throw new Error('source-unavailable')
       const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
-        scopeKey: source.source.scopeKey, family: source.admission!.decision!.family, failureCategory: group.category, consentRevision: source.source.consentRevision,
+        scopeKey: source.source.scopeKey, family: effectiveConversationFamily(source)!, failureCategory: group.category, consentRevision: source.source.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId], counterexampleTaskId: group.counterexample.source.taskId,
         cases, modelConfigDigest: sha256(callConfig), qualityContract: qualityContract!,
         ...(proposalClues.length === 0 ? {} : { proposalClues: proposalClues.map(item => item.reference) }),

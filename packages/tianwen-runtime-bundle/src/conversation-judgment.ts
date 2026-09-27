@@ -21,6 +21,8 @@ const nullable = (schema: JsonSchemaNode): JsonSchemaNode => ({ oneOf: [schema, 
 const object = (properties: Record<string, JsonSchemaNode>): ObjectJsonSchema => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false })
 const category = nullable(choices(CONVERSATION_FAILURES))
 const verdict = choices(['met', 'not-met', 'inconclusive'])
+export const CONVERSATION_FAMILY_SCHEMA = object({ family: choices(CONVERSATION_FAMILIES),
+  quote: { type: 'string', description: 'Copy one exact span from the current direct user request that supports the requested transformation; do not quote derived criteria or prior assistant text.' } })
 // Describe the actual result fields to the native capture tool. An open object
 // let the real model emit schema metadata (`type`) instead of the required `kind`.
 // Native validation and the stricter evidence/domain checks both remain active.

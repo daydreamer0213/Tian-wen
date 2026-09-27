@@ -45,7 +45,7 @@ it('reports the existing study-selection gates without starting work or reading 
   const behaviorVersion = guidanceVersion(snapshot)
   const task = (id: string, family = 'summarization', met = false) => ({
     source: { taskId: id, scopeKey, consentRevision: 1, behaviorVersion, requestDigest: sha256(id) },
-    admission: { decision: { family, evaluationMode: 'text' }, qualityContract: conversationQualityContract() },
+    admission: { decision: { kind: 'task', family, evaluationMode: 'text' }, qualityContract: conversationQualityContract() },
     completion: { status: 'completed' }, models: [{ modelConfigDigest: sha256('same-model') }],
     ...(met ? { review: { verdict: 'met', proof: { sessionId: 'proof' } } } : {}),
   })
@@ -74,6 +74,18 @@ it('reports the existing study-selection gates without starting work or reading 
   expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
   tasks = [s1, otherFamily]
   expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
+  const unresolvedS2 = { ...s2, source: { ...s2.source, admissionPolicy: 'tianwen.family-verification.v1' },
+    admission: { ...s2.admission, familyVerification: { resolvedFamily: null } } }
+  tasks = [s1, unresolvedS2]
+  expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
+  const verifiedS2 = { ...s2, source: { ...s2.source, admissionPolicy: 'tianwen.family-verification.v1' },
+    admission: { ...s2.admission, familyVerification: { resolvedFamily: 'summarization' } } }
+  tasks = [s1, verifiedS2, counter]
+  expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
+  const verifiedS1 = { ...s1, source: { ...s1.source, admissionPolicy: 'tianwen.family-verification.v1' },
+    admission: { ...s1.admission, familyVerification: { resolvedFamily: 'summarization' } } }
+  tasks = [verifiedS1, verifiedS2, counter]
+  expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
   tasks = [s1, s2]
   expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
   const feedbackTurn = { ...counter, admission: { ...counter.admission, decision: {
@@ -84,6 +96,11 @@ it('reports the existing study-selection gates without starting work or reading 
   expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
   tasks = [s1, s2, counter]
   expect(await readiness()).toEqual({ state: 'ready-to-schedule' })
+  const unresolvedCounter = { ...counter, source: { ...counter.source, admissionPolicy: 'tianwen.family-verification.v1' },
+    admission: { ...counter.admission, familyVerification: { resolvedFamily: null } } }
+  tasks = [s1, s2, unresolvedCounter]
+  expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
+  tasks = [s1, s2, counter]
   studies = [{ opened: { sourceTaskIds: [s1.source.taskId, s2.source.taskId] } }]
   expect(await readiness()).toEqual({ state: 'already-studied' })
   expect(clues).not.toHaveBeenCalled()
