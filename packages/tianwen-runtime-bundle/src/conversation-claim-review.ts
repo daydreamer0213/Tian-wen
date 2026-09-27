@@ -285,7 +285,19 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
   if (record(input.material) && input.material.evaluationMode === 'local-files' && 'toolEvidence' in input.material) input = { ...input, material: { ...input.material, toolEvidence: [] } }
   const evidence = projectClaimEvidence(input.material)
   const material = { original: structuredClone(input.material), claimEvidence: evidence }
-  const schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
+  let schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
+  if (input.purpose === 'method-study' && record(input.material) && record(input.material.task) && input.material.task.feedbackStandard !== undefined) {
+    const quoteExamples = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : answerQuoteChoices(item.text)))]
+    if (quoteExamples.length > 0 && Buffer.byteLength(JSON.stringify(quoteExamples), 'utf8') <= 16_384) schema = {
+      ...schema,
+      properties: { ...schema.properties, evidenceQuotes: {
+        ...schema.properties?.evidenceQuotes,
+        type: 'array',
+        items: { type: 'string', description: 'Copy an exact substring of one supplied claimEvidence item. Never copy feedbackStandard or originalFeedback as an evidence quote.', examples: quoteExamples },
+        description: 'Quote only the current request or answer evidence items. Feedback standards are requirements, not evidence quotes.',
+      } },
+    }
+  }
   const raw: AuditedCheck[] = []
   for (const focus of ['requirements', 'grounding'] as const) {
     input.signal.throwIfAborted()

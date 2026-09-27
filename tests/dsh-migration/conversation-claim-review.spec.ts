@@ -278,6 +278,11 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(checks.every(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2')).toBe(true)
       const recovered = await recoverConversationJudgmentRequest(harness.ctx, checks[0]!)
       expect(recovered.material).toEqual({ original: material, claimEvidence: evidence })
+      const reviewSchema: any = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
+      const evidenceQuoteExamples: string[] | undefined = reviewSchema?.properties?.evidenceQuotes?.items?.examples
+      expect(evidenceQuoteExamples).toContain('原料已送达。')
+      expect(evidenceQuoteExamples?.some(quote => quote.includes('RAW FEEDBACK ONLY'))).toBe(false)
+      expect(reviewSchema?.properties?.evidenceQuotes?.items?.enum).toBeUndefined()
       expect(recovered.instruction).toContain('Review purpose: method-study')
       expect(recovered.instruction).toContain('originalFeedback takes precedence over a conflicting derived feedback criterion')
       expect(recovered.instruction).toContain('actor, time, scope, commitment and premise')
