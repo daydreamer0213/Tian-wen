@@ -81,6 +81,7 @@ export class TianwenConversationObserverService extends Service {
           const authorized = admitted !== undefined && this.authorized(admitted.consentRevision)
           const guidance = authorized ? admitted.guidance : undefined
           const feedback = authorized && admitted.feedback
+          const feedbackOnlyPreference = authorized && admitted.feedbackOnlyPreference
           const priorGuidance = payload.agent.session.events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-conversation-guidance')
           // Native history stays immutable. Explicitly expire the previous
           // turn's method, including after rollback, disable or family change.
@@ -90,7 +91,7 @@ export class TianwenConversationObserverService extends Service {
           }
           if (decision.messages.some(message => message.source.kind === 'user') && feedback) {
             decision.messages.push(createUserMessage({ source: { kind: 'plugin', plugin: 'tianwen-conversation-feedback-status' }, content: [{ type: 'text', text:
-              `For native turn ${payload.turn} only: Automatic evaluation is enabled under current consent; do not ask again to enable learning or save this feedback as a long-term preference. Follow the current user request, but acknowledging feedback is not proof of persistent memory or an activated future method. ${guidance === undefined ? 'No evaluated method applies to this turn.' : 'Only the evaluated method supplied separately applies to this turn.'} Do not promise unverified global or future behavior, claim an unevidenced study is running, or guarantee improvement.` }] }))
+              `For native turn ${payload.turn} only: Automatic evaluation is enabled under current consent; do not ask again to enable learning or save this feedback as a long-term preference. Follow the current user request, but acknowledging feedback is not proof of persistent memory or an activated future method. ${feedbackOnlyPreference ? 'A future-only preference is feedback, not a request to use that format now. If the direct user says not to revise the earlier answer, acknowledge the preference and do not reproduce or rewrite the completed answer. If the user explicitly requests a current revision, complete it. ' : ''}${guidance === undefined ? 'No evaluated method applies to this turn.' : 'Only the evaluated method supplied separately applies to this turn.'} Do not promise unverified global or future behavior, claim an unevidenced study is running, or guarantee improvement.` }] }))
           }
         } catch (error) { this.warn(error) }
       }
@@ -175,7 +176,7 @@ export class TianwenConversationObserverService extends Service {
       && (revision === undefined || consent.revision === revision)
   }
 
-  private async admit(agent: Agent, turn: number, messages: readonly UserMessage[], stepSignal: AbortSignal): Promise<{ readonly guidance: string | undefined, readonly feedback: boolean, readonly consentRevision: number } | undefined> {
+  private async admit(agent: Agent, turn: number, messages: readonly UserMessage[], stepSignal: AbortSignal): Promise<{ readonly guidance: string | undefined, readonly feedback: boolean, readonly feedbackOnlyPreference: boolean, readonly consentRevision: number } | undefined> {
     const direct = messages.filter(message => message.source.kind === 'user')
     if (direct.length === 0) return
     if (!this.authorized()) {
@@ -264,7 +265,8 @@ export class TianwenConversationObserverService extends Service {
         }
       }
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision, proof: result.proof, unavailableReason: null, qualityContract })
-      return { guidance: decision.kind === 'task' ? guidanceRule(snapshot, decision.family, decision.evaluationMode, decision.fileOutputKind) : undefined, feedback: decision.feedback !== null, consentRevision: consent.revision }
+      return { guidance: decision.kind === 'task' ? guidanceRule(snapshot, decision.family, decision.evaluationMode, decision.fileOutputKind) : undefined,
+        feedback: decision.feedback !== null, feedbackOnlyPreference: decision.kind === 'conversation' && decision.feedback?.kind === 'preference', consentRevision: consent.revision }
     } catch (error) {
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision: null, proof: null, unavailableReason: unavailable(error, signal), qualityContract })
     } finally { this.analyses.delete(controller) }

@@ -219,6 +219,7 @@ it.each(['correction', 'preference'] as const)('keeps %s linked to the earlier a
       expect(messages).toContain('Automatic evaluation is enabled under current consent')
       expect(messages).toContain('do not ask again to enable learning or save this feedback')
       expect(messages).toContain('acknowledging feedback is not proof of persistent memory or an activated future method')
+      if (kind === 'preference') expect(messages).not.toContain('A future-only preference is feedback')
       feedbackMessages = messages
       feedbackPlugins = currentPlugins()
       expect(harness.ctx.tianwenEvolution.listConversationTasks()[1]?.admission?.decision?.feedback?.kind).toBe(kind)
@@ -242,6 +243,32 @@ it.each(['correction', 'preference'] as const)('keeps %s linked to the earlier a
     expect.soft(nextTurnPlugins).toEqual([])
     expect(tasks[2]?.review?.verdict).toBe('met')
     expect(JSON.stringify(harness.adapter.requests[1]?.messages)).not.toContain('Automatic evaluation is enabled under current consent')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('tells the main reply to acknowledge future-only feedback without rewriting the prior answer', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  let status = ''
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    () => structured({ ...admission, kind: 'conversation', objective: 'Record a future writing preference without revising the answer',
+      criteria: ['Do not rewrite the completed answer.'], family: 'other', evaluationMode: 'subjective',
+      relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
+      feedback: { kind: 'preference', quote: '以后同类摘要请分两句写', category: 'user-preference' } }),
+    request => {
+      const message = request.messages.find(item => item.source.kind === 'plugin' && item.source.plugin === 'tianwen-conversation-feedback-status')
+      status = message?.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('') ?? ''
+      return textResponse('了解这项未来写法偏好；刚才那份不重写。')
+    },
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：试点预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct('刚才的事实是对的。以后同类摘要请分两句写。这次不用重写。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[1]?.admission?.decision?.kind).toBe('conversation')
+    expect(status).toContain('do not reproduce or rewrite the completed answer')
+    expect(status).toContain('If the user explicitly requests a current revision, complete it')
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
