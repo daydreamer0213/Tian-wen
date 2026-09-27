@@ -2,7 +2,7 @@
 
 ## 最新 E090：真实反馈凑齐研究资格，研究第八臂无效交付而停止
 
-全新 D: 隔离档在同一工作区内完成松屿 S1、云栈 S2 的准确普通摘要与各自读后持续偏好，再完成南汀独立成功对照：三份原任务均为 `summarization/text` 且原生双审 `met/met`，两条反馈都准确关联原任务并评为 `preference/user-preference`。产品在对照终态后自行选对两个来源和 C 打开 `user-preference` 研究，候选方法形成；七条试验臂入账，S1/S2/C 的 baseline 均双审 `not-met`、candidate 均双审 `met`。第八条 `adjacent/candidate` 只在普通文本写出 JSON 形状答案，没有调用 `structured_output`，宿主以 `invalid-judgment` 停止，未补臂、未裁决、未激活。冻结、八条直接用户消息、46 份原生 Session、原生准入／反馈证明及停机审计通过，同意 `revision:2 / enabled:false`。见 [E090 结果](tianwen-study-eligibility-090-results-20260928.md)。这是一条真实研究入口通过和研究失败关闭证据，**不是完整研究或方法效果通过**。先窄诊断结构化交付失败，不重跑 E090 凑数；main/Daily **NO-GO**。
+全新 D: 隔离档在同一工作区内完成松屿 S1、云栈 S2 的准确普通摘要与各自读后持续偏好，再完成南汀独立成功对照：三份原任务均为 `summarization/text` 且原生双审 `met/met`，两条反馈都准确关联原任务并评为 `preference/user-preference`。产品在对照终态后自行选对两个来源和 C 打开 `user-preference` 研究，候选方法形成；七条试验臂入账，S1/S2/C 的 baseline 均双审 `not-met`、candidate 均双审 `met`。第八条 `adjacent/candidate` 只在普通文本写出 JSON 形状答案，没有调用 `structured_output`，宿主以 `invalid-judgment` 停止，未补臂、未裁决、未激活。冻结、八条直接用户消息、46 份原生 Session、原生准入／反馈证明及停机审计通过，同意 `revision:2 / enabled:false`。见 [E090 结果](tianwen-study-eligibility-090-results-20260928.md)。这是一条真实研究入口通过和研究失败关闭证据，**不是完整研究或方法效果通过**。窄诊断确认模型在明确要求调用工具时仍只输出普通文本；保持失败关闭，不重跑 E090 凑数；main/Daily **NO-GO**。
 
 ## 最新 E089：一条真实模型反馈入口经二次核对通过，研究仍无资格
 
