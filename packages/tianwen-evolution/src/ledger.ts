@@ -5734,6 +5734,9 @@ export class EvolutionLedger {
   listLearningIntakeStatuses(
     sessionId: string,
   ): readonly LearningIntakeStatus[] {
+    if (typeof sessionId !== 'string' || sessionId.trim().length === 0) {
+      throw new TypeError('sessionId is required to list learning intake statuses')
+    }
     return [...(this.#learningIntakeStatuses.get(sessionId)?.values() ?? [])]
       .map(clone)
   }
