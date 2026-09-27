@@ -7,7 +7,8 @@ import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { assertObjectJsonSchema, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
-import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationAdmissionSchema, conversationEvidenceSchema, conversationProposalSchema, recoverConversationAdmissionJudgment, recoverConversationStructuredJudgment, runConversationJudgment, runConversationReview, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationAdmissionSchema, conversationEvidenceSchema, conversationProposalSchema, recoverConversationAdmissionJudgment, recoverConversationStructuredJudgment, recoverConversationTrial, runConversationJudgment, runConversationReview, runConversationTrial, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 
 // Resolve the CLI's public provider entry: exercise the installed DSH composition,
 // not a test reimplementation of spawning, restrictions or structured output.
@@ -15,6 +16,29 @@ const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepse
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
+it('recovers an exact text trial answer without calling a model and rejects drift', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'trial-recovery-')); roots.push(root)
+  const answer = '完整答案：周五核对名单；排期仍待确认。'
+  const material = { request: '说明名单和排期。', context: ['周五核对名单，讲师排期未确认。'] }
+  const config = { provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 512 }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('trial-answer', 'structured_output', { answer })])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('trial-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const trial = await runConversationTrial(harness.ctx, handle.agent, { label: 'Tianwen trial', material, signal: new AbortController().signal, callConfig: config, guidance: '保留未知状态。' })
+    const expected = { outputDigest: sha256(answer), materialDigest: sha256(material), modelConfigDigest: sha256(config), guidance: '保留未知状态。' }
+    const requests = harness.adapter.requests.length
+    expect(await recoverConversationTrial(harness.ctx, trial.proof, expected)).toEqual({ answer, material })
+    expect(harness.adapter.requests).toHaveLength(requests)
+    await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, outputDigest: sha256('changed') })).rejects.toThrow('invalid-judgment')
+    await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, materialDigest: sha256('changed') })).rejects.toThrow('invalid-judgment')
+    await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, modelConfigDigest: sha256('changed') })).rejects.toThrow('invalid-judgment')
+    await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, guidance: '错误指导。' })).rejects.toThrow('invalid-judgment')
+    await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionDigest: sha256('changed') }, expected)).rejects.toThrow('source-unavailable')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 it('rejects a file output kind on a text admission before native capture', () => {
   const schema = conversationAdmissionSchema(['earlier-task'])
   const decision = { kind: 'task', objective: 'Summarize the facts.', criteria: ['Preserve the facts.'],
