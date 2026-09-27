@@ -352,6 +352,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         .toMatchObject({ value: { enabled: false, revision: 3, policyVersion: 'tianwen-auto-analysis.v3',
           disclosure: expect.stringMatching(/future automatic analysis.*does not erase.*already performed/isu) } })
       expect(disabled.value?.disclosure).toMatch(/ordinary conversation.*native feedback.*repeated research-summary failures.*none remains eligible while disabled/isu)
+      expect(disabled.value?.disclosure).toMatch(/previously activated guidance.*rolled back.*next reconciliation.*not promise.*manual rollback/isu)
     } finally {
       await child.dispose()
       await main.dispose()

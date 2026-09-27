@@ -51,7 +51,7 @@ export const LEARNING_CONSENT_NOTICE_TEXT = [
   'Internal analysis is read-only: it cannot edit the current project, directly install a Skill, or expand permission. A proposed change must pass evaluation before activation for future tasks; already-started tasks retain their frozen behavior version.',
   'Observation and review counts do not prove that learning improved future tasks. You can disable automatic analysis later.',
 ].join('\n')
-const LEARNING_CONSENT_DISABLE_TEXT = 'Disabling stops future automatic analysis for this profile: ordinary conversation turns, native feedback, and repeated research-summary failures. None remains eligible while disabled. It does not erase stored records or undo analyses and studies already performed. Explain both boundaries; do not claim earlier material was never used for learning.'
+const LEARNING_CONSENT_DISABLE_TEXT = 'Disabling stops future automatic analysis for this profile: ordinary conversation turns, native feedback, and repeated research-summary failures. None remains eligible while disabled. It does not erase stored records or undo analyses and studies already performed. Previously activated guidance can be rolled back to its parent on the next reconciliation after disabling; do not promise that an active method remains in effect or requires a separate manual rollback. Explain these boundaries; do not claim earlier material was never used for learning.'
 
 type ConsentAction = 'enable' | 'disable' | 'status'
 
