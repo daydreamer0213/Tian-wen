@@ -51,6 +51,7 @@ export const LEARNING_CONSENT_NOTICE_TEXT = [
   'Internal analysis is read-only: it cannot edit the current project, directly install a Skill, or expand permission. A proposed change must pass evaluation before activation for future tasks; already-started tasks retain their frozen behavior version.',
   'Observation and review counts do not prove that learning improved future tasks. You can disable automatic analysis later.',
 ].join('\n')
+const LEARNING_CONSENT_DISABLE_TEXT = 'Disabling stops future automatic analysis for this profile. It does not erase stored records or undo analyses and studies already performed. Explain the forward-looking effect; do not claim earlier material was never used for learning.'
 
 type ConsentAction = 'enable' | 'disable' | 'status'
 
@@ -627,6 +628,7 @@ export class TianwenLearningConsentAgentService extends Service {
         name: 'tianwen_learning_consent',
         description: [
           'Enable, disable, or inspect Tianwen automatic natural conversation, feedback, and task-result analysis for this profile. On first enable, explain the returned disclosure to the user.',
+          LEARNING_CONSENT_DISABLE_TEXT,
           LEARNING_CONSENT_NOTICE_TEXT,
         ].join('\n'),
         parameters: {
@@ -674,7 +676,8 @@ export class TianwenLearningConsentAgentService extends Service {
               .then(() => service.recoverPendingNotice())
               .catch(() => undefined)
           }
-          return disclose ? { ...status, disclosure: LEARNING_CONSENT_NOTICE_TEXT } : status
+          return disclose ? { ...status, disclosure: LEARNING_CONSENT_NOTICE_TEXT }
+            : action === 'disable' ? { ...status, disclosure: LEARNING_CONSENT_DISABLE_TEXT } : status
         },
       }))
     })

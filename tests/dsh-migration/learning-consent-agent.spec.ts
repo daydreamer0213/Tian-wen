@@ -348,7 +348,8 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(notices).toHaveLength(1)
       expect(mounted.adapter.requests).toHaveLength(1)
       expect(await executeConsent(mounted.ctx, main.agent, { action: 'disable' }))
-        .toMatchObject({ value: { enabled: false, revision: 3, policyVersion: 'tianwen-auto-analysis.v3' } })
+        .toMatchObject({ value: { enabled: false, revision: 3, policyVersion: 'tianwen-auto-analysis.v3',
+          disclosure: expect.stringMatching(/future automatic analysis.*does not erase.*already performed/isu) } })
     } finally {
       await child.dispose()
       await main.dispose()
