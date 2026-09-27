@@ -363,6 +363,20 @@ export async function verifyConversationClaimReviewCheck(ctx: Context, check: Co
     ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote))) throw new Error('invalid-judgment')
 }
 
+/** Validate an original-result check against its exact native task review input. */
+export async function verifyConversationOriginalReviewCheck(ctx: Context, check: ConversationAuditedReviewCheck,
+  original: unknown, modelConfigDigest: string): Promise<void> {
+  const recovered = await recoverConversationJudgmentRequest(ctx, check)
+  if (recovered.modelConfigDigests.some(digest => digest !== modelConfigDigest)
+    || !record(recovered.material) || !exactKeys(recovered.material, ['original', 'claimEvidence'])
+    || sha256(recovered.material.original) !== sha256(original)
+    || recovered.instruction !== fileClaimInstruction(original, 'original-result', check.focus)) throw new Error('source-unavailable')
+  const evidence = projectClaimEvidence(original)
+  if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('source-unavailable')
+  validateClaimAudit(check.audit, evidence, check.verdict)
+  if (check.evidenceQuotes.some(quote => !evidence.items.some(item => item.text.includes(quote)))) throw new Error('source-unavailable')
+}
+
 function fileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
   let base = claimReviewInstruction(material, purpose, focus)
   if (!record(material)) return base

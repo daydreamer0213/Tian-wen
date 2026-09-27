@@ -1,8 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { conversationReviewConsensus, guidanceRule, guidanceVersion, sha256, type ConversationTask, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { conversationReviewConsensus, guidanceRule, guidanceVersion, parseConversationAuditedReviewChecks, sha256, type ConversationTask, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
 import { recoverConversationJudgmentRequest, recoverConversationStructuredJudgment, recoverConversationTrial } from './conversation-judgment.js'
-import { verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
-import { recoverConversationTaskAnswer, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
+import { verifyConversationClaimReviewCheck, verifyConversationOriginalReviewCheck } from './conversation-claim-review.js'
+import { conversationMessages, conversationTaskModelDigest, recoverConversationTaskAnswer, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -49,6 +50,28 @@ export async function recoverTextGuidanceArmForReview(ctx: Context, study: Guida
 
 type ReviewedArm = Awaited<ReturnType<typeof recoverTextGuidanceArmForReview>>
 type OriginalAnswer = Awaited<ReturnType<typeof recoverConversationTaskAnswer>>
+async function recoverOriginalTaskReview(ctx: Context, task: ConversationTask, originalMaterial: ConversationTaskMaterial): Promise<ConversationTask['review']> {
+  const review = task.review
+  if (review === undefined || review.proof === null) return undefined
+  const modelConfigDigest = conversationTaskModelDigest(task)
+  const checks = review.reviewChecks
+  const completion = task.completion
+  if (modelConfigDigest === undefined || checks?.length !== 2 || completion === undefined || task.reviewIntent === undefined
+    || task.admission?.decision?.evaluationMode !== 'text'
+    || review.admissionDigest !== sha256(task.admission) || review.resultDigest !== completion.resultDigest
+    || conversationReviewConsensus(checks).verdict !== review.verdict) throw new Error('source-unavailable')
+  const saved = await ctx.sessionPersistence.inspect(SessionId(task.source.sessionId))
+  const span = saved.events.filter(event => event.seq >= task.source.startSeq && event.seq <= completion.endSeq)
+  if (sha256(span) !== completion.resultDigest) throw new Error('source-unavailable')
+  const original = { source: originalMaterial, evaluationMode: 'text',
+    conversation: conversationMessages(span, task.source.materialProjection),
+    toolEvidence: span.filter(event => event.type === 'tool/result') }
+  if (sha256(original) !== task.reviewIntent.materialDigest) throw new Error('source-unavailable')
+  for (const check of parseConversationAuditedReviewChecks(checks)) {
+    await verifyConversationOriginalReviewCheck(ctx, check, original, modelConfigDigest)
+  }
+  return review
+}
 type ReviewCase = {
   readonly id: string
   readonly kind: 'source' | 'counterexample' | 'synthetic'
@@ -110,12 +133,13 @@ export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: 
     const task: ConversationTask = matchingTasks[0]!
     const originalMaterial = await recoverConversationTaskMaterial(ctx, task)
     const originalAnswer = await recoverConversationTaskAnswer(ctx, task)
+    const originalTaskReview = await recoverOriginalTaskReview(ctx, task, originalMaterial)
     const { feedbackStandard, ...taskWithoutStandard } = baseline.task
     if (sha256(taskWithoutStandard) !== sha256(originalMaterial)) throw new Error('source-unavailable')
     if (kind === 'counterexample') {
       if (item.sourceTaskId !== study.opened.counterexampleTaskId || feedbackStandard !== undefined || item.feedbackAssessmentId !== undefined) throw new Error('source-unavailable')
       cases.push({ id: item.id, kind: 'counterexample', materialDigest: item.materialDigest,
-        originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview: task.review, baseline, candidate })
+        originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview, baseline, candidate })
       continue
     }
     const sourceIndex = kind === 'source1' ? 0 : 1
@@ -123,7 +147,7 @@ export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: 
     if (item.feedbackAssessmentId === undefined) {
       if (feedbackStandard !== undefined || task.review?.verdict !== 'not-met') throw new Error('source-unavailable')
       cases.push({ id: item.id, kind: 'source', materialDigest: item.materialDigest,
-        originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview: task.review, baseline, candidate })
+        originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview, baseline, candidate })
       continue
     }
     const feedbackService = ctx.get('tianwenConversationFeedback')
@@ -144,7 +168,7 @@ export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: 
     const rawFeedbackIncludedInStudy = Object.hasOwn(feedbackStandard, 'originalFeedback')
     if (rawFeedbackIncludedInStudy && sha256(feedbackStandard.originalFeedback) !== sha256(feedbackMaterial.feedback)) throw new Error('source-unavailable')
     cases.push({ id: item.id, kind: 'source', materialDigest: item.materialDigest,
-      originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview: task.review, baseline, candidate,
+      originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview, baseline, candidate,
       feedback: { assessmentId: assessment.started.assessmentId, originalFeedback: feedbackMaterial.feedback,
         supplementalCriteria: assessment.result.supplementalCriteria, studyStandard: feedbackStandard, rawFeedbackIncludedInStudy } })
   }

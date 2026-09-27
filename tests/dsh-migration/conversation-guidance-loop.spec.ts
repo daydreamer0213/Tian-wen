@@ -277,6 +277,16 @@ it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', '
       expect(packet.cases.filter(item => item.kind === 'synthetic').length).toBe(2)
       expect(harness.adapter.requests).toHaveLength(requestCount)
       await expect(recoverTextGuidanceStudyReviewPacket(harness.ctx, { ...study, arms: study.arms.slice(0, 9) })).rejects.toThrow('source-unavailable')
+      const originalReviewSessionId = before[0]!.review!.reviewChecks![0]!.proof.sessionId
+      const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+      const changedOriginalReview = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async sessionId => {
+        const saved = await inspect(sessionId)
+        return String(sessionId) === originalReviewSessionId
+          ? { ...saved, meta: { ...saved.meta, origin: 'user' } } : saved
+      })
+      try {
+        await expect(recoverTextGuidanceStudyReviewPacket(harness.ctx, study)).rejects.toThrow('source-unavailable')
+      } finally { changedOriginalReview.mockRestore() }
     }
   } finally { warning.mockRestore(); marker.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
