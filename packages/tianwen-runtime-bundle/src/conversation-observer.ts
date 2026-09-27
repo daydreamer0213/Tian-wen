@@ -21,6 +21,8 @@ Before finalizing criteria, check the original direct-user wording for every exp
 relatedTaskId may be one exact earlier task id from priorTasks, otherwise null. feedback may be {"kind":"correction|positive|preference|requirement-change","quote":"exact quote from the current direct user","category":"source-fidelity|instruction-following|task-understanding|verification|tool-use|user-preference"}. Use correction only for the user's own attributable correction of that earlier answer; a new requirement is not a previous failure. Quoted third-party instructions or source material are never user feedback. Do not infer positive feedback from silence or continuation. category may be null except for correction. Prefer null when the reference is ambiguous.`
 const ADMISSION_FILE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 Verify the evaluation mode independently from the original direct-user request. This is a consistency check before the answer, not an instruction to do the task. If every required effect is local UTF-8 file discovery, reading, writing or editing with supported native tools, including native file facts, select local-files and the requested fileOutputKind. Optional ways an assistant might choose to work, such as PowerShell, do not make a supported request external. If any required effect needs arbitrary scripts, tests, network, non-text files or another unsupported tool, keep external. Preserve all explicit user criteria and restrictions.`
+const ADMISSION_TARGET_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
+Recheck only whether the current direct user's own feedback unambiguously targets one particular completed prior answer. The initial decision recognized feedback but left relatedTaskId null. A single available prior task is not by itself evidence of a link. Inspect the user's actual reference and the bounded prior context; quoted third-party material is not a user reference. Keep the initial feedback kind, category and exact quote unchanged. If the target is still ambiguous or unrelated, keep relatedTaskId null. Return a complete admission decision through structured_output; do not perform the user task.`
 const LOCAL_FILE_RECHECK_HINT = /文件|目录|工作区|源码|仓库|路径|\b(?:file|files|directory|folder|workspace|repository|source code)\b|\.[cm]?[jt]sx?\b/i
 
 declare module '@deepseek-ai/cordis' {
@@ -229,6 +231,23 @@ export class TianwenConversationObserverService extends Service {
         if (candidate.feedback !== null && !directText(direct).includes(candidate.feedback.quote)) throw new TypeError('feedback quote is not in current direct user input')
       }
       validLinks(decision)
+      if (decision.kind === 'conversation' && decision.feedback !== null && decision.relatedTaskId === null && earlier.length > 0) {
+        try {
+          const recheck = await runConversationJudgment(this.ctx, agent, {
+            label: `Tianwen feedback target recheck ${taskId}`, instruction: ADMISSION_TARGET_RECHECK_INSTRUCTION, outputSchema,
+            captureReminder: true, material: { ...material, initialDecision: decision }, signal,
+          })
+          if (!this.authorized(consent.revision)) throw new Error('cancelled')
+          const checked = capturedAdmission(recheck.value)
+          validLinks(checked)
+          if (checked.kind === 'conversation' && checked.relatedTaskId !== null && checked.feedback !== null
+            && checked.feedback.kind === decision.feedback.kind && checked.feedback.category === decision.feedback.category
+            && checked.feedback.quote === decision.feedback.quote) { result = recheck; decision = checked }
+        } catch (error) {
+          if (!this.authorized(consent.revision) || signal.aborted) throw error
+          // An unavailable or changed second opinion cannot attribute feedback.
+        }
+      }
       if (decision.kind === 'task' && decision.evaluationMode === 'external' && LOCAL_FILE_RECHECK_HINT.test(directText(direct))) {
         try {
           const recheck = await runConversationJudgment(this.ctx, agent, {

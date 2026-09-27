@@ -245,6 +245,58 @@ it.each(['correction', 'preference'] as const)('keeps %s linked to the earlier a
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('rechecks an explicitly targeted preference left unlinked by the first admission and stores the second native proof', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const quote = '你这次把结论放在最后；以后同类摘要先给结论。'
+  const feedback = { kind: 'preference', quote, category: 'user-preference' }
+  const unlinked = { ...admission, kind: 'conversation', objective: 'Record a future summary preference', criteria: [],
+    family: 'other', relatedTaskId: null, feedback }
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    structured(unlinked),
+    () => structured({ ...unlinked, relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId }),
+    textResponse('已了解这项偏好。'),
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct(`针对刚才这份摘要，${quote}`))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(feedbackTask?.admission?.decision?.relatedTaskId).toBe(target?.source.taskId)
+    expect(feedbackTask?.admission?.decision?.feedback).toEqual(feedback)
+    const saved = await recoverConversationAdmissionJudgment(harness.ctx, feedbackTask!.admission!.proof!, feedbackTask!.admission!.decision)
+    expect(JSON.stringify(saved.material)).toContain('针对刚才这份摘要')
+    expect(harness.adapter.requests).toHaveLength(7)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['ambiguous', 'changed-feedback', 'unavailable'] as const)('keeps an unlinked preference unbound when the optional recheck is %s', async outcome => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const userText = outcome === 'ambiguous' ? '以后写摘要尽量简短。' : '针对刚才这份摘要，以后先给结论。'
+  const feedback = { kind: 'preference', quote: userText, category: 'user-preference' }
+  const unlinked = { ...admission, kind: 'conversation', objective: 'Record a future preference', criteria: [],
+    family: 'other', relatedTaskId: null, feedback }
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    structured(unlinked),
+    outcome === 'unavailable' ? new Error('recheck unavailable') : () => structured({ ...unlinked,
+      relatedTaskId: outcome === 'ambiguous' ? null : harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
+      feedback: outcome === 'changed-feedback' ? { ...feedback, quote: '以后先给结论。' } : feedback }),
+    textResponse('已了解。'),
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct(userText))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const feedbackTask = harness.ctx.tianwenEvolution.listConversationTasks()[1]!
+    expect(feedbackTask.admission?.decision?.relatedTaskId).toBeNull()
+    expect(feedbackTask.admission?.decision?.feedback).toEqual(feedback)
+    expect(harness.adapter.requests).toHaveLength(7)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('continues the actual user task when admission is unavailable and never backfills criteria on resume', async () => {
   const harness = await mount([new Error('provider unavailable'), textResponse('正常完成用户任务')])
   let resumed: Awaited<ReturnType<typeof harness.ctx.agents.resume>> | undefined
