@@ -1414,6 +1414,8 @@ describe('Tianwen main-chat learning consent tool', () => {
         type: 'text',
         text: expect.stringContaining(LEARNING_CONSENT_NOTICE_TEXT),
       }])
+      const noticeText = noticeEvent.data.content.find(block => block.type === 'text')?.text
+      expect(noticeText).toContain('Match the language of the most recent genuine user request')
       expect(LEARNING_CONSENT_NOTICE_TEXT).toContain('ordinary conversation turns')
       expect(LEARNING_CONSENT_NOTICE_TEXT).toContain('frozen behavior and Skill text')
       expect(LEARNING_CONSENT_NOTICE_TEXT).not.toContain('PRIVATE CORRECTION')
