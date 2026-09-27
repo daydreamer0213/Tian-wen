@@ -288,6 +288,8 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(recovered.instruction).toContain('actor, time, scope, commitment and premise')
       expect(recovered.instruction).toContain('Reconstruct substantive claims that span adjacent answer units')
       expect(recovered.instruction).toContain('A property checked for a filtered subset is not established for every original call')
+      expect(recovered.instruction).toContain('A pending or unverified result is not an explicitly judged failure')
+      expect(recovered.instruction).toContain('Preserve the complete optional advice speech act')
       expect(recovered.instruction).toContain('Independently reconstruct all original requirements')
       expect(recovered.modelConfigDigests).toEqual([sha256({ provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 })])
       if (mode === 'permitted-inference') expect(checks.map(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2' ? check.audit.units['answer-1']!.firstClaim : undefined)).toEqual([
@@ -324,6 +326,27 @@ function changeFirst(audit: any, change: (first: any) => unknown) {
   const unit = audit.units[answerId]
   return { ...audit, units: { ...audit.units, [answerId]: { ...unit, firstClaim: change(unit.firstClaim) } } }
 }
+
+it('keeps the exact historical v7 review instruction when recovering an old-quality task', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-v7-instruction-')); roots.push(root)
+  const current = conversationQualityContract()
+  const old = { ...current, schemaVersion: 'tianwen.conversation-quality.v7' as const,
+    criterion: current.criterion.split(' Preserve whether')[0]! }
+  const material = { source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '原料已送达。请复述。' }] })], qualityContract: old },
+    conversation: [{ id: 'answer', role: 'assistant', content: [{ type: 'text', text: '原料已送达。' }] }], toolEvidence: [] }
+  const harness = await mountPersistentHarness(root, [new Error('capture historical request')])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-v7-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationClaimReview(harness.ctx, handle.agent, { label: 'Historical v7', material,
+      evidence: ['原料已送达。'], signal: new AbortController().signal, callConfig: { provider: 'tianwen-probe', model: 'scripted' } })).rejects.toThrow('model-unavailable')
+    const request = JSON.stringify(harness.adapter.requests[0]?.messages)
+    expect(request).toContain('Reconstruct substantive claims that span adjacent answer units')
+    expect(request).not.toContain('A pending or unverified result is not an explicitly judged failure')
+    expect(request).not.toContain('Preserve the complete optional advice speech act')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it('offers bounded exact quote choices from each answer unit to the native reviewer', async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')

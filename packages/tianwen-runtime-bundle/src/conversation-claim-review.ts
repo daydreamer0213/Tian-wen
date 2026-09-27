@@ -254,6 +254,7 @@ const V6_PURPOSE = {
 } as const
 const V6_COMMON = `${COMMON} For current qualityContract, check the actor, time, scope, commitment and premise actually asserted. A labeled inference or courtesy does not establish an unverified current state, past event, external effect, decision or commitment; optional advice, grounded fallible inference, fiction and task-compatible courtesy remain permitted. For claims about your own tool use, file writes or absence of writes, cite a frozen user or tool source that directly establishes the claim. If no supplied source establishes it, mark the source-fact unsupported or uncertain, even when other claims already justify not-met. Never mark a source-fact supported with an empty sourceIds list.`
 const V7_COMMON = `${V6_COMMON} Reconstruct substantive claims that span adjacent answer units from the complete supplied answer before judging their meaning; keep each audit quote bound to the exact text in its own unit. For statements about all, none or successful tool calls, inspect the cited code and frozen call evidence for filtering and excluded cases. A property checked for a filtered subset is not established for every original call.`
+const V8_COMMON = `${V7_COMMON} A pending or unverified result is not an explicitly judged failure; absence of a pass is not evidence of failure. Keep a not-yet-confirmed-passed state distinct from an actual failed verdict. An explicit source failure may support an answer's failure statement. Preserve the complete optional advice speech act, including its speaker and conditional scope; do not extract a phrase inside advice as an independent fact merely by dropping recommendation wording. If the same sentence separately asserts an external state, result or necessary condition, assess that independent assertion against its source. Do not treat these distinctions as a ban on normal advice.`
 
 function claimReviewInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
   if (!record(material)) throw new Error('invalid-judgment')
@@ -267,11 +268,13 @@ function claimReviewInstruction(material: unknown, purpose: 'original-result' | 
   let contract
   try { contract = parseConversationQualityContract(quality) }
   catch { throw new Error('invalid-judgment') }
-  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7' && contract.schemaVersion !== 'tianwen.conversation-quality.v8') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
   if (purpose === 'method-study' && source.feedbackStandard !== undefined) {
     if (!record(source.feedbackStandard) || !Object.hasOwn(source.feedbackStandard, 'originalFeedback') || source.feedbackStandard.originalFeedback === undefined) throw new Error('invalid-judgment')
   }
-  return `${V6_PURPOSE[purpose]}\n\n${contract.schemaVersion === 'tianwen.conversation-quality.v7' ? V7_COMMON : V6_COMMON}\n\n${FOCUS[focus]}`
+  const common = contract.schemaVersion === 'tianwen.conversation-quality.v8' ? V8_COMMON
+    : contract.schemaVersion === 'tianwen.conversation-quality.v7' ? V7_COMMON : V6_COMMON
+  return `${V6_PURPOSE[purpose]}\n\n${common}\n\n${FOCUS[focus]}`
 }
 
 type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema'> & {
