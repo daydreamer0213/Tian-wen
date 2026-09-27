@@ -292,6 +292,22 @@ function activation(value: ReturnType<typeof evaluated>) {
   return { kind: 'guidance-activated' as const, studyId: value.opened.studyId, expectedParentVersion: value.opened.parentVersion, decisionDigest: sha256(value.decision) }
 }
 
+it('quarantines new activation writes while retaining accepted decisions and historical active replay', () => {
+  const { root, ledger, tasks } = seeded()
+  const value = evaluated(ledger, opening(tasks, 'quarantine'))
+  expect(value.decision.verdict).toBe('accepted')
+  const held = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(held.listConversationGuidanceStudies()[0]?.decision).toEqual(value.decision)
+  expect(held.getConversationGuidance(scope)).toEqual(value.opened.parentSnapshot)
+  expect(() => held.recordConversationGuidance(activation(value))).toThrow(/quarantin/i)
+  expect(new EvolutionLedger(root, { guidanceActivationQuarantine: true }).listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
+
+  ledger.recordConversationGuidance(activation(value))
+  const replay = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(replay.getConversationGuidance(scope)).toEqual(value.candidate.candidateSnapshot)
+  expect(replay.recordConversationGuidance(activation(value))).toEqual({ duplicate: true })
+})
+
 function nativeFeedback(ledger: EvolutionLedger, target: ConversationTask) {
   const messageId = target.completion!.assistantMessageIds[0]!
   ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'feedback-v1',

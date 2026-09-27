@@ -182,6 +182,7 @@ const STATES = new WeakMap<Context, EvolutionState>()
 export interface TianwenEvolutionConfig {
   readonly root: string
   readonly clock?: () => string
+  readonly guidanceActivationQuarantine?: boolean
 }
 
 export class EvolutionActivationError extends Error {
@@ -237,6 +238,7 @@ export class TianwenEvolutionService extends Service {
     super(ctx, 'tianwenEvolution')
     const ledger = new EvolutionLedger(config.root, {
       ...(config.clock === undefined ? {} : { clock: config.clock }),
+      guidanceActivationQuarantine: config.guidanceActivationQuarantine === true,
     })
     STATES.set(ctx.root, {
       ledger,

@@ -502,6 +502,7 @@ export interface TransitionAuthority {
 
 export interface EvolutionLedgerOptions {
   readonly clock?: () => string
+  readonly guidanceActivationQuarantine?: boolean
 }
 
 type EvolutionLedgerMode = 'mutation' | 'inspection'
@@ -2752,6 +2753,7 @@ export class EvolutionLedger {
   readonly #ledgerPath: string
   readonly #pointerPath: string
   readonly #clock: () => string
+  readonly #guidanceActivationQuarantine: boolean
   readonly #events: LedgerEvent[] = []
   readonly #runBindings = new Map<TianwenRunId, TianwenRunBinding>()
   readonly #conversationLearning = new ConversationLearningState()
@@ -2929,6 +2931,7 @@ export class EvolutionLedger {
     this.#ledgerPath = join(root, 'ledger.jsonl')
     this.#pointerPath = join(root, 'champion.json')
     this.#clock = options.clock ?? (() => new Date().toISOString())
+    this.#guidanceActivationQuarantine = options.guidanceActivationQuarantine === true
     if (mode === 'mutation') {
       mkdirSync(this.#artifactsRoot, { recursive: true })
     }
@@ -3036,6 +3039,9 @@ export class EvolutionLedger {
       if (sha256(previous) !== sha256(record)) throw new LedgerIntegrityError('conversation guidance changed after freeze')
       if (record.kind === 'study-decided') this.#ensureConversationGuidanceEvaluation(record)
       return { duplicate: true }
+    }
+    if (record.kind === 'guidance-activated' && this.#guidanceActivationQuarantine) {
+      throw new LedgerIntegrityError('conversation guidance activation is quarantined')
     }
     // This gate is intentionally mutation-only: replay must retain the exact
     // original meaning of pre-contract studies, decisions and activations.
