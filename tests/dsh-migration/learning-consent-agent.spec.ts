@@ -347,9 +347,11 @@ describe('Tianwen main-chat learning consent tool', () => {
         && String(event.data.id) === 'tianwen-learning-consent-notice:tianwen-auto-analysis.v3')
       expect(notices).toHaveLength(1)
       expect(mounted.adapter.requests).toHaveLength(1)
-      expect(await executeConsent(mounted.ctx, main.agent, { action: 'disable' }))
+      const disabled = await executeConsent(mounted.ctx, main.agent, { action: 'disable' })
+      expect(disabled)
         .toMatchObject({ value: { enabled: false, revision: 3, policyVersion: 'tianwen-auto-analysis.v3',
           disclosure: expect.stringMatching(/future automatic analysis.*does not erase.*already performed/isu) } })
+      expect(disabled.value?.disclosure).toMatch(/ordinary conversation.*native feedback.*repeated research-summary failures.*none remains eligible while disabled/isu)
     } finally {
       await child.dispose()
       await main.dispose()
