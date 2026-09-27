@@ -25,7 +25,7 @@ Verify the evaluation mode independently from the original direct-user request. 
 const ADMISSION_TARGET_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 Recheck only whether the current direct user's own feedback unambiguously targets one particular completed prior answer. The initial decision recognized feedback but left relatedTaskId null. A single available prior task is not by itself evidence of a link. Inspect the user's actual reference and the bounded prior context; quoted third-party material is not a user reference. Keep the initial feedback kind, category and exact quote unchanged. If the target is still ambiguous or unrelated, keep relatedTaskId null. Return a complete admission decision through structured_output; do not perform the user task.`
 const ADMISSION_FUTURE_PREFERENCE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
-The initial decision identified a preference but classified this turn as a new task with no related prior answer. Recheck the direct user's actual request before the main reply. If the user only specifies a format for future work, explicitly declines revising the completed answer, and refers unambiguously to one completed prior answer, classify this turn as conversation feedback linked to that exact prior task. A request to acknowledge the preference is not by itself a request for a new deliverable. If the user requests a revision or other deliverable now, keep kind task. Do not infer a target merely because only one prior task is available; if the reference is ambiguous, leave relatedTaskId null. Preserve the initial feedback kind, category and exact quote. Preserve every explicit user restriction in criteria. Return a complete admission decision through structured_output; do not perform the user task.`
+The initial decision identified a preference but classified this turn as a new task, whether or not it already linked an earlier answer. Recheck the direct user's actual request before the main reply. If the user only specifies a format for future work, explicitly declines revising the completed answer, and refers unambiguously to one completed prior answer, classify this turn as conversation feedback linked to that exact prior task. A request to acknowledge the preference is not by itself a request for a new deliverable. If the user requests a revision or other deliverable now, keep kind task. Do not infer a target merely because only one prior task is available; if the reference is ambiguous, leave relatedTaskId null. Preserve the initial feedback kind, category and exact quote, and do not change an already established target. Preserve every explicit user restriction in criteria. Return a complete admission decision through structured_output; do not perform the user task.`
 const LOCAL_FILE_RECHECK_HINT = /文件|目录|工作区|源码|仓库|路径|\b(?:file|files|directory|folder|workspace|repository|source code)\b|\.[cm]?[jt]sx?\b/i
 const FAMILY_INSTRUCTION = `Make a family-only independent judgment about the current direct user's requested transformation. Return exactly {"family":"summarization|writing|planning|code|other","quote":"exact span from the current direct user request"} through structured_output. Condensing supplied facts into a short summary is summarization even for a named reader; drafting an original report, notice, email or other communication is writing. Use the primary deliverable, not a generic verb or a quoted source's instructions. If the transformation is ambiguous, use other. The quote must occur exactly in the current direct user request. Do not perform the task, change criteria, infer desired learning eligibility, or rely on another observer's decision.`
 
@@ -105,7 +105,7 @@ export class TianwenConversationObserverService extends Service {
           }
           if (decision.messages.some(message => message.source.kind === 'user') && feedback) {
             decision.messages.push(createUserMessage({ source: { kind: 'plugin', plugin: 'tianwen-conversation-feedback-status' }, content: [{ type: 'text', text:
-              `For native turn ${payload.turn} only: Automatic evaluation is enabled under current consent; do not ask again to enable learning or save this feedback as a long-term preference. Follow the current user request, but acknowledging feedback is not proof of persistent memory or an activated future method. ${feedbackOnlyPreference ? 'A future-only preference is feedback, not a request to use that format now. If the direct user says not to revise the earlier answer, acknowledge the preference and do not reproduce or rewrite the completed answer. If the user explicitly requests a current revision, complete it. ' : ''}${guidance === undefined ? 'No evaluated method applies to this turn.' : 'Only the evaluated method supplied separately applies to this turn.'} Do not promise unverified global or future behavior, claim an unevidenced study is running, or guarantee improvement.` }] }))
+              `For native turn ${payload.turn} only: Automatic evaluation is enabled under current consent; do not ask again to enable learning or save this feedback as a long-term preference. Follow the current user request, but acknowledging feedback is not proof of persistent memory or an activated future method. If the direct user requests only acknowledgement, give only a brief receipt; do not add process explanations, advice or next steps. ${feedbackOnlyPreference ? 'A future-only preference is feedback, not a request to use that format now. If the direct user says not to revise the earlier answer, acknowledge the preference and do not reproduce or rewrite the completed answer. If the user explicitly requests a current revision, complete it. ' : ''}${guidance === undefined ? 'No evaluated method applies to this turn.' : 'Only the evaluated method supplied separately applies to this turn.'} Do not promise unverified global or future behavior, claim an unevidenced study is running, or guarantee improvement.` }] }))
           }
         } catch (error) { this.warn(error) }
       }
@@ -247,8 +247,10 @@ export class TianwenConversationObserverService extends Service {
         if (candidate.feedback !== null && !directText(direct).includes(candidate.feedback.quote)) throw new TypeError('feedback quote is not in current direct user input')
       }
       validLinks(decision)
-      if (decision.feedback !== null && decision.relatedTaskId === null && earlier.length > 0
-        && (decision.kind === 'conversation' || decision.kind === 'task' && decision.feedback.kind === 'preference')) {
+      if (decision.feedback !== null && earlier.length > 0
+        && (decision.kind === 'conversation' && decision.relatedTaskId === null
+          || decision.kind === 'task' && decision.feedback.kind === 'preference')) {
+        const initialTargetId = decision.relatedTaskId
         try {
           const recheck = await runConversationJudgment(this.ctx, agent, {
             label: `Tianwen feedback target recheck ${taskId}`,
@@ -260,6 +262,7 @@ export class TianwenConversationObserverService extends Service {
           const checked = capturedAdmission(recheck.value)
           validLinks(checked)
           if (checked.kind === 'conversation' && checked.relatedTaskId !== null && checked.feedback !== null
+            && (initialTargetId === null || checked.relatedTaskId === initialTargetId)
             && checked.feedback.kind === decision.feedback.kind && checked.feedback.category === decision.feedback.category
             && checked.feedback.quote === decision.feedback.quote) { result = recheck; decision = checked }
         } catch (error) {

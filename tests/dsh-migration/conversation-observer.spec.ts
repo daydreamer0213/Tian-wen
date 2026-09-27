@@ -270,10 +270,12 @@ it.each(['correction', 'preference'] as const)('keeps %s linked to the earlier a
     const boundary = events.findLast(event => event.type === 'turn/start')!.seq
     return events.flatMap(event => event.seq >= boundary && event.type === 'user/message' && event.data.source.kind === 'plugin' ? [event.data.source.plugin] : [])
   }
+  const linkedDecision = () => ({ ...admission, relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
+    feedback: { kind, quote, category: kind === 'preference' ? 'user-preference' : 'source-fidelity' } })
   harness = await mount([
     structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
-    () => structured({ ...admission, relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId,
-      feedback: { kind, quote, category: kind === 'preference' ? 'user-preference' : 'source-fidelity' } }),
+    () => structured(linkedDecision()),
+    ...(kind === 'preference' ? [() => structured(linkedDecision())] : []),
     request => {
       const messages = JSON.stringify(request.messages)
       expect(messages).toContain('Automatic evaluation is enabled under current consent')
@@ -328,6 +330,7 @@ it('tells the main reply to acknowledge future-only feedback without rewriting t
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     expect(harness.ctx.tianwenEvolution.listConversationTasks()[1]?.admission?.decision?.kind).toBe('conversation')
     expect(status).toContain('do not reproduce or rewrite the completed answer')
+    expect(status).toContain('If the direct user requests only acknowledgement, give only a brief receipt')
     expect(status).toContain('If the user explicitly requests a current revision, complete it')
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
@@ -378,6 +381,34 @@ it('rechecks an initially misclassified future-only preference before replying a
     harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     harness.handle.agent.followup(direct(`刚才这份事实正确。${quote}。从下一份开始采用；这一份不用改，也不要再给我一版。`))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(feedbackTask?.admission?.decision).toMatchObject({ kind: 'conversation', relatedTaskId: target?.source.taskId, feedback })
+    expect(feedbackTask?.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[5]?.sessionId))
+    expect(harness.adapter.requests).toHaveLength(7)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('rechecks a future-only preference already linked to the right answer but misclassified as a task', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const quote = '从下一份同类摘要开始，请固定写成两句'
+  const feedback = { kind: 'preference', quote, category: 'user-preference' }
+  const linked = () => ({ ...admission, kind: 'task', objective: 'Acknowledge a future preference',
+    criteria: ['Only confirm receipt; do not rewrite the earlier answer'], family: 'other',
+    relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId, feedback })
+  harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    () => structured(linked()),
+    () => structured({ ...linked(), kind: 'conversation', objective: 'Record the preference for future summaries' }),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('do not reproduce or rewrite the completed answer')
+      return textResponse('收到；从下一份同类摘要开始使用，刚才这份保持原样。')
+    },
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.handle.agent.followup(direct(`第一份摘要内容准确。${quote}。不要修改或重发刚才那份，本次只确认收到。`))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
     expect(feedbackTask?.admission?.decision).toMatchObject({ kind: 'conversation', relatedTaskId: target?.source.taskId, feedback })

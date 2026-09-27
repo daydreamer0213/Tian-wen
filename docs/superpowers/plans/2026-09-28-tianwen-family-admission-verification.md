@@ -45,7 +45,9 @@
 
 **Files:** new D:-resident freeze, protocol, profile and terminal audit; `docs/operations/tianwen-current-project-handoff.md` and a new result note.
 
-- [ ] Freeze new fictional summary and genuine writing-control inputs, exact commit/build/package/model, expected native proofs and first-anomaly stops before model calls.
-- [ ] Run one isolated natural flow in order; only write/send a read-after-answer feedback if the frozen source gate passes.
-- [ ] Close consent, stop host, audit original Session/proofs/hashes and report observed latency and any failure honestly.
+- [x] Freeze new fictional summary and genuine writing-control inputs, exact commit/build/package/model, expected native proofs and first-anomaly stops before model calls.
+- [x] Run one isolated natural flow in order; only write/send a read-after-answer feedback after both frozen ordinary-task gates passed. The feedback turn failed its own gate.
+- [x] Close consent, stop host, audit original Session/proofs/hashes and report the failure without relabeling or rerunning E087.
 - [ ] Commit and push source, tests and result note; preserve main/Daily NO-GO until separate research, semantic safety, activation and future-effect gates pass.
+
+Post-trial repair: E087's feedback was attributed correctly but initially labeled `task` despite a valid existing target. A separate red/green test now covers this case; the optional recheck applies to all task-classified preferences and accepts conversion only when an existing target stays unchanged. The reply status reminder also defers to a direct “only acknowledge” instruction. Engineering verification passed, but this repair needs a new prospective run before any real-model success claim.
