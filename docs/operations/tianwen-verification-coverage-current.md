@@ -1,5 +1,9 @@
 # 天问验证总表：已有证明、剩余缺口与补测必要性
 
+## 2026-09-27 事实与建议拆分：正常建议被误列为事实，候选停止
+
+新六题在调用前冻结、各取首次原生结果：无来源必要条件与发布就绪判断被指出，有来源条件获支持，混写事实和建议可分开；但两条明示“我建议／在我看来”的正常建议又被重复抽成无来源事实。45 项冻结文件或源码输入无漂移，13 份原生会话与结果绑定成立；预设六题门槛未过。当前独立诊断不接入产品，不回判历史样本。见[详细结果](tianwen-claim-mode-boundary-diagnostic-20260927.md)。E070 的两条普通产品主对话只证明首次答案进入独立逐句诊断，亦非发布安全门；见[E070 结果](tianwen-natural-answer-semantic-diagnostic-20260927.md)。main/Daily **NO-GO**。
+
 ## 2026-09-27 E061：同版本双任务范围对照，目标语义仍未验收
 
 从提交 `884fbeb` 的同一产品包和两份相同冻结源码启动开放式、显式限定范围的两个真实任务。两组均完成有效独立 v7 双审。开放组 `glob, glob, read, read`，最终因每个要点未都附文件名和函数名而 `not-met / instruction-following`；两审把“只认 read/write/edit/facts，缺路径即全弃”按筛选后集合解读，措辞不足以确定复现 E059 的过宽量词。限定组 `glob, glob, read, read, pwsh-denied`，两审支持明确的筛选范围，却抓到 `recoverFileExecution` 文件归属错误，均判 `not-met / source-fidelity`。冻结输入与安装包一致，原生会话可解码，同意关闭、host 停止。结论只覆盖这些事实，**不证明** v7 已修复 E059 式漏判或学习改善。见 [E061 结果](tianwen-real-task-061-results-20260927.md)。main/Daily **NO-GO**。
