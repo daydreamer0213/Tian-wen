@@ -10,6 +10,8 @@
 - 本地材料：`D:/DevData/tianwen-guidance-review-r9-diagnostic-20260927-final/packet.json` 和同目录 `manifest.json`。材料 SHA-256：`a665a2c206f46b7ab256151e86344f1669d8b72657ed39787bcd73589f62592d`；290,955 字节。清单列出账本目录的 3 份文件（含两份方法快照）和 66 份原生 Session 的路径、字节数与 SHA-256；读取前后清单相同，材料文件的重算哈希与清单一致。
 - 生成器：`scripts/export-guidance-review-packet.mjs` 仅接受明确的研究 ID、账本目录、Session 目录和 `D:/DevData` 下新输出目录。研究不存在或输出目录位于证据目录内时拒绝，且不创建输出。它不含批准或激活接口。
 
+只读阅读版现可由 `node scripts/render-guidance-review-packet.mjs --packet-dir D:/DevData/tianwen-guidance-review-r9-diagnostic-20260927-final` 从已导出的包生成。R9 的 `review.md` SHA-256 为 `990be5e4858b9b5d1130e80d4b2238f0045db9c5e89a2e25c42ee5559992ae22`；它展开五个案例、十条回答、原任务与两份评审、原反馈与派生标准，标明 `diagnostic-historical`，并隐藏上下文中的模型内部推理。阅读版先核对 `manifest.json` 的包哈希与研究身份；原 `packet.json` 仍是完整证据，哈希未变。输出文件已存在时不会覆盖。阅读版不下语义结论、不签署、不放行，审查者仍须结合[工作单](tianwen-guidance-independent-review-worksheet-20260927.md)逐项填写。
+
 ## 历史负例在材料中可直接看到
 
 | 案例 | 候选答案原文片段 | 独立语义问题 |
