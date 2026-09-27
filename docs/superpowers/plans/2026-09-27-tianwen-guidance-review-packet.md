@@ -8,7 +8,7 @@
 
 **技术：** TypeScript、现有 EvolutionLedger / DSH SessionPersistence、Vitest、SHA-256。
 
-**当前进度（2026-09-27）：** 任务 1 的静态映射与 R9 快照可见性核对完成；任务 2 的纯文本只读答案入口及摘要漂移测试已完成，五组相关回归 184/184、八包类型检查通过。新增单臂审查投影在一项脚本化研究中只读核对十臂的执行答案与双审核输入，变更答案摘要会拒绝。重复成功捕获的单独用例、原任务／反馈总包及本地导出仍待完成。此进度不构成放行。
+**当前进度（2026-09-27）：** 任务 1–3 的纯文本只读材料主路径已完成：原任务／反馈／五案例十臂总包、双审输入、提案证明与 `D:/DevData` 本地导出。R9 原始证据只读诊断包已生成，直接呈现两条错误和反馈主体偏移；见[结果](../../operations/tianwen-guidance-review-packet-r9-diagnostic-20260927.md)。相关四组回归 151/151、八包类型检查通过；缺 Session、重复成功捕获与摘要漂移均有失败关闭测试。新的真实 `accepted` 研究首次前瞻审查仍待完成；本计划从未包含放行/激活。本进度不构成发布许可。
 
 ## 全局约束
 
@@ -29,7 +29,7 @@
 **文件：** `packages/tianwen-runtime-bundle/src/conversation-judgment.ts`、相应恢复测试；随后新建 `packages/tianwen-runtime-bundle/src/guidance-review-packet.ts` 和 `tests/dsh-migration/guidance-review-packet.spec.ts`。
 
 1. 先写纯文本试验恢复失败测试：唯一成功原生捕获可提取完整答案；缺 Session、重复捕获、答案／材料／模型配置摘要漂移都拒绝。再实现只读入口，并核对两份审核者看到的答案与执行答案相同。
-2. 再写材料投影失败测试：完整脚本化研究应产出五个案例的 baseline/candidate 对、原反馈与补充标准并列、两个审核原结论和精确证明摘要；研究无候选、非 `accepted`、缺任一 Session／反馈／答案、摘要不符时拒绝生成。
+2. 再写材料投影失败测试：完整脚本化研究应产出五个案例的 baseline/candidate 对、由反馈支持的来源把原话与补充标准并列、由原任务 `not-met` 支持的来源展示原审核，并列出每臂双审原结论和精确证明摘要；研究无候选、非 `accepted`、缺任一必需 Session／反馈／答案、摘要不符时拒绝生成。
 3. 实现最小投影。材料标注 `reviewStatus: unreviewed`，旧已激活样本只能标注 `diagnostic-historical`。复测确认不增加原生模型请求、不更改账本和 Session 字节；材料内不得预填 `clear`。
 
 ## 任务 3：本地导出及 R9 负例复核

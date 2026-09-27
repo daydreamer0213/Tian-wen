@@ -12,7 +12,7 @@ import { apply as applyBundle } from '../../packages/tianwen-runtime-bundle/src/
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
-import { recoverTextGuidanceArmForReview } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
+import { recoverTextGuidanceArmForReview, recoverTextGuidanceStudyReviewPacket } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
@@ -266,6 +266,17 @@ it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', '
       expect(recovered.every(item => item.reviewStatus === 'diagnostic-historical')).toBe(true)
       expect(harness.adapter.requests).toHaveLength(requestCount)
       await expect(recoverTextGuidanceArmForReview(harness.ctx, study, { ...study.arms[0]!, outputDigest: sha256('changed') })).rejects.toThrow('source-unavailable')
+      const packet = await recoverTextGuidanceStudyReviewPacket(harness.ctx, study)
+      expect(packet.reviewStatus).toBe('diagnostic-historical')
+      expect(packet.cases).toHaveLength(5)
+      expect(packet.cases.every(item => item.baseline.answer && item.candidate.answer)).toBe(true)
+      expect(packet.cases.filter(item => item.kind === 'source').map(item => item.feedback)).toEqual([undefined, undefined])
+      expect(packet.cases.filter(item => item.kind === 'source').every(item => item.originalTaskReview?.verdict === 'not-met')).toBe(true)
+      expect(JSON.stringify(packet.proposalMaterial)).not.toContain(note)
+      expect(packet.cases.find(item => item.kind === 'counterexample')?.originalAnswer?.length).toBeGreaterThan(0)
+      expect(packet.cases.filter(item => item.kind === 'synthetic').length).toBe(2)
+      expect(harness.adapter.requests).toHaveLength(requestCount)
+      await expect(recoverTextGuidanceStudyReviewPacket(harness.ctx, { ...study, arms: study.arms.slice(0, 9) })).rejects.toThrow('source-unavailable')
     }
   } finally { warning.mockRestore(); marker.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
@@ -879,6 +890,9 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       const reviewArm = await recoverTextGuidanceArmForReview(harness.ctx, study, study.arms[1]!)
       expect(reviewArm.reviewStatus).toBe('unreviewed')
       expect(reviewArm.answer).toBe('保留来源范围 0')
+      const reviewPacket = await recoverTextGuidanceStudyReviewPacket(harness.ctx, study)
+      expect(reviewPacket.reviewStatus).toBe('unreviewed')
+      expect(JSON.stringify(reviewPacket)).not.toContain('"clear"')
       expect(harness.adapter.requests).toHaveLength(reviewRequests)
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
       const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
@@ -1239,6 +1253,17 @@ it.each(['valid', 'valid-explored', 'valid-source-explored', 'valid-source-froze
       .map(source => source.feedbackStandard?.originalFeedback)
     expect(recoveredFrom(caseDesignSources)).toEqual(recoveredFeedbacks)
     expect(recoveredFrom(proposalSources)).toEqual(recoveredFeedbacks)
+    if (recovery === 'valid') {
+      const requestCount = harness.adapter.requests.length
+      const packet = await recoverTextGuidanceStudyReviewPacket(harness.ctx, study)
+      expect(packet.reviewStatus).toBe('diagnostic-historical')
+      expect(packet.cases).toHaveLength(5)
+      expect(packet.cases.filter(item => item.kind === 'source').map(item => item.feedback?.originalFeedback.quote)).toEqual(notes)
+      expect(packet.cases.filter(item => item.kind === 'source').every(item => item.feedback?.rawFeedbackIncludedInStudy)).toBe(true)
+      expect(packet.cases.filter(item => item.kind === 'source').map(item => item.feedback?.supplementalCriteria)).toEqual([[supplemental], [supplemental]])
+      expect(packet.cases.every(item => item.baseline.answer && item.candidate.answer)).toBe(true)
+      expect(harness.adapter.requests).toHaveLength(requestCount)
+    }
     if (explored) {
       expect(recoveredFrom(postProposalSources)).toEqual(recoveredFeedbacks)
       expect(study.exploration?.arms).toHaveLength(2)

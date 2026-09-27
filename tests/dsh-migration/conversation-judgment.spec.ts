@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { assertObjectJsonSchema, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
@@ -38,6 +38,19 @@ it('recovers an exact text trial answer without calling a model and rejects drif
     await expect(recoverConversationTrial(harness.ctx, trial.proof, { ...expected, guidance: '错误指导。' })).rejects.toThrow('invalid-judgment')
     await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionDigest: sha256('changed') }, expected)).rejects.toThrow('source-unavailable')
     await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionId: String(SessionId('missing-trial-session')) }, expected)).rejects.toThrow()
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(trial.proof.sessionId))
+    const call = saved.events.find(event => event.type === 'tool/call' && event.data.name === 'structured_output')!
+    const result = saved.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === call.data.callId)!
+    const end = saved.events.find(event => event.type === 'turn/end')!
+    const extraCall = { ...call, seq: end.seq, data: { ...call.data, callId: 'duplicate-trial-call' } }
+    const extraResult = { ...result, seq: end.seq + 1, data: { ...result.data,
+      message: { ...result.data.message, source: { ...result.data.message.source, callId: 'duplicate-trial-call' } } } }
+    const events = [...saved.events.filter(event => event.seq < end.seq), extraCall, extraResult,
+      ...saved.events.filter(event => event.seq >= end.seq).map(event => ({ ...event, seq: event.seq + 2 }))]
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockResolvedValue({ ...saved, events } as typeof saved)
+    try {
+      await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionDigest: sha256({ meta: saved.meta, events }) }, expected)).rejects.toThrow('invalid-judgment')
+    } finally { inspect.mockRestore() }
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 it('rejects a file output kind on a text admission before native capture', () => {

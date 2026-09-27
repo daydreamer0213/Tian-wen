@@ -138,6 +138,21 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
     ...(fileExecution === undefined ? {} : { fileExecution }) }
 }
 
+/** Recover the original completed answer, bound to the task's frozen native span. */
+export async function recoverConversationTaskAnswer(ctx: Context, task: ConversationTask): Promise<ReturnType<typeof conversationMessages>> {
+  await recoverConversationTaskMaterial(ctx, task)
+  const completion = task.completion
+  if (completion?.status !== 'completed') throw new Error('source-unavailable')
+  const saved = await ctx.sessionPersistence.inspect(SessionId(task.source.sessionId))
+  const span = saved.events.filter(event => event.seq >= task.source.startSeq && event.seq <= completion.endSeq)
+  const terminal = span.at(-1)
+  if (sha256(span) !== completion.resultDigest || terminal?.type !== 'turn/end' || terminal.seq !== completion.endSeq
+    || terminal.data.reason.kind !== 'completed') throw new Error('source-unavailable')
+  const answer = conversationMessages(span, task.source.materialProjection).filter(message => message.role === 'assistant')
+  if (sha256(answer.map(message => message.id)) !== sha256(completion.assistantMessageIds) || answer.length === 0) throw new Error('source-unavailable')
+  return answer
+}
+
 function recoverFileExecution(events: readonly SessionEvent[], task: ConversationTask): ConversationFileExecutionEvidence {
   const calls = events.filter((event): event is Extract<SessionEvent, { type: 'tool/call' }> =>
     event.seq >= task.source.startSeq && event.seq <= task.completion!.files!.captureSeq && event.type === 'tool/call')

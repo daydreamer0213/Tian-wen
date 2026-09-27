@@ -2,7 +2,7 @@
 
 ## 结论与边界
 
-可以从现存证据构造审查材料。核对时发现产品**缺少**从纯文本试验执行证明返回完整答案的只读恢复函数；本分支现已补上 `recoverConversationTrial` 及定向正反例，并新增单臂审查投影，把执行答案和两份审核材料逐字交叉核对。它尚未组装原始任务、反馈与五案例的完整本地材料。旧 R9 仅用于诊断：它已经激活，而且独立对照发现错误，不能成为新放行记录。本次未调用真实模型、未重跑旧任务、未改演进账本或旧原生会话；main/Daily 继续 NO-GO。
+可以从现存证据构造审查材料。核对时发现产品**缺少**从纯文本试验执行证明返回完整答案的只读恢复函数；本分支已补上 `recoverConversationTrial`，再把原任务、必要反馈、候选提案与五案例十臂组成完整本地材料。R9 原始账本和会话的历史诊断导出已完成，见[结果](tianwen-guidance-review-packet-r9-diagnostic-20260927.md)。旧 R9 已经激活且有独立确认的错误，不能成为新放行记录。本次未调用真实模型、未重跑旧任务、未改演进账本或旧原生会话；main/Daily 继续 NO-GO。
 
 ## 本次实际核对
 
@@ -15,18 +15,18 @@
 | 所需材料 | 现有真源/校验 | 缺口 |
 | --- | --- | --- |
 | 研究身份、候选、十臂、裁决、激活 | `EvolutionLedger` 的研究投影及每臂证明/摘要 | `accepted` 和审核 `met` 仍非独立语义放行 |
-| 原始任务、上下文、事实文件 | `recoverConversationTaskMaterial` 核对原生 Session 生命周期、请求、上下文与冻结文件 | 原普通任务答案需沿任务完成边界恢复，不能用研究案例摘要代替 |
+| 原始任务、上下文、事实文件 | `recoverConversationTaskMaterial` 核对原生 Session 生命周期、请求、上下文与冻结文件；新增 `recoverConversationTaskAnswer` 沿冻结任务完成边界恢复答案 | 文件研究总包尚未覆盖，本轮只完成纯文本 |
 | 原始反馈、补充标准 | `materialForAssessment` 核对任务归因、原话和反馈材料摘要；账本保存 `supplementalCriteria` | 历史来源若已撤销或不再可恢复，应标为缺证，不能臆造原话 |
-| 纯文本十臂完整答案 | 原生执行 Session 的唯一成功 `structured_output` 捕获；审核 Session 的 `material.original.answer`；账本 `outputDigest` | 原有 `recoverConversationStructuredJudgment` 要求调用方**先提供**预期答案；本分支已补只读提取入口，尚未组合成十臂材料 |
-| 两份审核原结论和完整审核输入 | `recoverConversationJudgmentRequest` 与 `verifyConversationClaimReviewCheck` 校验原生证明、任务材料/答案摘要、模型配置和证据项 | 导出时需将两份恢复出的答案相互核对，并与**执行**会话再次绑定；仅凭审核摘要或模型标签不够 |
+| 纯文本十臂完整答案 | 原生执行 Session 的唯一成功 `structured_output` 捕获；审核 Session 的 `material.original.answer`；账本 `outputDigest` | 原有 `recoverConversationStructuredJudgment` 要求调用方**先提供**预期答案；本分支已补提取与十臂总包 |
+| 两份审核原结论和完整审核输入 | `recoverConversationJudgmentRequest` 与 `verifyConversationClaimReviewCheck` 校验原生证明、任务材料/答案摘要、模型配置和证据项 | 总包已把两份审核答案与执行会话逐字对照；语义是否正确仍需独立判断 |
 | 文件试验答案和产物 | `recoverConversationFileTrial` 已从受限收据核对输出与执行证明 | 与纯文本路径分开，不应退化为审核者材料中的自述 |
 
 `conversation-guidance-loop` 的冷恢复现已检查执行会话摘要及各审核记录，但纯文本路径原先不从执行证明提取完整答案。本分支新增的最小入口只读执行 Session，要求唯一成功的结构化 `{answer}`、正常结束、原试验指令和请求材料摘要、模型配置及 `executionProof` 全部一致，再以 `sha256(answer) === arm.outputDigest` 绑定账本。它复用现有原生恢复检查，并保留执行者与审核者不同的原生角色摘要。定向测试证实答案、材料、配置、指导语和会话证明漂移均被拒绝；恢复过程不增加模型请求。相关五组回归 **184/184**，八包类型检查与差异检查通过。
 
-随后新增的 `recoverTextGuidanceArmForReview` 只读核对研究 `accepted`、十臂摘要、案例与方法版本，分别恢复执行答案和两个原生审核输入；两份审核看到的完整答案与执行答案必须逐字相同，审核任务与账本材料摘要必须一致。在一项脚本化完整研究中，十臂均成功恢复，未增加模型请求；改动一臂答案摘要会拒绝。已激活研究只标成 `diagnostic-historical`；另一项脚本化 `accepted` 且被隔离的研究返回 `unreviewed`，未补激活、未增加模型请求。两种状态都不产生 `clear`。这仍只覆盖**纯文本单臂材料**，不包含原任务答案、反馈原话或五案例总包；不提供放行/激活操作。
+随后新增的 `recoverTextGuidanceArmForReview` 只读核对研究 `accepted`、十臂摘要、案例与方法版本，分别恢复执行答案和两个原生审核输入；两份审核看到的完整答案与执行答案必须逐字相同，审核任务与账本材料摘要必须一致。在一项脚本化完整研究中，十臂均成功恢复，未增加模型请求；改动一臂答案摘要会拒绝。已激活研究只标成 `diagnostic-historical`；另一项脚本化 `accepted` 且被隔离的研究返回 `unreviewed`，未补激活、未增加模型请求。两种状态都不产生 `clear`。后续总包补上原任务答案、由反馈支持时的原话与评估证明、由 `not-met` 支持时的原审核，以及候选提案原生输入。它仍只覆盖**纯文本**，不提供放行/激活操作。
 
 ## 下一步
 
-1. 给只读提取入口补重复成功捕获的针对性测试；目前已覆盖唯一成功捕获、缺 Session 和各项摘要漂移，并已在脚本化研究中逐臂交叉核对。
-2. 组合原任务、反馈、十臂和双审核成为本地材料，并对 R9 以诊断模式确认两条 false-met 答案和反馈主体偏移直接可见。R9 的历史激活必须醒目标记。
-3. 用脚本化 `accepted` 且未激活研究验证只读性和缺证停止；这只证明机制。实际放行仍需要**新的**真实研究及独立审查，现阶段继续隔离。
+1. 只读提取入口已覆盖唯一成功捕获、缺 Session、重复成功捕获和各项摘要漂移，并已在脚本化研究中逐臂交叉核对；继续把这组门槛留作回归。
+2. R9 的原始证据历史诊断包已完成；后续针对新的真实 `accepted` 待激活研究首次生成材料，独立审查其内容，不复用 R9 放行。
+3. 脚本化 `accepted` 且未激活研究的总包已验证只读性；后续仍可扩充缺证停止测试。实际放行需要**新的**真实研究及独立审查，现阶段继续隔离。

@@ -1,7 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { conversationReviewConsensus, guidanceRule, guidanceVersion, sha256, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
-import { recoverConversationJudgmentRequest, recoverConversationTrial } from './conversation-judgment.js'
+import { conversationReviewConsensus, guidanceRule, guidanceVersion, sha256, type ConversationTask, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
+import { recoverConversationJudgmentRequest, recoverConversationStructuredJudgment, recoverConversationTrial } from './conversation-judgment.js'
 import { verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
+import { recoverConversationTaskAnswer, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
+import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -43,4 +45,124 @@ export async function recoverTextGuidanceArmForReview(ctx: Context, study: Guida
     || materials.some(material => material.answer !== execution.answer)) throw new Error('source-unavailable')
   return { caseId: arm.caseId, role: arm.role, answer: execution.answer, task, reviews: checks,
     reviewStatus: study.activation === undefined ? 'unreviewed' as const : 'diagnostic-historical' as const }
+}
+
+type ReviewedArm = Awaited<ReturnType<typeof recoverTextGuidanceArmForReview>>
+type OriginalAnswer = Awaited<ReturnType<typeof recoverConversationTaskAnswer>>
+type ReviewCase = {
+  readonly id: string
+  readonly kind: 'source' | 'counterexample' | 'synthetic'
+  readonly materialDigest: string
+  readonly originalTaskId?: string
+  readonly originalMaterial?: ConversationTaskMaterial
+  readonly originalAnswer?: OriginalAnswer
+  readonly originalTaskReview?: ConversationTask['review']
+  readonly feedback?: {
+    readonly assessmentId: string
+    readonly originalFeedback: ConversationFeedbackMaterial['feedback']
+    readonly supplementalCriteria: readonly string[]
+    readonly studyStandard: unknown
+    readonly rawFeedbackIncludedInStudy: boolean
+  }
+  readonly baseline: ReviewedArm
+  readonly candidate: ReviewedArm
+}
+
+/** Complete text-only evidence packet. Missing raw feedback or any native proof stops export. */
+export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy): Promise<{
+  readonly schemaVersion: 'tianwen.guidance-review-packet.v1'
+  readonly reviewStatus: 'unreviewed' | 'diagnostic-historical'
+  readonly opened: GuidanceStudy['opened']
+  readonly candidate: NonNullable<GuidanceStudy['candidate']>
+  readonly decision: NonNullable<GuidanceStudy['decision']>
+  readonly activation: GuidanceStudy['activation']
+  readonly currentConsent: ReturnType<Context['tianwenEvolution']['getLearningAnalysisConsent']>
+  readonly currentSupport: boolean
+  readonly proposalMaterial: unknown
+  readonly cases: readonly ReviewCase[]
+}> {
+  const recorded = ctx.tianwenEvolution.listConversationGuidanceStudies().find(item => item.opened.studyId === study.opened.studyId)
+  if (recorded === undefined || sha256(recorded) !== sha256(study) || study.opened.evaluationMode === 'local-files'
+    || study.candidate === undefined || study.decision?.verdict !== 'accepted' || study.opened.cases.length !== 5
+    || study.arms.length !== 10 || sha256(study.arms) !== study.decision.armsDigest) throw new Error('source-unavailable')
+  const currentConsent = ctx.tianwenEvolution.getLearningAnalysisConsent()
+  const currentSupport = ctx.tianwenEvolution.isConversationGuidanceSupported(study.opened.studyId)
+  if (study.activation === undefined && (currentConsent?.enabled !== true || !currentSupport)) throw new Error('source-unavailable')
+  const tasks = ctx.tianwenEvolution.listConversationTasks()
+  const assessments = ctx.tianwenEvolution.listConversationFeedbackAssessments()
+  const cases: ReviewCase[] = []
+  for (const kind of ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const) {
+    const matches = study.opened.cases.filter(item => item.kind === kind)
+    if (matches.length !== 1) throw new Error('source-unavailable')
+    const item = matches[0]!
+    const arms = study.arms.filter(arm => arm.caseId === item.id)
+    if (arms.length !== 2 || arms[0]?.role !== 'baseline' || arms[1]?.role !== 'candidate') throw new Error('source-unavailable')
+    const [baseline, candidate] = await Promise.all(arms.map(arm => recoverTextGuidanceArmForReview(ctx, study, arm))) as [ReviewedArm, ReviewedArm]
+    if (sha256(baseline.task) !== sha256(candidate.task)) throw new Error('source-unavailable')
+    if (!('sourceTaskId' in item)) {
+      const generated = { prompt: item.prompt, criteria: item.criteria, ...(item.qualityContract === undefined ? {} : { qualityContract: item.qualityContract }) }
+      if (sha256(generated) !== sha256(baseline.task)) throw new Error('source-unavailable')
+      cases.push({ id: item.id, kind: 'synthetic', materialDigest: item.materialDigest, baseline, candidate })
+      continue
+    }
+    const matchingTasks = tasks.filter(task => task.source.taskId === item.sourceTaskId)
+    if (matchingTasks.length !== 1) throw new Error('source-unavailable')
+    const task: ConversationTask = matchingTasks[0]!
+    const originalMaterial = await recoverConversationTaskMaterial(ctx, task)
+    const originalAnswer = await recoverConversationTaskAnswer(ctx, task)
+    const { feedbackStandard, ...taskWithoutStandard } = baseline.task
+    if (sha256(taskWithoutStandard) !== sha256(originalMaterial)) throw new Error('source-unavailable')
+    if (kind === 'counterexample') {
+      if (item.sourceTaskId !== study.opened.counterexampleTaskId || feedbackStandard !== undefined || item.feedbackAssessmentId !== undefined) throw new Error('source-unavailable')
+      cases.push({ id: item.id, kind: 'counterexample', materialDigest: item.materialDigest,
+        originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview: task.review, baseline, candidate })
+      continue
+    }
+    const sourceIndex = kind === 'source1' ? 0 : 1
+    if (item.sourceTaskId !== study.opened.sourceTaskIds[sourceIndex]) throw new Error('source-unavailable')
+    if (item.feedbackAssessmentId === undefined) {
+      if (feedbackStandard !== undefined || task.review?.verdict !== 'not-met') throw new Error('source-unavailable')
+      cases.push({ id: item.id, kind: 'source', materialDigest: item.materialDigest,
+        originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview: task.review, baseline, candidate })
+      continue
+    }
+    const feedbackService = ctx.get('tianwenConversationFeedback')
+    if (feedbackService === undefined) throw new Error('source-unavailable')
+    const matchingAssessments = assessments.filter(assessment => assessment.started.assessmentId === item.feedbackAssessmentId)
+    if (matchingAssessments.length !== 1) throw new Error('source-unavailable')
+    const assessment = matchingAssessments[0]!
+    if (assessment.started.taskId !== item.sourceTaskId || assessment.result?.proof == null || !record(feedbackStandard)
+      || feedbackStandard.assessmentId !== assessment.started.assessmentId
+      || feedbackStandard.classification !== assessment.result.classification
+      || sha256(feedbackStandard.criteria) !== sha256(assessment.result.supplementalCriteria)) throw new Error('source-unavailable')
+    const feedbackMaterial = await feedbackService.materialForAssessment(assessment)
+    if (sha256(feedbackMaterial.original) !== sha256(originalMaterial) || sha256(feedbackMaterial.answer) !== sha256(originalAnswer)
+      || sha256(feedbackMaterial) !== assessment.started.materialDigest) throw new Error('source-unavailable')
+    const { kind: _kind, assessmentId: _id, taskId: _task, proof: _proof, unavailableReason: _reason, ...value } = assessment.result
+    const recovered = await recoverConversationStructuredJudgment(ctx, assessment.result.proof, value)
+    if (sha256(recovered.material) !== sha256(feedbackMaterial)) throw new Error('source-unavailable')
+    const rawFeedbackIncludedInStudy = Object.hasOwn(feedbackStandard, 'originalFeedback')
+    if (rawFeedbackIncludedInStudy && sha256(feedbackStandard.originalFeedback) !== sha256(feedbackMaterial.feedback)) throw new Error('source-unavailable')
+    cases.push({ id: item.id, kind: 'source', materialDigest: item.materialDigest,
+      originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview: task.review, baseline, candidate,
+      feedback: { assessmentId: assessment.started.assessmentId, originalFeedback: feedbackMaterial.feedback,
+        supplementalCriteria: assessment.result.supplementalCriteria, studyStandard: feedbackStandard, rawFeedbackIncludedInStudy } })
+  }
+  const proposalGuidance = guidanceRule(study.candidate.candidateSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind)
+  if (proposalGuidance === undefined) throw new Error('source-unavailable')
+  const proposalValue = { guidance: proposalGuidance, ...(study.candidate.sourceUse === undefined ? {} : { sourceUse: study.candidate.sourceUse }) }
+  const proposal = await recoverConversationStructuredJudgment(ctx, study.candidate.proposalProof, proposalValue)
+  if (!record(proposal.material)) throw new Error('source-unavailable:proposal-identity')
+  const historicalProposal = study.activation !== undefined && proposal.material.studyId === undefined && proposal.material.sourceTaskIds === undefined
+  if (!historicalProposal && proposal.material.studyId !== study.opened.studyId) throw new Error('source-unavailable:proposal-identity')
+  if (!historicalProposal && sha256(proposal.material.sourceTaskIds) !== sha256(study.opened.sourceTaskIds)) throw new Error('source-unavailable:proposal-tasks')
+  if (proposal.material.family !== study.opened.family || proposal.material.failureCategory !== study.opened.failureCategory
+    || proposal.material.currentGuidance !== (guidanceRule(study.opened.parentSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind) ?? '')) throw new Error('source-unavailable:proposal-context')
+  if (proposal.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('source-unavailable:proposal-model')
+  if (!Array.isArray(proposal.material.sources) || proposal.material.sources.length !== 2) throw new Error('source-unavailable:proposal-sources')
+  if (proposal.material.sources.some((source, index) => sha256(source) !== sha256(cases[index]!.baseline.task))) throw new Error('source-unavailable:proposal-source-material')
+  return { schemaVersion: 'tianwen.guidance-review-packet.v1',
+    reviewStatus: study.activation === undefined ? 'unreviewed' : 'diagnostic-historical',
+    opened: study.opened, candidate: study.candidate, decision: study.decision, activation: study.activation,
+    currentConsent, currentSupport, proposalMaterial: proposal.material, cases }
 }
