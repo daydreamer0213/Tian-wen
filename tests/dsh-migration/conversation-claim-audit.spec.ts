@@ -16,6 +16,7 @@ const literalCriterion = 'Be faithful to user-supplied or source facts and their
 const legacyV3 = { schemaVersion: 'tianwen.conversation-quality.v3' as const, source: 'host' as const, criterion: literalCriterion }
 const literalV4 = { schemaVersion: 'tianwen.conversation-quality.v4' as const, source: 'host' as const, criterion: literalCriterion }
 const literalV5 = { schemaVersion: 'tianwen.conversation-quality.v5' as const, source: 'host' as const, criterion: literalCriterion }
+const literalV7 = { schemaVersion: 'tianwen.conversation-quality.v7' as const, source: 'host' as const, criterion: `${literalCriterion} Apply source authority to the actor, time, scope, commitment and premise actually asserted. A labeled inference or courtesy does not establish an unverified current state, past event, external effect, decision or commitment; grounded fallible inference, optional advice, fiction and task-compatible courtesy remain permitted.` }
 const proof = (sessionId: string) => ({ sessionId, sessionDigest: sha256(`${sessionId}:session`), requestDigest: sha256(`${sessionId}:request`) })
 const legacyPair = ['requirements', 'grounding'].map(focus => ({ focus, verdict: 'met', category: null,
   explanation: 'The answer is supported.', evidenceQuotes: ['supported'], proof: proof(focus) }))
@@ -28,13 +29,16 @@ const v1Pair = legacyPair.map(check => ({ ...check, audit: audit() }))
 const v2Pair = legacyPair.map(check => ({ ...check, audit: auditV2() }))
 
 describe('conversation claim audit domain boundary', () => {
-  it('preserves literal v4/v5 while making only v7 current with semantic clarification', () => {
-    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v7')
+  it('preserves literal v4/v5/v7 while making only v8 current with state-strength boundaries', () => {
+    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v8')
     expect(conversationQualityContract().criterion).toContain('actor, time, scope, commitment and premise')
+    expect(conversationQualityContract().criterion).toContain('explicitly judged failure')
     expect(parseConversationQualityContract(literalV4)).toEqual(literalV4)
     expect(parseConversationQualityContract(literalV5)).toEqual(literalV5)
+    expect(parseConversationQualityContract(literalV7)).toEqual(literalV7)
     expect(hasCurrentConversationQuality(literalV4)).toBe(false)
     expect(hasCurrentConversationQuality(literalV5)).toBe(false)
+    expect(hasCurrentConversationQuality(literalV7)).toBe(false)
     expect(parseConversationQualityContract(legacyV3)).toEqual(legacyV3)
     expect(hasCurrentConversationQuality(legacyV3)).toBe(false)
     expect(sha256(literalV4)).toBe('sha256:5df1526ccccc0139245666bc6a02308a5044ce2da062f0410ac3578d0d43e757')
@@ -55,6 +59,7 @@ describe('conversation claim audit domain boundary', () => {
     expect(parseConversationQualityReviewChecks(v1Pair, literalV4)).toEqual(v1Pair)
     expect(parseConversationQualityReviewChecks(v2Pair, literalV5)).toEqual(v2Pair)
     expect(parseConversationQualityReviewChecks(v2Pair, conversationQualityContract())).toEqual(v2Pair)
+    expect(parseConversationQualityReviewChecks(v2Pair, literalV7)).toEqual(v2Pair)
     expect(() => parseConversationQualityReviewChecks(v1Pair, conversationQualityContract())).toThrow()
     expect(() => parseConversationQualityReviewChecks(v2Pair, literalV4)).toThrow()
     expect(() => parseConversationQualityReviewChecks(v1Pair, legacyV3)).toThrow()
