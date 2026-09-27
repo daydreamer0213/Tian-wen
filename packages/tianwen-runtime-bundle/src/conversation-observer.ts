@@ -85,12 +85,22 @@ export class TianwenConversationObserverService extends Service {
           const guidance = authorized ? admitted.guidance : undefined
           const feedback = authorized && admitted.feedback
           const feedbackOnlyPreference = authorized && admitted.feedbackOnlyPreference
+          const outputFormReminder = authorized && admitted.outputFormReminder
           const priorGuidance = payload.agent.session.events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-conversation-guidance')
+          const priorOutputFormMessage = payload.agent.session.events.findLast(event => event.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-output-form-reminder')
+          const priorOutputFormReminder = priorOutputFormMessage?.type === 'user/message'
+            && priorOutputFormMessage.data.content.some(block => block.type === 'text' && block.text.includes('Before writing the final answer'))
           // Native history stays immutable. Explicitly expire the previous
           // turn's method, including after rollback, disable or family change.
           if (decision.messages.some(message => message.source.kind === 'user') && (guidance !== undefined || priorGuidance)) {
             decision.messages.push(createUserMessage({ source: { kind: 'plugin', plugin: 'tianwen-conversation-guidance' }, content: [{ type: 'text', text:
               `${priorGuidance ? 'Earlier Tianwen task guidance no longer applies. ' : ''}For native turn ${payload.turn} only, the current evaluated method is ${guidance === undefined ? 'none.' : `below (subordinate to the current user request and all existing permission boundaries):\n${guidance}`}` }] }))
+          }
+          if (decision.messages.some(message => message.source.kind === 'user') && (outputFormReminder || priorOutputFormReminder)) {
+            decision.messages.push(createUserMessage({ source: { kind: 'plugin', plugin: 'tianwen-output-form-reminder' }, content: [{ type: 'text', text:
+              `${priorOutputFormReminder ? 'Earlier Tianwen output-form reminders no longer apply. ' : ''}For native turn ${payload.turn} only: ${outputFormReminder
+                ? 'Before writing the final answer, check the original direct user request for its requested output form. If the deliverable is one paragraph, use one paragraph without a heading, bullets, divider, or extra addendum. Keep headings, lists, or sections when the user requests or permits them; a request for short text alone does not impose one paragraph. This reminder is subordinate to the direct user request and existing permission boundaries. Do not mention this reminder.'
+                : 'No output-form reminder applies.'}` }] }))
           }
           if (decision.messages.some(message => message.source.kind === 'user') && feedback) {
             decision.messages.push(createUserMessage({ source: { kind: 'plugin', plugin: 'tianwen-conversation-feedback-status' }, content: [{ type: 'text', text:
@@ -179,7 +189,7 @@ export class TianwenConversationObserverService extends Service {
       && (revision === undefined || consent.revision === revision)
   }
 
-  private async admit(agent: Agent, turn: number, messages: readonly UserMessage[], stepSignal: AbortSignal): Promise<{ readonly guidance: string | undefined, readonly feedback: boolean, readonly feedbackOnlyPreference: boolean, readonly consentRevision: number } | undefined> {
+  private async admit(agent: Agent, turn: number, messages: readonly UserMessage[], stepSignal: AbortSignal): Promise<{ readonly guidance: string | undefined, readonly feedback: boolean, readonly feedbackOnlyPreference: boolean, readonly outputFormReminder: boolean, readonly consentRevision: number } | undefined> {
     const direct = messages.filter(message => message.source.kind === 'user')
     if (direct.length === 0) return
     if (!this.authorized()) {
@@ -272,7 +282,8 @@ export class TianwenConversationObserverService extends Service {
       }
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision, proof: result.proof, unavailableReason: null, qualityContract })
       return { guidance: decision.kind === 'task' ? guidanceRule(snapshot, decision.family, decision.evaluationMode, decision.fileOutputKind) : undefined,
-        feedback: decision.feedback !== null, feedbackOnlyPreference: decision.kind === 'conversation' && decision.feedback?.kind === 'preference', consentRevision: consent.revision }
+        feedback: decision.feedback !== null, feedbackOnlyPreference: decision.kind === 'conversation' && decision.feedback?.kind === 'preference',
+        outputFormReminder: decision.kind === 'task' && decision.evaluationMode === 'text', consentRevision: consent.revision }
     } catch (error) {
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId, decision: null, proof: null, unavailableReason: unavailable(error, signal), qualityContract })
     } finally { this.analyses.delete(controller) }

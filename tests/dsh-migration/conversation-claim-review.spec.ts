@@ -398,6 +398,25 @@ it('keeps the exact historical v9 review instruction without v10 output-form add
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('replays the v10 output-form reviewer instruction under a v11 current contract', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-v10-instruction-')); roots.push(root)
+  const old = { ...conversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v10' as const }
+  const material = { source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '请用一段话复述原料已送达。' }] })], qualityContract: old },
+    conversation: [{ id: 'answer', role: 'assistant', content: [{ type: 'text', text: '原料已送达。' }] }], toolEvidence: [] }
+  const harness = await mountPersistentHarness(root, [new Error('capture historical request')])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-v10-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationClaimReview(harness.ctx, handle.agent, { label: 'Historical v10', material,
+      evidence: ['原料已送达。'], signal: new AbortController().signal, callConfig: { provider: 'tianwen-probe', model: 'scripted' } })).rejects.toThrow('model-unavailable')
+    const request = JSON.stringify(harness.adapter.requests[0]?.messages)
+    expect(request).toContain('requested output form separately')
+    expect(request).toContain('Do not impose single-paragraph form')
+    expect(request).not.toContain('output-form reminder')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('offers bounded exact quote choices from each answer unit to the native reviewer', async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-quote-')); roots.push(root)

@@ -32,7 +32,7 @@ const v2Pair = legacyPair.map(check => ({ ...check, audit: auditV2() }))
 
 describe('conversation claim audit domain boundary', () => {
   it('preserves literal v4/v5/v7/v8/v9 while making only v10 current with output-form review', () => {
-    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v10')
+    expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v11')
     expect(conversationQualityContract().criterion).toContain('actor, time, scope, commitment and premise')
     expect(conversationQualityContract().criterion).toContain('explicitly judged failure')
     expect(conversationQualityContract().criterion).toContain('total number of items')

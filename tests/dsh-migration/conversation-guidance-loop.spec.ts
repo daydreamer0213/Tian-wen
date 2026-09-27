@@ -25,7 +25,7 @@ import { prepareConversationLearningExploration } from '../../packages/tianwen-e
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
-import { conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
+import { conversationContext, conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -1298,7 +1298,7 @@ it('keeps an accepted oversize natural feedback request exact and unavailable be
   // This remains below the admission-material limit with the short original
   // turn, but the recovered feedback material adds its frozen source binding
   // and crosses the judgment-material limit without a truncation path.
-  const directFeedback = `${marker}${'x'.repeat(CONVERSATION_MATERIAL_MAX_BYTES - 2560)}`
+  const directFeedback = `${marker}${'x'.repeat(CONVERSATION_MATERIAL_MAX_BYTES - 4352)}`
   let harness: Awaited<ReturnType<typeof mountFeedbackHarness>>
   const script: ScriptEntry[] = [
     structured({ ...admission, objective: 'Repeat the supplied word.', criteria: ['Repeat exactly.'] }), textResponse('base.'), ...reviewPair(verdict(true, 'base')),
@@ -1318,10 +1318,15 @@ it('keeps an accepted oversize natural feedback request exact and unavailable be
   try {
     handle.agent.followup(direct('Repeat: base.'))
     await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const earlier = harness.ctx.tianwenEvolution.listConversationTasks()
+    const admissionMaterial = { request: [feedbackMessage], context: conversationContext(handle.agent.session.events, Number.MAX_SAFE_INTEGER, 'surface-text.v1'),
+      qualityContract: conversationQualityContract(), priorTasks: earlier.map(task => ({ taskId: task.source.taskId, objective: task.admission?.decision?.objective, answerIds: task.completion!.assistantMessageIds })) }
+    expect(Buffer.byteLength(JSON.stringify(admissionMaterial), 'utf8')).toBeLessThanOrEqual(CONVERSATION_MATERIAL_MAX_BYTES)
     const beforeFeedbackTurn = harness.adapter.requests.length
     handle.agent.followup(feedbackMessage)
     await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationFeedback.whenIdle()
     const [target, feedbackTask] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(feedbackTask?.admission?.unavailableReason).toBeNull()
     expect(feedbackTask?.admission?.decision).toMatchObject({ kind: 'conversation', feedback: { quote: marker }, relatedTaskId: target?.source.taskId })
     const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target?.source.taskId)[0]!
     const recovered = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)

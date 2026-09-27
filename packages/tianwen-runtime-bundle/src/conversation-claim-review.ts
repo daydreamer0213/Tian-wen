@@ -271,11 +271,11 @@ function claimReviewInstruction(material: unknown, purpose: 'original-result' | 
   let contract
   try { contract = parseConversationQualityContract(quality) }
   catch { throw new Error('invalid-judgment') }
-  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7' && contract.schemaVersion !== 'tianwen.conversation-quality.v8' && contract.schemaVersion !== 'tianwen.conversation-quality.v9' && contract.schemaVersion !== 'tianwen.conversation-quality.v10') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7' && contract.schemaVersion !== 'tianwen.conversation-quality.v8' && contract.schemaVersion !== 'tianwen.conversation-quality.v9' && contract.schemaVersion !== 'tianwen.conversation-quality.v10' && contract.schemaVersion !== 'tianwen.conversation-quality.v11') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
   if (purpose === 'method-study' && source.feedbackStandard !== undefined) {
     if (!record(source.feedbackStandard) || !Object.hasOwn(source.feedbackStandard, 'originalFeedback') || source.feedbackStandard.originalFeedback === undefined) throw new Error('invalid-judgment')
   }
-  const common = contract.schemaVersion === 'tianwen.conversation-quality.v10' ? V10_COMMON
+  const common = contract.schemaVersion === 'tianwen.conversation-quality.v10' || contract.schemaVersion === 'tianwen.conversation-quality.v11' ? V10_COMMON
     : contract.schemaVersion === 'tianwen.conversation-quality.v9' ? V9_COMMON
     : contract.schemaVersion === 'tianwen.conversation-quality.v8' ? V8_COMMON
     : contract.schemaVersion === 'tianwen.conversation-quality.v7' ? V7_COMMON : V6_COMMON

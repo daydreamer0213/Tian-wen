@@ -82,16 +82,25 @@ it('keeps an admitted legacy turn in its own route while observing a later natur
 it('captures ordinary requests in two native turns before each answer and reviews automatically', async () => {
   let harness: Awaited<ReturnType<typeof mount>>
   let boundBeforeAnswer = false
+  let firstTaskQuality: string | undefined
+  let firstReminder = ''
+  let firstReminderCount = 0
+  let secondReminder = ''
   harness = await mount([
     structured(admission),
-    () => {
+    request => {
       const tasks = harness.ctx.tianwenEvolution.listConversationTasks('ordinary-chat')
-      expect(tasks).toHaveLength(1); expect(tasks[0]?.admission?.decision?.criteria).toEqual(admission.criteria)
-      expect(tasks[0]?.admission).toMatchObject({ qualityContract: { schemaVersion: 'tianwen.conversation-quality.v10', source: 'host' } })
+      firstTaskQuality = tasks[0]?.admission?.qualityContract?.schemaVersion
+      const reminders = request.messages.filter(message => message.source.kind === 'plugin' && message.source.plugin === 'tianwen-output-form-reminder')
+      firstReminderCount = reminders.length
+      firstReminder = JSON.stringify(reminders)
       boundBeforeAnswer = tasks[0]?.models?.[0]?.modelConfigDigest === sha256({ provider: 'tianwen-probe', model: 'scripted' })
       return textResponse('预计 5 天完成。')
     }, ...reviewPair(review),
-    structured({ ...admission, relatedTaskId: null }), textResponse('需要 5 天。'), ...reviewPair(review),
+    structured({ ...admission, relatedTaskId: null }), request => {
+      secondReminder = JSON.stringify(request.messages.filter(message => message.source.kind === 'plugin' && message.source.plugin === 'tianwen-output-form-reminder'))
+      return textResponse('需要 5 天。')
+    }, ...reviewPair(review),
   ])
   try {
     for (const message of ['帮我概括一下：预计 5 天完成。', '再整理这段：需要 5 天。']) {
@@ -101,6 +110,12 @@ it('captures ordinary requests in two native turns before each answer and review
     }
     const tasks = harness.ctx.tianwenEvolution.listConversationTasks('ordinary-chat')
     expect(boundBeforeAnswer).toBe(true)
+    expect(firstTaskQuality).toBe('tianwen.conversation-quality.v11')
+    expect(firstReminderCount).toBe(1)
+    expect(firstReminder).toContain('original direct user request')
+    expect(firstReminder).toContain('heading, bullets, divider, or extra addendum')
+    expect(secondReminder).toContain('Earlier Tianwen output-form reminders no longer apply')
+    expect(secondReminder).toContain('original direct user request')
     expect(tasks[1]?.models).toHaveLength(1)
     expect(tasks[1]?.models?.[0]?.headerSeq).toBe(tasks[0]?.models?.[0]?.headerSeq)
     expect(tasks.map(task => task.source.turn)).toEqual([1, 2])
@@ -109,12 +124,12 @@ it('captures ordinary requests in two native turns before each answer and review
     const recovered = await recoverConversationTaskMaterial(harness.ctx, tasks[0]!)
     expect(recovered).toHaveProperty('qualityContract', tasks[0]!.admission!.qualityContract)
     expect(recovered.criteria).toEqual(admission.criteria)
-    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v10')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v11')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('self-contained summaries, translations and rewrites')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('Writing is not automatically subjective')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen_captured_file_facts')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('inspect, count or hash local files and answer in chat is local-files/chat')
-    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v10')
+    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v11')
     expect(tasks[0]?.source.taskId).not.toBe(tasks[1]?.source.taskId)
     expect(harness.adapter.requests).toHaveLength(8)
     expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({
@@ -195,6 +210,51 @@ it('does not analyze ordinary conversations under the earlier narrower consent',
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual([])
     expect(harness.adapter.requests).toHaveLength(1)
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).not.toContain('tianwen-output-form-reminder')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('expires an earlier output-form reminder after learning consent is disabled', async () => {
+  let laterReminder = ''
+  const harness = await mount([
+    structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review),
+    request => {
+      laterReminder = JSON.stringify(request.messages.filter(message => message.source.kind === 'plugin' && message.source.plugin === 'tianwen-output-form-reminder'))
+      return textResponse('已收到下一条普通请求。')
+    },
+    textResponse('已收到第三条普通请求。'),
+  ])
+  try {
+    harness.handle.agent.followup(direct('概括一下：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    harness.handle.agent.followup(direct('下一条普通请求。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(laterReminder).toContain('Earlier Tianwen output-form reminders no longer apply')
+    expect(laterReminder).toContain('No output-form reminder applies')
+    harness.handle.agent.followup(direct('第三条普通请求。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const boundary = harness.handle.agent.session.events.findLast(event => event.type === 'turn/start')!.seq
+    expect(harness.handle.agent.session.events.filter(event => event.seq >= boundary && event.type === 'user/message'
+      && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-output-form-reminder')).toHaveLength(0)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(1)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('does not add an output-form reminder to an external task', async () => {
+  let reminderCount = -1
+  const harness = await mount([
+    structured({ ...admission, objective: 'Check an external site', evaluationMode: 'external' }),
+    request => {
+      reminderCount = request.messages.filter(message => message.source.kind === 'plugin' && message.source.plugin === 'tianwen-output-form-reminder').length
+      return textResponse('External result unavailable.')
+    },
+  ])
+  try {
+    harness.handle.agent.followup(direct('请检查外部站点的最新状态。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(reminderCount).toBe(0)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.admission?.decision?.evaluationMode).toBe('external')
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
@@ -238,9 +298,9 @@ it.each(['correction', 'preference'] as const)('keeps %s linked to the earlier a
     expect(tasks[1]?.admission?.decision?.feedback?.kind).toBe(kind)
     expect(tasks[1]?.completion?.assistantMessageIds).not.toEqual(tasks[0]?.completion?.assistantMessageIds)
     expect(statusBeforeAnswer).toBe(true)
-    expect.soft(feedbackPlugins).toEqual(['tianwen-conversation-feedback-status'])
+    expect.soft(feedbackPlugins).toEqual(['tianwen-output-form-reminder', 'tianwen-conversation-feedback-status'])
     expect.soft(feedbackMessages).not.toContain('Earlier Tianwen task guidance no longer applies')
-    expect.soft(nextTurnPlugins).toEqual([])
+    expect.soft(nextTurnPlugins).toEqual(['tianwen-output-form-reminder'])
     expect(tasks[2]?.review?.verdict).toBe('met')
     expect(JSON.stringify(harness.adapter.requests[1]?.messages)).not.toContain('Automatic evaluation is enabled under current consent')
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }

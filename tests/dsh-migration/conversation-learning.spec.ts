@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
-import { conversationQualityContract, parseConversationAuditedReviewChecks, parseConversationLearningRecord, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, hasCurrentConversationQuality, parseConversationAuditedReviewChecks, parseConversationLearningRecord, parseConversationQualityContract, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 
 const roots: string[] = []
 function root() {
@@ -15,6 +15,15 @@ function root() {
   return directory
 }
 afterEach(() => { for (const directory of roots.splice(0)) rmSync(directory, { recursive: true, force: true }) })
+
+it('keeps the exact v10 quality contract readable while v11 is current', () => {
+  const current = conversationQualityContract()
+  const historical = { ...current, schemaVersion: 'tianwen.conversation-quality.v10' as const }
+  expect(current.schemaVersion).toBe('tianwen.conversation-quality.v11')
+  expect(parseConversationQualityContract(historical)).toEqual(historical)
+  expect(hasCurrentConversationQuality(historical)).toBe(false)
+  expect(hasCurrentConversationQuality(current)).toBe(true)
+})
 
 function start(turn = 1) {
   return {
