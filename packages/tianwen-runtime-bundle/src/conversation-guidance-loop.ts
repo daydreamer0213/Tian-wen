@@ -9,7 +9,7 @@ import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversa
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
 import { runConversationFileTrial, recoverConversationFileTrial } from './conversation-file-trial.js'
-import { runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
+import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
@@ -607,7 +607,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
           : [material.prompt, execution.answer, ...(material.files?.entries.flatMap(entry => entry.content === null ? [] : [entry.content]) ?? []), ...(output?.files.flatMap(entry => material.files!.outputPaths.includes(entry.path) && entry.content !== null ? [entry.content] : []) ?? [])]
         const judged = await runConversationClaimReview(this.ctx, agent, { purpose: 'method-study', evidence,
           beforeCall: () => this.assertCurrent(studyOpened, signal),
-          label: `Tianwen blind ${fileMode ? 'file' : 'text'} review ${studyOpened.studyId}`, callConfig, signal, material: { task: material, answer: execution.answer, ...(output === undefined ? {} : { fileResult: output }) } })
+          label: `Tianwen blind ${fileMode ? 'file' : 'text'} review ${studyOpened.studyId}`, callConfig, signal, material: { task: material, answer: execution.answer,
+            ...(fileMode ? {} : { quoteProtocol: METHOD_STUDY_QUOTE_PROTOCOL }), ...(output === undefined ? {} : { fileResult: output }) } })
         await this.assertCurrent(studyOpened, signal)
         return { execution, judged, outputDigest: output?.outputDigest ?? sha256(execution.answer), output }
       }

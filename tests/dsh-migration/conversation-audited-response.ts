@@ -18,6 +18,7 @@ export const auditedEvidenceResponse = (value: Record<string, unknown> & { evide
     kind: item.text.trim() === '' || source === undefined ? 'non-factual' : 'source-fact', status: item.text.trim() === '' || source === undefined ? 'permitted' : 'supported',
     sourceIds: item.text.trim() === '' || source === undefined ? [] : [source.id], explanation: 'Deterministic fixture captures every answer unit.' })
   const version = schema?.properties?.audit?.properties?.schemaVersion?.enum?.[0]
+  const quoteChoices = schema?.properties?.evidenceQuotes?.items?.enum
   const audit = version === 'tianwen.claim-audit.v1' ? {
     schemaVersion: version, evidenceDigest: material.claimEvidence.evidenceDigest,
     units: answers.map(item => ({ answerId: item.id, claims: item.text.trim() === '' && formatting === 'empty' ? [] : [assessment(item)] })),
@@ -27,6 +28,6 @@ export const auditedEvidenceResponse = (value: Record<string, unknown> & { evide
   }
   return toolCallResponse('judgment', 'structured_output', { ...value, evidenceQuotes: value.evidenceQuotes.map(quote => {
     if (verifyQuotes && !material.claimEvidence.items.some(item => item.text.includes(quote))) throw new Error(`No raw evidence item contains ${quote}`)
-    return quote
+    return Array.isArray(quoteChoices) ? quoteChoices.find(choice => typeof choice === 'string' && choice.includes(quote)) ?? quote : quote
   }), audit })
 }

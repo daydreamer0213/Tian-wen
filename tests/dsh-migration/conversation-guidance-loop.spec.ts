@@ -836,9 +836,16 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     if (scenario === 'derived-quote' || scenario === 'disabled') {
       if (scenario === 'derived-quote') {
         expect(rejectedRequest).toBeUndefined()
+        const quoteEnums = harness.adapter.requests.flatMap(request => request.tools?.flatMap(tool => {
+          const parameters = tool.parameters as ObjectJsonSchema
+          return tool.name === 'structured_output' && Array.isArray(parameters.properties?.evidenceQuotes?.items?.enum)
+            ? [parameters.properties.evidenceQuotes.items.enum] : []
+        }) ?? [])
+        expect(quoteEnums.length).toBeGreaterThan(0)
+        expect(quoteEnums.every(choices => !choices.includes('Preserve source scope'))).toBe(true)
       }
       expect(study?.activation).toBeUndefined()
-      expect(study?.stopped?.reason).toBe(scenario === 'disabled' ? 'cancelled' : 'invalid-judgment')
+      expect(study?.stopped?.reason).toBe(scenario === 'disabled' ? 'cancelled' : 'model-unavailable')
       expect(study?.arms).toHaveLength(0)
       expect(warnings).toHaveLength(1)
       return

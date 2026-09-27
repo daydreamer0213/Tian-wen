@@ -9,6 +9,8 @@ import { fileExecutionTexts, parseFileExecutionEvidence } from './conversation-t
 
 export type { ClaimAudit } from '@tianwen/evolution'
 
+export const METHOD_STUDY_QUOTE_PROTOCOL = 'tianwen.evidence-item-quotes.v1'
+
 export interface ClaimEvidenceItem {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'tool' | 'answer'
@@ -279,14 +281,32 @@ type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'ins
 }
 type AuditedCheck = ConversationAuditedReviewCheck
 
+function studyQuoteChoices(material: unknown, purpose: 'original-result' | 'method-study', evidence: ClaimEvidence): string[] | undefined {
+  if (!record(material) || !Object.hasOwn(material, 'quoteProtocol')) return undefined
+  if (material.quoteProtocol !== METHOD_STUDY_QUOTE_PROTOCOL || purpose !== 'method-study' || !record(material.task)
+    || material.task.files !== undefined || material.fileResult !== undefined) throw new Error('invalid-judgment')
+  const choices = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : [item.text]))]
+  if (choices.length === 0 || Buffer.byteLength(JSON.stringify(choices), 'utf8') > 98_304) throw new Error('material-too-large')
+  return choices
+}
+
 /** Two isolated native audits for the shared production review path. */
 export async function runConversationClaimReview(ctx: Context, parent: Agent, input: ClaimReviewInput) {
   // File tool readbacks contain generated output and cannot ground themselves.
   if (record(input.material) && input.material.evaluationMode === 'local-files' && 'toolEvidence' in input.material) input = { ...input, material: { ...input.material, toolEvidence: [] } }
   const evidence = projectClaimEvidence(input.material)
+  const quoteChoices = studyQuoteChoices(input.material, input.purpose ?? 'original-result', evidence)
   const material = { original: structuredClone(input.material), claimEvidence: evidence }
   let schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
-  if (input.purpose === 'method-study' && record(input.material) && record(input.material.task) && input.material.task.feedbackStandard !== undefined) {
+  if (quoteChoices !== undefined) schema = {
+    ...schema,
+    properties: { ...schema.properties, evidenceQuotes: {
+      ...schema.properties?.evidenceQuotes,
+      type: 'array',
+      items: { type: 'string', enum: quoteChoices, description: 'Choose one complete supplied claimEvidence item. Feedback standards are not evidence.' },
+    } },
+  }
+  else if (input.purpose === 'method-study' && record(input.material) && record(input.material.task) && input.material.task.feedbackStandard !== undefined) {
     const quoteExamples = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : answerQuoteChoices(item.text)))]
     if (quoteExamples.length > 0 && Buffer.byteLength(JSON.stringify(quoteExamples), 'utf8') <= 16_384) schema = {
       ...schema,
@@ -308,7 +328,8 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
     if (!Array.isArray(result.value.evidenceQuotes) || result.value.evidenceQuotes.some(quote =>
-      typeof quote !== 'string' || quote.length === 0 || !evidence.items.some(item => item.text.includes(quote)))) throw new Error('invalid-judgment')
+      typeof quote !== 'string' || quote.length === 0 || (quoteChoices === undefined
+        ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))) throw new Error('invalid-judgment')
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
     const { audit: _audit, ...summary } = result.value
     raw.push({ ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck)
@@ -336,8 +357,10 @@ export async function verifyConversationClaimReviewCheck(ctx: Context, check: Co
     || recovered.instruction !== fileClaimInstruction(original, expected.purpose, check.focus)) throw new Error('invalid-judgment')
   const evidence = projectClaimEvidence(original)
   if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('invalid-judgment')
+  const quoteChoices = studyQuoteChoices(original, expected.purpose, evidence)
   validateClaimAudit(check.audit, evidence, check.verdict)
-  if (check.evidenceQuotes.some(quote => !evidence.items.some(item => item.text.includes(quote)))) throw new Error('invalid-judgment')
+  if (check.evidenceQuotes.some(quote => quoteChoices === undefined
+    ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote))) throw new Error('invalid-judgment')
 }
 
 function fileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
