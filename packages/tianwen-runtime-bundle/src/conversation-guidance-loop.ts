@@ -434,6 +434,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const candidates = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
       && task.source.consentRevision === consent.revision && task.source.behaviorVersion === version
       && hasCurrentConversationQuality(task.admission?.qualityContract)
+      && task.admission?.decision?.feedback == null
       && ['text', 'local-files'].includes(task.admission?.decision?.evaluationMode ?? '') && task.completion?.status === 'completed' && conversationTaskModelDigest(task) !== undefined)
     const materials = new Map<string, ConversationTaskMaterial>()
     const tasks: ConversationTask[] = []

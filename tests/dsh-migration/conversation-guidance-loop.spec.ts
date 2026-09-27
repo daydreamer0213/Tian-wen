@@ -74,6 +74,12 @@ it('reports the existing study-selection gates without starting work or reading 
   expect(await readiness()).toEqual({ state: 'awaiting-compatible-sources' })
   tasks = [s1, s2]
   expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
+  const feedbackTurn = { ...counter, admission: { ...counter.admission, decision: {
+    ...counter.admission.decision, kind: 'task', relatedTaskId: s1.source.taskId,
+    feedback: { kind: 'requirement-change', quote: 'For future summaries, lead with the conclusion.', category: 'user-preference' },
+  } } }
+  tasks = [s1, s2, feedbackTurn]
+  expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
   tasks = [s1, s2, counter]
   expect(await readiness()).toEqual({ state: 'ready-to-schedule' })
   studies = [{ opened: { sourceTaskIds: [s1.source.taskId, s2.source.taskId] } }]
