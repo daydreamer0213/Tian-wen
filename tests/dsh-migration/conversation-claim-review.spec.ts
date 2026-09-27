@@ -296,6 +296,8 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(recovered.instruction).toContain('A source total does not establish completion of every counted check')
       expect(recovered.instruction).toContain('A declarative future decision procedure')
       expect(recovered.instruction).toContain('an answer\'s own assurance')
+      expect(recovered.instruction).toContain('requested output form separately from the factual claim audit')
+      expect(recovered.instruction).toContain('write a paragraph')
       expect(recovered.instruction).toContain('Independently reconstruct all original requirements')
       expect(recovered.modelConfigDigests).toEqual([sha256({ provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 2048 })])
       if (mode === 'permitted-inference') expect(checks.map(check => check.audit.schemaVersion === 'tianwen.claim-audit.v2' ? check.audit.units['answer-1']!.firstClaim : undefined)).toEqual([
@@ -373,6 +375,26 @@ it('keeps the historical v8 review instruction when recovering an old-quality ta
     expect(request).toContain('A pending or unverified result is not an explicitly judged failure')
     expect(request).toContain('Preserve the complete optional advice speech act')
     expect(request).not.toContain('A source total does not establish completion of every counted check')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps the exact historical v9 review instruction without v10 output-form additions', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-v9-instruction-')); roots.push(root)
+  const current = conversationQualityContract()
+  const old = { ...current, schemaVersion: 'tianwen.conversation-quality.v9' as const,
+    criterion: current.criterion.split(' Check the complete answer\'s requested output form')[0]! }
+  const material = { source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '用一段文字复述原料已送达。' }] })], qualityContract: old },
+    conversation: [{ id: 'answer', role: 'assistant', content: [{ type: 'text', text: '原料已送达。' }] }], toolEvidence: [] }
+  const harness = await mountPersistentHarness(root, [new Error('capture historical request')])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-v9-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationClaimReview(harness.ctx, handle.agent, { label: 'Historical v9', material,
+      evidence: ['原料已送达。'], signal: new AbortController().signal, callConfig: { provider: 'tianwen-probe', model: 'scripted' } })).rejects.toThrow('model-unavailable')
+    const request = JSON.stringify(harness.adapter.requests[0]?.messages)
+    expect(request).toContain('A source total does not establish completion of every counted check')
+    expect(request).not.toContain('requested output form separately')
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
