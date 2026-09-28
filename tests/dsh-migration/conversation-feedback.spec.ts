@@ -244,6 +244,36 @@ describe('native feedback assessment adapter', () => {
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
+  it('checks every restriction in a future preference before promoting an expanded criterion', async () => {
+    const note = 'For all future pilot summaries, use exactly two sentences with no title. This completed answer needs no rewrite.'
+    const expanded = { classification: 'preference', category: 'user-preference',
+      supplementalCriteria: ['Future pilot summaries use exactly two sentences with no title, bullet list, divider or addendum.'],
+      explanation: 'The user states a future style preference.', evidenceQuotes: ['For all future pilot summaries'] }
+    const scope = { decisions: [{ criterion: expanded.supplementalCriteria[0], scope: 'unclear',
+      evidenceQuote: 'For all future pilot summaries, use exactly two sentences with no title.' }] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(expanded), structured(scope)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(assessment.result?.scopeReview?.decisions).toEqual(scope.decisions)
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(false)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment))
+        .rejects.toThrow('not eligible')
+      const assessmentRequest = JSON.stringify(harness.adapter.requests.at(-2))
+      const scopeRequest = JSON.stringify(harness.adapter.requests.at(-1))
+      expect(assessmentRequest).toContain('Do not add output restrictions absent from the direct feedback')
+      expect(scopeRequest).toContain('Check every restriction in the entire criterion')
+      expect(scopeRequest).toContain('no title does not by itself prohibit bullet lists, dividers or addenda')
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('fails closed when the one independent feedback recheck repeats the contradiction', async () => {
     const contradictory = { classification: 'requirement-change', category: null,
       supplementalCriteria: ['Use two sentences for future pilot summaries.'],
