@@ -336,6 +336,46 @@ it('tells the main reply to acknowledge future-only feedback without rewriting t
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('offers only completed deliverable tasks as feedback targets after a feedback-only turn', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  const preference = { kind: 'preference', quote: '以后同类摘要请分两句写', category: 'user-preference' }
+  harness = await mount([
+    structured(admission), textResponse('第一份摘要：预计 5 天完成。'), ...reviewPair(review),
+    () => structured({ ...admission, kind: 'conversation', family: 'other', evaluationMode: 'subjective',
+      relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[0]!.source.taskId, feedback: preference }),
+    textResponse('收到。'),
+    request => {
+      const tasks = harness.ctx.tianwenEvolution.listConversationTasks()
+      expect(tasks[1]?.completion).toBeDefined()
+      const allowed = request.tools?.[0]?.parameters?.properties?.decision?.oneOf?.[0]?.properties?.relatedTaskId
+      expect(allowed).toEqual({ oneOf: [{ type: 'string', enum: [tasks[0]!.source.taskId] }, { type: 'null' }] })
+      expect(JSON.stringify(request.messages)).not.toContain(`"taskId":"${tasks[1]!.source.taskId}"`)
+      return structured(admission)
+    },
+    textResponse('第二份摘要：预计 5 天完成。'), ...reviewPair(review),
+    () => structured({ ...admission, kind: 'conversation', family: 'other', evaluationMode: 'subjective',
+      relatedTaskId: harness.ctx.tianwenEvolution.listConversationTasks()[1]!.source.taskId,
+      feedback: { ...preference, quote: '以后仍按两句写' } }),
+    textResponse('收到。'),
+  ])
+  try {
+    for (const message of [
+      '概括第一份：试点预计 5 天完成。',
+      '针对第一份，未来有一条偏好：以后同类摘要请分两句写。这份不重写。',
+      '概括第二份：试点预计 5 天完成。',
+      '针对第二份，以后仍按两句写。',
+    ]) {
+      harness.handle.agent.followup(direct(message))
+      await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    }
+    const tasks = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(tasks).toHaveLength(4)
+    expect(tasks[2]?.admission?.decision?.kind).toBe('task')
+    expect(tasks[2]?.review?.verdict).toBe('met')
+    expect(tasks[3]?.admission?.decision).toBeNull()
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('rechecks an explicitly targeted preference left unlinked by the first admission and stores the second native proof', async () => {
   let harness: Awaited<ReturnType<typeof mount>>
   const quote = '你这次把结论放在最后；以后同类摘要先给结论。'

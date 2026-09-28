@@ -216,7 +216,8 @@ export class TianwenConversationObserverService extends Service {
     const boundary = agent.session.events.findLast(event => event.type === 'turn/start' && event.data.turn === turn)
     if (boundary === undefined) return
     const earlier = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id))
-      .filter(task => task.source.consentRevision === consent.revision && task.completion !== undefined).slice(-8)
+      .filter(task => task.source.consentRevision === consent.revision && task.completion !== undefined
+        && task.admission?.decision?.kind === 'task').slice(-8)
     const materialProjection = 'surface-text.v1' as const
     const context = conversationContext(agent.session.events, boundary.seq, materialProjection)
     const scopeKey = `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}`
