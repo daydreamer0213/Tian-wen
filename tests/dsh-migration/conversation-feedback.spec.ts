@@ -190,6 +190,8 @@ describe('native feedback assessment adapter', () => {
       const assessmentRequest = JSON.stringify(harness.adapter.requests.at(-1))
       expect(assessmentRequest).toMatch(/future similar tasks[^.]*even if phrased as (?:an imperative|a requirement)/i)
       expect(assessmentRequest).toMatch(/requirement-change[^.]*present deliverable/i)
+      expect(assessmentRequest).toMatch(/short contiguous exact fragment/i)
+      expect(assessmentRequest).toMatch(/do not reconstruct (?:a )?full sentence/i)
       expect(clue).toMatchObject({ schemaVersion: 'tianwen.proposal-clue.v1', taskId: target.source.taskId,
         request: expect.any(Array), answer: expect.any(Array), feedback: { rating: 'negative', note: 'You omitted the pilot scope.' },
         classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain the pilot-only scope.'] })
