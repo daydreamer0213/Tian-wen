@@ -4,13 +4,14 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**当前实现版本：Runtime 0.1.16 / Desktop preview.17。** DSH 0.1.1-rc.2 是当前精确支持的
+**开发源码：Runtime 0.1.24 / Desktop preview.25；日常已安装版：Runtime 0.1.23 /
+Desktop preview.24。** 开发版尚未升级到日常环境。DSH 0.1.1-rc.2 是当前精确支持的
 Agent Runtime。首次确认自动学习后，用户可以直接在 DSH Web/Desktop 中自然说出需求，
 包括同一会话里的后续任务和反馈；不需要 `/research-summary`、规定格式材料、Goal，
 也不需要主动要求总结经验，天问会自行观测和复盘。
 
 每个任务在回答前固定验收条件。可归因的重复问题或长期偏好积累到足够证据后，才会自动
-比较新旧方法；通过独立评估的方法只影响未来任务。收到反馈不等于已经学会，模型声称完成
+比较新旧方法。研究被接受只是评估结果，不代表方法已生效或改善了未来任务；目前新的对话指导方法激活仍被隔离。收到反馈不等于已经学会，模型声称完成
 也不能证明外部操作成功或用户满意。源码、真实模型验收和实际安装分别记账，最新边界见
 [当前项目权威交接](docs/operations/tianwen-current-project-handoff.md)。
 
@@ -96,14 +97,13 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 
 ## 在已有 DSH Profile 中使用天问
 
-当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。先从本仓库构建唯一的
-Runtime Bundle 压缩包，再交给 DSH 安装到用户自己选择的 Profile：
+当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。下面的命令会从当前源码构建尚未发布的 0.1.24 开发包，安装到测试 Profile。运行前须使用已单独配置的测试 `DSH_HOME`，并把示例中的 `work` 换成该测试 Profile 的名称；这不是升级日常环境的指引：
 
 ```powershell
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
-$env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.16.tgz
+$env:DSH_HOME = 'D:\DevData\dsh-home-tianwen-test'
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.24.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -125,12 +125,12 @@ $DshPackageRoot = (Resolve-Path 'D:\path\to\your\dsh-host\node_modules\@deepseek
 另一种可选路径：
 
 ```powershell
-node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
+node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen-dev-test --json
 ```
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 DSH 对话界面，已知 Runtime
-`0.1.10` 至 `0.1.15` 的精确 Profile 可在用户确认后更新到内嵌的 `0.1.16`；未知或损坏版本不会被自动覆盖。
+`0.1.10` 至 `0.1.23` 的精确 Profile 可在用户确认后由开发版 preview.25 更新到内嵌的 `0.1.24`；未知或损坏版本不会被自动覆盖。日常已安装版仍为 Desktop preview.24 / Runtime 0.1.23，见[日常交付记录](docs/operations/tianwen-safety-023-delivery-20260928.md)。
 
 安装后，直接在 DSH Web 或 Tianwen Desktop 中正常对话；确认学习开关后，自然任务与反馈可自动进入学习路径，不需要命令或规定格式。
 
