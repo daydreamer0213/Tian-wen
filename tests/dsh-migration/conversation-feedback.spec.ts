@@ -269,8 +269,10 @@ describe('native feedback assessment adapter', () => {
       const assessmentRequest = JSON.stringify(harness.adapter.requests.at(-2))
       const scopeRequest = JSON.stringify(harness.adapter.requests.at(-1))
       expect(assessmentRequest).toContain('Do not add output restrictions absent from the direct feedback')
+      expect(assessmentRequest).toContain('Do not narrow a general future preference to a project-specific subtype from the original request or answer')
       expect(scopeRequest).toContain('Check every restriction in the entire criterion')
       expect(scopeRequest).toContain('no title does not by itself prohibit bullet lists, dividers or addenda')
+      expect(scopeRequest).toContain('A criterion about only that project-specific subtype does not fully preserve the general future preference')
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
