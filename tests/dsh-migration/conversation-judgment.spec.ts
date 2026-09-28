@@ -152,6 +152,56 @@ it('reminds an admission once in the same native session when the model answers 
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('reminds a text trial once in its native session and recovers only the captured answer', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'trial-reminder-')); roots.push(root)
+  const answer = '本周共核对 8 项，其中 5 项已完成；3 项待复核、尚未裁决。'
+  const material = { request: '用一句话汇报进度。', context: ['8 项中 5 项完成、3 项待复核。'] }
+  const config = { provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 512 }
+  const harness = await mountPersistentHarness(root, [
+    textResponse(JSON.stringify({ answer })),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('Submit the answer by calling structured_output')
+      return toolCallResponse('reminded-trial', 'structured_output', { answer })
+    },
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('trial-reminder-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const trial = await runConversationTrial(harness.ctx, handle.agent, { label: 'Tianwen trial', material, signal: new AbortController().signal, callConfig: config })
+    expect(trial.answer).toBe(answer)
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(trial.proof.sessionId))
+    expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-conversation-trial')).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'tool/call' && event.data.name === 'structured_output')).toHaveLength(1)
+    const expected = { outputDigest: sha256(answer), materialDigest: sha256(material), modelConfigDigest: sha256(config) }
+    expect(await recoverConversationTrial(harness.ctx, trial.proof, expected)).toEqual({ answer, material })
+    const events = saved.events.map(event => event.type === 'user/message' && event.data.source.kind === 'plugin' && event.data.source.plugin === 'tianwen-conversation-trial'
+      ? { ...event, data: { ...event.data, source: { ...event.data.source, plugin: 'forged-reminder' } } } : event)
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockResolvedValue({ ...saved, events } as typeof saved)
+    try {
+      await expect(recoverConversationTrial(harness.ctx, { ...trial.proof, sessionDigest: sha256({ meta: saved.meta, events }) }, expected)).rejects.toThrow('invalid-judgment')
+    } finally { inspect.mockRestore() }
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('fails a text trial closed after one reminder without native capture', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'trial-reminder-fail-')); roots.push(root)
+  const harness = await mountPersistentHarness(root, [textResponse('{"answer":"text only"}'), textResponse('Still no tool call.')])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('trial-reminder-fail-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationTrial(harness.ctx, handle.agent, { label: 'Tianwen trial', material: { request: 'Report.' }, signal: new AbortController().signal })).rejects.toThrow('invalid-judgment')
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('fails closed after one admission reminder without a native capture', async () => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'admission-reminder-fail-')); roots.push(root)
