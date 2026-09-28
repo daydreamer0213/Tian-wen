@@ -16,7 +16,7 @@ import { TianwenConversationFeedbackService } from '../../packages/tianwen-runti
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { type ConversationTask } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import {
-  ConversationFeedbackState, conversationFeedbackAssessmentId, parseConversationFeedbackRecord,
+  ConversationFeedbackState, conversationFeedbackAssessmentId, hasVerifiedContinuingPreference, parseConversationFeedbackRecord,
   type ConversationFeedbackStarted, type ConversationFeedbackResult,
 } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
 
@@ -117,8 +117,13 @@ describe('immutable natural task feedback assessments', () => {
     expect(() => parseConversationFeedbackRecord({ ...assessed(), proof: null })).toThrow()
     expect(() => parseConversationFeedbackRecord({ ...assessed(), supplementalCriteria: [] })).toThrow()
     expect(() => parseConversationFeedbackRecord({ ...assessed(), evidenceQuotes: [] })).toThrow()
-    expect(parseConversationFeedbackRecord({ ...assessed(), classification: 'preference', category: 'user-preference' }))
-      .toMatchObject({ classification: 'preference', supplementalCriteria: ['Preserve the pilot scope.'] })
+    const historicalPreference = parseConversationFeedbackRecord({ ...assessed(), classification: 'preference', category: 'user-preference' }) as ConversationFeedbackResult
+    expect(historicalPreference).toMatchObject({ classification: 'preference', supplementalCriteria: ['Preserve the pilot scope.'] })
+    expect(hasVerifiedContinuingPreference(historicalPreference)).toBe(false)
+    expect(() => parseConversationFeedbackRecord({ ...historicalPreference, scopeReview: {
+      decisions: [{ criterion: 'Different criterion.', scope: 'continuing', evidenceQuote: 'pilot' }],
+      proof: { ...proof, sessionId: 'independent-scope' },
+    } })).toThrow(/bound/i)
     expect(() => parseConversationFeedbackRecord({ ...assessed(), classification: 'requirement-change' })).toThrow()
     expect(parseConversationFeedbackRecord({ ...assessed(), classification: 'inconclusive', category: null,
       supplementalCriteria: [], evidenceQuotes: [], proof: null, unavailableReason: 'cancelled' }))
@@ -184,8 +189,10 @@ describe('native feedback assessment adapter', () => {
       supplementalCriteria: ['Use two sentences for future pilot summaries.'],
       explanation: 'The user specifies future summaries and declines revising the old answer.',
       evidenceQuotes: ['For all future pilot summaries', 'Do not revise the earlier answer.'] }
+    const scope = { decisions: [{ criterion: corrected.supplementalCriteria[0], scope: 'continuing',
+      evidenceQuote: 'For all future pilot summaries' }] }
     const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
-      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(contradictory), structured(corrected)])
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(contradictory), structured(corrected), structured(scope)])
     try {
       await harness.ctx.plugin(TianwenConversationFeedbackService)
       const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
@@ -197,15 +204,43 @@ describe('native feedback assessment adapter', () => {
       const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
       expect(assessment.result).toMatchObject({ classification: 'preference', category: 'user-preference',
         supplementalCriteria: ['Use two sentences for future pilot summaries.'], unavailableReason: null,
-        proof: { sessionId: expect.any(String) } })
+        proof: { sessionId: expect.any(String) }, scopeReview: { decisions: scope.decisions, proof: { sessionId: expect.any(String) } } })
       await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment))
         .resolves.toMatchObject({ classification: 'preference', category: 'user-preference' })
-      expect(harness.adapter.requests).toHaveLength(6)
-      expect(harness.adapter.requests.at(-1)?.messages.map(message => message.content))
-        .toEqual(harness.adapter.requests.at(-2)?.messages.map(message => message.content))
-      const secondRequest = JSON.stringify(harness.adapter.requests.at(-1))
+      expect(harness.adapter.requests).toHaveLength(7)
+      expect(harness.adapter.requests.at(-2)?.messages.map(message => message.content))
+        .toEqual(harness.adapter.requests.at(-3)?.messages.map(message => message.content))
+      const secondRequest = JSON.stringify(harness.adapter.requests.at(-2))
       expect(secondRequest).not.toContain('The request applies to future work.')
       expect(secondRequest).not.toContain('classification\\":\\"requirement-change')
+      expect(JSON.stringify(harness.adapter.requests.at(-1))).toContain('Check each proposed supplemental criterion')
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it('retains a mixed feedback assessment but refuses to promote a one-off instruction into future guidance', async () => {
+    const note = 'For all future pilot summaries, use two sentences. This completed pilot answer needs no rewrite; reply only received.'
+    const mixed = { classification: 'preference', category: 'user-preference',
+      supplementalCriteria: ['Use two sentences for future pilot summaries.', 'Reply only received to this completed pilot answer.'],
+      explanation: 'The user states a future style and a current acknowledgment.', evidenceQuotes: ['For all future pilot summaries'] }
+    const scope = { decisions: [
+      { criterion: mixed.supplementalCriteria[0], scope: 'continuing', evidenceQuote: 'For all future pilot summaries' },
+      { criterion: mixed.supplementalCriteria[1], scope: 'one-off', evidenceQuote: 'This completed pilot answer needs no rewrite; reply only received.' },
+    ] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(mixed), structured(scope)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(assessment.result?.scopeReview?.decisions).toEqual(scope.decisions)
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(false)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment))
+        .rejects.toThrow('not eligible')
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 

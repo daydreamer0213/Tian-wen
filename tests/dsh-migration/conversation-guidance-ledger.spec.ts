@@ -341,6 +341,31 @@ function retract(ledger: EvolutionLedger, assessment: ReturnType<typeof nativeFe
     retractedFeedbackVersion: source.feedbackVersion, sessionLifecycleFingerprint: source.sessionLifecycleFingerprint })
 }
 
+it('rejects a new study that cites a historical preference without a continuing-scope proof', () => {
+  const { ledger, tasks } = seeded()
+  const target = tasks[0]
+  ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId,
+    messageId: target.completion!.assistantMessageIds[0]!, feedbackVersion: 'future-v1', rating: 'negative',
+    note: 'For future summaries, use two sentences.', scopeKey: target.source.scopeKey,
+    sessionDigest: sha256('future session'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  const status = ledger.getLearningIntakeStatus(target.source.sessionId, target.completion!.assistantMessageIds[0]!)!
+  const source: ConversationFeedbackSource = { kind: 'native', sessionId: target.source.sessionId,
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, messageId: target.completion!.assistantMessageIds[0]!,
+    feedbackVersion: 'future-v1', feedbackFingerprint: status.feedbackFingerprint }
+  const started: ConversationFeedbackStarted = { kind: 'feedback-assessment-started', taskId: target.source.taskId,
+    assessmentId: conversationFeedbackAssessmentId({ taskId: target.source.taskId, source }), source,
+    admissionDigest: sha256(target.admission), resultDigest: target.completion!.resultDigest,
+    materialDigest: sha256('frozen preference'), consentRevision: 1 }
+  ledger.recordConversationFeedback(started)
+  ledger.recordConversationFeedback({ kind: 'feedback-assessed', assessmentId: started.assessmentId, taskId: started.taskId,
+    classification: 'preference', category: 'user-preference', supplementalCriteria: ['Use two sentences for future summaries.'],
+    explanation: 'The user asks for a future style.', evidenceQuotes: ['future summaries'],
+    proof: proof('preference-judge'), unavailableReason: null })
+  expect(() => ledger.recordConversationGuidance(opening(tasks, 'unverified-scope', [started.assessmentId])))
+    .toThrow(/verified continuing feedback scope/)
+})
+
 it('requires a current marked incomplete local-file task and its exact active feedback assessment for a proposal clue', () => {
   const root = ledgerRoot(); const ledger = new EvolutionLedger(root)
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })

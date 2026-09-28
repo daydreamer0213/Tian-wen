@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { effectiveConversationFamily, hasCurrentConversationQuality, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
+import { effectiveConversationFamily, hasCurrentConversationQuality, hasVerifiedContinuingPreference, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
@@ -137,7 +137,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const latest = [...assessments].reverse().find(item => item.result?.proof != null && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification)
       && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))
     if (latest?.result?.classification === 'positive') return undefined
-    const assessment = latest?.result?.supplementalCriteria.length ? latest : undefined
+    const assessment = latest?.result?.supplementalCriteria.length && hasVerifiedContinuingPreference(latest.result) ? latest : undefined
     if (assessment?.result?.category !== null && assessment?.result?.category !== undefined) return { category: assessment.result.category, assessment }
     const positive = evolution.listLearningIntakeStatuses(task.source.sessionId).some(item => item.state === 'active' && item.rating === 'positive'
       && item.sessionLifecycleFingerprint === task.source.sessionLifecycleFingerprint && task.completion?.assistantMessageIds.includes(item.messageId))
@@ -181,7 +181,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification)
         && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))
       if (assessment?.result === undefined || assessment.result.classification === 'positive' || assessment.result.category !== category
-        || assessment.result.supplementalCriteria.length === 0) continue
+        || assessment.result.supplementalCriteria.length === 0 || !hasVerifiedContinuingPreference(assessment.result)) continue
       try {
         const config = await recoverConversationTaskModel(this.ctx, task)
         if (sha256(config) !== conversationTaskModelDigest(task) || sha256(config) !== sha256(firstConfig)) continue

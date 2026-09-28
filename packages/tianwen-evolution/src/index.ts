@@ -14,7 +14,7 @@ export type { GuidanceFileTrialTarget, GuidanceFileTrialRecord } from './convers
 export type { GuidanceSnapshot, GuidanceStudyId, GuidanceProof, GuidanceStudyBody, GuidanceStudy, GuidanceCase, GuidanceSourceCase, GuidanceGeneratedCase, GuidanceProposalClue, GuidanceStudyOpened, GuidanceSourceReferenceReadRecord, GuidanceCandidateRecord, GuidanceArmRecord, GuidanceExploration, GuidanceExplorationIntentRecord, GuidanceExplorationArmRecord, GuidanceDecisionRecord, GuidanceActivationRecord, GuidanceRollbackRecord, GuidanceStoppedRecord, ConversationGuidanceRecord } from './conversation-guidance.js'
 export { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse } from './conversation-skill-source.js'
 export type { ConversationSkillAdmission, GuidanceSourceUse } from './conversation-skill-source.js'
-export { parseConversationFeedbackRecord, conversationFeedbackAssessmentId } from './conversation-feedback.js'
+export { parseConversationFeedbackRecord, conversationFeedbackAssessmentId, hasVerifiedContinuingPreference } from './conversation-feedback.js'
 export type { ConversationFeedbackRecord, ConversationFeedbackAssessment, ConversationFeedbackSource, ConversationFeedbackStarted, ConversationFeedbackResult } from './conversation-feedback.js'
 
 export type LedgerEvent = PublicLedgerEvent

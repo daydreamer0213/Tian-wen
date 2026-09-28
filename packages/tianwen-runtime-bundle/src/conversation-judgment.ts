@@ -49,6 +49,9 @@ export const CONVERSATION_FEEDBACK_SCHEMA = object({
   classification: choices(['attributable-problem', 'positive', 'requirement-change', 'preference', 'inconclusive']),
   category, supplementalCriteria: strings, explanation: string, evidenceQuotes: strings,
 })
+export const CONVERSATION_FEEDBACK_SCOPE_SCHEMA = object({ decisions: { type: 'array', items: object({
+  criterion: string, scope: choices(['continuing', 'one-off', 'unclear']), evidenceQuote: string,
+}) } })
 const generatedCase = object({ prompt: string, criteria: strings })
 export const CONVERSATION_CASES_SCHEMA = object({ adjacent: generatedCase, holdout: generatedCase })
 const generatedFileCase = object({ prompt: string, criteria: strings, files: object({

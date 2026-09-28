@@ -162,7 +162,7 @@ export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: 
     const feedbackMaterial = await feedbackService.materialForAssessment(assessment)
     if (sha256(feedbackMaterial.original) !== sha256(originalMaterial) || sha256(feedbackMaterial.answer) !== sha256(originalAnswer)
       || sha256(feedbackMaterial) !== assessment.started.materialDigest) throw new Error('source-unavailable')
-    const { kind: _kind, assessmentId: _id, taskId: _task, proof: _proof, unavailableReason: _reason, ...value } = assessment.result
+    const { kind: _kind, assessmentId: _id, taskId: _task, proof: _proof, unavailableReason: _reason, scopeReview: _scopeReview, ...value } = assessment.result
     const recovered = await recoverConversationStructuredJudgment(ctx, assessment.result.proof, value)
     if (sha256(recovered.material) !== sha256(feedbackMaterial)) throw new Error('source-unavailable')
     const rawFeedbackIncludedInStudy = Object.hasOwn(feedbackStandard, 'originalFeedback')

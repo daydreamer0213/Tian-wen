@@ -17,7 +17,7 @@ import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
 import { ConversationLearningState, effectiveConversationFamily, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
 import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
-import { ConversationFeedbackState, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
+import { ConversationFeedbackState, hasVerifiedContinuingPreference, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
 import {
   canonicalJson,
@@ -3049,6 +3049,21 @@ export class EvolutionLedger {
       const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
       if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
+    }
+    if (record.kind === 'study-opened') {
+      for (const sourceCase of record.cases) {
+        if (!('feedbackAssessmentId' in sourceCase) || sourceCase.feedbackAssessmentId === undefined) continue
+        const assessment = this.#conversationFeedback.list().find(item => item.started.assessmentId === sourceCase.feedbackAssessmentId)
+        if (assessment?.result === undefined || !hasVerifiedContinuingPreference(assessment.result)) {
+          throw new LedgerIntegrityError('new study requires verified continuing feedback scope')
+        }
+      }
+      for (const clue of record.proposalClues ?? []) {
+        const assessment = this.#conversationFeedback.list().find(item => item.started.assessmentId === clue.assessmentId)
+        if (assessment?.result === undefined || !hasVerifiedContinuingPreference(assessment.result)) {
+          throw new LedgerIntegrityError('new proposal clue requires verified continuing feedback scope')
+        }
+      }
     }
     const existingStudy = record.kind === 'study-opened' ? undefined
       : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)

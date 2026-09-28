@@ -36,6 +36,16 @@ export interface ConversationFeedbackResult {
   readonly evidenceQuotes: readonly string[]
   readonly proof: ConversationJudgmentProof | null
   readonly unavailableReason: Exclude<ConversationUnavailable, 'file-evidence-unavailable'> | null
+  /** Independent, frozen scope check for each proposed continuing preference. Older records omit it. */
+  readonly scopeReview?: {
+    readonly decisions: readonly { readonly criterion: string, readonly scope: 'continuing' | 'one-off' | 'unclear', readonly evidenceQuote: string }[]
+    readonly proof: ConversationJudgmentProof
+  }
+}
+export function hasVerifiedContinuingPreference(result: ConversationFeedbackResult): boolean {
+  return result.classification !== 'preference' || result.supplementalCriteria.length === 0
+    || result.scopeReview?.decisions.length === result.supplementalCriteria.length
+      && result.scopeReview.decisions.every((item, index) => item.criterion === result.supplementalCriteria[index] && item.scope === 'continuing')
 }
 export type ConversationFeedbackRecord = ConversationFeedbackStarted | ConversationFeedbackResult
 export interface ConversationFeedbackAssessment {
@@ -97,12 +107,29 @@ export function parseConversationFeedbackRecord(value: unknown): ConversationFee
     return record
   }
   if (value.kind !== 'feedback-assessed') throw new TypeError('unknown feedback assessment record')
-  const input = object(value, ['kind', 'assessmentId', 'taskId', 'classification', 'category', 'supplementalCriteria', 'explanation', 'evidenceQuotes', 'proof', 'unavailableReason'])
+  const keys = ['kind', 'assessmentId', 'taskId', 'classification', 'category', 'supplementalCriteria', 'explanation', 'evidenceQuotes', 'proof', 'unavailableReason']
+  const input = object(value, 'scopeReview' in value ? [...keys, 'scopeReview'] : keys)
+  let scopeReview: ConversationFeedbackResult['scopeReview']
+  if ('scopeReview' in input) {
+    const review = object(input.scopeReview, ['decisions', 'proof'])
+    if (!Array.isArray(review.decisions) || review.decisions.length === 0 || review.decisions.length > 12) throw new TypeError('feedback scope review decisions are invalid')
+    const decisions = review.decisions.map(item => {
+      const decision = object(item, ['criterion', 'scope', 'evidenceQuote'])
+      return { criterion: text(decision.criterion, 2048), scope: oneOf(decision.scope, ['continuing', 'one-off', 'unclear']), evidenceQuote: text(decision.evidenceQuote, 2048) }
+    })
+    const nativeProof = proof(review.proof)
+    if (nativeProof === null) throw new TypeError('feedback scope review requires native proof')
+    scopeReview = { decisions, proof: nativeProof }
+  }
   const record: ConversationFeedbackResult = { kind: 'feedback-assessed', assessmentId: text(input.assessmentId, 512), taskId: text(input.taskId, 512),
     classification: oneOf(input.classification, ['attributable-problem', 'positive', 'requirement-change', 'preference', 'inconclusive']),
     category: input.category === null ? null : oneOf(input.category, CONVERSATION_FAILURES), supplementalCriteria: texts(input.supplementalCriteria),
     explanation: text(input.explanation), evidenceQuotes: texts(input.evidenceQuotes), proof: proof(input.proof),
-    unavailableReason: input.unavailableReason === null ? null : oneOf(input.unavailableReason, ['model-unavailable', 'material-too-large', 'cancelled', 'invalid-judgment']) }
+    unavailableReason: input.unavailableReason === null ? null : oneOf(input.unavailableReason, ['model-unavailable', 'material-too-large', 'cancelled', 'invalid-judgment']),
+    ...(scopeReview === undefined ? {} : { scopeReview }) }
+  if (scopeReview !== undefined && (record.classification !== 'preference' || scopeReview.decisions.length !== record.supplementalCriteria.length
+    || scopeReview.decisions.some((item, index) => item.criterion !== record.supplementalCriteria[index]!)
+    || record.proof?.sessionId === scopeReview.proof.sessionId)) throw new TypeError('feedback scope review is not bound to independent preference criteria')
   if (record.classification !== 'inconclusive' && (record.proof === null || record.unavailableReason !== null)) throw new TypeError('conclusive feedback assessment requires native proof')
   if (record.classification === 'attributable-problem' && (record.category === null || record.supplementalCriteria.length === 0 || record.evidenceQuotes.length === 0)) throw new TypeError('attributable feedback requires a category, criteria and evidence')
   if (record.classification === 'preference' && record.supplementalCriteria.length > 0
@@ -151,6 +178,7 @@ export class ConversationFeedbackState {
     if (record.kind === 'feedback-assessed' && record.proof !== null) {
       const earlierSessions = [target.source.sessionId, target.admission.proof?.sessionId, target.review?.proof?.sessionId, natural?.admission?.proof?.sessionId]
       if (earlierSessions.includes(record.proof.sessionId)) throw new Error('feedback assessment requires an independent native judgment')
+      if (record.scopeReview !== undefined && earlierSessions.includes(record.scopeReview.proof.sessionId)) throw new Error('feedback scope review requires an independent native judgment')
     }
   }
   apply(input: ConversationFeedbackRecord, at: string): void {
