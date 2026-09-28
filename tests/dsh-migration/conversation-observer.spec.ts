@@ -114,6 +114,7 @@ it('captures ordinary requests in two native turns before each answer and review
     expect(firstReminderCount).toBe(1)
     expect(firstReminder).toContain('original direct user request')
     expect(firstReminder).toContain('heading, bullets, divider, or extra addendum')
+    expect(firstReminder).toContain('do not append a prompt for the next task')
     expect(secondReminder).toContain('Earlier Tianwen output-form reminders no longer apply')
     expect(secondReminder).toContain('original direct user request')
     expect(tasks[1]?.models).toHaveLength(1)
