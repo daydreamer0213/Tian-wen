@@ -1,5 +1,9 @@
 # Tianwen 当前项目权威交接
 
+## 最新 E095：原话引文准确，反馈类别却自相矛盾而停止
+
+全新隔离档使用实际包含 E094 窄提示的运行包，完成泽汀准确普通摘要，`summarization/text`、双审 `met/met`。读后持续偏好被准入正确关联为 `conversation/preference`；独立评估通过原生工具提交，原话引文均准确，但把“今后同类、旧稿不改”判为 `requirement-change`，同时填写只允许持续偏好的四项未来标准。宿主正确拒绝为 `invalid-judgment / inconclusive`、无证明。按协议未发 S2/C、未开研究；同意已关、宿主已停，最终冻结、五条直接输入、9 份 Session 和终态审计通过。见 [E095 结果](tianwen-study-095-results-20260928.md)。E094 引文多字在这一个新样本中未复现，但反馈评估仍未通过，更不能声称研究提交提醒通过；下一步须针对类别与结构矛盾做可审计的工程处理和全新前瞻。main/Daily **NO-GO**。
+
 ## 最新 E094：第一条真实反馈因引文多字无效，按协议停止
 
 全新隔离档用含 `5c1c220` 一次提交提醒的运行包完成青岚准确普通摘要，任务族 `summarization/text`、双审 `met/met`。读后冻结的两句持续偏好正确关联旧任务，主回复仅“收到”；独立评估虽调用 `structured_output` 并选择 `preference/user-preference`，却在一条原话引文中多写“我”，宿主严格逐字核验判 `invalid-judgment / inconclusive`，无有效反馈证明。按事前条件未发 S2/C、未开研究，提醒功能也尚无真实模型前瞻验证；同意已关、宿主已停，冻结、五条直接输入、10 份 Session 和终态审计通过。见 [E094 结果](tianwen-study-094-results-20260928.md)。开发分支已先红后绿增加“复制短而连续的原话片段”窄提示，逐字门不放宽；真实模型待新档验证。main/Daily **NO-GO**。
