@@ -52,9 +52,10 @@ export const CONVERSATION_FEEDBACK_SCHEMA = object({
 export const CONVERSATION_FEEDBACK_SCOPE_SCHEMA = object({ decisions: { type: 'array', items: object({
   criterion: string, scope: choices(['continuing', 'one-off', 'unclear']), evidenceQuote: string,
 }) } })
-const generatedCase = object({ prompt: string, criteria: strings })
+const generatedCriteria: JsonSchemaNode = { ...strings, description: 'Give 1 to 12 checkable criteria. The host rejects more than 12.' }
+const generatedCase = object({ prompt: string, criteria: generatedCriteria })
 export const CONVERSATION_CASES_SCHEMA = object({ adjacent: generatedCase, holdout: generatedCase })
-const generatedFileCase = object({ prompt: string, criteria: strings, files: object({
+const generatedFileCase = object({ prompt: string, criteria: generatedCriteria, files: object({
   entries: { type: 'array', items: object({ path: string, content: nullable(string) }) }, outputPaths: strings,
 }) })
 export const CONVERSATION_FILE_CASES_SCHEMA = object({ adjacent: generatedFileCase, holdout: generatedFileCase })

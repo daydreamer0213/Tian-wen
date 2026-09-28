@@ -23,11 +23,20 @@ import { TianwenEvolutionService } from '../../packages/tianwen-evolution/dist/i
 import { ConversationGuidanceState, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
-import { CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+
+it('tells the case designer the ledger accepted criteria range in both supported model tool schemas', () => {
+  for (const schema of [CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA]) {
+    for (const kind of ['adjacent', 'holdout']) {
+      const caseSchema = schema.properties[kind] as ObjectJsonSchema
+      expect(caseSchema.properties.criteria).toMatchObject({ type: 'array', description: expect.stringContaining('1 to 12') })
+    }
+  }
+})
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output',
   'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
