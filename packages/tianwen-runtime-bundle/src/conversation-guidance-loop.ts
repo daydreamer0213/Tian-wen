@@ -60,8 +60,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private readonly recoverable = new Set<string>()
   private accepting = true
 
-  private readonly sourceConfig: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[] }
-  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[] } = {}) {
+  private readonly sourceConfig: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
+  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean } = {}) {
     super(ctx, 'tianwenConversationGuidanceLoop')
     this.sourceConfig = structuredClone(config)
   }
@@ -83,7 +83,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     // it passes. Retain interrupted studies; fresh evidence can open a new one.
     for (const study of this.ctx.tianwenEvolution.listConversationGuidanceStudies()) {
       if (study.decision === undefined && study.stopped === undefined) this.ctx.tianwenEvolution.recordConversationGuidance({ kind: 'study-stopped', studyId: study.opened.studyId, reason: 'cancelled' })
-      if (study.decision?.verdict === 'accepted' && study.activation === undefined && hasCurrentConversationQuality(study.opened.qualityContract)) this.recoverable.add(study.opened.studyId)
+      if (this.sourceConfig.guidanceActivationQuarantine !== true && study.decision?.verdict === 'accepted' && study.activation === undefined && hasCurrentConversationQuality(study.opened.qualityContract)) this.recoverable.add(study.opened.studyId)
     }
     const offReview = this.ctx.on('tianwen/conversation-task-reviewed', taskId => {
       const task = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === taskId)
@@ -154,6 +154,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     return work
   }
   private async recoverAccepted(scopeKey: string): Promise<void> {
+    if (this.sourceConfig.guidanceActivationQuarantine === true) return
     const evolution = this.ctx.tianwenEvolution
     for (const study of evolution.listConversationGuidanceStudies(scopeKey)) {
       if (!this.recoverable.delete(study.opened.studyId) || study.decision?.verdict !== 'accepted' || study.candidate === undefined || study.activation !== undefined) continue
@@ -467,7 +468,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       await this.assertCurrent(opened, signal)
       const decision = evolution.conversationGuidanceDecision(opened.studyId)
       evolution.recordConversationGuidance(decision)
-      if (decision.verdict === 'accepted') evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
+      if (decision.verdict === 'accepted' && this.sourceConfig.guidanceActivationQuarantine !== true) evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
     } catch (error) {
       if (opened !== undefined) {
         const study = evolution.listConversationGuidanceStudies().find(item => item.opened.studyId === opened!.studyId)

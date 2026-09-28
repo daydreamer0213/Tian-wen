@@ -472,7 +472,7 @@ export async function apply(
   ctx: Context,
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
-  await applyCore(ctx, config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot })
+  await applyCore(ctx, { ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }), guidanceActivationQuarantine: true })
   ctx.plugin(controlledSessionArchive)
   ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService, config.learningSkillSources === undefined
@@ -484,6 +484,7 @@ export async function apply(
   ctx.plugin(TianwenConversationGuidanceLoopService, {
     ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
+    guidanceActivationQuarantine: true,
   })
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)

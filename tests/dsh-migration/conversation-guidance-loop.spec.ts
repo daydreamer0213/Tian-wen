@@ -17,6 +17,7 @@ import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runt
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+import { TianwenEvolutionService } from '../../packages/tianwen-evolution/dist/index.js'
 import { ConversationGuidanceState } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
@@ -45,7 +46,8 @@ it('forwards the actual explicit runtime environment and independent natural adm
   const evolutionRoot = join(root, 'evolution')
   try {
     await applyBundle(harness.ctx, { evolutionRoot, conversationSkillSources: [] })
-    expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, skillSources: [] })
+    expect(plugin).toHaveBeenCalledWith(TianwenEvolutionService, { root: evolutionRoot, guidanceActivationQuarantine: true })
+    expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, skillSources: [], guidanceActivationQuarantine: true })
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
     expect(harness.adapter.requests).toHaveLength(0)
   } finally { plugin.mockRestore(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
@@ -57,7 +59,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   ...(['recover-source-explored', 'recover-source-explored-first'] as const).flatMap(order =>
     (['sources', 'guidance', 'family', 'category'] as const).map(field => `${order}-frozen-${field}` as const)),
   'support-withdrawn-during-review', 'explored-support-withdrawn-during-review',
-  'accepted', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
+  'accepted', 'activation-quarantined', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
@@ -84,6 +86,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   const configuredSource = scenario === 'no-source-environment' ? { ...sourceAdmission, environmentDigest: sha256('other-environment') }
     : scenario === 'no-source-scope' ? { ...sourceAdmission, scopeKey: `conversation:${sha256('other-scope')}` } : sourceAdmission
   const loopConfig = { ...(scenario === 'no-source-root' ? {} : { evolutionRoot: scenario === 'no-source-relative-root' ? 'relative-root' : join(root, 'evolution') }),
+    ...(scenario === 'activation-quarantined' ? { guidanceActivationQuarantine: true } : {}),
     skillSources: withSource || scenario.startsWith('no-source-') ? [configuredSource] : [] }
   const sourceUse = () => ({ readDigest: sha256(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.sourceReference!), status: scenario === 'source-not-used' ? 'not-used' : 'adapted', rationale: 'A bounded scope-checking reference.' })
   const capturedMaterial = (request: GenerateOptions) => {
@@ -257,7 +260,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     })
   }
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
-  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution'),
+    ...(scenario === 'activation-quarantined' ? { guidanceActivationQuarantine: true } : {}) })
   await harness.ctx.plugin(SkillRegistry)
   harness.ctx.skills.register(definition)
   const getDefinition = harness.ctx.skills.get.bind(harness.ctx.skills)
@@ -633,6 +637,41 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       return
     }
     expect(study?.decision?.verdict).toBe('accepted')
+    if (scenario === 'activation-quarantined') {
+      expect(study.activation).toBeUndefined()
+      expect(harness.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
+      const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
+        .map(line => JSON.parse(line))
+        .filter(event => event.type === 'conversation-guidance-recorded' && event.record.kind === 'guidance-activated').length
+      expect(activationCount()).toBe(0)
+      const priorTasks = harness.ctx.tianwenEvolution.listConversationTasks()
+      handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '概括：局部样本需要 4 天。' }], source: { kind: 'user' } }))
+      await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const followingTask = harness.ctx.tianwenEvolution.listConversationTasks().at(-1)
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(priorTasks.length + 1)
+      expect(followingTask?.source.behaviorVersion).toBe(priorTasks[0]?.source.behaviorVersion)
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
+      expect(activationCount()).toBe(0)
+      const requests = harness.adapter.requests.length
+      await handle.dispose(); await harness.ctx.fiber.dispose()
+      const restarted = await mountFeedbackHarness(join(root, 'sessions'), [])
+      try {
+        await restarted.ctx.plugin(SubagentRuntime); await restarted.ctx.plugin(spawn, { providerName: 'spawn' })
+        await applyRuntime(restarted.ctx, { evolutionRoot: join(root, 'evolution'), guidanceActivationQuarantine: true })
+        const parent = await restarted.ctx.agents.create({ sessionId: SessionId('natural-learning-main'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+        await restarted.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
+        await restarted.ctx.tianwenConversationGuidanceLoop.schedule(parent.agent)
+        await restarted.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.decision?.verdict).toBe('accepted')
+        expect(restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
+        expect(restarted.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
+        expect(activationCount()).toBe(0)
+        expect(harness.adapter.requests).toHaveLength(requests)
+        expect(restarted.adapter.requests).toHaveLength(0)
+        await parent.dispose()
+      } finally { await restarted.ctx.fiber.dispose() }
+      return
+    }
     expect(study?.activation).toBeDefined()
     const oldTasks = harness.ctx.tianwenEvolution.listConversationTasks()
     expect(new Set(oldTasks.map(task => task.source.behaviorVersion)).size).toBe(1)

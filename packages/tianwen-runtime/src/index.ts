@@ -119,6 +119,7 @@ export const inject = [] as const
 
 export interface TianwenRuntimeConfig {
   readonly evolutionRoot?: string
+  readonly guidanceActivationQuarantine?: boolean
 }
 
 export async function apply(
@@ -137,7 +138,8 @@ export async function apply(
     throw new Error('evolutionRoot must be an absolute path')
   }
   await ctx.plugin(TianwenEvidenceService)
-  await ctx.plugin(TianwenEvolutionService, { root: evolutionRoot })
+  await ctx.plugin(TianwenEvolutionService, { root: evolutionRoot,
+    ...(config.guidanceActivationQuarantine === true ? { guidanceActivationQuarantine: true } : {}) })
   await ctx.plugin(TianwenLearningIntakeService)
   await ctx.plugin(TianwenSkillEvaluationService)
 }
