@@ -11,7 +11,7 @@ import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.
 import { apply as applyBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
-import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
+import { TianwenConversationGuidanceLoopService, sharesCopiedQuantifiedFact } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 import { recoverTextGuidanceArmForReview, recoverTextGuidanceStudyReviewPacket } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
@@ -28,6 +28,16 @@ import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/
 import { conversationContext, conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+
+it('rejects the E104 copied quantitative source facts without rejecting a new case in the same format', () => {
+  const source = '请根据以下记录，为江册项目负责人写一段简短的本周进度摘要：本周检查了 31 项交付事项，其中 21 项已完成，7 项正在等待法务复核。'
+  const copied = '项目代号「江册」。记录内容：本周检查了 31 项交付事项，其中 21 项已完成；7 项正在等待法务复核。'
+  const independent = '项目代号「澧川」。记录内容：本周核查了 47 项流程清单，其中 26 项已完成；9 项正在等待安全复核。'
+  const sharedNumber = '项目代号「澧川」。本周检查了 31 项流程清单，其中 26 项已完成；请写成两句话。'
+  expect(sharesCopiedQuantifiedFact([source], copied)).toBe(true)
+  expect(sharesCopiedQuantifiedFact([source], independent)).toBe(false)
+  expect(sharesCopiedQuantifiedFact([source], sharedNumber)).toBe(false)
+})
 
 it('tells the case designer the ledger accepted criteria range in both supported model tool schemas', () => {
   for (const schema of [CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA]) {

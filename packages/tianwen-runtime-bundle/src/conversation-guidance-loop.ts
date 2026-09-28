@@ -4,7 +4,7 @@ import { isAbsolute, join } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
-import { effectiveConversationFamily, hasCurrentConversationQuality, hasVerifiedContinuingPreference, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
+import { effectiveConversationFamily, hasCurrentConversationQuality, hasVerifiedContinuingPreference, guidanceInputDigest, guidanceStudyId, guidanceVersion, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceGeneratedCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
@@ -44,7 +44,7 @@ function proposalChoice(value: unknown, allowExploration: boolean, sourceNames: 
   if (read === undefined && 'inspectSource' in value && typeof value.inspectSource === 'string' && sourceNames.includes(value.inspectSource)) return { inspectSource: value.inspectSource }
   throw new Error('invalid-judgment')
 }
-function generatedCases(value: unknown, qualityContract: ConversationQualityContract, fileMode?: { outputKind: 'files' | 'chat', cwd: string }): readonly GuidanceCase[] {
+function generatedCases(value: unknown, qualityContract: ConversationQualityContract, fileMode?: { outputKind: 'files' | 'chat', cwd: string }): readonly GuidanceGeneratedCase[] {
   if (value === null || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'adjacent,holdout') throw new Error('invalid-judgment')
   return (['adjacent', 'holdout'] as const).map(kind => {
     const item = (value as Record<string, unknown>)[kind]
@@ -56,6 +56,25 @@ function generatedCases(value: unknown, qualityContract: ConversationQualityCont
     const material = { prompt: item.prompt, criteria: item.criteria as string[], qualityContract,
       ...(fileMode === undefined ? {} : { files: parseConversationFileMaterial({ schemaVersion: 'tianwen.conversation-file-material.v1', ...fileMode, ...generatedFiles as object }) }) }
     return { id: kind, kind, ...material, inputDigest: guidanceInputDigest(material.prompt, material.files), materialDigest: sha256(material) }
+  })
+}
+
+/** Catch long, near-verbatim quantitative facts reused as a generated task. This
+ * intentionally makes no claim about paraphrased facts or semantic independence. */
+export function sharesCopiedQuantifiedFact(sources: readonly string[], candidate: string): boolean {
+  const normalize = (text: string) => text.normalize('NFKC').replace(/[^\p{L}\p{N}]/gu, '')
+  const target = normalize(candidate)
+  const width = 20
+  const windows = new Set<string>()
+  for (let index = 0; index <= target.length - width; index++) {
+    const window = target.slice(index, index + width)
+    if ((window.match(/[0-9]+/g) ?? []).length >= 2) windows.add(window)
+  }
+  if (windows.size === 0) return false
+  return sources.some(source => {
+    const text = normalize(source)
+    for (let index = 0; index <= text.length - width; index++) if (windows.has(text.slice(index, index + width))) return true
+    return false
   })
 }
 
@@ -554,6 +573,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const independent = generatedCases(generated.value, qualityContract!, fileConfig)
       const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => conversationEvidenceTexts(material, [])).map(text => guidanceInputDigest(text)))
       if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
+      if (!fileMode) {
+        const sourcePrompts = [...sources, counter].flatMap(material => conversationEvidenceTexts({ request: material.request, context: [] }, []))
+        if (independent.some((item, index) => sharesCopiedQuantifiedFact([...sourcePrompts, ...independent.slice(0, index).map(previous => previous.prompt)], item.prompt))) throw new Error('invalid-judgment')
+      }
       cases.push(...independent)
       const environmentDigest = this.sourceEnvironment()
       const registry = this.ctx.get('skills') as Context['skills'] | undefined
