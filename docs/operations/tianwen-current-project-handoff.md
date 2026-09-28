@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 最新 E091：两份准确普通任务，第二条未来写法被评为需求变更而停止
+
+新 D: 隔离档在事前冻结后完成桥衡、海澄两份含“已确认失败／待复核未裁决”的准确单段摘要，均为 `summarization/text`、原生双审 `met/met`；桥衡读后反馈形成有效 `preference/user-preference`，海澄反馈虽准确关联原任务且主回复仅“收到”，独立评估却把“今后同类……按两句写，旧稿不重写”判为 `requirement-change`、无未来偏好标准。按协议未发安沄 C、未开研究；同意关闭、宿主停止，17 份 Session、7 条直接消息、冻结哈希和原生证明审计均通过。见 [E091 结果](tianwen-study-eligibility-091-results-20260928.md)。开发分支只对独立评估指令补“重复未来写法即使命令语气仍为偏好，当前交付物修改才是需求变更”的窄边界；定向测试先红后绿、相关四组 **176/176**、八包 TypeScript 构建通过。模型前瞻修复尚未验证，E091 不回判，main/Daily **NO-GO**。
+
+同日按用户要求整理 D 盘历史构建：26 个无内部链接的旧构建目录迁到 E 盘并保留原 D 路径链接，D 可用空间从约 11.42 GB 升至约 20.69 GB，迁移与中断恢复核对通过。见 [磁盘保留记录](tianwen-d-disk-retention-20260928.md)。以后新轮次只保留冻结、原生证据和小运行包，不复制整套桌面宿主。
+
 ## 最新 E090：真实反馈凑齐研究资格，研究第八臂无效交付而停止
 
 全新 D: 隔离档在同一工作区内完成松屿 S1、云栈 S2 的准确普通摘要与各自读后持续偏好，再完成南汀独立成功对照：三份原任务均为 `summarization/text` 且原生双审 `met/met`，两条反馈都准确关联原任务并评为 `preference/user-preference`。产品在对照终态后自行选对两个来源和 C 打开 `user-preference` 研究，候选方法形成；七条试验臂入账，S1/S2/C 的 baseline 均双审 `not-met`、candidate 均双审 `met`。第八条 `adjacent/candidate` 只在普通文本写出 JSON 形状答案，没有调用 `structured_output`，宿主以 `invalid-judgment` 停止，未补臂、未裁决、未激活。冻结、八条直接用户消息、46 份原生 Session、原生准入／反馈证明及停机审计通过，同意 `revision:2 / enabled:false`。见 [E090 结果](tianwen-study-eligibility-090-results-20260928.md)。这是一条真实研究入口通过和研究失败关闭证据，**不是完整研究或方法效果通过**。窄诊断确认模型在明确要求调用工具时仍只输出普通文本；保持失败关闭，不重跑 E090 凑数；main/Daily **NO-GO**。
