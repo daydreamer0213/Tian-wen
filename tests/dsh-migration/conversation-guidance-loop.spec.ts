@@ -385,7 +385,11 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     structured(admission), textResponse('全国需要 5 天。'), ...reviewPair(verdict(false, '全国')),
     structured(admission), textResponse('公司整体增加 7%。'), ...reviewPair(verdict(false, '公司整体')),
     structured(admission), textResponse('全公司降低 2%。'), ...reviewPair(verdict(true, '2%')),
-    structured({ adjacent: { prompt: '概括：试点满意度 80%，不代表全国。', criteria: ['Preserve pilot-only scope'] }, holdout: { prompt: scenario === 'copied-holdout' ? '概括：试点需要 5 天，不代表全国。' : '概括：实验室测量 3 秒，实地结果未知。', criteria: ['Do not claim field results'] } }),
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('Both generated tasks must use facts different from every source task and from each other.')
+      expect(JSON.stringify(request.messages)).not.toContain('with all source facts')
+      return structured({ adjacent: { prompt: '概括：试点满意度 80%，不代表全国。', criteria: ['Preserve pilot-only scope'] }, holdout: { prompt: scenario === 'copied-holdout' ? '概括：试点需要 5 天，不代表全国。' : '概括：实验室测量 3 秒，实地结果未知。', criteria: ['Do not claim field results'] } })
+    },
     request => {
       initialMaterial = capturedMaterial(request)
       expect(JSON.stringify(request.messages)).not.toContain('实验室测量 3 秒')
