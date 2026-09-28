@@ -258,13 +258,25 @@ export class TianwenConversationFeedbackService extends Service {
       const evidence = [...conversationEvidenceTexts(material.original, answers, material.toolEvidence, material.fileResult?.files),
         ...conversationEvidenceTexts({ request: material.feedback.request ?? [], context: [] },
           material.feedback.note === undefined ? [] : [material.feedback.note])]
-      const output = await runConversationJudgment(this.ctx, agent, {
+      const judgmentInput = {
         outputSchema: conversationEvidenceSchema(CONVERSATION_FEEDBACK_SCHEMA, evidence),
-        label: `Tianwen feedback ${assessmentId}`, instruction: material.fileResult === undefined ? ASSESSMENT_INSTRUCTION
+        instruction: material.fileResult === undefined ? ASSESSMENT_INSTRUCTION
           : `${ASSESSMENT_INSTRUCTION}\nFrozen initial file entries are source preimages. fileResult contains exact captured final bytes and the assistant reply; declared outputPaths are answer artifacts, while input-only files are not answers. Post-write readback or successful writes do not ground generated facts. File existence proves only existence. Attribute feedback against the original request, actual file outputs and exact user feedback.`, material, signal,
-      })
+      }
+      let output = await runConversationJudgment(this.ctx, agent, { ...judgmentInput, label: `Tianwen feedback ${assessmentId}` })
       const assessment = { started, startedAt: '' }
       if (signal.aborted || !await this.isAssessmentActive(assessment)) throw new Error('cancelled')
+      // A requirement-change with future criteria is internally inconsistent.
+      // Give one blind native recheck the same frozen material, never the first answer.
+      if (output.value !== null && typeof output.value === 'object' && !Array.isArray(output.value)
+        && 'classification' in output.value && 'supplementalCriteria' in output.value
+        && output.value.classification === 'requirement-change'
+        && Array.isArray(output.value.supplementalCriteria) && output.value.supplementalCriteria.length > 0) {
+        const firstSessionId = output.proof.sessionId
+        output = await runConversationJudgment(this.ctx, agent, { ...judgmentInput, label: `Tianwen feedback independent recheck ${assessmentId}` })
+        if (signal.aborted || !await this.isAssessmentActive(assessment)) throw new Error('cancelled')
+        if (output.proof.sessionId === firstSessionId) throw new Error('invalid-judgment')
+      }
       if (output.value === null || typeof output.value !== 'object' || Array.isArray(output.value)) throw new TypeError('invalid feedback judgment')
       const result = parseConversationFeedbackRecord({ ...output.value, kind: 'feedback-assessed', assessmentId,
         taskId: binding.taskId, proof: output.proof, unavailableReason: null })
