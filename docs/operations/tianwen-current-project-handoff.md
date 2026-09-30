@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 持续DEV学习环境已接通；新真实报告任务准入失败，未接纳
+
+190b6a1复用正式runtime及DSH持久harness，连续Profile D:/DevData/tianwen-development-learning-20261001，旧记录未导入/重判。首次预检子服务异步启动时机失败0模型，等待原生命周期后五对话服务active；完整桌面host/其他缺依赖服务仍pending，不称全产品启动。一次新实际进展说明任务根completed/生成稿，总5请求（准入2/根3）、工具4、重试0；准入第二次捕获14条criteria超过既有12，invalid-judgment/review inconclusive/无完整文件结果，按事前条件拒收恢复目标不存在、不重跑。准确原任务冷读不变，材料仍拒恢复、账本raw不改、0调用；草稿/失败/源摘要保留。见[实际结果和边界](tianwen-persistent-development-task-20261001.md)。
+
+5fa4ce6设计后仅提示/criteria说明暴露现有1—12条上限，允许组合相关要求但全保留/原请求权威，解析/上限/重试/旧结果不变，尚无新自然效果验证。三组回归125/125、8包现有TS直接类型/声明退出0，只读审查无重要问题；原包装pnpm依赖环境失败另记，不安装。真实反馈/研究/激活0，普通记录不等于研究来源或完整材料。持续Profile238882字节，压缩流快照、小记录、新测试根残余0、无副本；D约18.59GiB。完整目标active，C—F/NO-GO/隔离/原门槛/十工作日窗口保持。后续自主选新实际待办复用连续环境，缺独立案例不扩通用checker、不以凑来源代替开发。
+
 ## 2026-10-01 文件研究完整只读证据入口已补齐；未转为结果verdict
 
 从63e315e普通verified回到C/D：十臂文件收据已有，但旧完整packet仅text。设计/计划a846711后，共享拼装补file arm/packet，先native恢复输出再核对双审、原任务完整文件结果/反馈/设计/提案，生成案例semanticIndependence仍unestablished；text字段原样、没有模型/账本写入/候选执行/采用权限。见[范围、失败及验证](tianwen-file-study-evidence-20261001.md)。

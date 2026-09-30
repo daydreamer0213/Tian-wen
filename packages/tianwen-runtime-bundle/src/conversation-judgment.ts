@@ -30,7 +30,7 @@ export const CONVERSATION_FAMILY_SCHEMA = object({ family: choices(CONVERSATION_
 // let the real model emit schema metadata (`type`) instead of the required `kind`.
 // Native validation and the stricter evidence/domain checks both remain active.
 const ADMISSION_COMMON_PROPERTIES: Record<string, JsonSchemaNode> = {
-  kind: choices(['task', 'conversation']), objective: string, criteria: { ...strings, description: 'Separate observable user requirements. Preserve every explicit output-only restriction, exclusion, condition, uncertainty and decision boundary; do not reduce an output restriction to merely selecting source content.' },
+  kind: choices(['task', 'conversation']), objective: string, criteria: { ...strings, description: 'A task requires 1 to 12 criteria; the host rejects more than 12. Keep all user requirements observable. If necessary, combine related requirements within an entry without dropping any explicit output-only restriction, exclusion, condition, uncertainty or decision boundary; do not reduce an output restriction to merely selecting source content. The original user request remains authoritative.' },
   family: choices(CONVERSATION_FAMILIES), relatedTaskId: nullable(string),
   feedback: nullable(object({ kind: choices(['correction', 'positive', 'preference', 'requirement-change']), quote: string, category })),
 }
