@@ -20,6 +20,12 @@ export interface ConversationTypeScriptCheckConfig {
   readonly compilerOptions: ts.CompilerOptions
 }
 
+/** Trusted project constraint over the already-frozen compiler program. */
+export interface FrozenTypeScriptCandidateConstraint {
+  readonly digest: ReturnType<typeof sha256>
+  readonly check: (program: ts.Program, target: ts.SourceFile) => string | undefined
+}
+
 interface Observations {
   readonly texts: Map<string, string | undefined>
   readonly files: Map<string, boolean>
@@ -131,7 +137,9 @@ function captureHost(options: ts.CompilerOptions, cwd: string, targetKey: string
   return host
 }
 
-export function createConversationTypeScriptCheck(config: ConversationTypeScriptCheckConfig): ConversationExternalCodeCheck {
+export function createConversationTypeScriptCheck(config: ConversationTypeScriptCheckConfig, constraint?: FrozenTypeScriptCandidateConstraint): ConversationExternalCodeCheck {
+  const frozenConstraint = constraint === undefined ? undefined : { digest: constraint.digest, check: constraint.check }
+  if (frozenConstraint !== undefined && (!/^sha256:[a-f0-9]{64}$/u.test(frozenConstraint.digest) || typeof frozenConstraint.check !== 'function')) throw new Error('invalid frozen TypeScript candidate constraint')
   const cwd = resolve(config.cwd)
   const requestText = config.requestText
   const targetPath = config.targetPath
@@ -172,6 +180,7 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
       const contractDigest = sha256({
         cwd, targetPath, contextPaths, requestText,
         compiler: ts.version, options, compilerDigest, checkerDigest,
+        ...(frozenConstraint === undefined ? {} : { constraintDigest: frozenConstraint.digest }),
         manifest,
         files: [...observations.files].sort(compareKeys),
         directories: [...observations.directories].sort(compareKeys),
@@ -239,7 +248,16 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
           const diagnostics = ts.getPreEmitDiagnostics(program)
           candidate.signal.throwIfAborted()
           if (unknown) return { status: 'unverifiable', detail: `${describe(scope, diagnostics)}; required dependency outside frozen context` }
-          if (diagnostics.length === 0) return { status: 'verified', detail: describe(scope, diagnostics) }
+          if (diagnostics.length === 0) {
+            if (frozenConstraint !== undefined) {
+              const target = program.getSourceFile(targetFull)
+              if (target === undefined) return { status: 'unverifiable', detail: `${describe(scope, diagnostics)}; frozen candidate source unavailable` }
+              const violation = frozenConstraint.check(program, target)
+              candidate.signal.throwIfAborted()
+              if (violation !== undefined) return { status: 'rejected', detail: `${describe(scope, diagnostics)}; ${violation}` }
+            }
+            return { status: 'verified', detail: describe(scope, diagnostics) }
+          }
           return { status: 'rejected', detail: describe(scope, diagnostics) }
         },
       }

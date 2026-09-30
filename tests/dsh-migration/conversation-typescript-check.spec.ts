@@ -47,6 +47,28 @@ it('accepts a typed output while describing only the frozen compiler check', asy
   expect(existsSync(join(f.cwd, 'task.js'))).toBe(false)
 })
 
+it('freezes a trusted candidate constraint and supplies only the captured program', async () => {
+  const f = fixture(), calls: string[] = []
+  const constraint = { digest: sha256('trusted-constraint'), check(program: ts.Program, target: ts.SourceFile): string | undefined {
+    calls.push(target.text)
+    expect(program.getSourceFile(join(f.cwd, 'api.ts'))?.text).toBe('export const api: number = 1')
+    return 'Trusted project obligation rejected.'
+  } }
+  const check = createConversationTypeScriptCheck(f.config, constraint)
+  constraint.digest = sha256('changed'); constraint.check = () => undefined
+  const prepared = await check.prepare(f.material)
+  expect(prepared).toBeDefined()
+  writeFileSync(join(f.cwd, 'api.ts'), 'export const api: string = "changed"')
+  const output = 'export const value: number = 2'
+  expect((await prepared!.evaluate(candidate(f, output))).status).toBe('rejected')
+  expect(calls).toEqual([output])
+})
+
+it('refuses a malformed trusted constraint before capturing a task', () => {
+  const f = fixture()
+  expect(() => createConversationTypeScriptCheck(f.config, { digest: 'invalid' as ReturnType<typeof sha256>, check: () => undefined })).toThrow(/constraint/)
+})
+
 it('rejects a type error without exposing candidate text', async () => {
   const f = fixture(); const prepared = await prepare(f)
   const result = await prepared.evaluate(candidate(f, 'export const private_value: number = "PRIVATE_VALUE"'))

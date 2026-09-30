@@ -16,8 +16,8 @@
 
 Files: create `scripts/ancillary-type-result-contract.ts`, create `tests/dsh-migration/ancillary-type-result-contract.spec.ts`; thin optional frozen-program constraint in `scripts/conversation-typescript-check.ts`, old unconfigured behavior unchanged.
 
-- [ ] 单文件真实旧TS2352复核，原目标/测试字节冻结摘要。
-- [ ] 现有纯编译检查的真实假阳性先红，随后实现骨架与禁止类型检查。
-- [ ] 正负与冻结/取消/身份机制回归，目标/脚本/测试strict、相关原编译检查；不修改真实目标求绿。
-- [ ] 独立只读审查及修复重要问题；保留首失败与范围。
-- [ ] 小记录/自有根0/磁盘，交接提交推送；下一阶段一次普通原生尝试，完整目标继续active。
+- [x] 单文件真实旧TS2352复核，原目标/测试字节冻结摘要。
+- [x] 现有纯编译检查的真实假阳性先红，随后实现骨架与禁止类型检查。
+- [x] 正负与冻结/取消/身份机制回归，脚本/完整相关测试strict、相关原编译检查；真实目标仍原2352，不修改求绿。
+- [x] 独立只读审查及修复重要问题；保留首失败与范围。
+- [x] 小记录/自有根0/磁盘，交接提交推送（准确状态见finish.json）；下一阶段一次普通原生尝试，完整目标继续active。
