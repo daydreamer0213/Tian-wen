@@ -479,6 +479,49 @@ describe('archive credential literal detection', () => {
 })
 
 describe('@tianwen/runtime-bundle', () => {
+  it('lets a host implement external checks through public package types without exposing the private runner', () => {
+    const consumerPath = resolve(packageRoot, '__external_check_consumer__.mts')
+    const manifest = json(resolve(packageRoot, 'package.json')) as { files: readonly string[] }
+    const publishedFiles = new Set([...manifest.files.map(path => resolve(packageRoot, path)), resolve(packageRoot, 'package.json')])
+    const published = (path: string) => {
+      const id = resolve(path), within = relative(packageRoot, id)
+      return id === consumerPath || isAbsolute(within) || within.startsWith('..')
+        || /^node_modules[\\/]/u.test(within) || publishedFiles.has(id)
+    }
+    const declarations = `import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation,
+      ConversationExternalCodeCandidate, PreparedConversationExternalCodeCheck } from '@tianwen/runtime-bundle';
+      const check: ConversationExternalCodeCheck = { async prepare(material) {
+        const source: ConversationExternalCodePreparation = material;
+        return { checkerId: 'host-check', checkerDigest: 'sha256:${'0'.repeat(64)}', contractDigest: 'sha256:${'1'.repeat(64)}',
+          inputs: [], async evaluate(candidate) {
+            const captured: ConversationExternalCodeCandidate = candidate;
+            return { status: 'unverifiable', detail: 'No applicable contract.' };
+          } } satisfies PreparedConversationExternalCodeCheck;
+      } }; void check;`
+    function compile(text: string) {
+      const options: ts.CompilerOptions = { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.NodeNext,
+        moduleResolution: ts.ModuleResolutionKind.NodeNext, strict: true, noEmit: true, skipLibCheck: true }
+      const host = ts.createCompilerHost(options, true)
+      const getSourceFile = host.getSourceFile
+      const readFile = host.readFile, fileExists = host.fileExists
+      host.readFile = path => published(path) ? readFile(path) : undefined
+      host.fileExists = path => published(path) && fileExists(path)
+      host.getSourceFile = (path, languageVersion, onError, shouldCreateNewSourceFile) => resolve(path) === consumerPath
+        ? ts.createSourceFile(path, text, languageVersion, true)
+        : published(path) ? getSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile) : undefined
+      return ts.getPreEmitDiagnostics(ts.createProgram([consumerPath], options, host))
+        .map(item => ({ code: item.code, message: ts.flattenDiagnosticMessageText(item.messageText, '\n') }))
+    }
+    expect(compile(declarations)).toEqual([])
+    expect(compile(declarations.replace("status: 'unverifiable'", "status: 'met'")))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ code: 2322 })]))
+    expect(compile("import { ConversationExternalCodeChecks } from '@tianwen/runtime-bundle'; void ConversationExternalCodeChecks;"))
+      .toEqual(expect.arrayContaining([expect.objectContaining({
+        code: expect.toSatisfy((code: number) => code === 2305 || code === 2724),
+        message: expect.stringContaining('ConversationExternalCodeChecks'),
+      })]))
+  }, 30_000)
+
   it('bundles the package root through the narrow research-summary entry', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/index.js'), 'utf8')
     const metafile = json(resolve(packageRoot, 'dist/index.meta.json')) as {

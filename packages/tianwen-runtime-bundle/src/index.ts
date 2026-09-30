@@ -1,5 +1,11 @@
 export const name = 'tianwen-runtime-bundle'
 export function apply(): void {}
+export type {
+  ConversationExternalCodePreparation,
+  ConversationExternalCodeCandidate,
+  PreparedConversationExternalCodeCheck,
+  ConversationExternalCodeCheck,
+} from './conversation-external-check.js'
 export {
   EXPLICIT_CORRECTION_PROTOCOL_SCOPE,
   EXPLICIT_CORRECTION_PROTOCOL_VERSION,
