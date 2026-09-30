@@ -13,6 +13,7 @@ import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversa
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { recoverConversationCaseDesign } from './conversation-case-design.js'
+import { hasSatisfiedConversationCodeCheck } from '@tianwen/evolution'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 
@@ -87,6 +88,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private readonly laneAgents = new Map<string, Agent>()
   private readonly laneInterrupts = new Map<string, () => void>()
   private readonly persistedWakes = new Map<string, Promise<void>>()
+  private readonly persistedWakeDirty = new Set<string>()
   private readonly dirty = new Set<string>()
   private readonly controllers = new Set<AbortController>()
   private readonly recoverable = new Set<string>()
@@ -117,10 +119,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (study.decision === undefined && study.stopped === undefined) this.ctx.tianwenEvolution.recordConversationGuidance({ kind: 'study-stopped', studyId: study.opened.studyId, reason: 'cancelled' })
       if (this.sourceConfig.guidanceActivationQuarantine !== true && study.decision?.verdict === 'accepted' && study.activation === undefined && hasCurrentConversationQuality(study.opened.qualityContract)) this.recoverable.add(study.opened.studyId)
     }
-    const offReview = this.ctx.on('tianwen/conversation-task-reviewed', taskId => {
+    const wakeTask = (taskId: string) => {
       const task = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === taskId)
       if (task !== undefined) void this.wakeTask(task).catch(error => this.warn(error))
-    })
+    }
+    const offReview = this.ctx.on('tianwen/conversation-task-reviewed', wakeTask)
+    const offCheck = this.ctx.on('tianwen/conversation-code-check-finished', wakeTask)
     const wakeSession = (sessionId: string) => {
       const agent = this.ctx.agents.get(SessionId(sessionId))
       if (agent !== undefined) void this.schedule(agent).catch(error => this.warn(error))
@@ -144,7 +148,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     })
     for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
     this.ctx.effect(() => async () => {
-      this.accepting = false; offReview(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
+      this.accepting = false; offReview(); offCheck(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
       for (const interrupt of this.laneInterrupts.values()) interrupt()
       for (const controller of this.controllers) controller.abort()
       await this.whenIdle()
@@ -223,7 +227,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     if (live !== undefined) return this.schedule(live)
     const scopeKey = task.source.scopeKey
     const existing = this.persistedWakes.get(scopeKey)
-    if (existing !== undefined) return existing
+    if (existing !== undefined) { this.persistedWakeDirty.add(scopeKey); return existing }
     const work = Promise.resolve().then(async () => {
       if (!this.accepting) return
       const evidence = await this.select(scopeKey)
@@ -237,7 +241,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
         provider: config.provider, model: config.model, ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
       } })
       try { await this.schedule(handle.agent) } finally { await handle.dispose() }
-    }).finally(() => { if (this.persistedWakes.get(scopeKey) === work) this.persistedWakes.delete(scopeKey) })
+    }).finally(() => {
+      if (this.persistedWakes.get(scopeKey) === work) this.persistedWakes.delete(scopeKey)
+      // An event may arrive after scan took its task snapshot. Coalesce it into
+      // one fresh serial scan, including events queued before this finalizer.
+      if (this.persistedWakeDirty.delete(scopeKey) && this.accepting) return this.wakeTask(task)
+    })
     this.persistedWakes.set(scopeKey, work)
     return work
   }
@@ -495,7 +504,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         if (studies.some(study => sources.every(task => study.opened.sourceTaskIds.includes(task.source.taskId)))) continue
         if (attempts.some(attempt => sources.every(task => attempt.sourceTaskIds.includes(task.source.taskId)))) { attempted = true; continue }
         unstudied = true
-        const counterexample = tasks.find(task => task.review?.verdict === 'met' && task.review.proof !== null && this.support(task) === undefined && !this.negativeFeedback(task)
+        const counterexample = tasks.find(task => task.review?.verdict === 'met' && task.review.proof !== null && hasSatisfiedConversationCodeCheck(task) && this.support(task) === undefined && !this.negativeFeedback(task)
           && compatible(task, first) && conversationTaskModelDigest(task) === conversationTaskModelDigest(first) && effectiveConversationFamily(task) === effectiveConversationFamily(first))
         if (counterexample !== undefined) {
           const category = this.support(first)!.category

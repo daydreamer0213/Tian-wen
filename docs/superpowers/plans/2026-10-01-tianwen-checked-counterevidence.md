@@ -25,9 +25,9 @@
 - Consumes: ConversationTask现有externalCheckPrepared/externalCheckFinished、task review及持久结果写入。
 - Produces: hasSatisfiedConversationCodeCheck(task): boolean；tianwen/conversation-code-check-finished(taskId)事件。
 
-- [ ] 写选择/直接账本新写入的pending/rejected/unverifiable反例，以及无检查、verified/非met、历史恢复对照。
-- [ ] 写正式结果事件仅一次、调用现有wakeTask的验证；保存首次失败，确认不是夹具错误。
-- [ ] 实现共享函数、未来写入保护、精确结果事件及订阅/释放，不改共享历史校验。
-- [ ] 定向测试，再受影响研究、代码检查/任务账本回归；运行八包类型与声明检查。
-- [ ] 独立只读审查，修复重要问题，记录失败/通过与资源事实。
-- [ ] 更新权威交接与路线图，提交/推送DEV，核实准确提交、干净状态与D空间；完整目标保持active。
+- [x] 写选择/直接账本新写入的pending/rejected/unverifiable反例，以及无检查、verified/非met、历史恢复对照。
+- [x] 写正式结果事件仅一次、调用现有wakeTask的验证；保存首次失败，确认不是夹具错误。
+- [x] 实现共享函数、未来写入保护、精确结果事件及订阅/释放，不改共享历史校验。
+- [x] 定向测试，再受影响研究、代码检查/任务账本回归；运行八包类型与声明检查。
+- [x] 独立只读审查，修复重要问题，记录失败/通过与资源事实。
+- [x] 更新权威交接与路线图；提交/推送DEV及准确提交、干净状态、D空间核对以本轮finish.json收据为准，完整目标保持active。

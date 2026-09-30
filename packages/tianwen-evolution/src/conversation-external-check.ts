@@ -37,6 +37,12 @@ export function supportsConversationCodeCheck(decision: ConversationAdmissionDec
     && (decision.evaluationMode === 'external' || decision.evaluationMode === 'local-files' && decision.fileOutputKind === 'files')
 }
 
+/** A configured check may not contradict new successful counterevidence.
+ * This does not establish a task verdict; unconfigured tasks keep their rules. */
+export function hasSatisfiedConversationCodeCheck(task: ConversationTask | undefined): boolean {
+  return task !== undefined && (task.externalCheckPrepared === undefined || task.externalCheckFinished?.status === 'verified')
+}
+
 function fields(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) throw new TypeError('invalid external check fields')

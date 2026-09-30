@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { hasSatisfiedConversationCodeCheck } from './conversation-external-check.js'
 import {
   closeSync,
   existsSync,
@@ -3036,6 +3037,7 @@ export class EvolutionLedger {
     if ([...attempt.sourceTaskIds, attempt.counterexampleTaskId].some(id => !hasCurrentConversationQuality(tasks.find(task => task.source.taskId === id)?.admission?.qualityContract))) {
       throw new LedgerIntegrityError('new case design attempts require the current quality contract')
     }
+    this.#requireCheckedConversationCounterevidence(attempt.counterexampleTaskId)
     this.#validateConversationCaseDesignAttempt(attempt)
     this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
     return { duplicate: false }
@@ -3087,6 +3089,14 @@ export class EvolutionLedger {
     return this.#conversationGuidance.decision(studyId)
   }
 
+  // New writes only. Shared support validation also owns historical replay,
+  // whose original decisions must not acquire a later check requirement.
+  #requireCheckedConversationCounterevidence(taskId: string): void {
+    if (!hasSatisfiedConversationCodeCheck(this.#conversationLearning.list().find(task => task.source.taskId === taskId))) {
+      throw new LedgerIntegrityError('new research counterevidence requires its prepared code check to be verified')
+    }
+  }
+
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
     const record = parseConversationGuidanceRecord(input)
     const previous = this.#conversationGuidance.existing(record)
@@ -3103,6 +3113,7 @@ export class EvolutionLedger {
     if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
       const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
       if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
+      this.#requireCheckedConversationCounterevidence(opened!.counterexampleTaskId)
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
     if (record.kind === 'study-opened') {
