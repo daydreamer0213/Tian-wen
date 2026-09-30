@@ -1,8 +1,8 @@
 # Tianwen 当前项目权威交接
 
-## 2026-09-30 独立维护：状态公开补丁已拆为 PR #3
+## 2026-09-30 独立维护：状态公开补丁已合入且主线 CI 全通过
 
-复用原安全维护工作区，基于准确主线 `15da16b` 把状态公开修复的四个代码／测试文件单独移植，提交 `c1dbd04`，形成[草稿 PR #3](https://github.com/daydreamer0213/Tian-wen/pull/3)。主线基线状态测试 **37/37**；新断言先因缺字段失败三项，移植后状态、账本和循环三组 **175/175**、正式运行包与打包 **64/64**、八包 TypeScript、完整构建及 DSH 兼容／私有导入检查通过。本维护包实际状态工具返回隔离开启、同意关闭、研究零条，账本未变、模型请求零次。原生真实模型回答是上一节开发包的证据，不冒充本维护包验证。详情在 PR 的 `docs/operations/tianwen-quarantine-status-maintenance-20260930.md`。提交时准确 head 的四项 CI 已触发，独立只读审查尚在进行；不得称 CI 或审查已通过。没有合入、版本升级或 Daily 安装，完整自动学习 **NO-GO** 不变。下一入口是核对 PR #3 准确 head 的审查和 CI，再按独立维护的既有门槛处理。
+复用原安全维护工作区，基于准确主线 `15da16b` 把状态公开修复的四个代码／测试文件单独移植，提交 `c1dbd04`，形成[PR #3](https://github.com/daydreamer0213/Tian-wen/pull/3)。主线基线状态测试 **37/37**；新断言先因缺字段失败三项，移植后状态、账本和循环三组 **175/175**、正式运行包与打包 **64/64**、八包 TypeScript、完整构建及 DSH 兼容／私有导入检查通过。本维护包实际状态工具返回隔离开启、同意关闭、研究零条，账本未变、模型请求零次。原生真实模型回答是上一节开发包的证据，不冒充本维护包验证。详情在 PR 的 `docs/operations/tianwen-quarantine-status-maintenance-20260930.md`。独立只读审查未发现可操作缺陷，准确 head 的四项 CI 全成功后按匹配 head 合入，主线为 `4aa7ef4`；完整文件树与已验证的 `c1dbd04` 相同。合入后准确 main 的 [CI `36668685018`](https://github.com/daydreamer0213/Tian-wen/actions/runs/36668685018) 的 Python、TypeScript、Windows 安装和 Windows 桌面四项均成功，收据在 `D:/DevData/tianwen-status-maintenance-20260930/main-ci-receipt.json`。没有版本升级或 Daily 安装，完整自动学习 **NO-GO** 不变。独立状态维护的源码合入已收尾，维护发布与安装仍须分开处理；日常 023 暂未取得这项新状态说明。
 
 ## 2026-09-30 前瞻收尾：真实状态回答正确，表达偏长
 
