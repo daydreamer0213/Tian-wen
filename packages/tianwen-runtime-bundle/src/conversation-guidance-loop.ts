@@ -13,7 +13,7 @@ import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversa
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { recoverConversationCaseDesign } from './conversation-case-design.js'
-import { hasSatisfiedConversationCodeCheck } from '@tianwen/evolution'
+import { hasSatisfiedConversationCodeCheck, conversationFileTaskInputDigest } from '@tianwen/evolution'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 
@@ -534,10 +534,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
         && task.admission?.decision?.evaluationMode === (study.opened.evaluationMode ?? 'text') && task.admission.decision.fileOutputKind === study.opened.fileOutputKind
         && effectiveConversationFamily(task) === study.opened.family && task.review?.verdict === 'not-met')
         .filter(task => task.source.admissionPolicy === sourcePolicy)
-      const distinct = failures.filter((task, index) => failures.findIndex(item => item.source.requestDigest === task.source.requestDigest) === index)
+      const fileRegression = study.opened.evaluationMode === 'local-files'
+      const identities = failures.map(task => fileRegression ? conversationFileTaskInputDigest(task) : task.source.requestDigest)
+      const distinct = failures.filter((_, index) => identities[index] !== undefined && identities.indexOf(identities[index]) === index)
       if (!disabled && !retracted && distinct.length < 2) continue
       evolution.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
-        expectedCurrentVersion: guidanceVersion(study.candidate.candidateSnapshot), reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : distinct.slice(-2).map(task => task.source.taskId) })
+        expectedCurrentVersion: guidanceVersion(study.candidate.candidateSnapshot), reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : distinct.slice(-2).map(task => task.source.taskId),
+        ...(!disabled && !retracted && fileRegression ? { evidenceInputPolicy: 'captured-files.v1' as const } : {}) })
     }
   }
   private async study(agent: Agent, group: EvidenceGroup): Promise<void> {

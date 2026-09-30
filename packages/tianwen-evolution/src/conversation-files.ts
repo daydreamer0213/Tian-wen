@@ -1,11 +1,25 @@
 import { isAbsolute } from 'node:path'
-import type { ConversationJudgmentProof } from './conversation-learning.js'
+import type { ConversationJudgmentProof, ConversationTask } from './conversation-learning.js'
 import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
 
 export interface ConversationFileEntry {
   readonly path: string
   readonly content: string | null
+}
+
+/** Regression identity from captured preimages, never the candidate's output.
+ * Missing file evidence cannot fall back to request-only independence. */
+export function conversationFileTaskInputDigest(task: ConversationTask): Sha256Digest | undefined {
+  const decision = task.admission?.decision, result = task.completion?.files
+  const inputs = task.fileInputs?.map(({ path, content }) => ({ path, content }))
+  if (decision?.kind !== 'task' || decision.evaluationMode !== 'local-files'
+    || task.completion?.status !== 'completed' || task.fileUnavailable !== undefined
+    || result === undefined || result.outputKind !== decision.fileOutputKind
+    || inputs === undefined || inputs.length === 0 || result.inputsDigest !== sha256(inputs)) return undefined
+  const canonicalInputs = inputs.map(({ path, content }) => ({ path: path.toLowerCase(), content }))
+    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+  return sha256({ requestDigest: task.source.requestDigest, inputs: canonicalInputs })
 }
 
 export const CONVERSATION_FILE_MAX_COUNT = 8

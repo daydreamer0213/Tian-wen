@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hasSatisfiedConversationCodeCheck } from './conversation-external-check.js'
+import { conversationFileTaskInputDigest } from './conversation-files.js'
 import {
   closeSync,
   existsSync,
@@ -3133,6 +3134,10 @@ export class EvolutionLedger {
     }
     const existingStudy = record.kind === 'study-opened' ? undefined
       : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
+    if (record.kind === 'guidance-rolled-back' && record.reason === 'regression'
+      && existingStudy?.opened.evaluationMode === 'local-files' && record.evidenceInputPolicy !== 'captured-files.v1') {
+      throw new LedgerIntegrityError('new file regression requires captured input policy')
+    }
     const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
       || (record.kind === 'candidate-recorded' && existingStudy?.exploration !== undefined)
     const sourceMutation = record.kind === 'source-reference-read'
@@ -3261,6 +3266,8 @@ export class EvolutionLedger {
         const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
         const sourcePolicy = this.#conversationLearning.list().find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
+        const identities = failures.map(task => task === undefined ? undefined : record.evidenceInputPolicy === 'captured-files.v1'
+          ? conversationFileTaskInputDigest(task) : task.source.requestDigest)
         if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
           || task.source.behaviorVersion !== record.expectedCurrentVersion || effectiveConversationFamily(task) !== study.family
           || task.source.admissionPolicy !== sourcePolicy
@@ -3268,7 +3275,9 @@ export class EvolutionLedger {
           || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
           || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
-          || new Set(failures.map(task => task!.source.requestDigest)).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
+          || (record.evidenceInputPolicy !== undefined && study.evaluationMode !== 'local-files')
+          || identities.some(identity => identity === undefined)
+          || new Set(identities).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
       }
       if (record.reason === 'support-retracted' && this.isConversationGuidanceSupported(study.studyId)) throw new LedgerIntegrityError('support rollback requires actually invalidated source or counterevidence')
     }

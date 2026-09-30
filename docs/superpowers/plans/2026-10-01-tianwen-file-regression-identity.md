@@ -27,8 +27,8 @@
 
 **Interfaces:** 消费现有 ConversationTask 捕获前像和 files 结果；产出 conversationFileTaskInputDigest(task): Sha256Digest | undefined，以及仅文件 regression 的 evidenceInputPolicy: captured-files.v1。
 
-- [ ] 写同请求不同前像、相同前像/顺序/大小写、缺材料、新写政策和旧冷重放用例；保留首次失败日志。
-- [ ] 实现纯身份/记录解析/新写政策、共享账本与运行时去重，不改变历史无字段判断。
-- [ ] 运行定向用例和 guidance-ledger / guidance-loop / file-learning / checked-counterevidence 回归；严格类型及八包类型/声明。
-- [ ] 只读独立审查并处理重要问题；保存失败归属和限制。
-- [ ] 更新交接/路线/本项证据，核对小生成物/新根收尾/D盘；提交推送DEV并核对准确SHA/干净上游。不合main、不安装Daily。
+- [x] 写同请求不同前像、相同前像/顺序/大小写、缺材料、新写政策和旧冷重放用例；保留首次失败日志（6失败/1过）。
+- [x] 实现纯身份/记录解析/新写政策、共享账本与运行时去重，不改变历史无字段判断。
+- [x] 四组259/259、最终新增22/22；八包类型/声明退出0。全spec strict旧3项与虚拟基线逐项相同，无新增，不称全strict通过。
+- [x] 只读独立审查无重要问题；保存失败归属和限制。
+- [x] 更新交接/路线/证据，新根0、D18.61GiB；提交推送DEV准确结果以运行目录finish.json为准。不合main、不安装Daily。
