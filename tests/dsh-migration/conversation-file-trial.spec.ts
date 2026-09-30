@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
-import { parseConversationFileTrialReceipt, recoverConversationFileTrial, runConversationFileTrial } from '../../packages/tianwen-runtime-bundle/src/conversation-file-trial.js'
+import { parseConversationFileTrialReceipt, recoverConversationFileTrial, runConversationFileTrial, type ConversationFileTrialReceipt } from '../../packages/tianwen-runtime-bundle/src/conversation-file-trial.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
@@ -113,7 +113,7 @@ it('recovers the exact retained output cold without reading current workspace fi
     textResponse('Saved the requested file.'),
   ])
   try {
-    let retained: Parameters<typeof parseConversationFileTrialReceipt>[0]
+    let retained: ConversationFileTrialReceipt
     const result = await runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input,
       retainReceipt: receipt => { retained = structuredClone(receipt) } })
     writeFileSync(join(harness.original, 'input.md'), 'tampered current source')
@@ -286,10 +286,10 @@ it('captures delegated policy synchronously before replica filesystem awaits', a
     toolCallResponse('write-output', 'write', { file_path: 'output.md', content: 'candidate result' }),
     textResponse('Saved.'),
   ], { sandboxPolicy: true })
-  harness.parent.agent.session.append('sandbox/mode', { mode: 'read-only', source: 'user' })
+  harness.parent.agent.session.append('sandbox/mode', { mode: 'read-only' })
   try {
     const running = runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, retainReceipt: () => undefined })
-    harness.parent.agent.session.append('sandbox/mode', { mode: 'danger-full-access', source: 'user' })
+    harness.parent.agent.session.append('sandbox/mode', { mode: 'danger-full-access' })
     const result = await running
     const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
     expect(saved.events.filter(event => event.type === 'sandbox/mode').map(event => event.data)).toEqual([
