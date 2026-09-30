@@ -6,6 +6,7 @@ import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSe
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
 import { isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
+import { conversationRequestContentDigest } from '@tianwen/evolution'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
   return events.flatMap(event => {
@@ -127,6 +128,7 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   const requests = saved.events.flatMap(event => event.seq >= source.startSeq && event.seq <= endSeq && event.type === 'user/message'
     && isAppendSurfaceEvent(event) && event.data.source.kind === 'user' && source.userMessageIds.includes(String(event.data.id)) ? [event.data] : [])
   if (sha256(requests) !== source.requestDigest || requests.length !== source.userMessageIds.length) throw new Error('natural task original request drift')
+  if (source.requestContentDigest !== undefined && conversationRequestContentDigest(requests) !== source.requestContentDigest) throw new Error('natural task original request content drift')
   const context = conversationContext(saved.events, source.startSeq, source.materialProjection)
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
   const files = recoverFiles(ctx, saved.meta.cwd, saved.events, task)

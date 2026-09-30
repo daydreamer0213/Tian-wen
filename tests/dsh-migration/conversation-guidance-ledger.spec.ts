@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import { EvolutionLedger, isPublicLedgerEvent, type ArtifactId } from '../../packages/tianwen-evolution/src/ledger.js'
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { conversationQualityContract, conversationTaskId, conversationReviewConsensus, parseConversationAuditedReviewChecks, parseConversationReviewChecks, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationQualityContract, conversationTaskId, conversationReviewConsensus, conversationTaskInputDigest, conversationRequestContentDigest, parseConversationAuditedReviewChecks, parseConversationReviewChecks, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import {
   ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemptId, parseConversationCaseDesignAttempt, parseConversationGuidanceRecord,
   type ConversationGuidanceRecord, type GuidanceStudyBody, type GuidanceStudyOpened, type GuidanceCandidateRecord, type GuidanceArmRecord,
@@ -13,6 +13,7 @@ import {
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { conversationFileTaskInputDigest } from '../../packages/tianwen-evolution/src/conversation-files.js'
+import * as taskMaterial from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { conversationFeedbackAssessmentId, type ConversationFeedbackSource, type ConversationFeedbackStarted } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
@@ -48,11 +49,13 @@ function ledgerRoot() {
 }
 
 // Synthetic native receipts exercise real ledger gates and disk replay; no model is run here.
-function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat', proposalCluePolicy: boolean | 'feedback.v2' = false, completeFiles = true, mode?: 'external' | 'subjective', family: 'summarization' | 'writing' = 'summarization', fileInputs = [{ path: 'pilot.txt', content: request }]): ConversationTask {
+function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat', proposalCluePolicy: boolean | 'feedback.v2' = false, completeFiles = true, mode?: 'external' | 'subjective', family: 'summarization' | 'writing' = 'summarization', fileInputs = [{ path: 'pilot.txt', content: request }], nativeRequest = false, captureContent = true): ConversationTask {
   const identity = { sessionId: 'ordinary-guidance', sessionLifecycleFingerprint: sha256('ordinary-guidance-lifecycle'), turn }
   const taskId = conversationTaskId(identity)
+  const message = nativeRequest ? createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: request }] }) : undefined
   const source = { kind: 'task-started' as const, taskId, ...identity, startSeq: turn * 10,
-    userMessageIds: [`request-${turn}`], requestDigest: sha256(request), contextDigest: sha256([]),
+    userMessageIds: message === undefined ? [`request-${turn}`] : [String(message.id)], requestDigest: message === undefined ? sha256(request) : sha256([message]), contextDigest: sha256([]),
+    ...(captureContent && qualityContract?.schemaVersion === conversationQualityContract().schemaVersion ? { requestContentDigest: sha256([[{ type: 'text', text: request }]]) } : {}),
     scopeKey, consentRevision: 1, behaviorVersion: guidanceVersion(ledger.getConversationGuidance(scopeKey)),
     ...(proposalCluePolicy ? { proposalCluePolicy: proposalCluePolicy === true ? 'feedback.v1' as const : proposalCluePolicy } : {}) }
   const admission: ConversationTaskAdmission = { kind: 'task-admitted', taskId, proof: proof(`admission:${turn}`), unavailableReason: null,
@@ -172,12 +175,7 @@ function fileOpening(tasks: readonly [ConversationTask, ConversationTask, Conver
 }
 
 // Controlled receipts verify the real rollback and replay, not natural efficacy.
-function fileRegressionScene(fileMode: 'files' | 'chat' = 'files') {
-  const root = ledgerRoot(); let tick = 0
-  const ledger = new EvolutionLedger(root, { clock: () => new Date(Date.UTC(2026, 9, 1) + tick++ * 1000).toISOString() })
-  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
-  const sources = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, fileMode)) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
-  const opened = fileOpening(sources, [], fileMode); ledger.recordConversationGuidance(opened)
+function evaluateFileStudy(ledger: EvolutionLedger, opened: GuidanceStudyOpened, fileMode: 'files' | 'chat') {
   const planned = proposalPlan(opened)
   const candidate = { ...planned.candidate, candidateSnapshot: { ...opened.parentSnapshot, fileRules: { summarization: { [fileMode]: 'Preserve pilot file scope.' } } } }
   ledger.recordConversationGuidance(candidate)
@@ -190,11 +188,21 @@ function fileRegressionScene(fileMode: 'files' | 'chat' = 'files') {
     ledger.recordConversationGuidance({ ...arm, outputDigest: sha256(output), behaviorVersion: arm.role === 'baseline' ? opened.parentVersion : guidanceVersion(candidate.candidateSnapshot) })
   }
   const decision = ledger.conversationGuidanceDecision(opened.studyId); ledger.recordConversationGuidance(decision)
+  return { candidate, decision }
+}
+
+function fileRegressionScene(fileMode: 'files' | 'chat' = 'files') {
+  const root = ledgerRoot(); let tick = 0
+  const ledger = new EvolutionLedger(root, { clock: () => new Date(Date.UTC(2026, 9, 1) + tick++ * 1000).toISOString() })
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const sources = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, fileMode)) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const opened = fileOpening(sources, [], fileMode); ledger.recordConversationGuidance(opened)
+  const { candidate, decision } = evaluateFileStudy(ledger, opened, fileMode)
   ledger.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
-  const later = (turn: number, inputs = [{ path: 'pilot.txt', content: `different input ${turn}` }], request = 'Summarize these files.', verdict: 'met' | 'not-met' = 'not-met') =>
-    task(ledger, turn, verdict, scope, request, undefined, undefined, undefined, fileMode, false, true, undefined, 'summarization', inputs)
+  const later = (turn: number, inputs = [{ path: 'pilot.txt', content: `different input ${turn}` }], request = 'Summarize these files.', verdict: 'met' | 'not-met' = 'not-met', captureContent = true) =>
+    task(ledger, turn, verdict, scope, request, undefined, undefined, undefined, fileMode, false, true, undefined, 'summarization', inputs, true, captureContent)
   const rollback = (failures: readonly ConversationTask[]) => ({ kind: 'guidance-rolled-back' as const, studyId: opened.studyId,
-    expectedCurrentVersion: guidanceVersion(candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: failures.map(task => task.source.taskId), evidenceInputPolicy: 'captured-files.v1' as const })
+    expectedCurrentVersion: guidanceVersion(candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: failures.map(task => task.source.taskId), evidenceInputPolicy: 'request-content.v1' as const })
   const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
   Object.assign(service, { ctx: { tianwenEvolution: ledger } })
   const reconcile = () => (service as unknown as { rollbackIfNeeded(scopeKey: string): void }).rollbackIfNeeded(scope)
@@ -203,7 +211,8 @@ function fileRegressionScene(fileMode: 'files' | 'chat' = 'files') {
 
 it('rolls back file regression with the same request and two different captured preimages, then cold replays', () => {
   const f = fileRegressionScene(), failures = [f.later(4), f.later(5)], record = f.rollback(failures)
-  expect(failures[0]!.source.requestDigest).toBe(failures[1]!.source.requestDigest)
+  expect(failures[0]!.source.requestDigest).not.toBe(failures[1]!.source.requestDigest)
+  expect(failures[0]!.source.requestContentDigest).toBe(failures[1]!.source.requestContentDigest)
   f.ledger.recordConversationGuidance(record)
   expect(f.ledger.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
   const before = readFileSync(join(f.root, 'ledger.jsonl'), 'utf8'), replay = new EvolutionLedger(f.root)
@@ -285,6 +294,18 @@ it('does not use candidate outputs, answer IDs or output path order as file regr
   expect(conversationFileTaskInputDigest(changed)).toBe(conversationFileTaskInputDigest(value))
 })
 
+it('does not manufacture distinct file input from two real native message identities with identical content', () => {
+  const f = fileRegressionScene(), first = f.later(4), second = f.later(5, first.fileInputs!.map(({ path, content }) => ({ path, content: content! })))
+  const one = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize these files.' }] })
+  const two = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize these files.' }] })
+  const withNativeSource = (task: ConversationTask, message: typeof one) => ({ ...task, source: { ...task.source,
+    requestDigest: sha256([message]), requestContentDigest: sha256([message.content]) } })
+  const a = withNativeSource(first, one), b = withNativeSource(second, two)
+  expect(a.source.requestDigest).not.toBe(b.source.requestDigest)
+  expect(a.source.requestContentDigest).toBe(b.source.requestContentDigest)
+  expect(conversationFileTaskInputDigest(a)).toBe(conversationFileTaskInputDigest(b))
+})
+
 it('distinguishes absent input from empty captured file input', () => {
   const f = fileRegressionScene(), value = f.later(4)
   const variant = (content: string | null): ConversationTask => {
@@ -308,7 +329,7 @@ it('keeps text regression request identity and forbids borrowing a file policy',
   // Explicit later clock avoids relying on the wall-clock millisecond tick.
   const laterLedger = new EvolutionLedger(f.root, { clock: () => '2099-01-01T00:00:00.000Z' })
   const failures = [task(laterLedger, 4), task(laterLedger, 5)]
-  const record = { kind: 'guidance-rolled-back' as const, studyId: value.opened.studyId, expectedCurrentVersion: guidanceVersion(value.candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: failures.map(task => task.source.taskId) }
+  const record = { kind: 'guidance-rolled-back' as const, studyId: value.opened.studyId, expectedCurrentVersion: guidanceVersion(value.candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: failures.map(task => task.source.taskId), evidenceInputPolicy: 'request-content.v1' as const }
   expect(() => laterLedger.recordConversationGuidance({ ...record, evidenceInputPolicy: 'captured-files.v1' })).toThrow(/regression/)
   laterLedger.recordConversationGuidance(record)
   expect(new EvolutionLedger(f.root).getConversationGuidance(scope)).toEqual(value.opened.parentSnapshot)
@@ -318,6 +339,111 @@ it.each(['unknown-policy', 'wrong-reason', 'explicit-undefined'] as const)('reje
   const f = fileRegressionScene(), record = f.rollback([f.later(4), f.later(5)])
   expect(() => parseConversationGuidanceRecord(scenario === 'wrong-reason' ? { ...record, reason: 'consent-disabled' }
     : { ...record, evidenceInputPolicy: scenario === 'unknown-policy' ? 'other.v1' : undefined })).toThrow(/policy/)
+})
+
+function contentSourceScene(scenario: 'text' | 'message-id' | 'read-order' | 'path-case' | 'different-content' | 'different-files' | 'legacy') {
+  const directory = ledgerRoot(), ledger = new EvolutionLedger(directory)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const inputs = [{ path: 'a.txt', content: 'first fact' }, { path: 'b.txt', content: 'second fact' }]
+  const secondInputs = scenario === 'read-order' ? [...inputs].reverse() : scenario === 'path-case' ? inputs.map(input => ({ ...input, path: input.path.toUpperCase() }))
+    : scenario === 'different-files' ? inputs.map(input => ({ ...input, content: `new ${input.content}` })) : inputs
+  const captureContent = scenario !== 'legacy'
+  const make = (turn: number, request: string, entries = inputs) => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, request,
+    undefined, undefined, undefined, scenario === 'text' ? undefined : 'files', false, true, undefined, 'summarization', entries, true, captureContent)
+  const tasks = [make(1, 'Summarize the supplied facts.'), make(2, scenario === 'different-content' ? 'Write a different summary of the supplied facts.' : 'Summarize the supplied facts.', secondInputs), make(3, 'Independent successful task.')] as const
+  const opened = scenario === 'text' ? opening(tasks) : fileOpening(tasks)
+  const body = { scopeKey: scope, consentRevision: 1, parentVersion: opened.parentVersion, sourceTaskIds: opened.sourceTaskIds, counterexampleTaskId: opened.counterexampleTaskId,
+    modelConfigDigest: opened.modelConfigDigest, materialDigest: sha256('controlled case-design material') }
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service, { ctx: { tianwenEvolution: ledger } })
+  vi.spyOn(taskMaterial, 'recoverConversationTaskMaterial').mockImplementation(async (_ctx, task) => ({ request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: task.source.taskId === tasks[2].source.taskId ? 'Independent successful task.' : task.source.taskId === tasks[1].source.taskId && scenario === 'different-content' ? 'Write a different summary of the supplied facts.' : 'Summarize the supplied facts.' }] })], context: [], objective: 'Summarize.', criteria: ['Preserve facts.'], files: {
+    schemaVersion: 'tianwen.conversation-file-material.v1', cwd: directory, outputKind: 'files', entries: task.fileInputs!.map(({ path, content }) => ({ path, content })), outputPaths: task.completion!.files!.outputPaths } }))
+  return { directory, ledger, tasks, opened, service, attempt: { attemptId: caseDesignAttemptId(body), ...body } }
+}
+
+it.each(['text', 'message-id', 'read-order', 'path-case'] as const)('rejects duplicate %s source contents before selection, case design and study writes', async scenario => {
+  const f = contentSourceScene(scenario)
+  expect(f.tasks[0].source.requestDigest).not.toBe(f.tasks[1].source.requestDigest)
+  expect(conversationTaskInputDigest(f.tasks[0])).toBe(conversationTaskInputDigest(f.tasks[1]))
+  expect(await f.service.readiness(scope)).toEqual({ state: 'awaiting-compatible-sources' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/distinct task contents/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/distinct task contents/)
+  expect(f.ledger.listConversationCaseDesignAttempts()).toEqual([])
+  expect(f.ledger.listConversationGuidanceStudies()).toEqual([])
+})
+
+it.each(['different-content', 'different-files'] as const)('retains two source inputs with %s', async scenario => {
+  const f = contentSourceScene(scenario)
+  expect(await f.service.readiness(scope)).toEqual({ state: 'ready-to-schedule' })
+  f.ledger.recordConversationCaseDesignAttempt(f.attempt)
+  f.ledger.recordConversationGuidance(f.opened)
+  expect(new EvolutionLedger(f.directory).listConversationGuidanceStudies()[0]?.opened).toEqual(f.opened)
+})
+
+it('deduplicates accurately recovered legacy file source content without backfilling the ledger', async () => {
+  const f = contentSourceScene('legacy'), before = readFileSync(join(f.directory, 'ledger.jsonl'), 'utf8')
+  expect(f.tasks.every(task => task.source.requestContentDigest === undefined)).toBe(true)
+  expect(await f.service.readiness(scope)).toEqual({ state: 'awaiting-compatible-sources' })
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it('preserves a recorded duplicate-source study and decision without allowing new activation', () => {
+  const f = contentSourceScene('message-id'), path = join(f.directory, 'ledger.jsonl')
+  // A controlled old-rule opening uses distinct source identities; it is not
+  // a newly allowed study or a regraded historical natural result.
+  appendFileSync(path, `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-10-01T01:00:00.000Z', record: f.opened })}\n`)
+  const ledger = new EvolutionLedger(f.directory), value = evaluateFileStudy(ledger, f.opened, 'files')
+  expect(value.decision.verdict).toBe('accepted')
+  const before = readFileSync(path, 'utf8'), replay = new EvolutionLedger(f.directory)
+  expect(replay.isConversationGuidanceSupported(f.opened.studyId)).toBe(true)
+  expect(replay.recordConversationGuidance(f.opened)).toEqual({ duplicate: true })
+  expect(() => replay.recordConversationGuidance({ kind: 'guidance-activated', studyId: f.opened.studyId, expectedParentVersion: f.opened.parentVersion, decisionDigest: sha256(value.decision) })).toThrow(/distinct task contents/)
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+it.each([undefined, 'captured-files.v1'] as const)('retains %s regression meaning despite optional new source content fields', policy => {
+  const f = fileRegressionScene(), inputs = [{ path: 'pilot.txt', content: 'same captured fact' }], failures = [f.later(4, inputs), f.later(5, inputs)]
+  expect(failures[0]!.source.requestDigest).not.toBe(failures[1]!.source.requestDigest)
+  expect(conversationTaskInputDigest(failures[0]!)).toBe(conversationTaskInputDigest(failures[1]!))
+  const { evidenceInputPolicy: _current, ...base } = f.rollback(failures), record = { ...base, ...(policy === undefined ? {} : { evidenceInputPolicy: policy }) }
+  const path = join(f.root, 'ledger.jsonl')
+  appendFileSync(path, `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-10-01T01:00:00.000Z', record })}\n`)
+  const before = readFileSync(path, 'utf8'), replay = new EvolutionLedger(f.root)
+  expect(replay.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  expect(replay.listConversationGuidanceStudies()[0]?.rollback).toEqual(record)
+  expect(replay.recordConversationGuidance(record)).toEqual({ duplicate: true })
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+it('requires new complete content evidence for regression without borrowing missing historical identities', () => {
+  const f = fileRegressionScene(), failures = [f.later(4, undefined, undefined, undefined, false), f.later(5)]
+  expect(conversationTaskInputDigest(failures[0]!)).toBeUndefined()
+  f.reconcile()
+  expect(f.ledger.listConversationGuidanceStudies()[0]?.rollback).toBeUndefined()
+  expect(() => f.ledger.recordConversationGuidance(f.rollback(failures))).toThrow(/distinct later failed tasks/)
+})
+
+it('deduplicates identical text contents with real message IDs before rolling back on a genuinely different later input', () => {
+  const f = seeded(), value = evaluated(f.ledger, opening(f.tasks)); f.ledger.recordConversationGuidance(activation(value))
+  const ledger = new EvolutionLedger(f.root, { clock: () => '2099-01-01T00:00:00.000Z' })
+  const later = (turn: number, request = 'Same summary task.') => task(ledger, turn, 'not-met', scope, request, undefined, undefined, undefined, undefined, false, true, undefined, 'summarization', undefined, true)
+  const first = later(4), repeated = later(5)
+  expect(first.source.requestDigest).not.toBe(repeated.source.requestDigest)
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service, { ctx: { tianwenEvolution: ledger } })
+  const reconcile = () => (service as unknown as { rollbackIfNeeded(scopeKey: string): void }).rollbackIfNeeded(scope)
+  reconcile()
+  expect(ledger.getConversationGuidance(scope)).toEqual(value.candidate.candidateSnapshot)
+  const distinct = later(6, 'Different summary task.'); reconcile()
+  expect(ledger.listConversationGuidanceStudies()[0]?.rollback).toMatchObject({ evidenceInputPolicy: 'request-content.v1', evidenceTaskIds: [first.source.taskId, distinct.source.taskId] })
+  expect(new EvolutionLedger(f.root).getConversationGuidance(scope)).toEqual(value.opened.parentSnapshot)
+})
+
+it('retains complete content blocks and message boundaries rather than folding them to plain text', () => {
+  const one = [{ content: [{ type: 'text', text: 'ab' }] }]
+  expect(conversationRequestContentDigest(one)).not.toBe(conversationRequestContentDigest([{ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }]))
+  expect(conversationRequestContentDigest(one)).not.toBe(conversationRequestContentDigest([{ content: [{ type: 'text', text: 'a' }] }, { content: [{ type: 'text', text: 'b' }] }]))
+  expect(conversationRequestContentDigest(one)).not.toBe(conversationRequestContentDigest([{ content: [{ type: 'text', text: 'ab ' }] }]))
 })
 
 it('selects compatible file sources through the ledger and cold replays private target-bound receipts', () => {

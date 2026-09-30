@@ -36,7 +36,7 @@ const reasoningTextResponse = (reasoning: string, text: string): readonly Stream
 const reviewPair = (value: typeof review) => [evidenceResponse(value), evidenceResponse(value)]
 
 async function mount(script: Parameters<typeof mountPersistentHarness>[1], policy = 'tianwen-auto-analysis.v3', feedback = false, legacy = false, familyVerification = false) {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'observer-')); roots.push(root)
   const harness = await (feedback ? mountFeedbackHarness(root, script) : mountPersistentHarness(join(root, 'sessions'), script))
@@ -53,6 +53,38 @@ async function mount(script: Parameters<typeof mountPersistentHarness>[1], polic
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('ordinary-chat'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
   return { ...harness, handle }
 }
+
+it('freezes request content identity before native answers independently from different message IDs', async () => {
+  const request = '将下面的试点情况简要总结：预计 5 天完成。'
+  const expected = sha256([[{ type: 'text', text: request }]])
+  const captured: unknown[] = []
+  let harness: Awaited<ReturnType<typeof mount>>
+  const answer = () => {
+    const source = harness.ctx.tianwenEvolution.listConversationTasks().at(-1)!.source
+    captured.push((source as typeof source & { requestContentDigest?: string }).requestContentDigest)
+    return textResponse('试点预计 5 天完成。')
+  }
+  harness = await mount([structured(admission), answer, ...reviewPair(review), structured(admission), answer, ...reviewPair(review)])
+  try {
+    for (let turn = 0; turn < 2; turn++) {
+      harness.handle.agent.followup(direct(request))
+      await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    }
+    const [first, second] = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(first!.source.userMessageIds).not.toEqual(second!.source.userMessageIds)
+    expect(first!.source.requestDigest).not.toBe(second!.source.requestDigest)
+    expect(captured).toEqual([expected, expected])
+    const material = await recoverConversationTaskMaterial(harness.ctx, second!)
+    const source = { ...second!.source, requestContentDigest: sha256('wrong original content') }
+    await expect(recoverConversationTaskMaterial(harness.ctx, { ...second!, source })).rejects.toThrow(/request content drift/)
+    await expect(recoverConversationTaskMaterial(harness.ctx, { ...second!, source: { ...second!.source, requestDigest: sha256('wrong native source') } })).rejects.toThrow(/original request drift/)
+    const { requestContentDigest: _content, ...legacySource } = second!.source
+    const legacyMaterial = await recoverConversationTaskMaterial(harness.ctx, { ...second!, source: legacySource })
+    expect(legacyMaterial).toEqual(material)
+    expect(Object.hasOwn(legacySource, 'requestContentDigest')).toBe(false)
+    expect(material.request.map(message => message.content)).toEqual([[{ type: 'text', text: request }]])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it('keeps an admitted legacy turn in its own route while observing a later natural follow-up with its context', async () => {
   const original = '/research-summary\n<research_packet>\n[F:days|required] The pilot takes 5 days.\n</research_packet>'

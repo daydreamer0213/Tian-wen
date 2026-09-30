@@ -160,8 +160,8 @@ export interface GuidanceRollbackRecord {
   readonly reason: 'support-retracted' | 'consent-disabled' | 'regression' | 'quality-contract-changed' | 'ancestor-invalidated'
   readonly ancestorStudyId?: GuidanceStudyId
   readonly evidenceTaskIds: readonly string[]
-  /** New file regression only; absence preserves historical request-only rules. */
-  readonly evidenceInputPolicy?: 'captured-files.v1'
+  /** Absence and captured-files.v1 retain their exact historical rules. */
+  readonly evidenceInputPolicy?: 'captured-files.v1' | 'request-content.v1'
 }
 export interface GuidanceHistoricalStoppedRecord {
   readonly kind: 'study-stopped'
@@ -370,12 +370,12 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
     const reason = oneOf(input.reason, ['support-retracted', 'consent-disabled', 'regression', 'quality-contract-changed', 'ancestor-invalidated'])
     const evidenceTaskIds = uniqueIds(input.evidenceTaskIds, 64)
     const filePolicy = Object.hasOwn(input, 'evidenceInputPolicy')
-    if (filePolicy && (reason !== 'regression' || input.evidenceInputPolicy !== 'captured-files.v1')) throw new TypeError('invalid guidance regression input policy')
+    if (filePolicy && (reason !== 'regression' || !['captured-files.v1', 'request-content.v1'].includes(input.evidenceInputPolicy as string))) throw new TypeError('invalid guidance regression input policy')
     if (reason === 'regression' && evidenceTaskIds.length === 0) throw new TypeError('guidance regression rollback requires task evidence')
     if (reason === 'quality-contract-changed' && evidenceTaskIds.length !== 0) throw new TypeError('quality contract rollback must not claim task regression evidence')
     if (reason === 'ancestor-invalidated' && (typeof input.ancestorStudyId !== 'string' || !/^guidance-study:[a-f0-9]{64}$/u.test(input.ancestorStudyId) || evidenceTaskIds.length !== 0)) throw new TypeError('guidance ancestor rollback requires an exact ancestor study and no regression evidence')
     return { kind: input.kind, studyId, expectedCurrentVersion: digest(input.expectedCurrentVersion), reason, evidenceTaskIds,
-      ...(filePolicy ? { evidenceInputPolicy: 'captured-files.v1' as const } : {}),
+      ...(filePolicy ? { evidenceInputPolicy: input.evidenceInputPolicy as 'captured-files.v1' | 'request-content.v1' } : {}),
       ...(reason === 'ancestor-invalidated' ? { ancestorStudyId: input.ancestorStudyId as GuidanceStudyId } : {}) }
   }
   if (input.kind === 'study-stopped') {

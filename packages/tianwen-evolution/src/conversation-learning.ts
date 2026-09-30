@@ -2,7 +2,7 @@ import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
 import { parseClaimAudit, type ClaimAudit } from './conversation-claim-audit.js'
 import { parseConversationTaskFileAncillary, projectConversationFileAncillaryContext, type ConversationTaskFileAncillary } from './conversation-file-ancillary.js'
-import { parseConversationFileEntries, parseConversationFileResult, type ConversationFileResult, type ConversationTaskFileInput, type ConversationTaskFileUnavailable } from './conversation-files.js'
+import { parseConversationFileEntries, parseConversationFileResult, conversationFileTaskInputDigest, type ConversationFileResult, type ConversationTaskFileInput, type ConversationTaskFileUnavailable } from './conversation-files.js'
 import { CAPTURED_FILE_FACTS_TOOL } from './conversation-file-facts.js'
 import { parseConversationExternalCheck, validateConversationExternalCheck, type ConversationExternalCheckPrepared, type ConversationExternalCheckFinished } from './conversation-external-check.js'
 
@@ -170,6 +170,9 @@ export interface ConversationTaskSource {
   readonly startSeq: number
   readonly userMessageIds: readonly string[]
   readonly requestDigest: Sha256Digest
+  /** Complete direct content before the answer, excluding message identity.
+   * Absent on historical records; never backfilled. */
+  readonly requestContentDigest?: Sha256Digest
   readonly contextDigest: Sha256Digest
   readonly scopeKey: string
   readonly consentRevision: number
@@ -290,6 +293,19 @@ export interface ConversationTask {
   readonly externalCheckFinished?: ConversationExternalCheckFinished
 }
 
+/** Exact content blocks and message boundaries; no source IDs or text folding. */
+export function conversationRequestContentDigest(messages: readonly { readonly content: unknown }[]): Sha256Digest {
+  return sha256(messages.map(message => message.content))
+}
+
+/** Current input identity only, never a task verdict or semantic independence. */
+export function conversationTaskInputDigest(task: ConversationTask): Sha256Digest | undefined {
+  const request = task.source.requestContentDigest, decision = task.admission?.decision
+  if (request === undefined || decision?.kind !== 'task') return undefined
+  return decision.evaluationMode === 'text' ? request
+    : decision.evaluationMode === 'local-files' ? conversationFileTaskInputDigest(task, request) : undefined
+}
+
 export function effectiveConversationFamily(task: ConversationTask): ConversationFamily | null {
   const decision = task.admission?.decision
   if (decision?.kind !== 'task') return null
@@ -401,11 +417,12 @@ export function parseConversationAdmission(value: unknown): ConversationAdmissio
 export function parseConversationLearningRecord(value: unknown): ConversationLearningRecord {
   if (value === null || typeof value !== 'object' || !('kind' in value)) throw new TypeError('conversation learning record is invalid')
   if (value.kind === 'task-started') {
-    const input = object(value, ['kind', 'taskId', 'sessionId', 'sessionLifecycleFingerprint', 'turn', 'startSeq', 'userMessageIds', 'requestDigest', 'contextDigest', 'scopeKey', 'consentRevision', 'behaviorVersion', ...(Object.hasOwn(value, 'materialProjection') ? ['materialProjection'] : []), ...(Object.hasOwn(value, 'proposalCluePolicy') ? ['proposalCluePolicy'] : []), ...(Object.hasOwn(value, 'admissionPolicy') ? ['admissionPolicy'] : [])])
+    const input = object(value, ['kind', 'taskId', 'sessionId', 'sessionLifecycleFingerprint', 'turn', 'startSeq', 'userMessageIds', 'requestDigest', 'contextDigest', 'scopeKey', 'consentRevision', 'behaviorVersion', ...(Object.hasOwn(value, 'materialProjection') ? ['materialProjection'] : []), ...(Object.hasOwn(value, 'proposalCluePolicy') ? ['proposalCluePolicy'] : []), ...(Object.hasOwn(value, 'admissionPolicy') ? ['admissionPolicy'] : []), ...(Object.hasOwn(value, 'requestContentDigest') ? ['requestContentDigest'] : [])])
     const source: ConversationTaskSource = {
       kind: 'task-started', taskId: text(input.taskId, 512), sessionId: text(input.sessionId, 512),
       sessionLifecycleFingerprint: digest(input.sessionLifecycleFingerprint), turn: integer(input.turn), startSeq: integer(input.startSeq),
       userMessageIds: uniqueTextList(input.userMessageIds), requestDigest: digest(input.requestDigest), contextDigest: digest(input.contextDigest),
+      ...(Object.hasOwn(input, 'requestContentDigest') ? { requestContentDigest: digest(input.requestContentDigest) } : {}),
       scopeKey: text(input.scopeKey, 512), consentRevision: integer(input.consentRevision), behaviorVersion: digest(input.behaviorVersion),
       ...(Object.hasOwn(input, 'materialProjection') ? { materialProjection: oneOf(input.materialProjection, ['surface-text.v1']) } : {}),
       ...(Object.hasOwn(input, 'proposalCluePolicy') ? { proposalCluePolicy: oneOf(input.proposalCluePolicy, ['feedback.v1', 'feedback.v2']) } : {}),

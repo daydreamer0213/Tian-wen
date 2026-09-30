@@ -5,7 +5,7 @@ import { SessionId, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh
 import { createUserMessage, isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
 import {
   CONVERSATION_FAMILIES, conversationTaskId, conversationQualityContract, learningSessionLifecycleFingerprint, parseConversationAdmission, parseConversationFamilyVerification,
-  hasCurrentConversationQuality, sha256, guidanceVersion,
+  hasCurrentConversationQuality, sha256, guidanceVersion, conversationRequestContentDigest,
   type ConversationTask, type ConversationTaskSource, type ConversationUnavailable, type ConversationFamilyCheck, type ConversationFamily,
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
@@ -240,6 +240,7 @@ export class TianwenConversationObserverService extends Service {
     const source: ConversationTaskSource = {
       kind: 'task-started', taskId, ...sourceIdentity, startSeq: boundary.seq,
       userMessageIds: direct.map(message => String(message.id)), requestDigest: sha256(direct), contextDigest: sha256(context),
+      requestContentDigest: conversationRequestContentDigest(direct),
       scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot), materialProjection, proposalCluePolicy: 'feedback.v2',
       ...(this.config.familyVerification === true ? { admissionPolicy: 'tianwen.family-verification.v1' as const } : {}),
     }

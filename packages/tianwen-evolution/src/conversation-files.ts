@@ -10,7 +10,7 @@ export interface ConversationFileEntry {
 
 /** Regression identity from captured preimages, never the candidate's output.
  * Missing file evidence cannot fall back to request-only independence. */
-export function conversationFileTaskInputDigest(task: ConversationTask): Sha256Digest | undefined {
+export function conversationFileTaskInputDigest(task: ConversationTask, requestDigest = task.source.requestContentDigest ?? task.source.requestDigest): Sha256Digest | undefined {
   const decision = task.admission?.decision, result = task.completion?.files
   const inputs = task.fileInputs?.map(({ path, content }) => ({ path, content }))
   if (decision?.kind !== 'task' || decision.evaluationMode !== 'local-files'
@@ -19,7 +19,7 @@ export function conversationFileTaskInputDigest(task: ConversationTask): Sha256D
     || inputs === undefined || inputs.length === 0 || result.inputsDigest !== sha256(inputs)) return undefined
   const canonicalInputs = inputs.map(({ path, content }) => ({ path: path.toLowerCase(), content }))
     .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
-  return sha256({ requestDigest: task.source.requestDigest, inputs: canonicalInputs })
+  return sha256({ requestDigest, inputs: canonicalInputs })
 }
 
 export const CONVERSATION_FILE_MAX_COUNT = 8

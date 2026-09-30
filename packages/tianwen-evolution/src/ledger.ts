@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hasSatisfiedConversationCodeCheck } from './conversation-external-check.js'
 import { conversationFileTaskInputDigest } from './conversation-files.js'
+import { conversationTaskInputDigest } from './conversation-learning.js'
 import {
   closeSync,
   existsSync,
@@ -3039,6 +3040,7 @@ export class EvolutionLedger {
       throw new LedgerIntegrityError('new case design attempts require the current quality contract')
     }
     this.#requireCheckedConversationCounterevidence(attempt.counterexampleTaskId)
+    this.#requireDistinctConversationTaskContents(attempt.sourceTaskIds)
     this.#validateConversationCaseDesignAttempt(attempt)
     this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
     return { duplicate: false }
@@ -3098,6 +3100,17 @@ export class EvolutionLedger {
     }
   }
 
+  // New content-bearing sources only. Historical/mixed support retains its
+  // frozen ledger rules; ordinary file selection also recovers exact inputs.
+  #requireDistinctConversationTaskContents(taskIds: readonly string[]): void {
+    const tasks = taskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
+    if (tasks.some(task => task?.source.requestContentDigest === undefined)) return
+    const identities = tasks.map(task => conversationTaskInputDigest(task!))
+    if (identities.some(identity => identity === undefined) || new Set(identities).size !== tasks.length) {
+      throw new LedgerIntegrityError('new research requires distinct requests and distinct task contents with captured inputs')
+    }
+  }
+
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
     const record = parseConversationGuidanceRecord(input)
     const previous = this.#conversationGuidance.existing(record)
@@ -3115,6 +3128,7 @@ export class EvolutionLedger {
       const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
       if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
       this.#requireCheckedConversationCounterevidence(opened!.counterexampleTaskId)
+      this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
     if (record.kind === 'study-opened') {
@@ -3134,9 +3148,8 @@ export class EvolutionLedger {
     }
     const existingStudy = record.kind === 'study-opened' ? undefined
       : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
-    if (record.kind === 'guidance-rolled-back' && record.reason === 'regression'
-      && existingStudy?.opened.evaluationMode === 'local-files' && record.evidenceInputPolicy !== 'captured-files.v1') {
-      throw new LedgerIntegrityError('new file regression requires captured input policy')
+    if (record.kind === 'guidance-rolled-back' && record.reason === 'regression' && record.evidenceInputPolicy !== 'request-content.v1') {
+      throw new LedgerIntegrityError('new regression requires request content input policy')
     }
     const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
       || (record.kind === 'candidate-recorded' && existingStudy?.exploration !== undefined)
@@ -3266,8 +3279,9 @@ export class EvolutionLedger {
         const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
         const sourcePolicy = this.#conversationLearning.list().find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
-        const identities = failures.map(task => task === undefined ? undefined : record.evidenceInputPolicy === 'captured-files.v1'
-          ? conversationFileTaskInputDigest(task) : task.source.requestDigest)
+        const identities = failures.map(task => task === undefined ? undefined : record.evidenceInputPolicy === 'request-content.v1'
+          ? conversationTaskInputDigest(task) : record.evidenceInputPolicy === 'captured-files.v1'
+            ? conversationFileTaskInputDigest(task, task.source.requestDigest) : task.source.requestDigest)
         if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
           || task.source.behaviorVersion !== record.expectedCurrentVersion || effectiveConversationFamily(task) !== study.family
           || task.source.admissionPolicy !== sourcePolicy
@@ -3275,7 +3289,7 @@ export class EvolutionLedger {
           || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
           || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
-          || (record.evidenceInputPolicy !== undefined && study.evaluationMode !== 'local-files')
+          || (record.evidenceInputPolicy === 'captured-files.v1' && study.evaluationMode !== 'local-files')
           || identities.some(identity => identity === undefined)
           || new Set(identities).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
       }

@@ -13,7 +13,7 @@ import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversa
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { recoverConversationCaseDesign } from './conversation-case-design.js'
-import { hasSatisfiedConversationCodeCheck, conversationFileTaskInputDigest } from '@tianwen/evolution'
+import { hasSatisfiedConversationCodeCheck, conversationFileTaskInputDigest, conversationTaskInputDigest, conversationRequestContentDigest } from '@tianwen/evolution'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 
@@ -481,7 +481,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
     }
     const inputIdentity = (task: ConversationTask) => {
       const material = materials.get(task.source.taskId)
-      return material === undefined ? task.source.requestDigest : guidanceInputDigest(conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files)
+      if (task.source.requestContentDigest !== undefined) return conversationTaskInputDigest(task)
+      return material === undefined ? task.source.requestDigest : conversationFileTaskInputDigest(task, conversationRequestContentDigest(material.request))
     }
     const compatible = (task: ConversationTask, first: ConversationTask) => task.admission!.decision!.evaluationMode === first.admission!.decision!.evaluationMode
       && task.source.admissionPolicy === first.source.admissionPolicy
@@ -534,13 +535,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
         && task.admission?.decision?.evaluationMode === (study.opened.evaluationMode ?? 'text') && task.admission.decision.fileOutputKind === study.opened.fileOutputKind
         && effectiveConversationFamily(task) === study.opened.family && task.review?.verdict === 'not-met')
         .filter(task => task.source.admissionPolicy === sourcePolicy)
-      const fileRegression = study.opened.evaluationMode === 'local-files'
-      const identities = failures.map(task => fileRegression ? conversationFileTaskInputDigest(task) : task.source.requestDigest)
+      const identities = failures.map(task => conversationTaskInputDigest(task))
       const distinct = failures.filter((_, index) => identities[index] !== undefined && identities.indexOf(identities[index]) === index)
       if (!disabled && !retracted && distinct.length < 2) continue
       evolution.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
         expectedCurrentVersion: guidanceVersion(study.candidate.candidateSnapshot), reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : distinct.slice(-2).map(task => task.source.taskId),
-        ...(!disabled && !retracted && fileRegression ? { evidenceInputPolicy: 'captured-files.v1' as const } : {}) })
+        ...(!disabled && !retracted ? { evidenceInputPolicy: 'request-content.v1' as const } : {}) })
     }
   }
   private async study(agent: Agent, group: EvidenceGroup): Promise<void> {
