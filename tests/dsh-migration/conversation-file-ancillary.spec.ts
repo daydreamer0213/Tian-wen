@@ -165,7 +165,7 @@ describe('conversation file ancillary parser', () => {
 
   it('bounds each record, glob paths, and grep matches without truncation', () => {
     const paths = Array.from({ length: 256 }, (_, index) => `folder/file-${index}.md`)
-    expect((api.parseConversationTaskFileAncillary(record({ tool: 'glob', root: 'D:/fixture', paths })).payload as { paths: string[] }).paths).toHaveLength(256)
+    expect((api.parseConversationTaskFileAncillary(record({ tool: 'glob', root: 'D:/fixture', paths })).payload as { readonly tool: 'glob'; readonly root: string; readonly paths: string[] }).paths).toHaveLength(256)
     expect(() => api.parseConversationTaskFileAncillary(record({ tool: 'glob', root: 'D:/fixture', paths: [...paths, 'overflow.md'] }))).toThrow(/count|limit|path/i)
     const matches = Array.from({ length: 257 }, (_, index) => ({ path: 'input.md', lineNumber: index + 1, line: 'x' }))
     expect(() => api.parseConversationTaskFileAncillary(record({ tool: 'grep', matches }))).toThrow(/count|limit|match/i)
