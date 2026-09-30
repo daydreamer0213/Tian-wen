@@ -509,6 +509,7 @@ export class TianwenEvolutionService extends Service {
     return this.state().ledger.listConversationTasks(sessionId)
   }
 
+  isConversationGuidanceActivationQuarantined(): boolean { return this.state().ledger.isConversationGuidanceActivationQuarantined() }
   getConversationGuidance(scopeKey: string): GuidanceSnapshot { return this.state().ledger.getConversationGuidance(scopeKey) }
   retireIncompatibleConversationGuidance(scopeKey: string): void { this.formalWrite(() => this.state().ledger.retireIncompatibleConversationGuidance(scopeKey)) }
   listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] { return this.state().ledger.listConversationGuidanceStudies(scopeKey) }

@@ -2997,6 +2997,10 @@ export class EvolutionLedger {
     return task?.admission !== undefined && sha256(task.admission) === source.sourceAdmissionDigest
   }
 
+  isConversationGuidanceActivationQuarantined(): boolean {
+    return this.#guidanceActivationQuarantine
+  }
+
   getConversationGuidance(scopeKey: string): GuidanceSnapshot {
     const snapshot = this.#conversationGuidance.snapshot(scopeKey)
     const artifactId = `artifact:${guidanceVersion(snapshot).slice(7)}` as ArtifactId
