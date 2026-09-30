@@ -53,6 +53,13 @@ function deferred(): {
   return { promise, resolve: resolvePromise }
 }
 
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('Expected a JSON object')
+  }
+  return value as Record<string, unknown>
+}
+
 function tempRoot(prefix: string): string {
   const base = process.platform === 'win32'
     ? 'D:/DevData/tianwen-learning-consent-agent-tests'
@@ -355,8 +362,8 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(disabled)
         .toMatchObject({ value: { enabled: false, revision: 3, policyVersion: 'tianwen-auto-analysis.v3',
           disclosure: expect.stringMatching(/future automatic analysis.*does not erase.*already performed/isu) } })
-      expect(disabled.value?.disclosure).toMatch(/ordinary conversation.*native feedback.*repeated research-summary failures.*none remains eligible while disabled/isu)
-      expect(disabled.value?.disclosure).toMatch(/previously activated guidance.*rolled back.*next reconciliation.*not promise.*manual rollback/isu)
+      expect(jsonObject(disabled.value).disclosure).toMatch(/ordinary conversation.*native feedback.*repeated research-summary failures.*none remains eligible while disabled/isu)
+      expect(jsonObject(disabled.value).disclosure).toMatch(/previously activated guidance.*rolled back.*next reconciliation.*not promise.*manual rollback/isu)
     } finally {
       await child.dispose()
       await main.dispose()
@@ -871,7 +878,7 @@ describe('Tianwen main-chat learning consent tool', () => {
             },
           },
         })
-      expect(status.value?.learningSources).not.toHaveProperty('eligible')
+      expect(jsonObject(status.value).learningSources).not.toHaveProperty('eligible')
       expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()).toBe(beforeConsent)
       expect(mounted.adapter.requests).toHaveLength(beforeRequests)
     } finally {
@@ -1069,9 +1076,11 @@ describe('Tianwen main-chat learning consent tool', () => {
           },
         },
       })
-      const learning = (result.value?.currentSession as any).learning
-      expect(learning.items).toHaveLength(8)
-      expect(learning.items[0]).toMatchObject({
+      const learning = jsonObject(jsonObject(jsonObject(result.value).currentSession).learning)
+      const learningItems = learning.items
+      if (!Array.isArray(learningItems)) throw new TypeError('Expected learning items to be an array')
+      expect(learningItems).toHaveLength(8)
+      expect(learningItems[0]).toMatchObject({
         analysisId: analyses[9]!.analysisId,
         phase: 'failed',
         receipts: {
@@ -1081,7 +1090,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         },
         recovery: { resumePhase: 'candidate-ready' },
       })
-      expect(learning.items[1]).toMatchObject({
+      expect(learningItems[1]).toMatchObject({
         analysisId: analyses[8]!.analysisId,
         phase: 'candidate-ready',
         receipts: {
@@ -1091,7 +1100,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         },
         recovery: null,
       })
-      expect(learning.items.map((item: { readonly analysisId: string }) => item.analysisId))
+      expect(learningItems.map((item: unknown) => jsonObject(item).analysisId))
         .toEqual(analyses.slice(2, 10).reverse().map(item => item.analysisId))
       expect(JSON.stringify(learning)).not.toContain('PRIVATE')
       expect(JSON.stringify(learning)).not.toContain('candidatePatch')
@@ -1200,7 +1209,7 @@ describe('Tianwen main-chat learning consent tool', () => {
           learningSources: { configured: 1, skills: [], available: false },
         },
       })
-      expect(status.value?.learningSources).not.toHaveProperty('eligible')
+      expect(jsonObject(status.value).learningSources).not.toHaveProperty('eligible')
       expect(snapshots.mock.calls).toEqual([
         [{ cwd, scope: main.agent, signal }],
         [{ cwd, scope: main.agent, signal }],
@@ -1384,7 +1393,7 @@ describe('Tianwen main-chat learning consent tool', () => {
         isError: false,
         value: { enabled: false, revision: 2 },
       })
-      expect(enabled.value?.disclosure).toBe(LEARNING_CONSENT_NOTICE_TEXT)
+      expect(jsonObject(enabled.value).disclosure).toBe(LEARNING_CONSENT_NOTICE_TEXT)
       const serialized = JSON.stringify([initial.value, enabledReplay.value, disabled.value])
       expect(serialized).not.toContain('note')
       expect(serialized).not.toContain('scope')

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 六处旧测试类型错误已清零；新普通任务配置绑定正确，但预算导致未通过
+
+新实际待办仅修学习状态测试返回值类型，候选前冻结原41项功能用例（32声明模板及参数表）、matcher预期/strict配置/目标与保护文件。一次普通 code/local-files/files 真实请求7（准入1/根6）、工具16，后4次被原12上限拒绝；部分修改，completion completed只代表会话结束，文件material-unavailable/check unverifiable/review file-evidence-unavailable。准备与实际config摘要一致，证实上轮配置修复真实生效，但不能追认为检查成功。原始结果/部分草稿保留，原目标恢复，不重跑。
+
+控制端另行工程补齐真实对象/数组收窄，六处旧TS2339清零、移除旧any，产品源码未变。最终两组 **87/87**、联合strict/八包类型/包根声明退出 **0**；首次工程遗漏map的unknown收窄失败保留。冻结声明/参数/预期及保护文件/正式驱动一致，只读与最终差异复核无重要问题。见[本项归属与结果](tianwen-learning-status-test-types-20261001.md)。运行约3.01 MiB、新测试残余0、旧451/4目录保持，D **18.63 GiB**。
+
+下一阶段回到 B 检查覆盖与 C/D 的独立案例/研究结果依据，不把维护回归算研究进度；类型检查只证明局部类型义务，不能授予采用许可。无适用合同不先扩建研究verifier，不编反馈或重做本题求绿。目标 active、反馈/研究/激活0、C—F、main/Daily 完整学习NO-GO、激活隔离、原门槛/十工作日窗口保持。
+
 ## 2026-10-01 状态交付后的配置时序阻塞已修复
 
 `31dafff` 后删除 proposal 阶段 prepare，改在已有原生 llm/stream 请求监听中读取实际 header.config，await prepare、复核同意、记录模型、再 next/provider。默认值已由原生 loop 固定，仍早于模型输出与文件执行；不 dry resolve 或改调用配置。旧状态任务的 unverifiable 不回填、不重跑。
