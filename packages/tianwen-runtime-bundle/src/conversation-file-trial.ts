@@ -198,11 +198,11 @@ export async function runConversationFileTrial(ctx: Context, parent: Agent, rawI
   input.signal.throwIfAborted()
   const replicaRoot = resolve(replicaParent, `trial-${randomUUID()}`)
   await mkdir(replicaRoot)
-  await seedConversationFiles(replicaRoot, material.files.entries)
-  const prompt = promptFor(material, replicaRoot, input.guidance)
   let handle: Awaited<ReturnType<Context['agents']['create']>> | undefined
   let preserveReplica = false
   try {
+    await seedConversationFiles(replicaRoot, material.files.entries)
+    const prompt = promptFor(material, replicaRoot, input.guidance)
     let requests = 0
     let toolCalls = 0
     const allowed = material.files.outputKind === 'files' ? ['read', 'write', 'edit'] : ['read']

@@ -88,6 +88,24 @@ it('runs native file tools only in a seeded replica and returns the captured out
   } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('cleans a partially seeded replica on filesystem failure before any model request or receipt', async () => {
+  let requests = 0
+  const harness = await mountTrial([() => { requests += 1; return textResponse('must not run') }])
+  let retained = false
+  const material = { ...harness.material, files: { ...harness.material.files,
+    entries: [harness.material.files.entries[0]!, { path: `nested/${'x'.repeat(300)}.md`, content: 'cannot seed' },
+      harness.material.files.entries[1]!] } }
+  try {
+    await expect(runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, material,
+      retainReceipt: () => { retained = true } })).rejects.toThrow()
+    expect(requests).toBe(0)
+    expect(retained).toBe(false)
+    expect(readdirSync(harness.replicas)).toEqual([])
+    expect(readFileSync(join(harness.original, 'input.md'), 'utf8')).toBe('original source')
+    expect(readdirSync(harness.original)).toEqual(['input.md'])
+  } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('recovers the exact retained output cold without reading current workspace files', async () => {
   const harness = await mountTrial([
     toolCallResponse('read-source', 'read', { file_path: 'input.md' }),
