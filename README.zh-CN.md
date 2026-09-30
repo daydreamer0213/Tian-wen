@@ -4,9 +4,11 @@
 
 天问是一个面向长时间运行 Agent、可审计的学习控制面。
 
-**开发源码：Runtime 0.1.24 / Desktop preview.25；日常已安装版：Runtime 0.1.23 /
-Desktop preview.24。** 开发版尚未升级到日常环境。DSH 0.1.1-rc.2 是当前精确支持的
-Agent Runtime。首次确认自动学习后，用户可以直接在 DSH Web/Desktop 中自然说出需求，
+**日常已安装版：Runtime 0.1.24 / Desktop preview.25**，已核验，见
+[024 日常交付记录](docs/operations/tianwen-status-024-delivery-20260930.md)。
+当前开发源码使用相同版本号，但包含尚未安装到日常环境的改动；版本号相同不代表程序内容相同，
+从当前源码构建也不等于升级日常环境。DSH 0.1.1-rc.2 是当前精确支持的 Agent Runtime。
+普通对话不需要先开启学习分析。首次同意学习分析后，用户可以直接在 DSH Web/Desktop 中自然说出需求，
 包括同一会话里的后续任务和反馈；不需要 `/research-summary`、规定格式材料、Goal，
 也不需要主动要求总结经验，天问会自行观测和复盘。
 
@@ -97,7 +99,7 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 
 ## 在已有 DSH Profile 中使用天问
 
-当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。下面的命令会从当前源码构建尚未发布的 0.1.24 开发包，安装到测试 Profile。运行前须使用已单独配置的测试 `DSH_HOME`，并把示例中的 `work` 换成该测试 Profile 的名称；这不是升级日常环境的指引：
+当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。下面的命令会从当前源码构建尚未安装到日常环境的 0.1.24 开发包，安装到测试 Profile；它不是已经核验的日常交付包。运行前须使用已单独配置的测试 `DSH_HOME`，并把示例中的 `work` 换成该测试 Profile 的名称；这不是升级日常环境的指引：
 
 ```powershell
 pnpm --filter @tianwen/runtime-bundle... build
@@ -130,7 +132,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen-dev-test --json
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 DSH 对话界面，已知 Runtime
-`0.1.10` 至 `0.1.23` 的精确 Profile 可在用户确认后由开发版 preview.25 更新到内嵌的 `0.1.24`；未知或损坏版本不会被自动覆盖。日常已安装版仍为 Desktop preview.24 / Runtime 0.1.23，见[日常交付记录](docs/operations/tianwen-safety-023-delivery-20260928.md)。
+`0.1.10` 至 `0.1.23` 的精确 Profile 可在用户确认后由开发版 preview.25 更新到内嵌的 `0.1.24`；未知或损坏版本不会被自动覆盖。日常已安装版为 Desktop preview.25 / Runtime 0.1.24，来自[已核验的日常交付](docs/operations/tianwen-status-024-delivery-20260930.md)，不是当前开发源码的构建物。完整自动学习尚未通过；已交付预览产品和独立维护分别按[固定范围](docs/operations/tianwen-product-learning-scope-20260928.md)记录，不重新打开它们的验收。
 
 安装后，直接在 DSH Web 或 Tianwen Desktop 中正常对话；确认学习开关后，自然任务与反馈可自动进入学习路径，不需要命令或规定格式。
 
