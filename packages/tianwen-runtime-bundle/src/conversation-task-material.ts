@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { CAPTURED_FILE_FACTS_TOOL, learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
+import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
 import { isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
@@ -184,7 +184,7 @@ function recordedToolPath(cwd: string, candidate: unknown): string | undefined {
 function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly SessionEvent[], task: ConversationTask): ConversationFileMaterial | undefined {
   const completion = task.completion
   const result = completion?.files
-  const outputKind = task.admission?.decision?.fileOutputKind
+  const outputKind = conversationFileCaptureOutputKind(task.admission?.decision)
   const inputs = task.fileInputs ?? []
   if (cwd === undefined || !isAbsolute(cwd) || completion === undefined || result === undefined
     || task.fileUnavailable !== undefined || outputKind !== result.outputKind || inputs.length === 0) return

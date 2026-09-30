@@ -381,7 +381,8 @@ export class TianwenConversationObserverService extends Service {
         const result = await runConversationClaimReview(this.ctx, agent, { label: `Tianwen review ${taskId}`, evidence, material, signal, callConfig })
         if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
         const review = { ...result, ...base, unavailableReason: null }
-        if (material.evaluationMode !== 'text' && material.fileResult === undefined && review.verdict === 'met') {
+        if (review.verdict === 'met' && (material.evaluationMode === 'external'
+          || material.evaluationMode !== 'text' && material.fileResult === undefined)) {
           this.ctx.tianwenEvolution.recordConversationLearning({ ...review, verdict: 'inconclusive' })
         } else this.ctx.tianwenEvolution.recordConversationLearning(review)
       }

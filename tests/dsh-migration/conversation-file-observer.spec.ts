@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
@@ -34,7 +35,7 @@ const parallelCalls = (calls: readonly { readonly id: string, readonly name: str
   { type: 'finish', reason: { kind: 'tool-calls' } },
 ]
 
-async function mount(script: Parameters<typeof mountPersistentHarness>[1]) {
+async function mount(script: Parameters<typeof mountPersistentHarness>[1], externalCodeArtifacts = false) {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-observer-')); roots.push(root)
@@ -45,7 +46,7 @@ async function mount(script: Parameters<typeof mountPersistentHarness>[1]) {
   await harness.ctx.plugin(fileTools, {})
   await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
   harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
-  await harness.ctx.plugin(TianwenConversationFileObserverService)
+  await harness.ctx.plugin(TianwenConversationFileObserverService, { externalCodeArtifacts })
   await harness.ctx.plugin(TianwenConversationObserverService)
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('file-chat'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
   return { ...harness, handle, root }
@@ -55,6 +56,102 @@ type TerminalCaptureState = { native: { pending: Map<string, unknown>, invalid: 
 function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, TerminalCaptureState> {
   return (harness.ctx.tianwenConversationFileObserver as unknown as { states: Map<string, TerminalCaptureState> }).states
 }
+
+const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
+  evaluationMode: 'external', relatedTaskId: null, feedback: null }
+
+it('captures external code artifacts without accepting a model success judgment', async () => {
+  const harness = await mount([structured(externalCode),
+    toolCallResponse('code-read', 'read', { file_path: 'input.ts' }),
+    toolCallResponse('code-write', 'write', { file_path: 'input.ts', content: 'export const value = 2\n' }),
+    textResponse('saved'), ...reviewPair()], true)
+  writeFileSync(join(harness.root, 'input.ts'), 'export const value = 1\n')
+  let resumed: Awaited<ReturnType<typeof harness.ctx.agents.resume>> | undefined
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change and verify compilation.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.decision).toMatchObject({ family: 'code', evaluationMode: 'external' })
+    expect(task.fileInputs?.map(({ path, content }) => ({ path, content }))).toEqual([
+      { path: 'input.ts', content: 'export const value = 1\n' },
+    ])
+    expect(task.completion?.files).toMatchObject({ outputKind: 'files', outputPaths: ['input.ts'],
+      entries: [{ path: 'input.ts', content: 'export const value = 2\n' }] })
+    expect(task.review?.verdict).toBe('inconclusive')
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId('file-chat'))
+    const changed = { ...saved, events: saved.events.map(event => event.type === 'tool/call' && String(event.data.callId) === 'code-write'
+      ? { ...event, data: { ...event.data, arguments: JSON.stringify({ file_path: 'input.ts', content: 'forged bytes' }) } } : event) } as typeof saved
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockResolvedValueOnce(changed)
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files).toBeUndefined()
+    inspect.mockRestore()
+    writeFileSync(join(harness.root, 'input.ts'), 'unrelated later bytes')
+    await harness.handle.dispose()
+    resumed = await harness.ctx.agents.resume({ resumeSessionId: SessionId('file-chat'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files).toMatchObject({
+      entries: [{ path: 'input.ts', content: 'export const value = 1\n' }], outputPaths: ['input.ts'],
+    })
+  } finally { await resumed?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each([
+  { enabled: false, decision: externalCode },
+  { enabled: true, decision: { ...externalCode, family: 'writing' } },
+])('leaves external captures absent for disabled capture or a non-code task: $enabled/$decision.family', async ({ enabled, decision }) => {
+  const harness = await mount([structured(decision), toolCallResponse('ordinary-write', 'write', { file_path: 'input.ts', content: 'changed' }),
+    textResponse('saved'), ...reviewPair()], enabled)
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(readFileSync(join(harness.root, 'input.ts'), 'utf8')).toBe('changed')
+    expect(task.fileInputs).toBeUndefined()
+    expect(task.completion?.files).toBeUndefined()
+    expect(task.review?.verdict).toBe('inconclusive')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('does not route an external command through the local-file command guard', async () => {
+  const harness = await mount([structured(externalCode),
+    toolCallResponse('write-before-check', 'write', { file_path: 'input.ts', content: 'changed' }),
+    toolCallResponse('external-check', 'pwsh', { command: 'compile-probe' }), textResponse('saved'), ...reviewPair()], true)
+  harness.ctx.tools.register(defineTool({
+    name: 'pwsh', description: 'Controlled external tool dispatch probe; does not execute a shell.',
+    parameters: { command: { type: 'string', required: true } },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    async execute({ command }) { writeFileSync(join(harness.root, 'command-ran.txt'), command); return 'EXTERNAL_CHECK_RESULT' },
+  }))
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change and verify compilation.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(readFileSync(join(harness.root, 'command-ran.txt'), 'utf8')).toBe('compile-probe')
+    const result = harness.handle.agent.session.events.find(event => event.type === 'tool/result' && String(event.data.message.source.callId) === 'external-check')
+    expect(result?.type === 'tool/result' && result.data.message.content[0].isError).toBe(false)
+    expect(JSON.stringify(result?.data)).toContain('EXTERNAL_CHECK_RESULT')
+    expect(task.fileInputs?.[0]?.content).toBeNull()
+    expect(task.fileUnavailable?.reason).toBe('unsupported-tool')
+    expect(task.fileAncillary).toBeUndefined()
+    expect(task.completion?.files).toBeUndefined()
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files).toBeUndefined()
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('drops external final artifacts when consent is withdrawn after the native write', async () => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  harness = await mount([structured(externalCode), toolCallResponse('code-write', 'write', { file_path: 'input.ts', content: 'changed' }), () => {
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    return textResponse('saved')
+  }], true)
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(readFileSync(join(harness.root, 'input.ts'), 'utf8')).toBe('changed')
+    expect(task.fileInputs?.[0]?.content).toBeNull()
+    expect(task.completion?.files).toBeUndefined()
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it('keeps the first bytes while an actual approved native write changes the file', async () => {
   const responses = [structured(admission), toolCallResponse('write-1', 'write', { file_path: 'input.md', content: 'rewritten\r\n' }), textResponse('saved'),

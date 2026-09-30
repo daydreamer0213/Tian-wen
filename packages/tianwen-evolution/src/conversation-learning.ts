@@ -208,6 +208,13 @@ export interface ConversationTaskAdmission {
   readonly familyVerification?: ConversationFamilyVerification
 }
 
+/** File artifacts alone do not establish an external code task's success. */
+export function conversationFileCaptureOutputKind(decision: ConversationAdmissionDecision | null | undefined): 'files' | 'chat' | undefined {
+  if (decision?.kind !== 'task') return
+  if (decision.evaluationMode === 'local-files') return decision.fileOutputKind
+  if (decision.evaluationMode === 'external' && decision.family === 'code') return 'files'
+}
+
 export interface ConversationFamilyCheck {
   readonly family: ConversationFamily
   readonly quote: string
@@ -511,7 +518,7 @@ export class ConversationLearningState {
       if (record.endSeq <= task.source.startSeq) throw new Error('task result must follow its source boundary')
       if (record.files !== undefined) {
         const inputs = task.fileInputs?.map(input => ({ path: input.path, content: input.content })) ?? []
-        if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.admission.decision.fileOutputKind !== record.files.outputKind || record.status !== 'completed' || task.fileUnavailable !== undefined
+        if (conversationFileCaptureOutputKind(task.admission?.decision) !== record.files.outputKind || record.status !== 'completed' || task.fileUnavailable !== undefined
           || inputs.length === 0 || record.files.inputsDigest !== sha256(inputs)
           || record.files.captureSeq >= record.endSeq || task.fileInputs!.some(input => input.callSeq >= record.files!.captureSeq)
           || (task.fileAncillary ?? []).some(item => item.resultSeq > record.files!.captureSeq)
@@ -526,7 +533,7 @@ export class ConversationLearningState {
       return
     }
     if (record.kind === 'task-file-input-captured') {
-      if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) throw new Error('task file capture requires local-files admission and must precede the completed result')
+      if (conversationFileCaptureOutputKind(task.admission?.decision) === undefined || task.completion !== undefined) throw new Error('task file capture requires local-files or external code admission and must precede the completed result')
       if (task.fileUnavailable !== undefined || record.callSeq <= task.source.startSeq) throw new Error('task file capture is unavailable or outside the task boundary')
       parseConversationFileEntries([...(task.fileInputs ?? []).map(input => ({ path: input.path, content: input.content })), { path: record.path, content: record.content }])
       return
@@ -553,7 +560,7 @@ export class ConversationLearningState {
       return
     }
     if (record.kind === 'task-file-evidence-unavailable') {
-      if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) throw new Error('task file evidence status requires local-files admission and must precede the completed result')
+      if (conversationFileCaptureOutputKind(task.admission?.decision) === undefined || task.completion !== undefined) throw new Error('task file evidence status requires local-files or external code admission and must precede the completed result')
       return
     }
     if (record.kind === 'task-review-started') {

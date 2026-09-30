@@ -55,6 +55,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string
   /** Experimental prospective admission policy; old sessions retain their original family. */
   readonly familyVerification?: boolean
+  /** Default-off capture of external code task file artifacts; no effect verdict or learning permission. */
+  readonly captureExternalCodeArtifacts?: boolean
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
@@ -486,6 +488,7 @@ export async function apply(
   ctx.plugin(TianwenMessageFeedbackBridgeService)
   ctx.plugin(TianwenNativeToolObservationService)
   ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
+    externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }) })
   ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true })
   ctx.plugin(TianwenConversationFeedbackService)

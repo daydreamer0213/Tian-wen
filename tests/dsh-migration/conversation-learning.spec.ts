@@ -376,6 +376,40 @@ describe('natural conversation task evidence', () => {
     expect(() => ledger.recordConversationLearning({ ...captured, callId: 'write-3', callSeq: 17, path: 'output.md', content: null })).toThrow(/before|completed|result/i)
   })
 
+  it('persists external code files without allowing an external model success review', () => {
+    const directory = root(), ledger = ledgerWithConsent(directory), source = start()
+    ledger.recordConversationLearning(source)
+    const admitted = admission(source.taskId, 'external')
+    ledger.recordConversationLearning({ ...admitted, decision: { ...admitted.decision, family: 'code' } })
+    const captured = { kind: 'task-file-input-captured' as const, taskId: source.taskId,
+      callId: 'code-write', callSeq: 14, path: 'input.ts', content: 'before' }
+    ledger.recordConversationLearning(captured)
+    const files = { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: 'files' as const,
+      inputsDigest: sha256([{ path: 'input.ts', content: 'before' }]), captureSeq: 17,
+      outputPaths: ['input.ts'], entries: [{ path: 'input.ts', content: 'after' }] }
+    expect(() => ledger.recordConversationLearning({ ...finish(source.taskId), files: { ...files, outputKind: 'chat', outputPaths: [] } })).toThrow(/file/i)
+    ledger.recordConversationLearning({ ...finish(source.taskId), files })
+    const checks = auditedChecks(), consensus = conversationReviewConsensus(checks)
+    const result = { ...consensus, kind: 'task-reviewed' as const, taskId: source.taskId,
+      admissionDigest: sha256(ledger.listConversationTasks()[0]!.admission), resultDigest: finish(source.taskId).resultDigest,
+      reviewChecks: checks, unavailableReason: null }
+    expect(() => ledger.recordConversationLearning(result)).toThrow(/external/i)
+    ledger.recordConversationLearning({ ...result, verdict: 'inconclusive' })
+    expect(new EvolutionLedger(directory).listConversationTasks()).toEqual(ledger.listConversationTasks())
+  })
+
+  it.each(['external', 'text', 'subjective'] as const)('does not accept file evidence for a %s non-code task', mode => {
+    const ledger = ledgerWithConsent(), source = start()
+    ledger.recordConversationLearning(source)
+    ledger.recordConversationLearning(admission(source.taskId, mode))
+    expect(() => ledger.recordConversationLearning({ kind: 'task-file-input-captured', taskId: source.taskId,
+      callId: 'unexpected', callSeq: 14, path: 'input.md', content: 'source' })).toThrow(/admission/i)
+    expect(() => ledger.recordConversationLearning({ kind: 'task-file-evidence-unavailable', taskId: source.taskId,
+      reason: 'unsupported-tool' })).toThrow(/admission/i)
+    ledger.recordConversationLearning(finish(source.taskId))
+    expect(ledger.listConversationTasks()[0]?.fileInputs).toBeUndefined()
+  })
+
   it('binds file completion to the frozen kind, input digest and exact final path coverage', () => {
     const setup = (kind: 'files' | 'chat' = 'files') => {
       const ledger = ledgerWithConsent(), source = start()

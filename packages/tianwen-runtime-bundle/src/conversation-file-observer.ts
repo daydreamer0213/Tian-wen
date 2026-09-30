@@ -2,7 +2,7 @@ import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
-import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, parseConversationFileEntries, parseConversationFileResult, sha256, type CapturedFileFacts, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
+import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, conversationFileCaptureOutputKind, parseConversationFileEntries, parseConversationFileResult, sha256, type CapturedFileFacts, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
 import { isAbsolute } from 'node:path'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationFilePath, readConversationFile } from './conversation-file-material.js'
@@ -27,6 +27,11 @@ interface CaptureState {
   final?: ConversationFileResult
 }
 
+export interface ConversationFileObserverConfig extends ConversationFileAncillaryConfig {
+  /** Prospective native read/write/edit artifacts only; does not certify code effects. */
+  readonly externalCodeArtifacts?: boolean
+}
+
 function isRoot(agent: Agent): boolean {
   return agent.session.header.parentSession === undefined && agent.session.header.origin !== 'subagent'
     && agent.session.header.agentPreset !== TIANWEN_CONTROLLED_AGENT_PRESET
@@ -44,7 +49,7 @@ export class TianwenConversationFileObserverService extends Service {
   private readonly factDefinitions = new WeakSet<ToolDefinition>()
   private readonly installations = new Map<Agent, () => Promise<void>>()
 
-  constructor(ctx: Context, private readonly config: ConversationFileAncillaryConfig = {}) { super(ctx, 'tianwenConversationFileObserver') }
+  constructor(ctx: Context, private readonly config: ConversationFileObserverConfig = {}) { super(ctx, 'tianwenConversationFileObserver') }
 
   verifyAncillary(task: ConversationTask, cwd: string, events: readonly SessionEvent[], boundary: number): void {
     verifyConversationFileAncillary(task, cwd, events, boundary, this.config)
@@ -116,7 +121,8 @@ export class TianwenConversationFileObserverService extends Service {
   private async factFor(args: { file_path: string }, exec: ToolDispatchExecution): Promise<CapturedFileFacts> {
     if (Object.keys(args).length !== 1 || typeof args.file_path !== 'string' || isAbsolute(args.file_path)) throw new Error('captured file facts require one relative file path')
     const current = this.current(exec)
-    if (current === undefined || current.state.revoked || current.state.unavailable || !this.authorized(current.state.consentRevision)) throw new Error('captured file facts require an active authorized local-file task')
+    if (current === undefined || current.task.admission?.decision?.evaluationMode !== 'local-files'
+      || current.state.revoked || current.state.unavailable || !this.authorized(current.state.consentRevision)) throw new Error('captured file facts require an active authorized local-file task')
     const path = await conversationFilePath(current.state.cwd, args.file_path)
     await current.state.captures.get(path.toLowerCase())
     const input = this.ctx.tianwenEvolution.listConversationTasks(String(exec.agent!.session.id))
@@ -144,8 +150,10 @@ export class TianwenConversationFileObserverService extends Service {
     if (call?.type !== 'tool/call') return
     const task = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id))
       .find(item => item.source.turn === call.data.turn && item.admission?.decision?.kind === 'task'
-        && item.admission.decision.evaluationMode === 'local-files' && item.completion === undefined)
-    const outputKind = task?.admission?.decision?.fileOutputKind
+        && (item.admission.decision.evaluationMode === 'local-files'
+          || this.config.externalCodeArtifacts === true && conversationFileCaptureOutputKind(item.admission.decision) !== undefined)
+        && item.completion === undefined)
+    const outputKind = conversationFileCaptureOutputKind(task?.admission?.decision)
     const cwd = agent.session.header.cwd
     if (task === undefined || outputKind === undefined || cwd === undefined) return
     let state = this.states.get(task.source.taskId)
@@ -164,6 +172,13 @@ export class TianwenConversationFileObserverService extends Service {
     const { task, state } = current
     delete state.final
     if (state.revoked || !this.authorized(state.consentRevision)) { state.revoked = true; state.native.discard(); return next() }
+    // External commands retain their ordinary execution path. Local-file ancillary
+    // command restrictions must not intercept a compiler/test run.
+    if (task.admission?.decision?.evaluationMode === 'external'
+      && exec.name !== 'read' && exec.name !== 'write' && exec.name !== 'edit') {
+      this.unavailable(state, 'unsupported-tool')
+      return next()
+    }
     try { await state.native.prepare(exec) }
     catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error) }
     if (isFileAncillaryTool(exec.name) && exec.name !== CAPTURED_FILE_FACTS_TOOL) return state.native.execute(exec, next)
