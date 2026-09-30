@@ -5,7 +5,7 @@ import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evo
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { conversationQualityContract, hasCurrentConversationQuality, parseConversationAuditedReviewChecks, parseConversationLearningRecord, parseConversationQualityContract, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
-import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
+import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, validateConversationExternalCheck } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 
 const roots: string[] = []
 function root() {
@@ -53,10 +53,10 @@ function ledgerWithConsent(directory = root()) {
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   return ledger
 }
-function externalCheckSetup() {
+function externalCheckSetup(mode: 'external' | 'local-files' = 'external') {
   const directory = root(), ledger = ledgerWithConsent(directory), source = start()
   ledger.recordConversationLearning(source)
-  const initial = admission(source.taskId, 'external')
+  const initial = admission(source.taskId, mode)
   const admitted = { ...initial, decision: { ...initial.decision, family: 'code' as const } }
   ledger.recordConversationLearning(admitted)
   const prepared = { kind: 'task-external-check-prepared' as const, taskId: source.taskId, preparedSeq: 12,
@@ -88,6 +88,30 @@ function auditedChecks(verdict: 'met' | 'not-met' | 'inconclusive' = 'met') {
 }
 
 describe('natural conversation task evidence', () => {
+  it.each(['verified', 'rejected'] as const)('cold-replays a local-file code check %s without changing admission or granting review', status => {
+    const { directory, ledger, result, complete } = externalCheckSetup('local-files')
+    const admitted = ledger.listConversationTasks()[0]!.admission
+    complete()
+    ledger.recordConversationLearning({ ...result, status })
+    const task = ledger.listConversationTasks()[0]!
+    expect(task.admission).toEqual(admitted)
+    expect(task.admission?.decision).toMatchObject({ family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files' })
+    expect(task.externalCheckFinished?.status).toBe(status)
+    expect(task.review).toBeUndefined()
+    expect(new EvolutionLedger(directory).listConversationTasks()).toEqual(ledger.listConversationTasks())
+  })
+
+  it.each(['writing', 'chat', 'text', 'subjective'] as const)('does not extend code checks to %s tasks', kind => {
+    const { ledger, prepared } = externalCheckSetup()
+    const task = ledger.listConversationTasks()[0]!
+    const changedAdmission = { ...task.admission!, decision: { ...task.admission!.decision!,
+      family: kind === 'writing' ? 'writing' as const : 'code' as const,
+      evaluationMode: kind === 'text' || kind === 'subjective' ? kind : 'local-files' as const,
+      ...(kind === 'chat' || kind === 'writing' ? { fileOutputKind: kind === 'chat' ? 'chat' as const : 'files' as const } : {}),
+    } }
+    expect(() => validateConversationExternalCheck({ ...prepared, admissionDigest: sha256(changedAdmission) }, { ...task, admission: changedAdmission })).toThrow(/admission/i)
+  })
+
   it('freezes separate external check records and cold-replays them without granting a model review', () => {
     const { directory, ledger, prepared, result, complete } = externalCheckSetup()
     complete()

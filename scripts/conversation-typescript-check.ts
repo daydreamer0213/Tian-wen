@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { sha256 } from '../packages/tianwen-evolution/src/index.js'
+import { sha256, supportsConversationCodeCheck } from '../packages/tianwen-evolution/src/index.js'
 import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
 
 const CHECKER_ID = 'conversation-typescript-noemit'
@@ -151,8 +151,7 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
       material.signal.throwIfAborted()
       if (!samePath(material.cwd, cwd)) return undefined
       if (directRequestText(material.request) !== requestText) return undefined
-      if (material.task.admission?.decision?.kind !== 'task' || material.task.admission.decision.evaluationMode !== 'external'
-        || material.task.admission.decision.family !== 'code') return undefined
+      if (!supportsConversationCodeCheck(material.task.admission?.decision)) return undefined
       const targetFull = inside(cwd, targetPath)
       if (targetFull === undefined) return undefined
       const contextFulls: string[] = []

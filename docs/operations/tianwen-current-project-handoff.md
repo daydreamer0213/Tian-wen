@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 普通本地代码任务已能接入独立检查；下一任务是状态汇总
+
+预算任务首次候选前失败暴露 external-only 接缝；本轮保持其失败，不重跑或回填。按现有合法分类补接 code/local-files/files，与 code/external 共用一项 evolution applicability 判断，validator/runtime prepare/TypeScript 适配器一致；null/缺准入、writing、chat、text、subjective 不扩入。显式 runtime 双开关、原 local 准入/review、研究来源/accepted/激活均未改；独立结果只单独记录，不能覆盖模型评价或授予学习资格。
+
+四项先红、五项边界负例通过。首轮完整 104 过/16 失败，原因为包消费者尚未构建新增出口，三个 pending 回调测试超时；strict 发现 null 准入/夹具类型遗漏。修正类型并按项目构建顺序后，最终四组 **120/120**、八包类型/联合严格类型/包根声明退出 **0**，独立审查无重要问题。原冻结 17 项测试未改，检查器当前源码身份随本修复变化，不重评旧合同。详见[本项实现与失败记录](tianwen-local-file-code-check-20261001.md)。
+
+本项模型/反馈/研究/激活均 0，目标 active，C—F、main/Daily 完整学习 NO-GO、隔离、原门槛/期限不变。新运行约 23 KB、checker 测试残余 0、普通测试旧目录仍 451，D **18.64 GiB**。下一新实际待办：当前/历史学习状态缺独立代码检查汇总，补准备/等待及三种结果计数，保持模型评价分开；候选前固定检查后通过普通原生接线实现，不重做已完成预算题。
+
 ## 2026-10-01 文件预算说明已交付；普通真实任务暴露 local code 接缝
 
 上一检查器工程轮是 progress，本轮选择另一实际文件预算说明待办，先冻结测试/旧收据机制夹具/原计划。普通原生准入一次真实请求正确判为 code/local-files/files；原任务只改 UTF-8 代码、不执行命令，分类符合现有规则。当前检查仅支持 external/code，控制端错误假定本任务 external；宿主在候选请求前因无准备合同阻止执行。根 error、账本 failed/inconclusive，真实候选请求 0、工具 0、目标未变。requests=2/rootRequests=1 只是驱动拦截入口计数，不是实际调用量；不补合同、不改旧账本或重跑。

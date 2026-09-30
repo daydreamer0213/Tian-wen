@@ -24,6 +24,18 @@ function fixture(initial = 'export const value: number = 1') {
   return { cwd, config, material, candidate }
 }
 
+it.each(['files', 'chat'] as const)('handles local code %s output without allowing a chat-only check', async outputKind => {
+  const f = fixture()
+  const material = { ...f.material, task: { ...f.material.task, admission: { ...f.material.task.admission!,
+    decision: { ...f.material.task.admission!.decision!, evaluationMode: 'local-files' as const, fileOutputKind: outputKind } } } }
+  const prepared = await createConversationTypeScriptCheck(f.config).prepare(material)
+  if (outputKind === 'chat') expect(prepared).toBeUndefined()
+  else {
+    expect(prepared).toBeDefined()
+    expect((await prepared!.evaluate(f.candidate('export const value: number = 2'))).status).toBe('verified')
+  }
+})
+
 it.each(['target', 'context'])('rejects an initial %s path outside the project', async field => {
   const f = fixture(); if (field === 'target') f.config.targetPath = '../outside.ts'; else f.config.contextPaths = ['../outside.ts']
   expect(await createConversationTypeScriptCheck(f.config).prepare(f.material).catch(() => undefined)).toBeUndefined()

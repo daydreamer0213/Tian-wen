@@ -66,14 +66,15 @@ function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, 
 const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
   evaluationMode: 'external', relatedTaskId: null, feedback: null }
 
-it('uses the concrete TypeScript host check in ordinary external-code observation without authorizing learning', async () => {
+it.each(['external', 'local-files'] as const)('uses the concrete TypeScript host check in ordinary %s code observation without authorizing learning', async mode => {
   const requestText = 'Repair the type of value in input.ts; change only input.ts.'
   let harness: Awaited<ReturnType<typeof mount>>
   const check: ConversationExternalCodeCheck = { async prepare(material) {
     return createConversationTypeScriptCheck({ cwd: harness.root, requestText, targetPath: 'input.ts', contextPaths: [],
       compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: [] } }).prepare(material)
   } }
-  harness = await mount([structured(externalCode), structured(externalCode), () => toolCallResponse('typed-write', 'write', {
+  const code = { ...externalCode, evaluationMode: mode, ...(mode === 'local-files' ? { fileOutputKind: 'files' } : {}) }
+  harness = await mount([structured(code), ...(mode === 'external' ? [structured(code)] : []), () => toolCallResponse('typed-write', 'write', {
     file_path: 'input.ts', content: 'export const value: number = 2',
   }), textResponse('saved'), ...reviewPair()], true, check)
   writeFileSync(join(harness.root, 'input.ts'), 'export const value: number = "wrong"')
@@ -85,7 +86,8 @@ it('uses the concrete TypeScript host check in ordinary external-code observatio
     expect(task.externalCheckPrepared?.checkerId).toBe('conversation-typescript-noemit')
     expect(task.externalCheckFinished).toMatchObject({ status: 'verified', resultDigest: task.completion?.resultDigest,
       preparationDigest: sha256(task.externalCheckPrepared), fileResultDigest: sha256(task.completion?.files) })
-    expect(task.review?.verdict).toBe('inconclusive')
+    expect(task.admission?.decision).toMatchObject({ family: 'code', evaluationMode: mode })
+    expect(task.review?.verdict).toBe(mode === 'external' ? 'inconclusive' : 'met')
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })

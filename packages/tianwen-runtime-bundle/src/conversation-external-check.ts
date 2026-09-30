@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type UserMessage } from '@deepseek-ai/dsh-session'
-import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, sha256, validateConversationExternalCheck,
+import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, sha256, supportsConversationCodeCheck, validateConversationExternalCheck,
   type ConversationExternalCheckOutcome, type ConversationFileEntry, type ConversationTask } from '@tianwen/evolution'
 import { conversationContext, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
 
@@ -71,8 +71,8 @@ export class ConversationExternalCodeChecks {
     const task = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id)).find(task => task.source.turn === turn)
     if (this.check === undefined || task === undefined || task.externalCheckPrepared !== undefined || task.completion !== undefined
       || (task.models?.length ?? 0) > 0 || (task.fileInputs?.length ?? 0) > 0
-      || task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'external'
-      || task.admission.decision.family !== 'code' || agent.session.header.cwd === undefined || !this.authorized(task.source.consentRevision)) return
+      || !supportsConversationCodeCheck(task.admission?.decision)
+      || agent.session.header.cwd === undefined || !this.authorized(task.source.consentRevision)) return
     const controller = new AbortController(); this.controllers.add(controller)
     const signal = AbortSignal.any([stepSignal, controller.signal])
     try {

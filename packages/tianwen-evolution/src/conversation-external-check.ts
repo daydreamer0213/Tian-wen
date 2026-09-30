@@ -1,7 +1,7 @@
 import { parseConversationFileEntries, type ConversationFileEntry } from './conversation-files.js'
 import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
-import type { ConversationTask } from './conversation-learning.js'
+import type { ConversationAdmissionDecision, ConversationTask } from './conversation-learning.js'
 
 export interface ConversationExternalCheckPrepared {
   readonly kind: 'task-external-check-prepared'
@@ -29,6 +29,12 @@ export interface ConversationExternalCheckFinished extends ConversationExternalC
   readonly preparationDigest: Sha256Digest
   readonly resultDigest: Sha256Digest
   readonly fileResultDigest: Sha256Digest | null
+}
+
+/** Host-check applicability only; never a task verdict or learning permission. */
+export function supportsConversationCodeCheck(decision: ConversationAdmissionDecision | null | undefined): boolean {
+  return decision?.kind === 'task' && decision.family === 'code'
+    && (decision.evaluationMode === 'external' || decision.evaluationMode === 'local-files' && decision.fileOutputKind === 'files')
 }
 
 function fields(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -73,7 +79,7 @@ export function parseConversationExternalCheck(value: unknown): ConversationExte
 
 export function validateConversationExternalCheck(record: ConversationExternalCheckPrepared | ConversationExternalCheckFinished, task: ConversationTask): void {
   const decision = task.admission?.decision
-  if (decision?.kind !== 'task' || decision.evaluationMode !== 'external' || decision.family !== 'code') throw new Error('external check requires external code admission')
+  if (!supportsConversationCodeCheck(decision)) throw new Error('external check requires file code admission')
   if (record.kind === 'task-external-check-prepared') {
     if (task.completion !== undefined || (task.models?.length ?? 0) > 0 || (task.fileInputs?.length ?? 0) > 0
       || task.fileUnavailable !== undefined || (task.fileAncillary?.length ?? 0) > 0) throw new Error('external check must be prepared before the candidate or file execution')
