@@ -154,6 +154,15 @@ function naturalConversationStatus(tasks: readonly ConversationTask[], feedbackS
       notMet: reviewed.filter(task => task.review?.verdict === 'not-met').length,
       inconclusive: reviewed.filter(task => task.review?.verdict === 'inconclusive').length,
     },
+    codeChecks: {
+      scope: 'Independent code checks cover only their declared checks; they do not replace model review, whole-task acceptance, learning eligibility or activation.',
+      prepared: count(task => task.externalCheckPrepared !== undefined),
+      pending: count(task => task.externalCheckPrepared !== undefined
+        && task.externalCheckFinished === undefined),
+      verified: count(task => task.externalCheckFinished?.status === 'verified'),
+      rejected: count(task => task.externalCheckFinished?.status === 'rejected'),
+      unverifiable: count(task => task.externalCheckFinished?.status === 'unverifiable'),
+    },
     feedback: {
       correction: feedbackCount('correction'),
       positive: feedbackCount('positive'),

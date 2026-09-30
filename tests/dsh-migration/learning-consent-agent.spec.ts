@@ -515,6 +515,7 @@ describe('Tianwen main-chat learning consent tool', () => {
             reviews: { pending: 1, unavailable: 2, met: 2, notMet: 1, inconclusive: 1 },
             feedback: { correction: 1, positive: 1, preference: 1, requirementChange: 1 },
             nativeFeedback: { activePositive: 2, activeNegative: 1, retracted: 1 },
+            codeChecks: { prepared: 0, pending: 0, verified: 0, rejected: 0, unverifiable: 0 },
           },
         },
         currentSession: { naturalConversation: {
@@ -522,10 +523,88 @@ describe('Tianwen main-chat learning consent tool', () => {
           completion: { pending: 2, completed: 6, interrupted: 1, failed: 0 },
           reviews: { pending: 1, unavailable: 2, met: 1, notMet: 1, inconclusive: 1 },
           nativeFeedback: { activePositive: 1, activeNegative: 1, retracted: 1 },
+          codeChecks: { prepared: 0, pending: 0, verified: 0, rejected: 0, unverifiable: 0 },
         } },
       } })
       expect(JSON.stringify(result.value)).not.toContain('PRIVATE')
       expect(JSON.stringify(result.value)).not.toContain(firstTask)
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.adapter.requests).toHaveLength(0)
+    } finally {
+      await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it('reports independent code checks in their session scope without granting a review or exposing material', async () => {
+    const mounted = await mountConsentRuntime('code-check-status')
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      const evolution = mounted.ctx.tianwenEvolution
+      evolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+      const mainId = String(main.agent.session.id)
+      function record(turn: number, sessionId: string, status: 'verified' | 'rejected' | 'unverifiable' | 'pending' | 'legacy') {
+        const lifecycle = sha256(sessionId)
+        const taskId = `conversation-task:${sha256({ sessionId, lifecycle, turn }).slice(7)}`
+        const requestDigest = sha256(`PRIVATE request ${turn}`), contextDigest = sha256('PRIVATE context')
+        const scopeKey = 'PRIVATE scope'
+        evolution.recordConversationLearning({ kind: 'task-started', taskId, sessionId,
+          sessionLifecycleFingerprint: lifecycle, turn, startSeq: turn * 10, userMessageIds: ['PRIVATE request'],
+          requestDigest, contextDigest, scopeKey, consentRevision: 1,
+          behaviorVersion: guidanceVersion({ schemaVersion: 'tianwen.conversation-guidance.v1', scopeKey, rules: {} }) })
+        const admitted = { kind: 'task-admitted' as const, taskId,
+          decision: { kind: 'task' as const, objective: 'PRIVATE objective', criteria: ['PRIVATE criterion'],
+            family: 'code' as const, evaluationMode: 'local-files' as const, fileOutputKind: 'files' as const,
+            relatedTaskId: null, feedback: null }, qualityContract: conversationQualityContract(),
+          proof: { sessionId: 'PRIVATE admission', sessionDigest: sha256('proof'), requestDigest: sha256('admission') },
+          unavailableReason: null }
+        evolution.recordConversationLearning(admitted)
+        const inputs = [{ path: 'PRIVATE.ts', content: 'PRIVATE before' }]
+        const prepared = { kind: 'task-external-check-prepared' as const, taskId, preparedSeq: turn * 10 + 1,
+          requestDigest, contextDigest, admissionDigest: sha256(admitted), modelConfigDigest: sha256('model'),
+          checkerId: 'PRIVATE checker', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256(inputs) }
+        if (status !== 'legacy') evolution.recordConversationLearning(prepared)
+        evolution.recordConversationLearning({ kind: 'task-model-observed', taskId,
+          headerSeq: turn * 10 + 2, modelConfigDigest: sha256('model') })
+        evolution.recordConversationLearning({ kind: 'task-file-input-captured', taskId, callId: `PRIVATE call ${turn}`,
+          callSeq: turn * 10 + 3, path: inputs[0]!.path, content: inputs[0]!.content })
+        const files = { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: 'files' as const,
+          inputsDigest: prepared.inputsDigest, captureSeq: turn * 10 + 7,
+          outputPaths: ['PRIVATE.ts'], entries: [{ path: 'PRIVATE.ts', content: 'PRIVATE after' }] }
+        const resultDigest = sha256(`PRIVATE answer ${turn}`)
+        evolution.recordConversationLearning({ kind: 'task-finished', taskId, endSeq: turn * 10 + 8,
+          status: 'completed', assistantMessageIds: ['PRIVATE answer'], resultDigest, evidenceIds: [], files })
+        if (status !== 'legacy' && status !== 'pending') evolution.recordConversationLearning({
+          kind: 'task-external-check-finished', taskId, preparationDigest: sha256(prepared), resultDigest,
+          fileResultDigest: sha256(files), status, detail: 'PRIVATE check detail' })
+      }
+      record(1, mainId, 'verified')
+      record(2, mainId, 'rejected')
+      record(3, mainId, 'unverifiable')
+      record(4, mainId, 'pending')
+      record(5, mainId, 'legacy')
+      record(1, 'other-session', 'verified')
+      record(2, 'other-session', 'pending')
+      const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl')
+      const beforeLedger = readFileSync(ledgerPath, 'utf8')
+
+      const result = await executeLearningStatus(mounted.ctx, main.agent)
+      const scope = 'Independent code checks cover only their declared checks; they do not replace model review, whole-task acceptance, learning eligibility or activation.'
+      expect(result).toMatchObject({ isError: false, value: {
+        history: { naturalConversation: {
+          codeChecks: { prepared: 6, pending: 2, verified: 2, rejected: 1, unverifiable: 1, scope },
+          reviews: { pending: 7, unavailable: 0, met: 0, notMet: 0, inconclusive: 0 },
+        } },
+        currentSession: { naturalConversation: {
+          codeChecks: { prepared: 4, pending: 1, verified: 1, rejected: 1, unverifiable: 1, scope },
+          reviews: { pending: 5, unavailable: 0, met: 0, notMet: 0, inconclusive: 0 },
+        } },
+      } })
+      expect(JSON.stringify(result.value)).not.toContain('PRIVATE')
+      expect(JSON.stringify(result.value)).not.toContain('conversation-task:')
+      expect(JSON.stringify(result.value)).not.toContain(sha256('checker'))
       expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
       expect(mounted.adapter.requests).toHaveLength(0)
     } finally {

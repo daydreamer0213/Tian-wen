@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 独立检查状态已交付；原生修改完成但模型默认值造成不可核验
+
+新增当前/历史 `codeChecks` 汇总，与模型 reviews 分开，旧无检查记录全零。新的普通实际任务合法 code/local-files/files；真实请求 5（准入 1、根 4）、工具 3、重试/脚本候选 0，根与任务 completed，生成九行实际修改。原独立结果 unverifiable，复核 inconclusive/invalid-judgment，不重跑或回填。已精确确认 `agent/request` proposal 没有 reasoningEffort，后续 DSH prepareCall 加入提供者 high 默认值，故候选前摘要与实际请求头不一致；账本保守拒收正确。
+
+差异只读审查无重要问题，控制端采用相同原生候选字节做独立工程验证：两项先红，最终两组 **87/87**、八包类型/包根声明退出 **0**。联合 strict 的六处旧测试字段错误通过修改前源码对比确认原有且未增；不能称此检查全过，冻结测试不改。见[本项结果与归属](tianwen-code-check-status-20261001.md)。运行约 1.03 MiB、新测试残余 0、四个 9 月 5 日旧状态目录保留，D **18.64 GiB**。
+
+下一实际工程任务：在已有原生请求头、实际提供者发送前固定独立检查，沿用确切 config、原取消/同意/漂移/冷恢复保护，不增加宽松比较或新模型重试。目标 active，反馈/研究/激活 0、C—F、main/Daily 完整学习 NO-GO、激活隔离、原门槛/十工作日窗口保持。
+
 ## 2026-10-01 普通本地代码任务已能接入独立检查；下一任务是状态汇总
 
 预算任务首次候选前失败暴露 external-only 接缝；本轮保持其失败，不重跑或回填。按现有合法分类补接 code/local-files/files，与 code/external 共用一项 evolution applicability 判断，validator/runtime prepare/TypeScript 适配器一致；null/缺准入、writing、chat、text、subjective 不扩入。显式 runtime 双开关、原 local 准入/review、研究来源/accepted/激活均未改；独立结果只单独记录，不能覆盖模型评价或授予学习资格。
