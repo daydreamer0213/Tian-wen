@@ -14,6 +14,8 @@ import { TianwenConversationObserverService } from '../../packages/tianwen-runti
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { ConversationExternalCodeChecks, type ConversationExternalCodeCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
+import ts from 'typescript'
+import { createConversationTypeScriptCheck } from '../../scripts/conversation-typescript-check.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -63,6 +65,30 @@ function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, 
 
 const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
   evaluationMode: 'external', relatedTaskId: null, feedback: null }
+
+it('uses the concrete TypeScript host check in ordinary external-code observation without authorizing learning', async () => {
+  const requestText = 'Repair the type of value in input.ts; change only input.ts.'
+  let harness: Awaited<ReturnType<typeof mount>>
+  const check: ConversationExternalCodeCheck = { async prepare(material) {
+    return createConversationTypeScriptCheck({ cwd: harness.root, requestText, targetPath: 'input.ts', contextPaths: [],
+      compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: [] } }).prepare(material)
+  } }
+  harness = await mount([structured(externalCode), structured(externalCode), () => toolCallResponse('typed-write', 'write', {
+    file_path: 'input.ts', content: 'export const value: number = 2',
+  }), textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'export const value: number = "wrong"')
+  try {
+    harness.handle.agent.followup(direct(requestText))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.externalCheckPrepared).toBeDefined()
+    expect(task.externalCheckPrepared?.checkerId).toBe('conversation-typescript-noemit')
+    expect(task.externalCheckFinished).toMatchObject({ status: 'verified', resultDigest: task.completion?.resultDigest,
+      preparationDigest: sha256(task.externalCheckPrepared), fileResultDigest: sha256(task.completion?.files) })
+    expect(task.review?.verdict).toBe('inconclusive')
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it('prepares an external check before the candidate and records its result separately from model review', async () => {
   let preparedBeforeCandidate = false
