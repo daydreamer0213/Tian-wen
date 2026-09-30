@@ -20,7 +20,7 @@ import { conversationQualityContract } from '../../packages/tianwen-evolution/sr
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { TianwenEvolutionService } from '../../packages/tianwen-evolution/dist/index.js'
-import { ConversationGuidanceState, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { ConversationGuidanceState, guidanceVersion, caseDesignAttemptId } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
@@ -71,6 +71,7 @@ it('reports the existing study-selection gates without starting work or reading 
   const s1 = task('source-1'), s2 = task('source-2'), otherFamily = task('other-family', 'writing'), counter = task('counter', 'summarization', true)
   let tasks = [s1] as ReturnType<typeof task>[]
   let studies: unknown[] = []
+  let attempts: { sourceTaskIds: string[] }[] = []
   let enabled = true
   const record = vi.fn()
   const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService & Record<string, unknown>
@@ -79,6 +80,7 @@ it('reports the existing study-selection gates without starting work or reading 
     getConversationGuidance: () => snapshot,
     listConversationTasks: () => tasks,
     listConversationGuidanceStudies: () => studies,
+    listConversationCaseDesignAttempts: () => attempts,
     listLearningIntakeStatuses: () => [],
     recordConversationGuidance: record,
   } } })
@@ -120,6 +122,8 @@ it('reports the existing study-selection gates without starting work or reading 
   tasks = [s1, s2, unresolvedCounter]
   expect(await readiness()).toEqual({ state: 'awaiting-counterexample' })
   tasks = [s1, s2, counter]
+  attempts = [{ sourceTaskIds: [s1.source.taskId, s2.source.taskId] }]
+  expect(await readiness()).toEqual({ state: 'already-attempted' })
   studies = [{ opened: { sourceTaskIds: [s1.source.taskId, s2.source.taskId] } }]
   expect(await readiness()).toEqual({ state: 'already-studied' })
   expect(clues).not.toHaveBeenCalled()
@@ -352,6 +356,53 @@ it.each(['explicit', 'default'] as const)('forwards the actual %s runtime enviro
   } finally { plugin.mockRestore(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
 
+it('selects an unattempted pair beyond each newest compatible but consumed second', async () => {
+  const base = resolve(process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'pair-selection-'))
+  const script: ScriptEntry[] = []
+  for (let index = 0; index < 5; index++) script.push(structured(admission), textResponse('全国'), ...reviewPair(verdict(index === 4, '全国')))
+  script.push(() => { throw new Error('simulated remaining-pair design failure') })
+  const harness = await mountFeedbackHarness(join(root, 'sessions'), script)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  await harness.ctx.plugin(TianwenConversationObserverService)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('pair-selection'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => {})
+  try {
+    for (let index = 0; index < 5; index++) {
+      handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: `概括：第 ${index} 个试点尚未取得全国结论。` }], source: { kind: 'user' } }))
+      await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    }
+    const tasks = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(tasks).toHaveLength(5)
+    expect(tasks.slice(0, 4).every(task => task.review?.verdict === 'not-met')).toBe(true)
+    expect(tasks[4]!.review?.verdict).toBe('met')
+    for (const [first, second] of [[0, 1], [1, 2], [2, 3], [1, 3], [0, 3]]) {
+      const body = { scopeKey: tasks[0]!.source.scopeKey, consentRevision: 1, parentVersion: tasks[0]!.source.behaviorVersion,
+        sourceTaskIds: [tasks[first!]!.source.taskId, tasks[second!]!.source.taskId] as const, counterexampleTaskId: tasks[4]!.source.taskId,
+        modelConfigDigest: tasks[0]!.models![0]!.modelConfigDigest, materialDigest: sha256(`owned selector fixture ${first},${second}`) }
+      harness.ctx.tianwenEvolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(body), ...body })
+    }
+    await harness.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution') })
+    expect(await harness.ctx.tianwenConversationGuidanceLoop.readiness(tasks[0]!.source.scopeKey)).toEqual({ state: 'ready-to-schedule' })
+    await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+    await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(harness.adapter.requests).toHaveLength(21)
+    const attempts = harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()
+    expect(attempts).toHaveLength(6)
+    expect([...attempts.at(-1)!.sourceTaskIds].sort()).toEqual([tasks[0]!.source.taskId, tasks[2]!.source.taskId].sort())
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+    expect(harness.adapter.requests).toHaveLength(21)
+  } finally {
+    warning.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose()
+    const child = relative(base, resolve(root))
+    if (isAbsolute(child) || child.includes(sep) || !child.startsWith('pair-selection-')) throw new Error('unsafe selector test cleanup')
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', 'no-source-scope', 'source-outside', 'source-mixed', 'source-use-alone', 'source-exploration-use', 'source-wrong-digest',
   'source-adapted', 'source-not-used', 'source-insufficient', 'source-explored', 'source-second', 'source-invalid-use', 'source-no-use', 'source-disabled-get', 'source-disabled-candidate', 'source-support-get', 'source-support-candidate', 'source-interrupted', 'recover-source', 'recover-source-explored', 'recover-source-missing-selection', 'recover-source-removed-admission', 'recover-source-substituted-proposal',
   'source-explored-first', 'recover-source-explored-first', 'recover-source-explored-first-substituted-observation', 'recover-source-explored-first-substituted-selection',
@@ -361,7 +412,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   'accepted', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
-  'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
+  'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'case-provider-failure', 'case-design-fresh-source', 'case-attempt-write-failure', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'
@@ -406,7 +457,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     request => {
       expect(JSON.stringify(request.messages)).toContain('Both generated tasks must use facts different from every source task and from each other.')
       expect(JSON.stringify(request.messages)).not.toContain('with all source facts')
-      return structured({ adjacent: { prompt: '概括：试点满意度 80%，不代表全国。', criteria: ['Preserve pilot-only scope'] }, holdout: { prompt: scenario === 'copied-holdout' ? '概括：试点需要 5 天，不代表全国。' : '概括：实验室测量 3 秒，实地结果未知。', criteria: ['Do not claim field results'] } })
+      if (scenario === 'case-provider-failure') throw new Error('simulated case provider failure')
+      return structured({ adjacent: { prompt: '概括：试点满意度 80%，不代表全国。', criteria: ['Preserve pilot-only scope'] }, holdout: { prompt: scenario === 'copied-holdout' || scenario === 'case-design-fresh-source' ? '概括：试点需要 5 天，不代表全国。' : '概括：实验室测量 3 秒，实地结果未知。', criteria: ['Do not claim field results'] } })
     },
     request => {
       initialMaterial = capturedMaterial(request)
@@ -544,6 +596,10 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     expect(JSON.stringify(request.messages)).toContain(guidance)
     return textResponse('仍是局部样本，需要 4 天。')
   }, ...reviewPair(verdict(true, '局部样本')))
+  if (scenario === 'case-design-fresh-source') script.splice(13, 0,
+    structured(admission), textResponse('新区总体增加 9%。'), ...reviewPair(verdict(false, '新区总体')),
+    request => { expect(JSON.stringify(capturedMaterial(request))).toContain('新站测试组增加 9%'); throw new Error('simulated new-pair design failure') },
+    request => { expect(JSON.stringify(capturedMaterial(request))).toContain('新站测试组增加 9%'); throw new Error('simulated new-pair design failure') })
   const harness = await mountFeedbackHarness(join(root, 'sessions'), script)
   if (withdrawDuringReview) {
     const stream = harness.adapter.stream.bind(harness.adapter)
@@ -562,6 +618,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution'),
     ...(scenario === 'activation-quarantined' ? { guidanceActivationQuarantine: true } : {}) })
+  const attemptWriteFault = scenario === 'case-attempt-write-failure' ? vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationCaseDesignAttempt')
+    .mockImplementation(() => { throw new Error('simulated attempt append failure') }) : undefined
   await harness.ctx.plugin(SkillRegistry)
   harness.ctx.skills.register(definition)
   const getDefinition = harness.ctx.skills.get.bind(harness.ctx.skills)
@@ -630,9 +688,50 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
       await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
     }
-    if (scenario === 'mixed-models' || scenario === 'copied-holdout') {
+    if (scenario === 'case-attempt-write-failure') {
+      expect(harness.adapter.requests).toHaveLength(12)
+      expect(harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toEqual([])
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      return
+    }
+    if (scenario === 'mixed-models' || scenario === 'copied-holdout' || scenario === 'case-provider-failure' || scenario === 'case-design-fresh-source') {
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
       expect(harness.adapter.requests).toHaveLength(scenario === 'mixed-models' ? 12 : 13)
+      if (scenario !== 'mixed-models') {
+        const before = harness.adapter.requests.length
+        const attempts = harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()
+        expect(attempts).toHaveLength(1)
+        expect(new EvolutionLedger(join(root, 'evolution')).listConversationCaseDesignAttempts()).toEqual(attempts)
+        expect(await harness.ctx.tianwenConversationGuidanceLoop.readiness(attempts[0]!.scopeKey)).toEqual({ state: 'already-attempted' })
+        await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+        await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(harness.adapter.requests).toHaveLength(before)
+        await loopFiber.dispose(); await harness.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
+        await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+        await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(harness.adapter.requests).toHaveLength(before)
+        expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+        if (scenario === 'case-design-fresh-source') {
+          handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '概括：新站测试组增加 9%，不代表新区总体。' }], source: { kind: 'user' } }))
+          await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+          expect(harness.adapter.requests).toHaveLength(before + 5)
+          const allAttempts = harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()
+          expect(allAttempts).toHaveLength(2)
+          expect(allAttempts[1]!.sourceTaskIds).toContain(harness.ctx.tianwenEvolution.listConversationTasks().at(-1)!.source.taskId)
+          expect(new Set(allAttempts.flatMap(attempt => attempt.sourceTaskIds)).size).toBe(3)
+          expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+          await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+          // The new source may pair with either old source. Both are new
+          // opportunities; only a previously consumed pair must be blocked.
+          expect(harness.adapter.requests).toHaveLength(before + 6)
+          const complete = harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()
+          expect(complete).toHaveLength(3)
+          expect(new Set(complete.map(attempt => [...attempt.sourceTaskIds].sort().join('|'))).size).toBe(3)
+          expect(complete[0]).toEqual(attempts[0])
+          await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+          expect(harness.adapter.requests).toHaveLength(before + 6)
+        }
+      }
       return
     }
     if (scenario === 'case-design-missing') {
@@ -1099,7 +1198,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('support-retracted')
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(study!.opened.scopeKey)).toEqual(study!.opened.parentSnapshot)
     }
-  } finally { caseDesignInspectionFault?.mockRestore(); caseDesignRecordFault?.mockRestore(); activationFault?.mockRestore(); warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+  } finally { attemptWriteFault?.mockRestore(); caseDesignInspectionFault?.mockRestore(); caseDesignRecordFault?.mockRestore(); activationFault?.mockRestore(); warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 30_000)
 
 it.each(['valid', 'valid-explored', 'valid-source-explored', 'valid-source-frozen-feedback', 'missing', 'tampered'] as const)('handles %s natural correction recovery without rewriting earlier met reviews', async recovery => {

@@ -7,7 +7,7 @@ import { EvolutionLedger, isPublicLedgerEvent, type ArtifactId } from '../../pac
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract, conversationTaskId, conversationReviewConsensus, parseConversationAuditedReviewChecks, parseConversationReviewChecks, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import {
-  ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion,
+  ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemptId, parseConversationCaseDesignAttempt,
   type ConversationGuidanceRecord, type GuidanceStudyBody, type GuidanceStudyOpened, type GuidanceCandidateRecord, type GuidanceArmRecord,
   type GuidanceExplorationIntentRecord, type GuidanceExplorationArmRecord, type GuidanceSourceReferenceReadRecord,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
@@ -84,6 +84,56 @@ function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondS
   const tasks = [task(ledger, 1, verdict, firstScope, undefined, undefined, qualityContract, root), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels, qualityContract, root), task(ledger, 3, 'met', firstScope, undefined, undefined, qualityContract, root)] as const
   return { root, ledger: qualityContract === null || !['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11'].includes(qualityContract.schemaVersion) ? new EvolutionLedger(root) : ledger, tasks }
 }
+
+it('persists consumed case-design pairs without inventing studies, and permits genuinely new source pairs', () => {
+  const { root, ledger, tasks } = seeded()
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toEqual([])
+  const body = { scopeKey: scope, consentRevision: 1, parentVersion: tasks[0].source.behaviorVersion,
+    sourceTaskIds: [tasks[0].source.taskId, tasks[1].source.taskId] as const, counterexampleTaskId: tasks[2].source.taskId,
+    modelConfigDigest: sha256('scripted ledger model configuration'), materialDigest: sha256('frozen design material') }
+  const attempt = { attemptId: caseDesignAttemptId(body), ...body }
+  expect(ledger.recordConversationCaseDesignAttempt(attempt)).toEqual({ duplicate: false })
+  expect(ledger.recordConversationCaseDesignAttempt(attempt)).toEqual({ duplicate: true })
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationCaseDesignAttempts(scope)).toEqual([attempt])
+  expect(replay.listConversationGuidanceStudies()).toEqual([])
+  expect(replay.listEvents().filter(isPublicLedgerEvent).some(event => String(event.type) === 'conversation-case-design-attempted')).toBe(false)
+  const returned = replay.listConversationCaseDesignAttempts()[0]!
+  ;(returned.sourceTaskIds as string[])[0] = 'changed caller copy'
+  expect(replay.listConversationCaseDesignAttempts()).toEqual([attempt])
+  for (const changed of [ { ...body, materialDigest: sha256('changed') }, { ...body, sourceTaskIds: [...body.sourceTaskIds].reverse() as [string, string] } ]) {
+    expect(() => replay.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(changed), ...changed })).toThrow(/already attempted/)
+  }
+  const newSource = task(replay, 4)
+  const next = { ...body, sourceTaskIds: [tasks[1].source.taskId, newSource.source.taskId] as const }
+  expect(replay.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(next), ...next })).toEqual({ duplicate: false })
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toHaveLength(2)
+})
+
+it('preserves historical attempt contracts on replay without allowing new writes under an obsolete contract', () => {
+  const { root, ledger, tasks } = seeded('not-met', scope, false, undefined, exactV3Quality)
+  const body = { scopeKey: scope, consentRevision: 1, parentVersion: tasks[0].source.behaviorVersion,
+    sourceTaskIds: [tasks[0].source.taskId, tasks[1].source.taskId] as const, counterexampleTaskId: tasks[2].source.taskId,
+    modelConfigDigest: sha256('scripted ledger model configuration'), materialDigest: sha256('historical frozen design material') }
+  const attempt = { attemptId: caseDesignAttemptId(body), ...body }
+  expect(() => ledger.recordConversationCaseDesignAttempt(attempt)).toThrow()
+  appendFileSync(join(root, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: new Date().toISOString(), attempt })}\n`)
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toEqual([attempt])
+})
+
+it.each(['scope', 'parent', 'model', 'consent', 'disabled', 'source', 'counter', 'extra', 'identity'] as const)('rejects invalid case-design attempt %s before a durable write', scenario => {
+  const { root, ledger, tasks } = seeded()
+  if (scenario === 'disabled') ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  const body = { scopeKey: scenario === 'scope' ? 'other-scope' : scope, consentRevision: scenario === 'consent' ? 2 : 1,
+    parentVersion: scenario === 'parent' ? sha256('other version') : tasks[0].source.behaviorVersion,
+    sourceTaskIds: [tasks[0].source.taskId, scenario === 'source' ? 'missing task' : tasks[1].source.taskId] as const,
+    counterexampleTaskId: scenario === 'counter' ? tasks[0].source.taskId : tasks[2].source.taskId,
+    modelConfigDigest: sha256(scenario === 'model' ? 'other model' : 'scripted ledger model configuration'), materialDigest: sha256('frozen design material') }
+  const attempt = { attemptId: scenario === 'identity' ? 'changed' : caseDesignAttemptId(body), ...body, ...(scenario === 'extra' ? { extra: true } : {}) }
+  expect(() => ledger.recordConversationCaseDesignAttempt(attempt)).toThrow()
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toEqual([])
+  expect(() => parseConversationCaseDesignAttempt({ ...attempt, consentRevision: 1.5 })).toThrow()
+})
 
 function opening(tasks: readonly [ConversationTask, ConversationTask, ConversationTask], label = 'first', assessments: readonly (string | undefined)[] = []): GuidanceStudyOpened {
   const parentSnapshot = baselineGuidanceSnapshot(tasks[0].source.scopeKey)

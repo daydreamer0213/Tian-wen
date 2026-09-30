@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
 import { ConversationLearningState, effectiveConversationFamily, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
-import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
+import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, parseConversationCaseDesignAttempt, type ConversationCaseDesignAttempt, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
 import { ConversationFeedbackState, hasVerifiedContinuingPreference, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
 import {
@@ -382,6 +382,7 @@ export interface RecoveryFailedEvent {
 export type LedgerEvent =
   | ConversationLearningEvent
   | { readonly type: 'conversation-guidance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-record.v1', readonly at: string, readonly record: ConversationGuidanceRecord }
+  | { readonly type: 'conversation-case-design-attempted', readonly schemaVersion: 'tianwen.conversation-case-design-attempt.v1', readonly at: string, readonly attempt: ConversationCaseDesignAttempt }
   | { readonly type: 'conversation-feedback-recorded', readonly schemaVersion: 'tianwen.conversation-feedback.v1', readonly at: string, readonly record: ConversationFeedbackRecord }
   | LearningIntakeLedgerEvent
   | LearningFeedbackRetractedEvent
@@ -1879,6 +1880,11 @@ function parseEvent(value: unknown): LedgerEvent {
     if (value.schemaVersion !== 'tianwen.conversation-guidance-record.v1') throw new LedgerIntegrityError('invalid conversation guidance schema')
     return { type, schemaVersion: value.schemaVersion, at, record: parseConversationGuidanceRecord(value.record) }
   }
+  if (type === 'conversation-case-design-attempted') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'attempt'])
+    if (value.schemaVersion !== 'tianwen.conversation-case-design-attempt.v1') throw new LedgerIntegrityError('invalid case design attempt schema')
+    return { type, schemaVersion: value.schemaVersion, at, attempt: parseConversationCaseDesignAttempt(value.attempt) }
+  }
   if (type === 'conversation-feedback-recorded') {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
     if (value.schemaVersion !== 'tianwen.conversation-feedback.v1') throw new LedgerIntegrityError('invalid conversation feedback schema')
@@ -3012,6 +3018,51 @@ export class EvolutionLedger {
 
   listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] {
     return this.#conversationGuidance.listStudies(scopeKey)
+  }
+  listConversationCaseDesignAttempts(scopeKey?: string): readonly ConversationCaseDesignAttempt[] {
+    return this.#events.filter((event): event is Extract<LedgerEvent, { type: 'conversation-case-design-attempted' }> => event.type === 'conversation-case-design-attempted')
+      .map(event => event.attempt).filter(attempt => scopeKey === undefined || attempt.scopeKey === scopeKey).map(attempt => structuredClone(attempt))
+  }
+  recordConversationCaseDesignAttempt(input: ConversationCaseDesignAttempt): { readonly duplicate: boolean } {
+    const attempt = parseConversationCaseDesignAttempt(input)
+    const previous = this.listConversationCaseDesignAttempts(attempt.scopeKey).find(item => attempt.sourceTaskIds.every(id => item.sourceTaskIds.includes(id)))
+    if (previous !== undefined) {
+      if (sha256(previous) !== sha256(attempt)) throw new LedgerIntegrityError('case design source pair was already attempted')
+      return { duplicate: true }
+    }
+    // Current-contract eligibility applies to new writes only; old attempts
+    // must retain their frozen meaning when the host contract advances.
+    const tasks = this.listConversationTasks()
+    if ([...attempt.sourceTaskIds, attempt.counterexampleTaskId].some(id => !hasCurrentConversationQuality(tasks.find(task => task.source.taskId === id)?.admission?.qualityContract))) {
+      throw new LedgerIntegrityError('new case design attempts require the current quality contract')
+    }
+    this.#validateConversationCaseDesignAttempt(attempt)
+    this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
+    return { duplicate: false }
+  }
+  #validateConversationCaseDesignAttempt(attempt: ConversationCaseDesignAttempt): void {
+    this.#requireConversationConsent(attempt.consentRevision)
+    if (attempt.parentVersion !== guidanceVersion(this.getConversationGuidance(attempt.scopeKey))
+      || this.listConversationCaseDesignAttempts(attempt.scopeKey).some(item => attempt.sourceTaskIds.every(id => item.sourceTaskIds.includes(id)))) {
+      throw new LedgerIntegrityError('case design requires current parent and an unattempted source pair')
+    }
+    const tasks = this.listConversationTasks()
+    const first = tasks.find(task => task.source.taskId === attempt.sourceTaskIds[0])
+    if (first === undefined) throw new LedgerIntegrityError('case design source is unavailable')
+    for (const id of [...attempt.sourceTaskIds, attempt.counterexampleTaskId]) {
+      const task = tasks.find(item => item.source.taskId === id)
+      if (task === undefined || task.source.scopeKey !== attempt.scopeKey || task.source.consentRevision !== attempt.consentRevision
+        || task.source.behaviorVersion !== attempt.parentVersion || task.completion?.status !== 'completed'
+        || !['text', 'local-files'].includes(task.admission?.decision?.evaluationMode ?? '')
+        || effectiveConversationFamily(task) === null || effectiveConversationFamily(task) !== effectiveConversationFamily(first)
+        || task.admission?.decision?.evaluationMode !== first?.admission?.decision?.evaluationMode
+        || task.admission?.decision?.fileOutputKind !== first?.admission?.decision?.fileOutputKind
+        || task.source.admissionPolicy !== first?.source.admissionPolicy
+        || sha256(task.admission?.qualityContract) !== sha256(first?.admission?.qualityContract)
+        || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== attempt.modelConfigDigest)) {
+        throw new LedgerIntegrityError('case design requires exact compatible completed sources and native model identity')
+      }
+    }
   }
 
   /** Future-only policy migration. Historical receipts and task verdicts stay
@@ -7211,6 +7262,7 @@ export class EvolutionLedger {
       if (
         parsed.type === 'conversation-learning-recorded'
         || parsed.type === 'conversation-guidance-recorded'
+        || parsed.type === 'conversation-case-design-attempted'
         || parsed.type === 'conversation-feedback-recorded'
         || parsed.type === 'initial-run-skill-binding-recorded'
         || parsed.type === 'learning-intake-recorded'
@@ -7305,6 +7357,10 @@ export class EvolutionLedger {
     }
     if (event.type === 'conversation-guidance-recorded') {
       this.#validateConversationGuidance(event.record)
+      return
+    }
+    if (event.type === 'conversation-case-design-attempted') {
+      this.#validateConversationCaseDesignAttempt(event.attempt)
       return
     }
     if (event.type === 'conversation-feedback-recorded') {

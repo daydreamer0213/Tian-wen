@@ -14,6 +14,30 @@ export interface GuidanceSnapshot {
 }
 export type GuidanceStudyId = `guidance-study:${string}`
 export type GuidanceProof = ConversationJudgmentProof
+/** A consumed generation opportunity, not a completed study or a model verdict. */
+export interface ConversationCaseDesignAttemptBody {
+  readonly scopeKey: string
+  readonly consentRevision: number
+  readonly parentVersion: Sha256Digest
+  readonly sourceTaskIds: readonly [string, string]
+  readonly counterexampleTaskId: string
+  readonly modelConfigDigest: Sha256Digest
+  readonly materialDigest: Sha256Digest
+}
+export interface ConversationCaseDesignAttempt extends ConversationCaseDesignAttemptBody {
+  readonly attemptId: string
+}
+export function caseDesignAttemptId(body: ConversationCaseDesignAttemptBody): string { return `case-design-attempt:${sha256(body).slice(7)}` }
+export function parseConversationCaseDesignAttempt(value: unknown): ConversationCaseDesignAttempt {
+  const input = object(value, ['attemptId', 'scopeKey', 'consentRevision', 'parentVersion', 'sourceTaskIds', 'counterexampleTaskId', 'modelConfigDigest', 'materialDigest'])
+  const ids = uniqueIds(input.sourceTaskIds, 2)
+  if (ids.length !== 2 || !Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('invalid case design attempt sources or consent')
+  const body: ConversationCaseDesignAttemptBody = { scopeKey: text(input.scopeKey, 512), consentRevision: input.consentRevision as number,
+    parentVersion: digest(input.parentVersion), sourceTaskIds: [ids[0]!, ids[1]!], counterexampleTaskId: text(input.counterexampleTaskId, 512),
+    modelConfigDigest: digest(input.modelConfigDigest), materialDigest: digest(input.materialDigest) }
+  if (ids.includes(body.counterexampleTaskId) || input.attemptId !== caseDesignAttemptId(body)) throw new TypeError('invalid case design attempt identity')
+  return { attemptId: input.attemptId as string, ...body }
+}
 export type GuidanceCaseKind = 'source1' | 'source2' | 'counterexample' | 'adjacent' | 'holdout'
 export interface GuidanceSourceCase {
   readonly id: string

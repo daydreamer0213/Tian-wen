@@ -1,6 +1,6 @@
 import { Service } from '@tianwen/dsh-compat'
 import type { ConversationLearningRecord, ConversationTask } from './conversation-learning.js'
-import type { ConversationGuidanceRecord, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord } from './conversation-guidance.js'
+import type { ConversationGuidanceRecord, ConversationCaseDesignAttempt, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord } from './conversation-guidance.js'
 import type { ConversationFeedbackRecord, ConversationFeedbackAssessment } from './conversation-feedback.js'
 import type {
   Agent,
@@ -513,6 +513,10 @@ export class TianwenEvolutionService extends Service {
   getConversationGuidance(scopeKey: string): GuidanceSnapshot { return this.state().ledger.getConversationGuidance(scopeKey) }
   retireIncompatibleConversationGuidance(scopeKey: string): void { this.formalWrite(() => this.state().ledger.retireIncompatibleConversationGuidance(scopeKey)) }
   listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] { return this.state().ledger.listConversationGuidanceStudies(scopeKey) }
+  listConversationCaseDesignAttempts(scopeKey?: string): readonly ConversationCaseDesignAttempt[] { return this.state().ledger.listConversationCaseDesignAttempts(scopeKey) }
+  recordConversationCaseDesignAttempt(input: ConversationCaseDesignAttempt): { readonly duplicate: boolean } {
+    return this.formalWrite(() => this.state().ledger.recordConversationCaseDesignAttempt(input))
+  }
   isConversationGuidanceSupported(studyId: string): boolean { return this.state().ledger.isConversationGuidanceSupported(studyId) }
   conversationGuidanceDecision(studyId: string): GuidanceDecisionRecord { return this.state().ledger.conversationGuidanceDecision(studyId) }
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {

@@ -690,6 +690,15 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
       expect(mounted.adapter.requests).toHaveLength(0)
 
+      readiness.mockResolvedValueOnce({ state: 'already-attempted' as never, secret: 'PRIVATE feedback' })
+      const attempted = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(attempted).toMatchObject({ isError: false, value: { currentSession: { naturalConversation: {
+        guidanceReadiness: { state: 'already-attempted' },
+      } } } })
+      expect(JSON.stringify(attempted.value)).not.toContain('PRIVATE')
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.adapter.requests).toHaveLength(0)
+
       readiness.mockRejectedValueOnce(new Error('PRIVATE scan failure'))
       const unavailable = await executeLearningStatus(mounted.ctx, main.agent)
       expect(unavailable).toMatchObject({ isError: false, value: { currentSession: { naturalConversation: {
