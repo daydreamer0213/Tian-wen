@@ -41,6 +41,8 @@ B—F 是依赖前一阶段结果的路线，不是假定接口已设计好的�
 
 ## 当前实施检查点（2026-09-30）
 
+2026-10-01 结果主线的现有隔离环境未知已核实：D盘Docker及缓存Python可启动，主要隔离字段inspect与7项可信静态探针通过；首次日志配置失败保留，按旧Alpha设置修正，不是原生任务重试。容器按身份清除，Desktop/WSL恢复停止；无安装/下载/模型/候选/反馈/研究/激活。见[当前复用依据](../../operations/tianwen-isolated-check-preflight-20261001.md)。该环境不证明TypeScript测试或原要求覆盖，现有externalCodeCheck仍禁止执行候选；仍须真实待办/既有检查与具体保护合同，不先扩建平台。约20KiB，自有小目录删除被blocked by policy拒绝未绕过，D18.62GiB。完整目标active，C—F、NO-GO/门槛/窗口不变。
+
 2026-10-01 普通评价材料超限准确分类交付：答案原32KiB/128单元限额不变，改用现有material-too-large并显示数字/未启动评价；独立检查仍与模型评价分开，冷恢复不补评。旧状态任务精确原intent材料只读复现45035字节，原记录未变；不重跑或追认为成功。最终291/291、生产/observer strict/八包类型/声明及只读审查通过；整个旧claim-review测试的2项类型诊断与基线相同，未冒称全strict通过。见[范围/失败归属](../../operations/tianwen-review-material-bound-diagnostic-20261001.md)。本项为实际产品诊断，不满足B覆盖或C/D独立结果，完整目标active、NO-GO/原门槛/窗口保持。
 
 2026-10-01 新实际旧类型修复待办经普通入口真实尝试，准备/实际config摘要一致；16工具超原12上限，部分修改，原生仍unverifiable，不重跑。控制端工程清零六处旧TS2339，原41项功能与预期保持，最终87/87、联合strict/八包类型/声明及审查通过。见[本项归属](../../operations/tianwen-learning-status-test-types-20261001.md)。下一阶段回到B覆盖边界及C/D独立结果依据，不能继续把维护回归算研究进展，或以局部编译结果授予采用许可；完整目标active、NO-GO/原门槛/窗口保持。
