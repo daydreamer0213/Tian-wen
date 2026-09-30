@@ -41,6 +41,8 @@ B—F 是依赖前一阶段结果的路线，不是假定接口已设计好的�
 
 ## 当前实施检查点（2026-09-30）
 
+2026-10-01 后续配置阻塞已修复：从实际原生 header.config、提供者进入前 prepare，不再固定未应用默认值的 proposal。三项适用机制首红后，最终166/166、八包类型/联合strict/声明与只读审查通过；上次状态任务 unverifiable 不重判。见[修复与验证](../../operations/tianwen-code-check-effective-config-20261001.md)。本项真实模型0，不替代新普通前瞻或C—F；下一不同实际待办才验证新入口，NO-GO、原门槛/窗口保持。
+
 2026-10-01 状态查询已交付独立 `codeChecks`，与模型评价分开。新的普通原生任务 completed 并生成九行修改，首次核验因 proposal 未含后加的 high 默认值而 unverifiable；不重跑、不回填。相同候选经工程两组87/87、八包类型/声明及只读审查后采用；联合 strict 六处旧测试类型错误不新增但未整体通过。见[本项归属](../../operations/tianwen-code-check-status-20261001.md)。下一最小修复是在实际原生请求头、提供者发送前固定检查配置；完整目标 active，C—F、NO-GO和原窗口不变。
 
 2026-10-01 local code 接缝已修复：普通 code/local-files/files 与 code/external 共用已有检查；原分类/review/来源/激活不变，writing/chat 等不扩入。四组120/120、八包类型/联合strict/包根声明通过，首次未构建新出口的16项失败及类型修正均保留。见[交付记录](../../operations/tianwen-local-file-code-check-20261001.md)。本项模型0，不重跑旧预算任务或把机制当自然效果；下一不同实际待办是学习状态中分别汇总已持久的独立代码检查，再通过修复后的普通入口前瞻实现。C—F、NO-GO和原窗口保持。

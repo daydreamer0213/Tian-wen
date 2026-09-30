@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
@@ -90,6 +91,61 @@ it.each(['external', 'local-files'] as const)('uses the concrete TypeScript host
     expect(task.review?.verdict).toBe(mode === 'external' ? 'inconclusive' : 'met')
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['provider-defaults', 'outer-request-hook', 'later-config-drift'] as const)('binds an independent check to the actual native header with %s', async scenario => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  let preparations = 0, evaluations = 0
+  let preparedAtHeader = false, preparedBeforeProvider = false
+  const check: ConversationExternalCodeCheck = { async prepare(material) {
+    preparations++
+    const header = harness.handle.agent.session.events.findLast(event => event.type === 'request/header')
+    preparedAtHeader = header?.type === 'request/header' && sha256(header.data.header.config) === material.modelConfigDigest
+      && !harness.handle.agent.session.events.some(event => ['assistant/message', 'tool/call', 'tool/result'].includes(event.type))
+    return { checkerId: 'effective-config-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate() {
+        evaluations++
+        return { status: 'verified', detail: 'Only the frozen output check.' }
+      } }
+  } }
+  harness = await mount([structured(externalCode), () => {
+    preparedBeforeProvider = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckPrepared !== undefined
+    return toolCallResponse('effective-write', 'write', { file_path: 'input.ts', content: 'after' })
+  }, textResponse('saved'), ...reviewPair()], true, check)
+  const modelInfo = vi.spyOn(harness.adapter, 'resolveModel').mockImplementation(async (provider, model) => ({
+    provider, id: model, name: model, defaultMaxTokens: 64000,
+    reasoning: { efforts: [{ id: ReasoningEffortId('low'), name: 'Low' }, { id: ReasoningEffortId('high'), name: 'High' }], defaultEffort: ReasoningEffortId('high') },
+  }))
+  let rootRequests = 0
+  const off = harness.ctx.on('agent/request', async ({ agent }, next) => {
+    const proposed = await next()
+    if (String(agent.session.id) !== 'file-chat') return proposed
+    rootRequests++
+    if (scenario === 'outer-request-hook') return { ...proposed, maxTokens: 4096, reasoningEffort: ReasoningEffortId('low') }
+    if (scenario === 'later-config-drift' && rootRequests > 1) return { ...proposed, reasoningEffort: ReasoningEffortId('low') }
+    return proposed
+  }, { prepend: true })
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.unavailableReason).toBeNull()
+    expect(preparedBeforeProvider).toBe(true)
+    expect(preparedAtHeader).toBe(true)
+    expect(preparations).toBe(1)
+    expect(task.externalCheckPrepared?.modelConfigDigest).toBe(task.models?.[0]?.modelConfigDigest)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId('file-chat'))
+    const header = saved.events.find(event => event.type === 'request/header')
+    expect(header?.type === 'request/header' ? header.data.header.config : undefined).toMatchObject({
+      maxTokens: scenario === 'outer-request-hook' ? 4096 : 64000,
+      reasoningEffort: scenario === 'outer-request-hook' ? 'low' : 'high',
+    })
+    expect(task.externalCheckFinished?.status).toBe(scenario === 'later-config-drift' ? 'unverifiable' : 'verified')
+    expect(evaluations).toBe(scenario === 'later-config-drift' ? 0 : 1)
+    expect(task.review?.verdict).toBe('inconclusive')
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+  } finally { off(); modelInfo.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('prepares an external check before the candidate and records its result separately from model review', async () => {

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 状态交付后的配置时序阻塞已修复
+
+`31dafff` 后删除 proposal 阶段 prepare，改在已有原生 llm/stream 请求监听中读取实际 header.config，await prepare、复核同意、记录模型、再 next/provider。默认值已由原生 loop 固定，仍早于模型输出与文件执行；不 dry resolve 或改调用配置。旧状态任务的 unverifiable 不回填、不重跑。
+
+三项适用机制首红，最终文件观察 40/40、相关四组126/126，合计 **166/166**；八包类型、最终目标/测试联合 strict、包根声明退出 **0**，只读审查无重要问题。初次夹具缺 effort.name 及随后 branded 类型遗漏均保留并明确归属，未修改原冻结17项测试。详见[实际配置时序修复](tianwen-code-check-effective-config-20261001.md)。本项模型/反馈/研究/激活0，约11 KiB、新测试残余0，旧451/4目录保留，D **18.63 GiB**。
+
+下一步用不同的实际未完成产品待办验证新普通入口，不重做预算/状态/配置题；分别核对原生完成、前瞻独立检查、冻结需求符合，再推进研究结果证据依赖。目标 active、C—F、main/Daily 完整学习 NO-GO、新激活隔离、原门槛与十工作日窗口不变。
+
 ## 2026-10-01 独立检查状态已交付；原生修改完成但模型默认值造成不可核验
 
 新增当前/历史 `codeChecks` 汇总，与模型 reviews 分开，旧无检查记录全零。新的普通实际任务合法 code/local-files/files；真实请求 5（准入 1、根 4）、工具 3、重试/脚本候选 0，根与任务 completed，生成九行实际修改。原独立结果 unverifiable，复核 inconclusive/invalid-judgment，不重跑或回填。已精确确认 `agent/request` proposal 没有 reasoningEffort，后续 DSH prepareCall 加入提供者 high 默认值，故候选前摘要与实际请求头不一致；账本保守拒收正确。

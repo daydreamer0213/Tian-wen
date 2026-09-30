@@ -68,23 +68,22 @@ export class TianwenConversationObserverService extends Service {
   }
 
   protected [Service.init](): void {
-    const offExternalRequest = this.ctx.on('agent/request', async (payload, next) => {
-      const config = await next()
-      if (isRoot(payload.agent)) await this.externalChecks.prepare(payload.agent, payload.turn, config, payload.signal)
-      return config
-    }, { prepend: true })
-    const offModel = this.ctx.on('llm/stream', (request, next) => {
-      const agent = request.sessionId === undefined ? undefined : this.ctx.agents.get(SessionId(String(request.sessionId)))
+    const observer = this
+    const offModel = this.ctx.on('llm/stream', async function* (request, next) {
+      const agent = request.sessionId === undefined ? undefined : observer.ctx.agents.get(SessionId(String(request.sessionId)))
       if (agent !== undefined && isRoot(agent) && isAgentLoopRequest(request)) {
         try {
-          const task = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id)).findLast(item => item.admission !== undefined && item.completion === undefined)
+          const task = observer.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id)).findLast(item => item.admission !== undefined && item.completion === undefined)
           const header = agent.session.events.findLast(event => event.type === 'request/header')
-          if (task !== undefined && this.authorized(task.source.consentRevision) && header?.type === 'request/header') {
-            this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-model-observed', taskId: task.source.taskId, headerSeq: header.seq, modelConfigDigest: sha256(header.data.header.config) })
+          if (task !== undefined && observer.authorized(task.source.consentRevision) && header?.type === 'request/header') {
+            // The native loop has applied adapter defaults and bound this header
+            // to the actual call; preparation still precedes provider dispatch.
+            await observer.externalChecks.prepare(agent, task.source.turn, header.data.header.config, request.signal ?? observer.shutdown.signal)
+            if (observer.authorized(task.source.consentRevision)) observer.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-model-observed', taskId: task.source.taskId, headerSeq: header.seq, modelConfigDigest: sha256(header.data.header.config) })
           }
-        } catch (error) { this.warn(error) }
+        } catch (error) { observer.warn(error) }
       }
-      return next()
+      yield* next()
     })
     const offStep = this.ctx.on('agent/pre-step', async (payload, next) => {
       const decision = await next()
@@ -141,7 +140,7 @@ export class TianwenConversationObserverService extends Service {
     })
     for (const agent of this.ctx.agents.list()) this.restore(agent)
     this.ctx.effect(() => async () => {
-      offStep(); offModel(); offSession(); offCreated(); offConsent(); offExternalRequest(); this.shutdown.abort()
+      offStep(); offModel(); offSession(); offCreated(); offConsent(); this.shutdown.abort()
       this.externalChecks.cancel()
       await this.whenIdle()
     }, 'tianwen-conversation-observer.dispose')
