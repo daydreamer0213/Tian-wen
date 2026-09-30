@@ -223,7 +223,7 @@ describe('claim audit validation', () => {
   })
 })
 
-it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quote', 'invalid-source', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled', 'before-first', 'before-second'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
+it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quote', 'invalid-second-quote', 'invalid-source', 'invalid-status', 'permitted-inference', 'missing', 'provider', 'cancelled', 'before-first', 'before-second'] as const)('composes two isolated native audit-bearing reviews: %s', async mode => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-review-')); roots.push(root)
   const originalFeedback = { source: { kind: 'native', sessionId: 'old-feedback-session', sessionLifecycleFingerprint: sha256('old-feedback-lifecycle'), messageId: 'old-answer', feedbackVersion: 'v1', feedbackFingerprint: sha256('negative: raw marker') }, rating: 'negative' as const, note: 'RAW FEEDBACK ONLY: do not reverse the actor or erase the exception.' }
@@ -251,6 +251,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
     if (mode === 'invalid-source' && index === 0) audit.units['answer-1']!.firstClaim.sourceIds = ['foreign-1']
     const value: Record<string, unknown> = { verdict, category: verdict === 'not-met' || mode === 'contradictory' ? 'source-fidelity' : null, explanation: `review-${index}`, evidenceQuotes: ['原料已送达。'], audit }
     if (mode === 'invalid-quote' && index === 0) value.evidenceQuotes = ['标签：原料已送达。']
+    if (mode === 'invalid-second-quote' && index === 1) value.evidenceQuotes = ['原料已送达。', '标签：原料已送达。']
     if (mode === 'missing' && index === 0) delete value.audit
     return toolCallResponse(`claim-result-${index}`, 'structured_output', value)
   })
@@ -268,7 +269,10 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(harness.adapter.requests).toHaveLength(mode === 'before-first' ? 0 : 1)
     }
     else if (mode === 'contradictory') expect(result).toMatchObject({ message: 'successful review check cannot assert a failure category' })
-    else if (mode === 'invalid' || mode === 'invalid-quote' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
+    else if (mode === 'invalid-quote' || mode === 'invalid-second-quote') expect(result).toMatchObject({
+      message: 'invalid-judgment', focus: mode === 'invalid-quote' ? 'requirements' : 'grounding', quoteIndex: mode === 'invalid-quote' ? 0 : 1,
+    })
+    else if (mode === 'invalid' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
     else if (mode === 'provider' || mode === 'invalid-source') expect(result).toMatchObject({ message: 'model-unavailable' })
     else if (mode === 'cancelled') expect(result).toMatchObject({ message: 'cancelled' })
     else {
@@ -325,6 +329,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(supplied[1]).toEqual(supplied[0])
     }
     if (mode === 'invalid-status' || mode === 'invalid-quote') expect(harness.adapter.requests).toHaveLength(1)
+    if (mode === 'invalid-second-quote') expect(harness.adapter.requests).toHaveLength(2)
     if (mode === 'invalid-source') expect(harness.adapter.requests).toHaveLength(3)
     expect(harness.ctx.agents.list()).toHaveLength(1)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }

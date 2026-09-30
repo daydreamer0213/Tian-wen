@@ -190,7 +190,8 @@ it('retains a completed first check after the second fails and never retries the
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
     expect(task.reviewIntent).toBeDefined()
-    expect(task.review).toMatchObject({ verdict: 'inconclusive', proof: null, unavailableReason: 'model-unavailable' })
+    expect(task.review).toMatchObject({ verdict: 'inconclusive', proof: null, unavailableReason: 'model-unavailable',
+      explanation: 'Automatic review could not establish the task result.' })
     expect(task.review).not.toHaveProperty('reviewChecks')
     const firstId = SessionId(String(harness.adapter.requests[2]!.sessionId))
     const saved = await harness.ctx.sessionPersistence.inspect(firstId)
@@ -629,6 +630,34 @@ it.each([admission.criteria[0], admission.objective, 'evaluationMode'])('rejects
     expect(result?.unavailableReason).toBe('invalid-judgment')
     expect(result?.proof).toBeNull()
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each([false, true])('records the second reviewer quote mismatch without accepting or exposing it; cancelled=%s', async cancelled => {
+  const alteredQuote = '分享自己最近做的一个项目'
+  let harness: Awaited<ReturnType<typeof mount>>
+  harness = await mount([structured(admission), textResponse('5 天完成。'), evidenceResponse(review), request => {
+    if (cancelled) harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    return evidenceResponse({ ...review, evidenceQuotes: ['5 天', '5 天', '5 天', '5 天', '5 天', alteredQuote] }, 'empty', false)(request)
+  }])
+  let resumed: Awaited<ReturnType<typeof harness.ctx.agents.resume>> | undefined
+  try {
+    harness.handle.agent.followup(direct('分享自己最近做的项目，5 天完成。'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.adapter.requests).toHaveLength(4)
+    const result = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review
+    expect(result).toMatchObject({ verdict: 'inconclusive', category: null, evidenceQuotes: [], proof: null,
+      unavailableReason: cancelled ? 'cancelled' : 'invalid-judgment',
+      explanation: cancelled ? 'Automatic review could not establish the task result.'
+        : 'Automatic review could not establish the task result: the grounding reviewer returned an evidence quote not found in the frozen source or answer (quote 6).',
+    })
+    expect(result?.explanation).not.toContain(alteredQuote)
+    expect(result).not.toHaveProperty('reviewChecks')
+    await harness.handle.dispose()
+    resumed = await harness.ctx.agents.resume({ resumeSessionId: SessionId('ordinary-chat'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review).toEqual(result)
+    expect(harness.adapter.requests).toHaveLength(4)
+  } finally { await resumed?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it.each(['same', 'new'])('retains the original request when a native replacement has a %s message id', async identity => {

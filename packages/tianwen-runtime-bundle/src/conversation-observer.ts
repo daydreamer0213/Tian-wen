@@ -10,7 +10,7 @@ import {
 } from '@tianwen/evolution'
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { CONVERSATION_FAMILY_SCHEMA, conversationAdmissionSchema, runConversationJudgment } from './conversation-judgment.js'
-import { runConversationClaimReview } from './conversation-claim-review.js'
+import { ConversationClaimReviewQuoteError, runConversationClaimReview } from './conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial, recoverConversationTaskModel } from './conversation-task-material.js'
 import { guidanceRule } from '@tianwen/evolution'
 
@@ -359,7 +359,11 @@ export class TianwenConversationObserverService extends Service {
     const controller = new AbortController(); this.analyses.add(controller)
     const signal = AbortSignal.any([this.shutdown.signal, controller.signal])
     const failed = (error: unknown) => {
-      this.ctx.tianwenEvolution.recordConversationLearning({ ...base, verdict: 'inconclusive', category: null, explanation: 'Automatic review could not establish the task result.', evidenceQuotes: [], proof: null, unavailableReason: unavailable(error, signal) })
+      const unavailableReason = unavailable(error, signal)
+      const explanation = unavailableReason === 'invalid-judgment' && error instanceof ConversationClaimReviewQuoteError
+        ? `Automatic review could not establish the task result: the ${error.focus} reviewer returned an evidence quote not found in the frozen source or answer (quote ${error.quoteIndex + 1}).`
+        : 'Automatic review could not establish the task result.'
+      this.ctx.tianwenEvolution.recordConversationLearning({ ...base, verdict: 'inconclusive', category: null, explanation, evidenceQuotes: [], proof: null, unavailableReason })
     }
     const settled = () => { this.analyses.delete(controller); this.reviewing.delete(taskId) }
     let queued = false

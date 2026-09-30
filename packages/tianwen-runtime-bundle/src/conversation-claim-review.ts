@@ -11,6 +11,13 @@ export type { ClaimAudit } from '@tianwen/evolution'
 
 export const METHOD_STUDY_QUOTE_PROTOCOL = 'tianwen.evidence-item-quotes.v1'
 
+/** Host-side location only; never carry the rejected quote into failure records. */
+export class ConversationClaimReviewQuoteError extends Error {
+  constructor(readonly focus: 'requirements' | 'grounding', readonly quoteIndex: number) {
+    super('invalid-judgment')
+  }
+}
+
 export interface ClaimEvidenceItem {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'tool' | 'answer'
@@ -335,9 +342,11 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus), outputSchema: schema })
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
-    if (!Array.isArray(result.value.evidenceQuotes) || result.value.evidenceQuotes.some(quote =>
+    if (!Array.isArray(result.value.evidenceQuotes)) throw new Error('invalid-judgment')
+    const invalidQuoteIndex = result.value.evidenceQuotes.findIndex(quote =>
       typeof quote !== 'string' || quote.length === 0 || (quoteChoices === undefined
-        ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))) throw new Error('invalid-judgment')
+        ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))
+    if (invalidQuoteIndex !== -1) throw new ConversationClaimReviewQuoteError(focus, invalidQuoteIndex)
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
     const { audit: _audit, ...summary } = result.value
     raw.push({ ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck)
