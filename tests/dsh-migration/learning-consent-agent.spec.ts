@@ -69,12 +69,16 @@ async function mountConsentRuntimeAt(
   options: {
     readonly nativeSkills?: readonly object[]
     readonly learningSkillSources?: readonly object[]
+    readonly guidanceActivationQuarantine?: boolean
   } = {},
 ) {
   const harness = await mountGoalHarness(join(root, 'sessions'), responses, {
     goalRoundDriver: false,
   })
-  await applyCore(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  await applyCore(harness.ctx, {
+    evolutionRoot: join(root, 'evolution'),
+    ...(options.guidanceActivationQuarantine === true ? { guidanceActivationQuarantine: true } : {}),
+  })
   if (options.nativeSkills !== undefined) {
     await harness.ctx.plugin(SkillRegistry)
     for (const skill of options.nativeSkills) harness.ctx.skills.register(skill as never)
@@ -532,7 +536,7 @@ describe('Tianwen main-chat learning consent tool', () => {
   })
 
   it('separates historical feedback assessments and guidance decisions from current activation without leaking material', async () => {
-    const mounted = await mountConsentRuntime('natural-assessment-status')
+    const mounted = await mountConsentRuntime('natural-assessment-status', [], { guidanceActivationQuarantine: true })
     const { main, child } = await createMainAndChild(mounted.ctx)
     try {
       const evolution = mounted.ctx.tianwenEvolution
@@ -625,6 +629,7 @@ describe('Tianwen main-chat learning consent tool', () => {
       const result = await executeLearningStatus(mounted.ctx, main.agent)
 
       expect(result).toMatchObject({ isError: false, value: {
+        conversationGuidanceActivation: { quarantined: true },
         history: { skillBoundRuns: 0, recordedOutcomes: 0, naturalConversation: {
           reviews: { met: 2, notMet: 0 }, feedback: { correction: 0 },
           feedbackAssessments: { total: 8, pending: 1, unavailable: 1, attributableProblems: 2,
@@ -702,6 +707,35 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(JSON.stringify(malformed.value)).not.toContain('PRIVATE')
     } finally {
       await child.dispose(); await main.dispose(); await mounted.ctx.fiber.dispose()
+    }
+  })
+
+  it.each([true, false])('reports the actual activation quarantine (%s) even with no studies or model calls', async quarantined => {
+    const mounted = await mountConsentRuntime('activation-quarantine-status', [], { guidanceActivationQuarantine: quarantined })
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      mounted.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+      const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl')
+      const beforeLedger = readFileSync(ledgerPath, 'utf8')
+      const beforeConsent = mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()
+
+      const result = await executeLearningStatus(mounted.ctx, main.agent)
+
+      expect(result).toMatchObject({ isError: false, value: {
+        consent: { enabled: true, revision: 1 },
+        conversationGuidanceActivation: {
+          quarantined,
+          scope: expect.stringMatching(/new.*activations.*blocked.*accepted.*historical.*not undone.*analysis.*evaluation.*other.*checks/isu),
+        },
+        history: { naturalConversation: { guidanceStudies: { total: 0, currentlyActive: 0 } } },
+      } })
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.ctx.tianwenEvolution.getLearningAnalysisConsent()).toStrictEqual(beforeConsent)
+      expect(mounted.adapter.requests).toHaveLength(0)
+    } finally {
+      await child.dispose()
+      await main.dispose()
+      await mounted.ctx.fiber.dispose()
     }
   })
 
