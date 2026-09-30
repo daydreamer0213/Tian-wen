@@ -55,6 +55,8 @@ export interface GuidanceStudyBody {
   readonly counterexampleTaskId: string
   readonly cases: readonly GuidanceCase[]
   readonly modelConfigDigest: Sha256Digest
+  /** Native generation identity; absent only on older recorded studies. Not a semantic independence verdict. */
+  readonly caseDesignProof?: GuidanceProof
   /** Absent only in historical studies; frozen before proposing a method. */
   readonly qualityContract?: ConversationQualityContract
   /** Bounded feedback hypotheses for the proposer only; never study sources. */
@@ -254,7 +256,7 @@ function parseProposalClue(value: unknown): GuidanceProposalClue {
     assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
 }
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : [])])
   const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
@@ -281,6 +283,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
     failureCategory: oneOf(input.failureCategory, CONVERSATION_FAILURES), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), parentSnapshot: parseGuidanceSnapshot(input.parentSnapshot),
     sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest), ...quality, ...mode,
+    ...(Object.hasOwn(input, 'caseDesignProof') ? { caseDesignProof: proof(input.caseDesignProof) } : {}),
     ...(Object.hasOwn(input, 'proposalClues') ? { proposalClues } : {}),
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')

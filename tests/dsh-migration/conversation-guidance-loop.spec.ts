@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
@@ -324,7 +324,15 @@ it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', '
         await expect(recoverTextGuidanceStudyReviewPacket(harness.ctx, study)).rejects.toThrow('source-unavailable')
       } finally { changedOriginalReview.mockRestore() }
     }
-  } finally { warning.mockRestore(); marker.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose() }
+  } finally {
+    warning.mockRestore(); marker.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose()
+    const ownedDirectory = relative(resolve(base), resolve(root))
+    if (isAbsolute(ownedDirectory) || ownedDirectory.includes(sep) || !ownedDirectory.startsWith('external-text-')) {
+      throw new Error('Refusing to clean a directory outside this test')
+    }
+    rmSync(root, { recursive: true, force: true })
+    expect(existsSync(root)).toBe(false)
+  }
 })
 
 it.each(['explicit', 'default'] as const)('forwards the actual %s runtime environment and independent natural admissions', async setting => {
@@ -350,7 +358,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   ...(['recover-source-explored', 'recover-source-explored-first'] as const).flatMap(order =>
     (['sources', 'guidance', 'family', 'category'] as const).map(field => `${order}-frozen-${field}` as const)),
   'support-withdrawn-during-review', 'explored-support-withdrawn-during-review',
-  'accepted', 'activation-quarantined', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
+  'accepted', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
@@ -579,6 +587,17 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   const loopFiber = harness.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
   await loopFiber
   const record = harness.ctx.tianwenEvolution.recordConversationGuidance.bind(harness.ctx.tianwenEvolution)
+  let caseDesignInspectionFault: { mockRestore(): void } | undefined
+  const inspectNative = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+  const caseDesignRecordFault = scenario === 'case-design-missing' ? vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationGuidance').mockImplementation(input => {
+    const result = record(input)
+    if (input.kind === 'study-opened') {
+      expect(input.caseDesignProof).toBeDefined()
+      caseDesignInspectionFault = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(sessionId =>
+        String(sessionId) === input.caseDesignProof!.sessionId ? Promise.reject(new Error('simulated missing case design')) : inspectNative(sessionId))
+    }
+    return result
+  }) : undefined
   const activationFault = scenario.startsWith('recover') || scenario === 'explored-interrupted' || scenario === 'source-interrupted' ? vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationGuidance').mockImplementation(input => {
     if (input.kind === 'guidance-activated') throw new Error('simulated activation append failure')
     if ((scenario === 'explored-interrupted' || scenario === 'source-interrupted') && input.kind === 'study-stopped') throw new Error('simulated lost stop append')
@@ -616,11 +635,35 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       expect(harness.adapter.requests).toHaveLength(scenario === 'mixed-models' ? 12 : 13)
       return
     }
+    if (scenario === 'case-design-missing') {
+      const stopped = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(stopped.opened.caseDesignProof).toBeDefined()
+      expect(stopped.stopped?.reason).toBe('source-unavailable')
+      expect(stopped.candidate).toBeUndefined(); expect(stopped.arms).toHaveLength(0)
+      expect(stopped.decision).toBeUndefined(); expect(stopped.activation).toBeUndefined()
+      expect(harness.adapter.requests).toHaveLength(13)
+      return
+    }
     if (scenario.startsWith('recover')) {
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.decision?.verdict).toBe('accepted')
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
       expect(warnings).toEqual(['simulated activation append failure'])
       warnings.splice(0); activationFault!.mockRestore()
+      if (scenario === 'recover-case-design-missing') {
+        const accepted = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+        expect(accepted.opened.caseDesignProof).toBeDefined()
+        caseDesignInspectionFault = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(sessionId =>
+          String(sessionId) === accepted.opened.caseDesignProof!.sessionId ? Promise.reject(new Error('simulated missing case design')) : inspectNative(sessionId))
+        const before = harness.adapter.requests.length
+        await loopFiber.dispose(); await harness.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
+        await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        const unchanged = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+        expect(unchanged.decision).toEqual(accepted.decision)
+        expect(unchanged.activation).toBeUndefined()
+        expect(harness.adapter.requests).toHaveLength(before)
+        expect(warnings).toEqual(['simulated missing case design'])
+        return
+      }
       if (frozenSubstitution || scenario === 'recover-source-substituted-proposal' || scenario === 'recover-source-explored-first-substituted-observation' || scenario === 'recover-source-explored-first-substituted-selection') {
         const accepted = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
         invalidValue = { guidance, sourceUse: sourceUse() }
@@ -942,6 +985,9 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       expect(reviewArm.answer).toBe('保留来源范围 0')
       const reviewPacket = await recoverTextGuidanceStudyReviewPacket(harness.ctx, study)
       expect(reviewPacket.reviewStatus).toBe('unreviewed')
+      expect(reviewPacket.caseDesign?.semanticIndependence).toBe('unestablished')
+      expect(reviewPacket.caseDesign?.proof).toEqual(study.opened.caseDesignProof)
+      expect(reviewPacket.caseDesign?.material).toMatchObject({ family: study.opened.family, failureCategory: study.opened.failureCategory })
       expect(JSON.stringify(reviewPacket)).not.toContain('"clear"')
       expect(harness.adapter.requests).toHaveLength(reviewRequests)
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
@@ -1053,7 +1099,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('support-retracted')
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(study!.opened.scopeKey)).toEqual(study!.opened.parentSnapshot)
     }
-  } finally { activationFault?.mockRestore(); warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+  } finally { caseDesignInspectionFault?.mockRestore(); caseDesignRecordFault?.mockRestore(); activationFault?.mockRestore(); warningSpy.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 }, 30_000)
 
 it.each(['valid', 'valid-explored', 'valid-source-explored', 'valid-source-frozen-feedback', 'missing', 'tampered'] as const)('handles %s natural correction recovery without rewriting earlier met reviews', async recovery => {

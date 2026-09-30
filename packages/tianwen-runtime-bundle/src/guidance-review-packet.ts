@@ -5,6 +5,7 @@ import { recoverConversationJudgmentRequest, recoverConversationStructuredJudgme
 import { verifyConversationClaimReviewCheck, verifyConversationOriginalReviewCheck } from './conversation-claim-review.js'
 import { conversationMessages, conversationTaskModelDigest, recoverConversationTaskAnswer, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
+import { recoverConversationCaseDesign, type RecoveredConversationCaseDesign } from './conversation-case-design.js'
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -102,6 +103,7 @@ export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: 
   readonly currentConsent: ReturnType<Context['tianwenEvolution']['getLearningAnalysisConsent']>
   readonly currentSupport: boolean
   readonly proposalMaterial: unknown
+  readonly caseDesign?: RecoveredConversationCaseDesign
   readonly cases: readonly ReviewCase[]
 }> {
   const recorded = ctx.tianwenEvolution.listConversationGuidanceStudies().find(item => item.opened.studyId === study.opened.studyId)
@@ -185,8 +187,10 @@ export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: 
   if (proposal.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('source-unavailable:proposal-model')
   if (!Array.isArray(proposal.material.sources) || proposal.material.sources.length !== 2) throw new Error('source-unavailable:proposal-sources')
   if (proposal.material.sources.some((source, index) => sha256(source) !== sha256(cases[index]!.baseline.task))) throw new Error('source-unavailable:proposal-source-material')
+  const caseDesign = await recoverConversationCaseDesign(ctx, study.opened)
   return { schemaVersion: 'tianwen.guidance-review-packet.v1',
     reviewStatus: study.activation === undefined ? 'unreviewed' : 'diagnostic-historical',
     opened: study.opened, candidate: study.candidate, decision: study.decision, activation: study.activation,
-    currentConsent, currentSupport, proposalMaterial: proposal.material, cases }
+    currentConsent, currentSupport, proposalMaterial: proposal.material,
+    ...(caseDesign === undefined ? {} : { caseDesign }), cases }
 }

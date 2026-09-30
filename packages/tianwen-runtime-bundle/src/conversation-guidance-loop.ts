@@ -12,6 +12,7 @@ import { runConversationFileTrial, recoverConversationFileTrial } from './conver
 import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
+import { recoverConversationCaseDesign } from './conversation-case-design.js'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 
@@ -590,7 +591,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
         scopeKey: source.source.scopeKey, family: effectiveConversationFamily(source)!, failureCategory: group.category, consentRevision: source.source.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId], counterexampleTaskId: group.counterexample.source.taskId,
-        cases, modelConfigDigest: sha256(callConfig), qualityContract: qualityContract!,
+        cases, modelConfigDigest: sha256(callConfig), caseDesignProof: generated.proof, qualityContract: qualityContract!,
         ...(proposalClues.length === 0 ? {} : { proposalClues: proposalClues.map(item => item.reference) }),
         ...(fileMode ? { evaluationMode: 'local-files' as const, fileOutputKind: fileConfig!.outputKind } : {}),
       })
@@ -778,6 +779,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       || guidanceVersion(this.ctx.tianwenEvolution.getConversationGuidance(study.scopeKey)) !== study.parentVersion
       || !this.ctx.tianwenEvolution.isConversationGuidanceSupported(study.studyId)) throw new Error('scope-changed')
     await this.recoverProposalClues(study)
+    await recoverConversationCaseDesign(this.ctx, study)
     for (const item of study.cases) if ('feedbackAssessmentId' in item && item.feedbackAssessmentId !== undefined) {
       const assessment = this.ctx.tianwenEvolution.listConversationFeedbackAssessments().find(value => value.started.assessmentId === item.feedbackAssessmentId)
       const feedback = this.ctx.get('tianwenConversationFeedback')
