@@ -14,7 +14,7 @@
 
 ### Task 1: 完整有限结果包装
 
-Files: create `scripts/ancillary-type-result-contract.ts`, create `tests/dsh-migration/ancillary-type-result-contract.spec.ts`; reuse `scripts/conversation-typescript-check.ts` unchanged.
+Files: create `scripts/ancillary-type-result-contract.ts`, create `tests/dsh-migration/ancillary-type-result-contract.spec.ts`; thin optional frozen-program constraint in `scripts/conversation-typescript-check.ts`, old unconfigured behavior unchanged.
 
 - [ ] 单文件真实旧TS2352复核，原目标/测试字节冻结摘要。
 - [ ] 现有纯编译检查的真实假阳性先红，随后实现骨架与禁止类型检查。
