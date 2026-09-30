@@ -18,6 +18,18 @@ export class ConversationClaimReviewQuoteError extends Error {
   }
 }
 
+/** Host counts only; no source, answer, path or rejected model text. */
+export class ConversationClaimReviewMaterialError extends Error {
+  constructor(readonly limit: 'material-bytes' | 'answer-bytes' | 'answer-units', readonly actual: number, readonly maximum: number) {
+    super('material-too-large')
+    this.name = 'ConversationClaimReviewMaterialError'
+  }
+}
+
+function boundReviewMaterial(limit: ConversationClaimReviewMaterialError['limit'], actual: number, maximum: number): void {
+  if (actual > maximum) throw new ConversationClaimReviewMaterialError(limit, actual, maximum)
+}
+
 export interface ClaimEvidenceItem {
   readonly id: string
   readonly role: 'user' | 'assistant' | 'tool' | 'answer'
@@ -55,7 +67,7 @@ function materialBytes(material: unknown): number {
 
 /** Lossless, role-preserving projection for audited conversation review. */
 export function projectClaimEvidence(material: unknown): ClaimEvidence {
-  if (materialBytes(material) > CONVERSATION_MATERIAL_MAX_BYTES) throw new Error('material-too-large')
+  boundReviewMaterial('material-bytes', materialBytes(material), CONVERSATION_MATERIAL_MAX_BYTES)
   if (!record(material)) throw new Error('invalid-judgment')
   const items: ClaimEvidenceItem[] = []
   const counters = { context: 0, request: 0, tool: 0, answer: 0 }
@@ -122,7 +134,8 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
       else if (message.role !== 'user') throw new Error('invalid-judgment')
     }
   } else if ('task' in material && 'answer' in material) {
-    if (!record(material.task) || typeof material.answer !== 'string' || Buffer.byteLength(material.answer, 'utf8') > 32_768) throw new Error('invalid-judgment')
+    if (!record(material.task) || typeof material.answer !== 'string') throw new Error('invalid-judgment')
+    boundReviewMaterial('answer-bytes', Buffer.byteLength(material.answer, 'utf8'), 32_768)
     if (typeof material.task.prompt === 'string') add('request', 'user', material.task.prompt)
     else {
       messages(material.task.context, 'context')
@@ -135,7 +148,9 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
   if (record(fileResult) && items.filter(item => item.role === 'answer').map(item => item.text).join('') !== fileResult.answer) throw new Error('invalid-judgment')
   if (files?.outputKind === 'files' && finalEntries !== undefined) for (const path of files.outputPaths) addFile(path, finalEntries.find(entry => entry.path === path)!.content!, 'final')
   const answers = items.filter(item => item.role === 'answer')
-  if (answers.length === 0 || answers.length > 128 || Buffer.byteLength(answers.map(item => item.text).join(''), 'utf8') > 32_768) throw new Error('invalid-judgment')
+  if (answers.length === 0) throw new Error('invalid-judgment')
+  boundReviewMaterial('answer-bytes', Buffer.byteLength(answers.map(item => item.text).join(''), 'utf8'), 32_768)
+  boundReviewMaterial('answer-units', answers.length, 128)
   return { schemaVersion: 'tianwen.claim-evidence.v1', items, evidenceDigest: sha256(items) }
 }
 

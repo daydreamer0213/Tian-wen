@@ -350,7 +350,7 @@ it.each(['explicit', 'default'] as const)('forwards the actual %s runtime enviro
     await applyBundle(harness.ctx, { ...(setting === 'explicit' ? { evolutionRoot } : {}), conversationSkillSources: [] })
     expect(plugin).toHaveBeenCalledWith(TianwenEvolutionService, { root: evolutionRoot, guidanceActivationQuarantine: true })
     expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, skillSources: [], guidanceActivationQuarantine: true })
-    expect(plugin).toHaveBeenCalledWith(TianwenConversationFileObserverService, { evolutionRoot, skillSources: [] })
+    expect(plugin).toHaveBeenCalledWith(TianwenConversationFileObserverService, { evolutionRoot, skillSources: [], externalCodeArtifacts: false })
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
     expect(harness.adapter.requests).toHaveLength(0)
   } finally { plugin.mockRestore(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }

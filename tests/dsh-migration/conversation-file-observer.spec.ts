@@ -67,6 +67,42 @@ function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, 
 const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
   evaluationMode: 'external', relatedTaskId: null, feedback: null }
 
+it('retains a verified independent result but classifies full-file review overflow before any reviewer call', async () => {
+  const code = { ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }
+  const content = 'x'.repeat(32_765)
+  let evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    return { checkerId: 'frozen-file-equality-probe', checkerDigest: sha256('probe'), contractDigest: sha256(content),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate(candidate) {
+        evaluations++
+        return candidate.outputs[0]?.content === content ? { status: 'verified', detail: 'Only the declared byte equality check.' }
+          : { status: 'rejected', detail: 'Declared byte equality did not match.' }
+      } }
+  } }
+  const harness = await mount([structured(code), toolCallResponse('overflow-write', 'write', { file_path: 'input.ts', content }),
+    textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.followup(direct('Replace input.ts with the supplied content.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.completion?.files?.entries[0]?.content).toBe(content)
+    expect(task.externalCheckFinished?.status).toBe('verified')
+    expect(evaluations).toBe(1)
+    expect(task.review).toMatchObject({ verdict: 'inconclusive', category: null, proof: null,
+      unavailableReason: 'material-too-large', evidenceQuotes: [],
+      explanation: 'Automatic result review was not attempted: frozen answer contains 32770 UTF-8 bytes; the existing limit is 32768.' })
+    expect(harness.adapter.requests).toHaveLength(3)
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()).toHaveLength(1)
+    const recovery = await mount([], false, undefined, harness.root)
+    try {
+      expect(recovery.ctx.tianwenEvolution.listConversationTasks()[0]?.review).toEqual(task.review)
+      expect(recovery.adapter.requests).toHaveLength(0)
+    } finally { await recovery.handle.dispose(); await recovery.ctx.fiber.dispose() }
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['external', 'local-files'] as const)('uses the concrete TypeScript host check in ordinary %s code observation without authorizing learning', async mode => {
   const requestText = 'Repair the type of value in input.ts; change only input.ts.'
   let harness: Awaited<ReturnType<typeof mount>>

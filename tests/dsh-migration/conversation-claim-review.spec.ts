@@ -144,11 +144,42 @@ describe('claim evidence projection', () => {
   it('fails closed for unsupported shapes, nontext-only answers and retained byte/count bounds', () => {
     expect(() => projectClaimEvidence({ criteria: ['not material'] })).toThrow('invalid-judgment')
     expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: 1 })).toThrow('invalid-judgment')
-    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: 'a'.repeat(32_769) })).toThrow('invalid-judgment')
+    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: 'a'.repeat(32_769) })).toThrow('material-too-large')
     expect(() => projectClaimEvidence({ source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'x' }] })] },
-      conversation: [{ id: 'a', role: 'assistant', content: [{ type: 'text', text: 'a'.repeat(32_769) }] }], toolEvidence: [] })).toThrow('invalid-judgment')
+      conversation: [{ id: 'a', role: 'assistant', content: [{ type: 'text', text: 'a'.repeat(32_769) }] }], toolEvidence: [] })).toThrow('material-too-large')
     expect(() => projectClaimEvidence({ task: { prompt: 'x'.repeat(CONVERSATION_MATERIAL_MAX_BYTES) }, answer: 'x' })).toThrow('material-too-large')
-    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: `${'a\n'.repeat(128)}a` })).toThrow('invalid-judgment')
+    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: `${'a\n'.repeat(128)}a` })).toThrow('material-too-large')
+  })
+
+  it.each(['material-bytes', 'answer-bytes', 'answer-units', 'combined-file-bytes'] as const)('reports only the host limit and counts for %s', scenario => {
+    const answer = scenario === 'answer-units' ? `${'a\n'.repeat(128)}a` : 'a'.repeat(32_769)
+    const fileOutput = { answer: 'saved', files: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: 'x'.repeat(32_764) }] }
+    const material = scenario === 'material-bytes' ? { task: { prompt: 'private-source'.repeat(50_000) }, answer: 'x' }
+      : scenario === 'combined-file-bytes' ? { task: { prompt: 'Write output.txt.', files: fileMaterial }, answer: fileOutput.answer,
+        fileResult: { ...fileOutput, outputDigest: sha256(fileOutput) } }
+        : { task: { prompt: 'private-source' }, answer }
+    let caught: unknown
+    try { projectClaimEvidence(material) } catch (error) { caught = error }
+    expect(caught).toMatchObject({ name: 'ConversationClaimReviewMaterialError', message: 'material-too-large',
+      limit: scenario === 'combined-file-bytes' ? 'answer-bytes' : scenario,
+      actual: scenario === 'material-bytes' ? Buffer.byteLength(JSON.stringify(material), 'utf8')
+        : scenario === 'answer-units' ? 129 : 32_769,
+      maximum: scenario === 'material-bytes' ? CONVERSATION_MATERIAL_MAX_BYTES : scenario === 'answer-units' ? 128 : 32_768 })
+    expect(JSON.stringify(caught)).not.toContain('private-source')
+    expect(JSON.stringify(caught)).not.toContain('output.txt')
+  })
+
+  it('keeps exact limits lossless and counts UTF-8 bytes rather than characters', () => {
+    const answer = `${'a'.repeat(32_765)}中`
+    expect(projectClaimEvidence({ task: { prompt: 'x' }, answer }).items.filter(item => item.role === 'answer').map(item => item.text).join('')).toBe(answer)
+    expect(() => projectClaimEvidence({ task: { prompt: 'x' }, answer: `${answer}x` })).toThrow('material-too-large')
+    const atCount = 'a\n'.repeat(128)
+    expect(projectClaimEvidence({ task: { prompt: 'x' }, answer: atCount }).items.filter(item => item.role === 'answer')).toHaveLength(128)
+    const shell = { task: { prompt: '' }, answer: 'x' }
+    shell.task.prompt = 'a'.repeat(CONVERSATION_MATERIAL_MAX_BYTES - Buffer.byteLength(JSON.stringify(shell), 'utf8'))
+    expect(() => projectClaimEvidence(shell)).not.toThrow()
+    shell.task.prompt += 'a'
+    expect(() => projectClaimEvidence(shell)).toThrow('material-too-large')
   })
 })
 
