@@ -19,6 +19,7 @@ import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
 import { ConversationGuidanceState } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { guidanceInputDigest } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import * as studyEvidence from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import {
   parseConversationFileEntries,
   parseConversationFileMaterial,
@@ -67,7 +68,7 @@ it('preserves every old v1 file shape and digest when ancillary fields are absen
 })
 
 for (const historicalFileClue of [false, true])
-for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-clue', 'feedback-clue-external', 'feedback-clue-packet-overflow', 'feedback-clue-frozen-overflow', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-projection-drift', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) if (!historicalFileClue || ['feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted'].includes(scenario)) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}${historicalFileClue ? ' (legacy-v1)' : ''}`, async () => {
+for (const scenario of ['accepted', 'packet-quarantined', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-study', 'feedback-clue', 'feedback-clue-external', 'feedback-clue-packet-overflow', 'feedback-clue-frozen-overflow', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-projection-drift', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) if (!historicalFileClue || ['feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted'].includes(scenario)) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}${historicalFileClue ? ' (legacy-v1)' : ''}`, async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-learning-'))
@@ -79,7 +80,7 @@ for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover'
   const definition = { name: 'file-scope-reference', provider: 'owned-test-fixture', source: 'bundled', description: 'Scope reference', invocation: { modelInvocable: true, userInvocable: true }, content: 'Preserve source scope in a file.' }
   const sourceAdmission = { name: definition.name, provider: definition.provider, digest: sha256(definition), origin: 'https://example.invalid/owned-test-fixture', revision: 'fixture-v1', license: 'MIT' as const, reviewedAt: '2026-09-08T00:00:00.000Z', kind: 'self-contained-text' as const, runtime: '0.1.1-rc.2' as const, purpose: 'conversation-method-reference' as const,
     scopeKey: `conversation:${sha256({ cwd: root })}`, environmentDigest: sha256({ kind: 'tianwen.conversation-skill-environment.v1', evolutionRoot }) }
-  const loopConfig = { evolutionRoot, ...(withSource ? { skillSources: [sourceAdmission] } : {}) }
+  const loopConfig = { evolutionRoot, ...(scenario === 'packet-quarantined' ? { guidanceActivationQuarantine: true } : {}), ...(withSource ? { skillSources: [sourceAdmission] } : {}) }
   const finalProposal = () => ({ guidance: 'Preserve pilot scope in the output file.', ...(withSource ? { sourceUse: { readDigest: sha256(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.sourceReference!), status: 'adapted', rationale: 'Use the scope reference.' } } : {}) })
   const exploration = (material: { sourceTaskIds: string[] }) => ({ exploration: { sourceTaskId: material.sourceTaskIds[0], hypothesis: 'Scope ignored.', alternative: 'Input misunderstood.', temporaryInstruction: 'Check pilot scope.', expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'not-met', treatment: 'not-met' } } })
   const script: ScriptEntry[] = []
@@ -170,7 +171,7 @@ for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover'
       await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('natural-files'); await harness.ctx.tianwenConversationFeedback.scheduleForSession('natural-files')
       const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
       const material = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
-      if (scenario === 'feedback') {
+      if (scenario === 'feedback' || scenario === 'feedback-study') {
         expect(material.fileResult?.files.find(entry => entry.path === 'output.md')?.content).toBe('pilot original 1')
         expect(material.original.files?.entries.find(entry => entry.path === 'input.md')?.content).toBe('pilot source 1')
         expect(material.toolEvidence).toEqual([])
@@ -277,6 +278,51 @@ for (const scenario of ['accepted', 'rejected', 'unknown', 'explored', 'recover'
     expect(study.arms).toHaveLength(scenario === 'recover-incomplete' ? 0 : 10)
     expect(study.fileTrials).toHaveLength(scenario === 'recover-incomplete' ? 1 : explored ? 12 : 10)
     expect(study.decision?.verdict).toBe(scenario === 'recover-incomplete' ? undefined : scenario === 'rejected' ? 'rejected' : scenario === 'unknown' ? 'inconclusive' : 'accepted')
+    if (scenario === 'accepted' || scenario === 'packet-quarantined' || scenario === 'chat' || scenario === 'feedback-study') {
+      expect(studyEvidence).toHaveProperty('recoverFileGuidanceStudyReviewPacket')
+      expect(studyEvidence).toHaveProperty('recoverFileGuidanceArmForReview')
+      const beforeRequests = harness.adapter.requests.length
+      const beforeLedger = readFileSync(join(evolutionRoot, 'ledger.jsonl'), 'utf8')
+      const packet = await studyEvidence.recoverFileGuidanceStudyReviewPacket(harness.ctx, study)
+      expect(packet.schemaVersion).toBe('tianwen.file-guidance-review-packet.v1')
+      expect(packet.fileOutputKind).toBe(chat ? 'chat' : 'files')
+      expect(packet.cases).toHaveLength(5)
+      expect(packet.reviewStatus).toBe(scenario === 'packet-quarantined' ? 'unreviewed' : 'diagnostic-historical')
+      expect(packet.caseDesign?.semanticIndependence).toBe('unestablished')
+      for (const item of packet.cases) {
+        if (item.kind !== 'synthetic') expect(item.originalFileResult).toBeDefined()
+        expect(item.baseline.task.files).toBeDefined()
+        expect(item.candidate.task).toEqual(item.baseline.task)
+        for (const arm of [item.baseline, item.candidate]) {
+          expect(arm.fileResult).toBeDefined()
+          expect(arm.fileResult!.outputDigest).toBe(sha256({ answer: arm.answer, files: arm.fileResult!.files }))
+          expect(arm.receipt!.outputKind).toBe(chat ? 'chat' : 'files')
+          expect(arm.receipt!.executionProof.sessionId).not.toBe('natural-files')
+        }
+      }
+      if (scenario === 'feedback-study') expect(packet.cases[0]!.feedback?.rawFeedbackIncludedInStudy).toBe(true)
+      await expect(studyEvidence.recoverTextGuidanceStudyReviewPacket(harness.ctx, study)).rejects.toThrow('source-unavailable')
+      await expect(studyEvidence.recoverFileGuidanceStudyReviewPacket(harness.ctx, { ...study, arms: study.arms.slice(0, 9) })).rejects.toThrow('source-unavailable')
+      if (scenario === 'accepted') {
+        const first = study.arms[0]!
+        await expect(studyEvidence.recoverFileGuidanceArmForReview(harness.ctx, { ...study, fileTrials: [] }, first)).rejects.toThrow('source-unavailable')
+        const receipts = study.fileTrials!.map((trial, index) => index === 0 ? { ...trial,
+          receipt: { ...trial.receipt, files: trial.receipt.files.map(file => file.path === 'output.md' ? { ...file, content: 'substituted output' } : file) } } : trial)
+        await expect(studyEvidence.recoverFileGuidanceArmForReview(harness.ctx, { ...study, fileTrials: receipts }, first)).rejects.toThrow()
+        await expect(studyEvidence.recoverFileGuidanceArmForReview(harness.ctx, { ...study, fileTrials: study.fileTrials!.map((trial, index) => index === 0
+          ? { ...trial, receipt: study.fileTrials![1]!.receipt } : trial) }, first)).rejects.toThrow('source-unavailable')
+        const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+        const spy = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
+          const saved = await inspect(id)
+          return String(id) === first.executionProof.sessionId ? { ...saved, events: [] } : saved
+        })
+        try { await expect(studyEvidence.recoverFileGuidanceStudyReviewPacket(harness.ctx, study)).rejects.toThrow() }
+        finally { spy.mockRestore() }
+      }
+      expect(harness.adapter.requests).toHaveLength(beforeRequests)
+      expect(readFileSync(join(evolutionRoot, 'ledger.jsonl'), 'utf8')).toBe(beforeLedger)
+    }
+    if (scenario === 'rejected' || scenario === 'unknown') await expect(studyEvidence.recoverFileGuidanceStudyReviewPacket(harness.ctx, study)).rejects.toThrow('source-unavailable')
     const [baseline, candidate] = study.fileTrials!
     if (!chat) expect(baseline!.receipt.files.find(entry => entry.path === 'output.md')!.content).toContain(explored ? 'control' : '0-baseline')
     if (candidate !== undefined) {

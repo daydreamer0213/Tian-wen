@@ -309,6 +309,12 @@ it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', '
       const packet = await recoverTextGuidanceStudyReviewPacket(harness.ctx, study)
       expect(packet.reviewStatus).toBe('diagnostic-historical')
       expect(packet.cases).toHaveLength(5)
+      expect(packet.schemaVersion).toBe('tianwen.guidance-review-packet.v1')
+      for (const item of packet.cases) {
+        expect(item).not.toHaveProperty('originalFileResult')
+        expect(item.baseline).not.toHaveProperty('fileResult')
+        expect(item.candidate).not.toHaveProperty('receipt')
+      }
       expect(packet.cases.every(item => item.baseline.answer && item.candidate.answer)).toBe(true)
       expect(packet.cases.filter(item => item.kind === 'source').map(item => item.feedback)).toEqual([undefined, undefined])
       expect(packet.cases.filter(item => item.kind === 'source').every(item => item.originalTaskReview?.verdict === 'not-met')).toBe(true)
