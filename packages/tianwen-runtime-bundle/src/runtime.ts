@@ -44,6 +44,7 @@ import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.j
 import { TianwenResearchSummaryAdmissionService } from './research-summary-admission.js'
 import { TianwenConversationObserverService } from './conversation-observer.js'
 import { TianwenConversationFileObserverService } from './conversation-file-observer.js'
+import type { ConversationExternalCodeCheck } from './conversation-external-check.js'
 import { TianwenNativeToolObservationService } from './native-tool-observation.js'
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
@@ -57,6 +58,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly familyVerification?: boolean
   /** Default-off capture of external code task file artifacts; no effect verdict or learning permission. */
   readonly captureExternalCodeArtifacts?: boolean
+  /** Trusted programmatic pre-answer check; no model-supplied checker or automatic learning permission. */
+  readonly externalCodeCheck?: ConversationExternalCodeCheck
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
@@ -490,7 +493,8 @@ export async function apply(
   ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }) })
-  ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true })
+  ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true,
+    ...(config.captureExternalCodeArtifacts === true && config.externalCodeCheck !== undefined ? { externalCodeCheck: config.externalCodeCheck } : {}) })
   ctx.plugin(TianwenConversationFeedbackService)
   ctx.plugin(TianwenConversationGuidanceLoopService, {
     ...(evolutionRoot === undefined ? {} : { evolutionRoot }),

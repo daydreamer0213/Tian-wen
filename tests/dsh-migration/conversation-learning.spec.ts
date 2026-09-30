@@ -5,10 +5,11 @@ import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evo
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { conversationQualityContract, hasCurrentConversationQuality, parseConversationAuditedReviewChecks, parseConversationLearningRecord, parseConversationQualityContract, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 
 const roots: string[] = []
 function root() {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : resolve('tmp/conversation-tests')
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : resolve('tmp/conversation-tests'))
   mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'ledger-'))
   roots.push(directory)
@@ -52,6 +53,28 @@ function ledgerWithConsent(directory = root()) {
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   return ledger
 }
+function externalCheckSetup() {
+  const directory = root(), ledger = ledgerWithConsent(directory), source = start()
+  ledger.recordConversationLearning(source)
+  const initial = admission(source.taskId, 'external')
+  const admitted = { ...initial, decision: { ...initial.decision, family: 'code' as const } }
+  ledger.recordConversationLearning(admitted)
+  const prepared = { kind: 'task-external-check-prepared' as const, taskId: source.taskId, preparedSeq: 12,
+    requestDigest: source.requestDigest, contextDigest: source.contextDigest, admissionDigest: sha256(admitted), modelConfigDigest: sha256('model'),
+    checkerId: 'mechanism-check', checkerDigest: sha256('checker'), contractDigest: sha256('contract'), inputsDigest: sha256([{ path: 'input.ts', content: 'before' }]) }
+  const capture = { kind: 'task-file-input-captured' as const, taskId: source.taskId, callId: 'write-1', callSeq: 14, path: 'input.ts', content: 'before' }
+  const files = { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: 'files' as const,
+    inputsDigest: prepared.inputsDigest, captureSeq: 17, outputPaths: ['input.ts'], entries: [{ path: 'input.ts', content: 'after' }] }
+  const result = { kind: 'task-external-check-finished' as const, taskId: source.taskId, preparationDigest: sha256(prepared),
+    resultDigest: finish(source.taskId).resultDigest, fileResultDigest: sha256(files), status: 'verified' as const, detail: 'Checked frozen output.' }
+  const complete = () => {
+    ledger.recordConversationLearning(prepared)
+    ledger.recordConversationLearning({ kind: 'task-model-observed', taskId: source.taskId, headerSeq: 8, modelConfigDigest: prepared.modelConfigDigest })
+    ledger.recordConversationLearning(capture)
+    ledger.recordConversationLearning({ ...finish(source.taskId), files })
+  }
+  return { directory, ledger, source, prepared, capture, files, result, complete }
+}
 function auditedChecks(verdict: 'met' | 'not-met' | 'inconclusive' = 'met') {
   return parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({
     focus, verdict, category: verdict === 'not-met' ? 'source-fidelity' : null,
@@ -65,6 +88,73 @@ function auditedChecks(verdict: 'met' | 'not-met' | 'inconclusive' = 'met') {
 }
 
 describe('natural conversation task evidence', () => {
+  it('freezes separate external check records and cold-replays them without granting a model review', () => {
+    const { directory, ledger, prepared, result, complete } = externalCheckSetup()
+    complete()
+    expect(ledger.recordConversationLearning(prepared)).toEqual({ duplicate: true })
+    expect(() => ledger.recordConversationLearning({ ...prepared, contractDigest: sha256('new contract') })).toThrow(/freeze|changed/i)
+    expect(ledger.recordConversationLearning(result)).toEqual({ duplicate: false })
+    expect(ledger.recordConversationLearning(result)).toEqual({ duplicate: true })
+    expect(() => ledger.recordConversationLearning({ ...result, status: 'rejected' })).toThrow(/freeze|changed/i)
+    expect(new EvolutionLedger(directory).listConversationTasks()).toEqual(ledger.listConversationTasks())
+    expect(ledger.listConversationTasks()[0]?.review).toBeUndefined()
+  })
+
+  it.each(['requestDigest', 'contextDigest', 'admissionDigest'] as const)('rejects a prepared check with a changed %s', field => {
+    const { ledger, prepared } = externalCheckSetup()
+    expect(() => ledger.recordConversationLearning({ ...prepared, [field]: sha256('other task') })).toThrow(/original task/i)
+  })
+
+  it.each(['model', 'file', 'completion'] as const)('rejects check preparation after %s evidence', phase => {
+    const { ledger, source, prepared, capture } = externalCheckSetup()
+    if (phase === 'model') ledger.recordConversationLearning({ kind: 'task-model-observed', taskId: source.taskId, headerSeq: 8, modelConfigDigest: sha256('model') })
+    else if (phase === 'file') ledger.recordConversationLearning(capture)
+    else ledger.recordConversationLearning(finish(source.taskId))
+    expect(() => ledger.recordConversationLearning(prepared)).toThrow(/before/i)
+  })
+
+  it.each(['preparationDigest', 'resultDigest', 'fileResultDigest'] as const)('rejects a check result with a changed %s', field => {
+    const { ledger, result, complete } = externalCheckSetup()
+    complete()
+    expect(() => ledger.recordConversationLearning({ ...result, [field]: sha256('other result') })).toThrow(/match/i)
+  })
+
+  it('refuses conclusive external results after model drift and refuses new analysis after revocation', () => {
+    const { ledger, source, result, complete } = externalCheckSetup()
+    complete()
+    // Separate native configuration epoch recorded within the completed span.
+    // Insert before completion in a fresh fixture instead of modifying history.
+    const drift = externalCheckSetup()
+    drift.ledger.recordConversationLearning(drift.prepared)
+    drift.ledger.recordConversationLearning({ kind: 'task-model-observed', taskId: drift.source.taskId, headerSeq: 8, modelConfigDigest: sha256('different model') })
+    drift.ledger.recordConversationLearning(drift.capture)
+    drift.ledger.recordConversationLearning({ ...finish(drift.source.taskId), files: drift.files })
+    expect(() => drift.ledger.recordConversationLearning(drift.result)).toThrow(/changed|missing/i)
+    drift.ledger.recordConversationLearning({ ...drift.result, status: 'unverifiable' })
+    ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    expect(() => ledger.recordConversationLearning(result)).toThrow(/consent/i)
+    expect(ledger.listConversationTasks()[0]?.externalCheckPrepared?.taskId).toBe(source.taskId)
+  })
+
+  it('requires bounded exact external result fields and an order-independent target input identity', () => {
+    const { prepared, result } = externalCheckSetup()
+    expect(() => parseConversationLearningRecord({ ...prepared, preparedSeq: 0 })).toThrow()
+    expect(() => parseConversationLearningRecord({ ...result, met: true })).toThrow()
+    for (const status of [true, null, { toString: () => 'verified' }, 'met']) expect(() => parseConversationExternalCheckOutcome({ status, detail: 'checked' })).toThrow()
+    const inputs = [{ path: 'b.ts', content: null }, { path: 'a.ts', content: 'source' }]
+    expect(conversationExternalInputsDigest(inputs)).toBe(sha256([{ path: 'a.ts', content: 'source' }, { path: 'b.ts', content: null }]))
+    expect(conversationExternalInputsDigest([...inputs].reverse())).toBe(conversationExternalInputsDigest(inputs))
+    expect(() => conversationExternalInputsDigest([])).toThrow(/inputs/i)
+  })
+
+  it.each(['prepared', 'finished'] as const)('refuses serialized external %s records appended after consent revocation', phase => {
+    const state = externalCheckSetup()
+    if (phase === 'finished') state.complete()
+    state.ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    appendFileSync(join(state.directory, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-learning-recorded',
+      schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-30T12:00:00.000Z', record: phase === 'prepared' ? state.prepared : state.result })}\n`)
+    expect(() => new EvolutionLedger(state.directory)).toThrow(/consent/i)
+  })
   it('rejects silent proofless completed v5 task reviews but retains explicit unavailability', () => {
     const ledger = ledgerWithConsent(), source = start(), admitted = admission(source.taskId)
     ledger.recordConversationLearning(source); ledger.recordConversationLearning(admitted); ledger.recordConversationLearning(finish(source.taskId))

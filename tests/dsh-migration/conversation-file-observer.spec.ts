@@ -13,6 +13,7 @@ import { TianwenConversationFileObserverService } from '../../packages/tianwen-r
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
+import { ConversationExternalCodeChecks, type ConversationExternalCodeCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
@@ -35,10 +36,11 @@ const parallelCalls = (calls: readonly { readonly id: string, readonly name: str
   { type: 'finish', reason: { kind: 'tool-calls' } },
 ]
 
-async function mount(script: Parameters<typeof mountPersistentHarness>[1], externalCodeArtifacts = false) {
+async function mount(script: Parameters<typeof mountPersistentHarness>[1], externalCodeArtifacts = false, externalCodeCheck?: ConversationExternalCodeCheck, existingRoot?: string) {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
-  const root = mkdtempSync(join(base, 'file-observer-')); roots.push(root)
+  const root = existingRoot ?? mkdtempSync(join(base, 'file-observer-'))
+  if (existingRoot === undefined) roots.push(root)
   const harness = await mountPersistentHarness(join(root, 'sessions'), script)
   await harness.ctx.plugin(localFs.default, { cwd: root })
   await harness.ctx.plugin(SubagentRuntime)
@@ -47,8 +49,10 @@ async function mount(script: Parameters<typeof mountPersistentHarness>[1], exter
   await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
   harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   await harness.ctx.plugin(TianwenConversationFileObserverService, { externalCodeArtifacts })
-  await harness.ctx.plugin(TianwenConversationObserverService)
-  const handle = await harness.ctx.agents.create({ sessionId: SessionId('file-chat'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  await harness.ctx.plugin(TianwenConversationObserverService, externalCodeArtifacts && externalCodeCheck !== undefined ? { externalCodeCheck } : {})
+  const handle = existingRoot === undefined
+    ? await harness.ctx.agents.create({ sessionId: SessionId('file-chat'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    : await harness.ctx.agents.resume({ resumeSessionId: SessionId('file-chat'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
   return { ...harness, handle, root }
 }
 
@@ -59,6 +63,209 @@ function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, 
 
 const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
   evaluationMode: 'external', relatedTaskId: null, feedback: null }
+
+it('prepares an external check before the candidate and records its result separately from model review', async () => {
+  let preparedBeforeCandidate = false
+  let preparations = 0, evaluations = 0
+  let harness: Awaited<ReturnType<typeof mount>>
+  const check = { async prepare({ request }: { request: readonly unknown[] }) {
+    preparations++
+    return { checkerId: 'bounded-mechanism-probe', checkerDigest: sha256('probe implementation'), contractDigest: sha256(request),
+      inputs: [{ path: 'input.ts', content: 'before' }],
+      async evaluate({ outputs }: { outputs: readonly { path: string, content: string | null }[] }) {
+        evaluations++
+        return { status: outputs.length === 1 && outputs[0]?.content === 'after' ? 'verified' as const : 'rejected' as const, detail: 'Frozen output check.' }
+      } }
+  } }
+  harness = await mount([structured(externalCode), () => {
+    preparedBeforeCandidate = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckPrepared !== undefined
+    return toolCallResponse('checked-write', 'write', { file_path: 'input.ts', content: 'after' })
+  }, textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  let cold: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(preparedBeforeCandidate).toBe(true)
+    expect(task.externalCheckPrepared).toMatchObject({ checkerId: 'bounded-mechanism-probe', requestDigest: task.source.requestDigest })
+    expect(task.externalCheckFinished).toMatchObject({ status: 'verified', resultDigest: task.completion?.resultDigest,
+      preparationDigest: sha256(task.externalCheckPrepared), fileResultDigest: sha256(task.completion?.files) })
+    expect(task.review?.verdict).toBe('inconclusive')
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    cold = await mount([], true, check, harness.root)
+    await cold.ctx.tianwenConversationObserver.whenIdle()
+    expect(cold.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished).toEqual(task.externalCheckFinished)
+    expect(preparations).toBe(1)
+    expect(evaluations).toBe(1)
+  } finally { await cold?.handle.dispose(); await cold?.ctx.fiber.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['rejected', 'throw', 'oversized', 'invalid', 'changed-input'] as const)('keeps an external %s check from certifying success', async failure => {
+  let evaluations = 0
+  let harness: Awaited<ReturnType<typeof mount>>
+  const check: ConversationExternalCodeCheck = { async prepare() { return {
+    checkerId: 'bounded-mechanism-probe', checkerDigest: sha256('probe'), contractDigest: sha256('frozen contract'), inputs: [{ path: 'input.ts', content: 'before' }],
+    async evaluate() {
+      evaluations++
+      if (failure === 'throw') throw new Error('controlled check failure')
+      if (failure === 'oversized') return { status: 'verified', detail: '字'.repeat(4096) }
+      if (failure === 'invalid') return { status: 'verified', detail: 'ignored extra', met: true } as never
+      return { status: 'rejected', detail: 'The frozen requirement was not met.' }
+    },
+  } } }
+  harness = await mount([structured(externalCode), () => {
+    if (failure === 'changed-input') writeFileSync(join(harness.root, 'input.ts'), 'changed after preparation')
+    return toolCallResponse('checked-write', 'write', { file_path: 'input.ts', content: 'after' })
+  }, textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.externalCheckFinished?.status).toBe(failure === 'rejected' ? 'rejected' : 'unverifiable')
+    expect(evaluations).toBe(failure === 'changed-input' ? 0 : 1)
+    await new ConversationExternalCodeChecks(harness.ctx, check).finish(task.source.taskId)
+    expect(evaluations).toBe(failure === 'changed-input' ? 0 : 1)
+    expect(task.review?.verdict).toBe('inconclusive')
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['not-applicable', 'prepare-failed', 'disabled', 'revoked'] as const)('keeps ordinary execution working when the external check is %s', async reason => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  let evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    if (reason === 'not-applicable') return
+    if (reason === 'prepare-failed') throw new Error('controlled preparation failure')
+    return { checkerId: 'bounded-mechanism-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate() { evaluations++; return { status: 'verified', detail: 'Checked.' } } }
+  } }
+  harness = await mount([structured(externalCode), toolCallResponse('check-write', 'write', { file_path: 'input.ts', content: 'after' }), () => {
+    if (reason === 'revoked') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    return textResponse('saved')
+  }, ...(reason === 'revoked' ? [] : reviewPair())], reason !== 'disabled', check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(readFileSync(join(harness.root, 'input.ts'), 'utf8')).toBe('after')
+    expect(task.completion?.status).toBe('completed')
+    expect(task.externalCheckFinished).toBeUndefined()
+    if (reason !== 'revoked') expect(task.externalCheckPrepared).toBeUndefined()
+    expect(evaluations).toBe(0)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('cold-recovers a lost check closure as unverifiable without post-answer preparation or retry', async () => {
+  let preparations = 0, evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    preparations++
+    return { checkerId: 'bounded-mechanism-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate() { evaluations++; return { status: 'verified', detail: 'Checked.' } } }
+  } }
+  // Simulate loss after durable completion, before the finish handler runs.
+  const crash = vi.spyOn(ConversationExternalCodeChecks.prototype, 'finish').mockResolvedValueOnce(undefined)
+  const harness = await mount([structured(externalCode), toolCallResponse('crash-write', 'write', { file_path: 'input.ts', content: 'after' }),
+    textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  let cold: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished).toBeUndefined()
+    crash.mockRestore()
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    cold = await mount([], true, check, harness.root)
+    await cold.ctx.tianwenConversationObserver.whenIdle()
+    const task = cold.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.externalCheckFinished?.status).toBe('unverifiable')
+    await new ConversationExternalCodeChecks(cold.ctx, check).finish(task.source.taskId)
+    expect(preparations).toBe(1)
+    expect(evaluations).toBe(0)
+  } finally { crash.mockRestore(); await cold?.handle.dispose(); await cold?.ctx.fiber.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['prepare', 'evaluate'] as const)('releases observer work when consent is revoked during a pending %s callback', async stage => {
+  let entered!: () => void, release!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    if (stage === 'prepare') { entered(); await held }
+    return { checkerId: 'held-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate() {
+        if (stage === 'evaluate') { entered(); await held }
+        return { status: 'verified', detail: 'Late callback result.' }
+      } }
+  } }
+  const harness = await mount([structured(externalCode), toolCallResponse('held-write', 'write', { file_path: 'input.ts', content: 'after' }),
+    textResponse('saved'), ...(stage === 'evaluate' ? reviewPair() : [])], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await started
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    const idle = harness.handle.agent.whenIdle().then(() => harness.ctx.tianwenConversationObserver.whenIdle()).then(() => true)
+    expect(await Promise.race([idle, new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 1000) })])).toBe(true)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished).toBeUndefined()
+  } finally {
+    clearTimeout(timer); release()
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+  }
+})
+
+it('does not evaluate an external check when the original native session cannot flush', async () => {
+  let evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() { return {
+    checkerId: 'flush-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'), inputs: [{ path: 'input.ts', content: 'before' }],
+    async evaluate() { evaluations++; return { status: 'verified', detail: 'Checked.' } },
+  } } }
+  const harness = await mount([structured(externalCode), toolCallResponse('flush-write', 'write', { file_path: 'input.ts', content: 'after' }), textResponse('saved')], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  const originalFlush = harness.ctx.sessions.flush.bind(harness.ctx.sessions)
+  const flush = vi.spyOn(harness.ctx.sessions, 'flush').mockImplementation(session => String(session.id) === 'file-chat' ? Promise.resolve(false) : originalFlush(session))
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished?.status).toBe('unverifiable')
+    expect(evaluations).toBe(0)
+  } finally { flush.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('releases a pending external native flush on revocation without evaluating or recording a late result', async () => {
+  let entered!: () => void, release!: (value: boolean) => void, evaluations = 0, first = true
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<boolean>(resolve => { release = resolve })
+  const check: ConversationExternalCodeCheck = { async prepare() { return {
+    checkerId: 'flush-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'), inputs: [{ path: 'input.ts', content: 'before' }],
+    async evaluate() { evaluations++; return { status: 'verified', detail: 'Checked.' } },
+  } } }
+  const harness = await mount([structured(externalCode), toolCallResponse('flush-write', 'write', { file_path: 'input.ts', content: 'after' }), textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  const originalFlush = harness.ctx.sessions.flush.bind(harness.ctx.sessions)
+  const flush = vi.spyOn(harness.ctx.sessions, 'flush').mockImplementation(session => {
+    if (String(session.id) === 'file-chat' && first) { first = false; entered(); return held }
+    return originalFlush(session)
+  })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await started
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    const idle = harness.handle.agent.whenIdle().then(() => harness.ctx.tianwenConversationObserver.whenIdle()).then(() => true)
+    expect(await Promise.race([idle, new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 1000) })])).toBe(true)
+    release(true)
+    await idle
+    expect(evaluations).toBe(0)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished).toBeUndefined()
+  } finally {
+    clearTimeout(timer); release(true); flush.mockRestore()
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+  }
+})
 
 it('captures external code artifacts without accepting a model success judgment', async () => {
   const harness = await mount([structured(externalCode),

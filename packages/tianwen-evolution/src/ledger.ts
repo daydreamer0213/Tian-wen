@@ -7349,7 +7349,8 @@ export class EvolutionLedger {
       if (event.record.kind === 'task-started') {
         this.#requireConversationConsent(event.record.consentRevision)
         if (event.record.behaviorVersion !== guidanceVersion(this.#conversationGuidance.snapshot(event.record.scopeKey))) throw new LedgerIntegrityError('replayed task guidance does not match its start-time version')
-      } else if ((event.record.kind === 'task-admitted' || event.record.kind === 'task-reviewed') && event.record.proof !== null) {
+      } else if (event.record.kind === 'task-external-check-prepared' || event.record.kind === 'task-external-check-finished'
+        || (event.record.kind === 'task-admitted' || event.record.kind === 'task-reviewed') && event.record.proof !== null) {
         const taskId = event.record.taskId
         this.#requireConversationConsent(this.#conversationLearning.list().find(task => task.source.taskId === taskId)!.source.consentRevision)
       }

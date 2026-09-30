@@ -1,4 +1,5 @@
 import { Context, Service } from '@deepseek-ai/cordis'
+import { ConversationExternalCodeChecks, withConversationObservationCancellation, type ConversationExternalCodeCheck } from './conversation-external-check.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { createUserMessage, isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
@@ -60,9 +61,18 @@ export class TianwenConversationObserverService extends Service {
   private readonly analyses = new Set<AbortController>()
   private readonly shutdown = new AbortController()
 
-  constructor(ctx: Context, private readonly config: { readonly familyVerification?: boolean } = {}) { super(ctx, 'tianwenConversationObserver') }
+  private readonly externalChecks: ConversationExternalCodeChecks
+  constructor(ctx: Context, private readonly config: { readonly familyVerification?: boolean, readonly externalCodeCheck?: ConversationExternalCodeCheck } = {}) {
+    super(ctx, 'tianwenConversationObserver')
+    this.externalChecks = new ConversationExternalCodeChecks(ctx, config.externalCodeCheck)
+  }
 
   protected [Service.init](): void {
+    const offExternalRequest = this.ctx.on('agent/request', async (payload, next) => {
+      const config = await next()
+      if (isRoot(payload.agent)) await this.externalChecks.prepare(payload.agent, payload.turn, config, payload.signal)
+      return config
+    }, { prepend: true })
     const offModel = this.ctx.on('llm/stream', (request, next) => {
       const agent = request.sessionId === undefined ? undefined : this.ctx.agents.get(SessionId(String(request.sessionId)))
       if (agent !== undefined && isRoot(agent) && isAgentLoopRequest(request)) {
@@ -120,16 +130,19 @@ export class TianwenConversationObserverService extends Service {
       const events = structuredClone(session.events.filter(item => item.seq >= task.source.startSeq && item.seq <= event.seq))
       try {
         this.complete(task, events, event)
+        this.track(this.externalChecks.finish(task.source.taskId))
         this.track(this.review(agent, task.source.taskId, events))
       } catch (error) { this.warn(error) }
     })
     const offCreated = this.ctx.on('agent/created', ({ agent }) => this.restore(agent))
     const offConsent = this.ctx.on('tianwen/learning-consent-changed', () => {
       for (const controller of this.analyses) controller.abort()
+      this.externalChecks.cancel()
     })
     for (const agent of this.ctx.agents.list()) this.restore(agent)
     this.ctx.effect(() => async () => {
-      offStep(); offModel(); offSession(); offCreated(); offConsent(); this.shutdown.abort()
+      offStep(); offModel(); offSession(); offCreated(); offConsent(); offExternalRequest(); this.shutdown.abort()
+      this.externalChecks.cancel()
       await this.whenIdle()
     }, 'tianwen-conversation-observer.dispose')
   }
@@ -166,7 +179,8 @@ export class TianwenConversationObserverService extends Service {
     const saved = await this.ctx.sessionPersistence.inspect(agent.session.id)
     const lifecycle = learningSessionLifecycleFingerprint({ sessionId: String(saved.meta.id), createdAt: saved.meta.createdAt, ...(saved.meta.cwd === undefined ? {} : { cwd: saved.meta.cwd }) })
     for (const task of tasks) {
-      if (task.review !== undefined || task.source.sessionLifecycleFingerprint !== lifecycle) continue
+      if (task.source.sessionLifecycleFingerprint !== lifecycle) continue
+      if (task.review !== undefined) { await this.externalChecks.finish(task.source.taskId); continue }
       // An already attempted admission must never be regenerated after seeing
       // the answer; a missing durable result stays unavailable after restart.
       if (task.admission === undefined && task.completion === undefined) this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId: task.source.taskId, decision: null, proof: null, unavailableReason: 'cancelled' })
@@ -175,6 +189,7 @@ export class TianwenConversationObserverService extends Service {
       const events = saved.events.filter(event => event.seq >= task.source.startSeq && event.seq <= end.seq)
       if (task.completion === undefined) this.complete(this.task(task.source.taskId), events, end)
       else if (task.completion.resultDigest !== sha256(events)) throw new Error('recovered task boundary does not match the recorded result')
+      await this.externalChecks.finish(task.source.taskId)
       // Recovery waits for the durable review receipt, never its model response.
       await this.review(agent, task.source.taskId, events)
     }
@@ -356,7 +371,7 @@ export class TianwenConversationObserverService extends Service {
         this.ctx.tianwenEvolution.recordConversationLearning({ ...base, verdict: 'inconclusive', category: null, explanation: 'No completed task with frozen acceptance criteria.', evidenceQuotes: [], proof: null, unavailableReason: task.admission.unavailableReason })
         return
       }
-      if (!await this.ctx.sessions.flush(agent.session)) throw new Error('task persistence unavailable')
+      if (!await withConversationObservationCancellation(signal, () => this.ctx.sessions.flush(agent.session))) throw new Error('task persistence unavailable')
       const source = await recoverConversationTaskMaterial(this.ctx, task)
       if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
       if (task.admission.decision.evaluationMode === 'local-files' && source.files === undefined) {

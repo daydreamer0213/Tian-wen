@@ -4,6 +4,7 @@ import { parseClaimAudit, type ClaimAudit } from './conversation-claim-audit.js'
 import { parseConversationTaskFileAncillary, projectConversationFileAncillaryContext, type ConversationTaskFileAncillary } from './conversation-file-ancillary.js'
 import { parseConversationFileEntries, parseConversationFileResult, type ConversationFileResult, type ConversationTaskFileInput, type ConversationTaskFileUnavailable } from './conversation-files.js'
 import { CAPTURED_FILE_FACTS_TOOL } from './conversation-file-facts.js'
+import { parseConversationExternalCheck, validateConversationExternalCheck, type ConversationExternalCheckPrepared, type ConversationExternalCheckFinished } from './conversation-external-check.js'
 
 export const CONVERSATION_FAMILIES = ['summarization', 'writing', 'planning', 'code', 'other'] as const
 export const CONVERSATION_FAILURES = ['source-fidelity', 'instruction-following', 'task-understanding', 'verification', 'tool-use', 'user-preference'] as const
@@ -267,7 +268,7 @@ export interface ConversationTaskReviewIntent {
   readonly materialDigest: Sha256Digest
 }
 
-export type ConversationLearningRecord = ConversationTaskSource | ConversationTaskAdmission | ConversationTaskCompletion | ConversationTaskReview | ConversationTaskReviewIntent | ConversationTaskModelObserved | ConversationTaskFileInput | ConversationTaskFileUnavailable | ConversationTaskFileAncillary
+export type ConversationLearningRecord = ConversationTaskSource | ConversationTaskAdmission | ConversationTaskCompletion | ConversationTaskReview | ConversationTaskReviewIntent | ConversationTaskModelObserved | ConversationTaskFileInput | ConversationTaskFileUnavailable | ConversationTaskFileAncillary | ConversationExternalCheckPrepared | ConversationExternalCheckFinished
 export interface ConversationLearningEvent {
   readonly type: 'conversation-learning-recorded'
   readonly schemaVersion: 'tianwen.conversation-learning.v1'
@@ -285,6 +286,8 @@ export interface ConversationTask {
   readonly fileInputs?: readonly ConversationTaskFileInput[]
   readonly fileAncillary?: readonly ConversationTaskFileAncillary[]
   readonly fileUnavailable?: ConversationTaskFileUnavailable
+  readonly externalCheckPrepared?: ConversationExternalCheckPrepared
+  readonly externalCheckFinished?: ConversationExternalCheckFinished
 }
 
 export function effectiveConversationFamily(task: ConversationTask): ConversationFamily | null {
@@ -460,6 +463,7 @@ export function parseConversationLearningRecord(value: unknown): ConversationLea
     const input = object(value, ['kind', 'taskId', 'materialDigest'])
     return { kind: 'task-review-started', taskId: text(input.taskId, 512), materialDigest: digest(input.materialDigest) }
   }
+  if (value.kind === 'task-external-check-prepared' || value.kind === 'task-external-check-finished') return parseConversationExternalCheck(value)
   throw new TypeError('unknown conversation learning record')
 }
 
@@ -490,6 +494,8 @@ export class ConversationLearningState {
           && (input.callId === record.callId || input.callSeq === record.callSeq || input.callSeq === record.resultSeq))
     }
     if (record.kind === 'task-file-evidence-unavailable') return task?.fileUnavailable
+    if (record.kind === 'task-external-check-prepared') return task?.externalCheckPrepared
+    if (record.kind === 'task-external-check-finished') return task?.externalCheckFinished
     return task?.review
   }
 
@@ -502,6 +508,10 @@ export class ConversationLearningState {
     }
     const task = this.tasks.get(record.taskId)
     if (task === undefined) throw new Error('unknown conversation task source')
+    if (record.kind === 'task-external-check-prepared' || record.kind === 'task-external-check-finished') {
+      validateConversationExternalCheck(record, task)
+      return
+    }
     if (record.kind === 'task-admitted') {
       if (task.completion !== undefined) throw new Error('task criteria must be frozen before the completed result')
       const needsFamily = task.source.admissionPolicy === 'tianwen.family-verification.v1'
@@ -608,7 +618,8 @@ export class ConversationLearningState {
         this.tasks.set(record.taskId, { ...previous, fileUnavailable: record })
         return
       }
-      const key = record.kind === 'task-admitted' ? 'admission' : record.kind === 'task-finished' ? 'completion' : record.kind === 'task-review-started' ? 'reviewIntent' : 'review'
+      const key = record.kind === 'task-external-check-prepared' ? 'externalCheckPrepared' : record.kind === 'task-external-check-finished' ? 'externalCheckFinished'
+        : record.kind === 'task-admitted' ? 'admission' : record.kind === 'task-finished' ? 'completion' : record.kind === 'task-review-started' ? 'reviewIntent' : 'review'
       this.tasks.set(record.taskId, { ...previous, [key]: record })
     }
   }
