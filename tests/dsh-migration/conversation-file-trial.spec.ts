@@ -5,8 +5,9 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
-import { parseConversationFileTrialReceipt, recoverConversationFileTrial, runConversationFileTrial, type ConversationFileTrialReceipt } from '../../packages/tianwen-runtime-bundle/src/conversation-file-trial.js'
+import { parseConversationFileTrialReceipt, recoverConversationFileTrial, recoverConversationFileTrialExecution, runConversationFileTrial, type ConversationFileTrialReceipt } from '../../packages/tianwen-runtime-bundle/src/conversation-file-trial.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const fileTools = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-tool-fs')).href)
@@ -129,6 +130,89 @@ it('runs native file tools only in a seeded replica and returns the captured out
     expect(() => readFileSync(join(harness.original, 'output.md'), 'utf8')).toThrow()
     expect(retained).toEqual([result.receipt])
     expect(readdirSync(harness.replicas)).toEqual([])
+  } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('gives method review only this trial own read/write facts, never old source actions or generated content', async () => {
+  const harness = await mountTrial([
+    toolCallResponse('own-read', 'read', { file_path: 'input.md' }),
+    toolCallResponse('own-write', 'write', { file_path: 'output.md', content: 'GENERATED_CONTENT_CANARY' }),
+    textResponse('Saved output.md after reading input.md.'),
+  ])
+  try {
+    const result = await runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, retainReceipt: () => undefined })
+    const trialExecution = result.trialExecution
+    expect(trialExecution).toMatchObject({ executionProof: result.proof, outputDigest: result.outputDigest,
+      actions: [{ tool: 'read', path: 'input.md', status: 'success' }, { tool: 'write', path: 'output.md', status: 'success' }] })
+    const output = { answer: result.answer, files: result.files, outputDigest: result.outputDigest }
+    const projected = projectClaimEvidence({ task: { ...harness.material, fileExecution: {
+      schemaVersion: 'tianwen.file-execution-evidence.v2', actions: [{ tool: 'edit', path: 'output.md', callSeq: 1, resultSeq: 2, status: 'success' }], directoryObservations: [] } },
+      answer: result.answer, fileResult: output, trialExecution }, 'file-chunks-v1')
+    const sources = projected.items.filter(item => item.role !== 'answer').map(item => item.text).join('\n')
+    expect(sources).toContain('Native trial read "input.md"')
+    expect(sources).toContain('Native trial write "output.md"')
+    expect(sources).not.toContain('Native edit')
+    expect(sources).not.toContain('GENERATED_CONTENT_CANARY')
+    const count = harness.adapter.requests.length
+    const recovery = { receipt: result.receipt, material: harness.material, callConfig: harness.input.callConfig, outputDigest: result.outputDigest }
+    expect(await recoverConversationFileTrialExecution(harness.ctx, result.proof, recovery)).toEqual(trialExecution)
+    expect(await recoverConversationFileTrial(harness.ctx, result.proof, recovery)).toEqual(output)
+    expect(harness.adapter.requests).toHaveLength(count)
+    expect(readdirSync(harness.replicas)).toEqual([])
+  } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('includes rejected trial attempts with no invented path, and preserves successful frozen spelling', async () => {
+  const harness = await mountTrial([
+    toolCallResponse('denied-path', 'read', { file_path: 'UNDECLARED_PATH_CANARY.md' }),
+    toolCallResponse('valid-read', 'read', { file_path: process.platform === 'win32' ? 'INPUT.md' : 'input.md' }),
+    toolCallResponse('valid-write', 'write', { file_path: 'output.md', content: 'generated' }),
+    textResponse('Done.'),
+  ])
+  try {
+    const result = await runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, retainReceipt: () => undefined })
+    expect(result.trialExecution.actions).toMatchObject([
+      { tool: 'read', path: null, status: 'error' }, { tool: 'read', path: 'input.md', status: 'success' }, { tool: 'write', path: 'output.md', status: 'success' },
+    ])
+    expect(JSON.stringify(result.trialExecution)).not.toContain('UNDECLARED_PATH_CANARY')
+  } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['duplicate-result', 'duplicate-nonappend-result', 'wrong-step', 'wrong-association', 'duplicate-call-id', 'missing-result'] as const)('rejects %s while independently recovering trial actions', async change => {
+  const harness = await mountTrial([
+    toolCallResponse('proof-read', 'read', { file_path: 'input.md' }),
+    toolCallResponse('proof-write', 'write', { file_path: 'output.md', content: 'generated' }), textResponse('Done.'),
+  ])
+  try {
+    const result = await runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, retainReceipt: () => undefined })
+    const inspected = structuredClone(await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId)))
+    const saved = { ...inspected, events: [...inspected.events] }
+    const call = saved.events.find(event => event.type === 'tool/call' && String(event.data.callId) === 'proof-read')!
+    const nativeResult = saved.events.find(event => event.type === 'tool/result' && String(event.data.message.source.callId) === 'proof-read')!
+    if (call.type !== 'tool/call' || nativeResult.type !== 'tool/result') throw new Error('missing native fixture actions')
+    if (change === 'duplicate-result') saved.events.push({ ...nativeResult, seq: saved.events.at(-1)!.seq + 1 })
+    if (change === 'duplicate-nonappend-result') {
+      const { surfaceOp: _surface, ...nonappend } = nativeResult
+      saved.events.push({ ...nonappend, seq: saved.events.at(-1)!.seq + 1 })
+    }
+    if (change === 'wrong-step') nativeResult.data.step += 1
+    if (change === 'wrong-association') nativeResult.sourceEventSeqs = [call.seq + 1]
+    if (change === 'missing-result') saved.events = saved.events.filter(event => event !== nativeResult)
+    if (change === 'duplicate-call-id') {
+      const write = saved.events.find(event => event.type === 'tool/call' && String(event.data.callId) === 'proof-write')!
+      const written = saved.events.find(event => event.type === 'tool/result' && String(event.data.message.source.callId) === 'proof-write')!
+      if (write.type !== 'tool/call' || written.type !== 'tool/result') throw new Error('missing native fixture write')
+      write.data.callId = call.data.callId; written.data.message.source.callId = call.data.callId
+    }
+    const proof = { ...result.proof, sessionDigest: sha256({ meta: saved.meta, events: saved.events }) }
+    const receipt = { ...result.receipt, executionProof: proof }
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockResolvedValue(saved)
+    const count = harness.adapter.requests.length
+    try {
+      await expect(recoverConversationFileTrialExecution(harness.ctx, proof, { receipt, material: harness.material,
+        callConfig: harness.input.callConfig, outputDigest: result.outputDigest })).rejects.toThrow()
+      expect(harness.adapter.requests).toHaveLength(count)
+    } finally { inspect.mockRestore() }
   } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
 })
 

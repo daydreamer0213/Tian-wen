@@ -4,7 +4,7 @@ import { conversationCheckedFailureSource, conversationReviewConsensus, guidance
 import { recoverConversationJudgmentRequest, recoverConversationStructuredJudgment, recoverConversationTrial } from './conversation-judgment.js'
 import { verifyConversationClaimReviewCheck, verifyConversationOriginalReviewCheck } from './conversation-claim-review.js'
 import { conversationMessages, conversationTaskModelDigest, recoverConversationTaskAnswer, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
-import { recoverConversationFileTrial } from './conversation-file-trial.js'
+import { recoverConversationFileTrial, recoverConversationFileTrialExecution } from './conversation-file-trial.js'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { recoverConversationCaseDesign, type RecoveredConversationCaseDesign } from './conversation-case-design.js'
 
@@ -65,13 +65,15 @@ async function recoverGuidanceArmForReview(ctx: Context, study: GuidanceStudy, a
       ...(original.ancillaryContext === undefined ? {} : { ancillaryContext: original.ancillaryContext }) }
       : typeof task.prompt === 'string' ? { prompt: task.prompt, files } : undefined
     if (worker === undefined) throw new Error('source-unavailable')
-    fileResult = await recoverConversationFileTrial(ctx, arm.executionProof, { receipt: captured.receipt, material: worker,
-      callConfig, outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) })
+    const recovery = { receipt: captured.receipt, material: worker,
+      callConfig, outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) }
+    fileResult = await recoverConversationFileTrial(ctx, arm.executionProof, recovery)
     if (materials.some(material => material.answer !== fileResult!.answer || sha256(material.fileResult) !== sha256(fileResult))) throw new Error('source-unavailable')
     // A file review must be checked against native output, never against the
     // reviewer-supplied fileResult as its own independent evidence.
     for (const check of parseConversationAuditedReviewChecks(checks)) await verifyConversationClaimReviewCheck(ctx, check, { purpose: 'method-study', materialDigest: arm.materialDigest,
-      outputDigest: arm.outputDigest, modelConfigDigest: opened.modelConfigDigest, fileOutput: fileResult })
+      outputDigest: arm.outputDigest, modelConfigDigest: opened.modelConfigDigest, fileOutput: fileResult,
+      recoverTrialExecution: () => recoverConversationFileTrialExecution(ctx, arm.executionProof, recovery) })
     receipt = structuredClone(captured.receipt)
     return { caseId: arm.caseId, role: arm.role, answer: fileResult.answer, task, reviews: checks, fileResult, receipt,
       reviewStatus: study.activation === undefined ? 'unreviewed' as const : 'diagnostic-historical' as const }

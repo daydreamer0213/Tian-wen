@@ -214,6 +214,12 @@ for (const scenario of ['pre-design-late-cancel', 'pre-design-pass', 'pre-design
       expect(study.fileTrials?.length).toBe(Math.floor(checks++ / 2) + 1)
       if (scenario === 'recover-incomplete' && checks === 2) throw new Error('second review interrupted')
       const material = materialOf(request)
+      const retainedTrial = study.fileTrials!.at(-1)!.receipt
+      expect(material.original.trialExecution).toMatchObject({ executionProof: retainedTrial.executionProof, outputDigest: retainedTrial.outputDigest,
+        actions: chat ? [{ tool: 'read', path: 'input.md', status: 'success' }]
+          : [{ tool: 'read', path: 'input.md', status: 'success' }, { tool: 'write', path: 'output.md', status: 'success' }] })
+      expect(material.claimEvidence.items.some((item: { role: string, text: string }) => item.role === 'tool' && item.text.startsWith('Native trial read "input.md"'))).toBe(true)
+      expect(material.claimEvidence.items.some((item: { role: string, text: string }) => item.role === 'tool' && item.text.startsWith('Native trial write "output.md"'))).toBe(!chat)
       if (activeClue) expect(JSON.stringify(request.messages)).not.toContain('tianwen.proposal-clue.v1')
       if (checkedSources) expect(JSON.stringify(request.messages)).not.toContain('checkedFailureSources')
       if (chat) expect(material.original.fileResult.answer).toBe(`pilot ${label}`)

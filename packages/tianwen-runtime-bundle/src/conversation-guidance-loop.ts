@@ -8,7 +8,8 @@ import { effectiveConversationFamily, hasCurrentConversationQuality, hasVerified
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
-import { runConversationFileTrial, recoverConversationFileTrial } from './conversation-file-trial.js'
+import { runConversationFileTrial, recoverConversationFileTrial, recoverConversationFileTrialExecution, type RecoverConversationFileTrialInput } from './conversation-file-trial.js'
+import type { ConversationFileTrialExecutionEvidence } from './conversation-file-trial-evidence.js'
 import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
@@ -315,7 +316,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     this.lanes.set(scopeKey, work)
     return work
   }
-  private async recoverArmFile(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<ConversationFileTrialOutput> {
+  private async armFileRecovery(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<{ proof: GuidanceArmRecord['executionProof'], input: RecoverConversationFileTrialInput }> {
     const formal = 'caseId' in arm
     const item = formal ? study.opened.cases.find(item => item.id === arm.caseId)
       : study.opened.cases.find(item => 'sourceTaskId' in item && item.sourceTaskId === study.exploration?.intent.request.sourceTaskId)
@@ -348,8 +349,16 @@ export class TianwenConversationGuidanceLoopService extends Service {
       : arm.arm === 'control' ? parentRule : [parentRule, study.exploration!.intent.request.proposal.temporaryInstruction].filter(value => value !== undefined).join('\n\n')
     const worker = 'request' in material ? { request: material.request, context: material.context, files: material.files,
       ...(material.ancillaryContext === undefined ? {} : { ancillaryContext: material.ancillaryContext }) } : { prompt: material.prompt, files: material.files }
-    return recoverConversationFileTrial(this.ctx, arm.executionProof, { receipt: retained.receipt, material: worker, callConfig,
-      outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) })
+    return { proof: arm.executionProof, input: { receipt: retained.receipt, material: worker, callConfig,
+      outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) } }
+  }
+  private async recoverArmFile(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<ConversationFileTrialOutput> {
+    const { proof, input } = await this.armFileRecovery(study, arm)
+    return recoverConversationFileTrial(this.ctx, proof, input)
+  }
+  private async recoverArmFileExecution(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<ConversationFileTrialExecutionEvidence> {
+    const { proof, input } = await this.armFileRecovery(study, arm)
+    return recoverConversationFileTrialExecution(this.ctx, proof, input)
   }
   private async recoverAccepted(scopeKey: string): Promise<void> {
     if (this.sourceConfig.guidanceActivationQuarantine === true) return
@@ -460,7 +469,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
           for (const check of arm.reviewChecks) {
             if (!('audit' in check)) throw new Error('source-unavailable')
             await verifyConversationClaimReviewCheck(this.ctx, check, { purpose: 'method-study', materialDigest: arm.materialDigest,
-              outputDigest: arm.outputDigest, modelConfigDigest: study.opened.modelConfigDigest, ...(fileOutput === undefined ? {} : { fileOutput }) })
+              outputDigest: arm.outputDigest, modelConfigDigest: study.opened.modelConfigDigest, ...(fileOutput === undefined ? {} : { fileOutput,
+                recoverTrialExecution: () => this.recoverArmFileExecution(study, arm) }) })
           }
         }
         await this.assertCurrent(study.opened, controller.signal)
@@ -737,7 +747,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         // Workers see the exact original request/context, never old answers,
         // feedback standards, predictions or reviewer-only criteria.
         const request = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt }
-        const execution: Awaited<ReturnType<typeof runConversationTrial>> & Partial<ConversationFileTrialOutput> = fileMode ? await (async () => {
+        const execution: Awaited<ReturnType<typeof runConversationTrial>> & Partial<ConversationFileTrialOutput> & { trialExecution?: ConversationFileTrialExecutionEvidence } = fileMode ? await (async () => {
           if (material.files === undefined || this.sourceConfig.evolutionRoot === undefined || !isAbsolute(this.sourceConfig.evolutionRoot)) throw new Error('source-unavailable')
           const replicaParent = join(this.sourceConfig.evolutionRoot, 'conversation-file-trials')
           await mkdir(replicaParent, { recursive: true })
@@ -752,7 +762,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         const judged = await runConversationClaimReview(this.ctx, agent, { purpose: 'method-study', evidence,
           beforeCall: () => this.assertCurrent(studyOpened, signal),
           label: `Tianwen blind ${fileMode ? 'file' : 'text'} review ${studyOpened.studyId}`, callConfig, signal, material: { task: material, answer: execution.answer,
-            ...(fileMode ? {} : { quoteProtocol: METHOD_STUDY_QUOTE_PROTOCOL }), ...(output === undefined ? {} : { fileResult: output }) } })
+            ...(fileMode ? { trialExecution: execution.trialExecution } : { quoteProtocol: METHOD_STUDY_QUOTE_PROTOCOL }), ...(output === undefined ? {} : { fileResult: output }) } })
         await this.assertCurrent(studyOpened, signal)
         return { execution, judged, outputDigest: output?.outputDigest ?? sha256(execution.answer), output }
       }
