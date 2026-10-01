@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { conversationExternalInputsDigest, parseConversationFileEntries, parseConversationFileMaterial, sha256, supportsConversationCodeCheck,
+import { conversationExternalInputsDigest, parseConversationFileEntries, parseConversationFileMaterial, parseConversationQualityContract, sha256, supportsConversationCodeCheck,
   type ConversationExternalCheckOutcome, type ConversationFileEntry } from '../packages/tianwen-evolution/src/index.js'
 import { readConversationFile } from '../packages/tianwen-runtime-bundle/src/conversation-file-material.js'
 import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation, ConversationExternalCodeCandidate, PreparedConversationExternalCodeCheck } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
@@ -161,4 +161,67 @@ export function createConversationStudyIsolatedPythonCheck(config: ConversationI
       }
     } catch { material.signal.throwIfAborted(); return undefined }
   } }
+}
+
+type FunctionalStudyRole = 'source1' | 'source2' | 'counterexample' | 'adjacent' | 'holdout'
+export interface ConversationIsolatedPythonStudyCase {
+  readonly material: ConversationStudyResultMaterial
+  readonly cases: ConversationIsolatedPythonCheckConfig['cases']
+  readonly isolated: IsolatedPythonCliConfig
+  readonly requiredCondition: string
+}
+
+/** Closed host cohort, fixed before case design; not a task generator or source-eligibility decision. */
+export function createConversationStudyIsolatedPythonCohortCheck(raw: {
+  readonly modelConfigDigest: ReturnType<typeof sha256>
+  readonly cases: Readonly<Record<FunctionalStudyRole, ConversationIsolatedPythonStudyCase>>
+}): ConversationStudyResultCheck {
+  const config = structuredClone(raw), roles = ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const
+  assert.match(config.modelConfigDigest, /^sha256:[a-f0-9]{64}$/u)
+  assert.deepEqual(Object.keys(config.cases).sort(), [...roles].sort())
+  const definitions = new Map(roles.map((id, index) => {
+    const entry = config.cases[id], material = body(entry.material), files = parseConversationFileMaterial(material.files)
+    assert(files.outputKind === 'files' && files.outputPaths.length === 1)
+    assert(('request' in material) === (index < 3))
+    assert(material.qualityContract !== undefined)
+    parseConversationQualityContract(material.qualityContract)
+    const targetPath = files.outputPaths[0]!, referencePaths = files.entries.filter(file => file.path !== targetPath).map(file => file.path)
+    const producer = createConversationStudyIsolatedPythonCheck({ cwd: files.cwd,
+      requestText: 'request' in material ? requestText(material.request) : material.prompt,
+      targetPath, referencePaths, criteria: material.criteria, cases: entry.cases, isolated: entry.isolated, requiredCondition: entry.requiredCondition })
+    return [id, { material, materialDigest: sha256(material), producer }] as const
+  }))
+  const first = definitions.get('source1')!.material, cwd = first.files.cwd, qualityDigest = sha256(first.qualityContract)
+  assert(roles.every(id => definitions.get(id)!.material.files.cwd === cwd && sha256(definitions.get(id)!.material.qualityContract) === qualityDigest))
+  const cohortDigest = sha256(config)
+  const independent = (id: 'adjacent' | 'holdout') => {
+    const material = definitions.get(id)!.material
+    assert('prompt' in material)
+    return { prompt: material.prompt, criteria: [...material.criteria],
+      files: { entries: structuredClone(material.files.entries), outputPaths: [...material.files.outputPaths] } }
+  }
+  return {
+    async prepareIndependentCases(material) {
+      material.signal.throwIfAborted()
+      try {
+        if (material.modelConfigDigest !== config.modelConfigDigest || material.cwd !== cwd || sha256(material.qualityContract) !== qualityDigest
+          || material.sources.length !== 2) return undefined
+        const originals = [...material.sources, material.counterexample]
+        if (originals.some((value, index) => value.files === undefined
+          || sha256(body({ ...value, files: value.files })) !== definitions.get(roles[index]!)!.materialDigest)) return undefined
+        return { adjacent: independent('adjacent'), holdout: independent('holdout') }
+      } catch { material.signal.throwIfAborted(); return undefined }
+    },
+    async prepare(material) {
+      material.signal.throwIfAborted()
+      try {
+        const entry = definitions.get(material.caseId as FunctionalStudyRole)
+        if (material.modelConfigDigest !== config.modelConfigDigest || entry === undefined || sha256(body(material)) !== entry.materialDigest) return undefined
+        const prepared = await entry.producer.prepare(material)
+        material.signal.throwIfAborted()
+        return prepared === undefined ? undefined : { ...prepared,
+          contractDigest: sha256({ functionalContract: prepared.contractDigest, cohortDigest, role: material.caseId }) }
+      } catch { material.signal.throwIfAborted(); return undefined }
+    },
+  }
 }
