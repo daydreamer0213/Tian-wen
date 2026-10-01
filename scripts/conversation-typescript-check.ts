@@ -8,6 +8,7 @@ import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation
 
 const CHECKER_ID = 'conversation-typescript-noemit'
 const CHECKER_PATH = fileURLToPath(import.meta.url)
+const TYPECHECK_REQUIRED_CONDITION = 'The frozen target and context must have zero strict TypeScript noEmit diagnostics.'
 // TypeScript accepts ignore/expect-error prefixes without a word boundary,
 // including closing lines of block comments without a leading star.
 const SUPPRESSION = /^\s*[/*]*\s*@ts-(ignore|expect-error|nocheck\b)/gmu
@@ -18,6 +19,8 @@ export interface ConversationTypeScriptCheckConfig {
   readonly targetPath: string
   readonly contextPaths: readonly string[]
   readonly compilerOptions: ts.CompilerOptions
+  /** Opt in only when the original task requires this compiler result. Default: diagnostic only. */
+  readonly requireCleanTypecheck?: boolean
 }
 
 /** Trusted project constraint over the already-frozen compiler program. */
@@ -138,6 +141,8 @@ function captureHost(options: ts.CompilerOptions, cwd: string, targetKey: string
 }
 
 export function createConversationTypeScriptCheck(config: ConversationTypeScriptCheckConfig, constraint?: FrozenTypeScriptCandidateConstraint): ConversationExternalCodeCheck {
+  if (config.requireCleanTypecheck !== undefined && typeof config.requireCleanTypecheck !== 'boolean') throw new TypeError('requireCleanTypecheck must be a boolean')
+  const requiredCondition = config.requireCleanTypecheck === true ? TYPECHECK_REQUIRED_CONDITION : undefined
   const frozenConstraint = constraint === undefined ? undefined : { digest: constraint.digest, check: constraint.check }
   if (frozenConstraint !== undefined && (!/^sha256:[a-f0-9]{64}$/u.test(frozenConstraint.digest) || typeof frozenConstraint.check !== 'function')) throw new Error('invalid frozen TypeScript candidate constraint')
   const cwd = resolve(config.cwd)
@@ -180,6 +185,7 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
       const contractDigest = sha256({
         cwd, targetPath, contextPaths, requestText,
         compiler: ts.version, options, compilerDigest, checkerDigest,
+        ...(requiredCondition === undefined ? {} : { requiredCondition }),
         ...(frozenConstraint === undefined ? {} : { constraintDigest: frozenConstraint.digest }),
         manifest,
         files: [...observations.files].sort(compareKeys),
@@ -193,6 +199,7 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
         checkerId: CHECKER_ID,
         checkerDigest,
         contractDigest,
+        ...(requiredCondition === undefined ? {} : { requiredCondition }),
         inputs: [{ path: targetPath, content: originalContent }],
         evaluate: async (candidate) => {
           candidate.signal.throwIfAborted()
@@ -258,7 +265,8 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
             }
             return { status: 'verified', detail: describe(scope, diagnostics) }
           }
-          return { status: 'rejected', detail: describe(scope, diagnostics) }
+          return { status: 'rejected', detail: describe(scope, diagnostics),
+            ...(requiredCondition === undefined ? {} : { failedRequiredConditionDigest: sha256(requiredCondition) }) }
         },
       }
     },

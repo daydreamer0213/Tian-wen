@@ -295,6 +295,37 @@ it.each(['external', 'local-files'] as const)('uses the concrete TypeScript host
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it.each([true, false])('carries concrete compiler attribution opt-in=%s through native observation and zero-request cold replay', async requireCleanTypecheck => {
+  const requestText = 'Repair input.ts; the frozen target and context must pass strict TypeScript noEmit with zero diagnostics.'
+  let harness: Awaited<ReturnType<typeof mount>>, frozenBeforeCandidate = false
+  const check: ConversationExternalCodeCheck = { async prepare(material) {
+    return createConversationTypeScriptCheck({ cwd: harness.root, requestText, targetPath: 'input.ts', contextPaths: [], requireCleanTypecheck,
+      compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: [] } }).prepare(material)
+  } }
+  harness = await mount([structured({ ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }), () => {
+    const prepared = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckPrepared
+    frozenBeforeCandidate = prepared !== undefined && (prepared.requiredCondition !== undefined) === requireCleanTypecheck
+    return toolCallResponse('required-compiler-write', 'write', { file_path: 'input.ts', content: 'export const value: number = "still wrong"' })
+  }, textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'export const value: number = "wrong"')
+  let cold: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    harness.handle.agent.followup(direct(requestText))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(frozenBeforeCandidate).toBe(true); expect(task.review?.verdict).toBe('met')
+    expect(task.externalCheckFinished).toMatchObject({ status: 'rejected', preparationDigest: sha256(task.externalCheckPrepared) })
+    if (requireCleanTypecheck) expect(task.externalCheckFinished?.failedRequiredConditionDigest).toBe(sha256(task.externalCheckPrepared!.requiredCondition))
+    else expect(task.externalCheckFinished).not.toHaveProperty('failedRequiredConditionDigest')
+    expect(hasRejectedConversationCodeCheck(task)).toBe(requireCleanTypecheck)
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    cold = await mount([], false, undefined, harness.root)
+    expect(cold.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(task)
+    expect(hasRejectedConversationCodeCheck(cold.ctx.tianwenEvolution.listConversationTasks()[0])).toBe(requireCleanTypecheck)
+    expect(cold.adapter.requests).toHaveLength(0); expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+  } finally { if (cold !== undefined) { await cold.handle.dispose(); await cold.ctx.fiber.dispose() } else { await harness.handle.dispose(); await harness.ctx.fiber.dispose() } }
+})
+
 it.each(['provider-defaults', 'outer-request-hook', 'later-config-drift'] as const)('binds an independent check to the actual native header with %s', async scenario => {
   let harness: Awaited<ReturnType<typeof mount>>
   let preparations = 0, evaluations = 0
