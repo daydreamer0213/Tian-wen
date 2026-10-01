@@ -5,7 +5,7 @@ import { isAbsolute, relative, resolve, sep } from 'node:path'
 import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSessionLifecycleFingerprint, parseConversationFileEntries, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
-import { isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
+import { isCreatedFileMissingRead, isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
 import { conversationRequestContentDigest } from '@tianwen/evolution'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
@@ -299,7 +299,10 @@ function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly Se
     && event.sourceEventSeqs?.[0] === call.event.seq && event.data.turn === call.event.data.turn && event.data.step === call.event.data.step
     && String(event.data.message.source.callId) === String(call.event.data.callId)
     && event.data.error === undefined && event.data.message.content[0].isError !== true)
-  if (calls.some(call => !successful(call))) return
+  if (calls.some(call => !successful(call) && !(outputKind === 'files'
+    && result.outputPaths.some(path => path.toLowerCase() === call.path!.toLowerCase())
+    && result.entries.some(entry => entry.path.toLowerCase() === call.path!.toLowerCase() && entry.content !== null)
+    && isCreatedFileMissingRead(task, cwd, call.event, span, result.captureSeq)))) return
   const mutations = new Set(calls.filter(call => call.event.data.name === 'write' || call.event.data.name === 'edit').map(call => call.path!.toLowerCase()))
   if (outputKind === 'chat') {
     if (mutations.size !== 0 || !calls.some(call => call.event.data.name === 'read' && successful(call)) || result.outputPaths.length !== 0) return

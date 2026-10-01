@@ -8,6 +8,7 @@ import { canonicalJson } from '@tianwen/evolution/learning-intake'
 import { parseConversationTaskFileAncillary, parseConversationSkillAdmission, parseConversationSkillDefinition,
   projectConversationFileAncillaryContext, sha256, type ConversationSkillAdmission, type ConversationTask,
   CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type ConversationTaskFileAncillary, type ConversationAncillaryPayload, type ConversationAncillaryProducer } from '@tianwen/evolution'
+import { conversationFileCaptureOutputKind } from '@tianwen/evolution'
 import { conversationFilePath } from './conversation-file-material.js'
 import { parseNativeDirectoryReceipt, parseNativePwshDenial, type NativeDirectoryReceipt, type NativePwshDenial } from './native-tool-observation.js'
 import type { NativeToolRegistrationProducer } from './native-tools-observer.js'
@@ -75,7 +76,7 @@ function registration(ctx: Context, definition: ToolDefinition): NativeToolRegis
   const runtime = ctx.tools as Context['tools'] & { nativeRegistration?: (definition: ToolDefinition) => NativeToolRegistrationProducer | undefined }
   return runtime.nativeRegistration?.(definition)
 }
-function resultFor(events: readonly SessionEvent[], call: Call, boundary: number, denied = false): Result {
+function resultFor(events: readonly SessionEvent[], call: Call, boundary: number, denied = false, missingRead = false): Result {
   const matches = events.filter((event): event is Result => event.type === 'tool/result'
     && String(event.data.message.source.callId) === String(call.data.callId))
   assert(matches.length === 1)
@@ -83,8 +84,28 @@ function resultFor(events: readonly SessionEvent[], call: Call, boundary: number
   assert(isAppendSurfaceEvent(event) && event.seq > call.seq && event.seq <= boundary
     && event.sourceEventSeqs?.length === 1 && event.sourceEventSeqs[0] === call.seq
     && event.data.turn === call.data.turn && event.data.step === call.data.step
-    && event.data.error === undefined && (event.data.message.content[0].isError === true) === denied)
+    && (missingRead ? call.data.name === 'read' && event.data.error?.name === 'FsError' && event.data.error.code === 'FS_NOT_FOUND' : event.data.error === undefined)
+    && (event.data.message.content[0].isError === true) === (denied || missingRead))
   return event
+}
+
+/** A missing read stays a failure; only a subsequently created output can preserve file evidence. */
+export function isCreatedFileMissingRead(task: ConversationTask, cwd: string, call: Call, events: readonly SessionEvent[], boundary: number): boolean {
+  try {
+    if (conversationFileCaptureOutputKind(task.admission?.decision) !== 'files' || call.data.name !== 'read'
+      || call.data.turn !== task.source.turn || call.seq < task.source.startSeq) return false
+    const path = recordedFilePath(cwd, object(JSON.parse(call.data.arguments)).file_path)
+    if (path === undefined || !task.fileInputs?.some(input => input.path.toLowerCase() === path.toLowerCase()
+      && input.content === null && input.callSeq <= call.seq)) return false
+    const missing = resultFor(events, call, boundary, false, true)
+    const mutations = events.filter((event): event is Call => event.type === 'tool/call' && event.seq >= task.source.startSeq
+      && event.seq <= boundary && event.data.turn === task.source.turn && (event.data.name === 'write' || event.data.name === 'edit')
+      && recordedFilePath(cwd, object(JSON.parse(event.data.arguments)).file_path)?.toLowerCase() === path.toLowerCase())
+    const successful = mutations.filter(event => { try { resultFor(events, event, boundary); return true } catch { return false } })
+    if (successful.some(event => event.seq <= missing.seq)) return false
+    return successful.some(event => event.data.name === 'write' && event.seq > missing.seq
+      && typeof object(JSON.parse(event.data.arguments)).content === 'string')
+  } catch { return false }
 }
 function eventProjection(event: Result): unknown {
   return { content: event.data.message.content[0].content, isError: event.data.message.content[0].isError === true,
@@ -275,6 +296,8 @@ export class ConversationFileAncillaryCapture {
     const pending = this.pending.get(String(exec.callId))
     if (pending === undefined) { this.invalid = true; return }
     try {
+      const missingRead = exec.name === 'read' && conversationFileCaptureOutputKind(this.task.admission?.decision) === 'files'
+        && result.isError && result.error.info?.name === 'FsError' && result.error.info.code === 'FS_NOT_FOUND'
       assert(exec.token === pending.execution.token && exec.agent?.session.id === pending.execution.agent?.session.id
         && exec.name === pending.call.data.name && sha256(exec.arguments) === pending.argumentsDigest
         && this.ctx.tools.get(exec.name, exec.agent) === pending.definition
@@ -282,7 +305,7 @@ export class ConversationFileAncillaryCapture {
           ? this.ctx.get('tianwenConversationFileObserver')?.isFactsDefinition(pending.definition) === true
           : !isFileAncillaryTool(exec.name) || sha256(registration(this.ctx, pending.definition) ?? null) === sha256(pending.producer))
         && pending.result === undefined && Object.isFrozen(exec) && Object.isFrozen(result)
-        && result.isError === (pending.denial !== undefined))
+        && result.isError === (pending.denial !== undefined || missingRead))
       pending.result = structuredClone(result)
     } catch { this.invalid = true }
   }
@@ -295,7 +318,8 @@ export class ConversationFileAncillaryCapture {
     for (const call of calls) {
       const pending = this.pending.get(String(call.data.callId))
       assert(pending !== undefined && pending.settled && pending.result !== undefined && sha256(call) === sha256(pending.call))
-      const event = resultFor(events, call, boundary, pending.denial !== undefined)
+      const event = resultFor(events, call, boundary, pending.denial !== undefined,
+        isCreatedFileMissingRead(task, this.cwd, call, events, boundary))
       assert(sha256(eventProjection(event)) === sha256(finalProjection(pending.result)))
       if (pending.denial !== undefined) {
         assert(call.data.name === 'pwsh' && pending.receipt === undefined && pending.result.isError)

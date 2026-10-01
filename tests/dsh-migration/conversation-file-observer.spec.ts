@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -11,6 +11,7 @@ import { SessionId, createUserMessage, mountPersistentHarness, textResponse, too
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { sha256, hasRejectedConversationCodeCheck, parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/index.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
+import { isCreatedFileMissingRead } from '../../packages/tianwen-runtime-bundle/src/conversation-file-ancillary.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { projectClaimEvidence, verifyConversationOriginalReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
@@ -825,6 +826,145 @@ it('does not replace a preimage after read, write and reread in the same turn', 
     expect(task.fileInputs).toHaveLength(1)
     expect(task.fileInputs?.[0]).toMatchObject({ callId: 'read-before', path: 'input.md', content: 'first' })
     expect(task.completion?.files?.entries).toEqual([{ path: 'input.md', content: 'changed' }])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['writing', 'code'] as const)('preserves absent-read creation evidence and exact cold recovery for %s files', async family => {
+  const decision = { ...admission, objective: 'Create new.md', family }
+  const harness = await mount([structured(decision),
+    toolCallResponse('new-absent', 'read', { file_path: 'new.md' }),
+    toolCallResponse('new-write', 'write', { file_path: 'new.md', content: 'created' }),
+    toolCallResponse('new-read', 'read', { file_path: 'new.md' }), textResponse('saved'), ...reviewPair()], family === 'code')
+  try {
+    harness.handle.agent.followup(direct('Create new.md and verify its saved content.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.fileUnavailable).toBeUndefined()
+    expect(task.fileInputs).toEqual([expect.objectContaining({ callId: 'new-absent', path: 'new.md', content: null })])
+    expect(task.completion?.files).toMatchObject({ outputKind: 'files', outputPaths: ['new.md'], entries: [{ path: 'new.md', content: 'created' }] })
+    expect(task.review?.verdict).toBe('met')
+    const material = await recoverConversationTaskMaterial(harness.ctx, task)
+    expect(material.files?.entries).toEqual([{ path: 'new.md', content: null }])
+    if (material.fileExecution?.schemaVersion !== 'tianwen.file-execution-evidence.v2') throw new Error('missing file action evidence')
+    expect(material.fileExecution.actions).toMatchObject([
+      { tool: 'read', path: 'new.md', status: 'error' }, { tool: 'write', path: 'new.md', status: 'success' }, { tool: 'read', path: 'new.md', status: 'success' },
+    ])
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    const cold = await mount([], family === 'code', undefined, harness.root)
+    try {
+      const recovered = cold.ctx.tianwenEvolution.listConversationTasks()[0]!
+      expect(recovered).toEqual(task)
+      expect(await recoverConversationTaskMaterial(cold.ctx, recovered)).toEqual(material)
+      expect(cold.adapter.requests).toHaveLength(0)
+    } finally { await cold.handle.dispose(); await cold.ctx.fiber.dispose() }
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['writing', 'code'] as const)('shares the null preimage across concurrent missing reads before a %s creation', async family => {
+  const harness = await mount([structured({ ...admission, family }), parallelCalls([
+    { id: 'missing-a', name: 'read', arguments: { file_path: 'new.md' } },
+    { id: 'missing-b', name: 'read', arguments: { file_path: 'new.md' } },
+  ]), toolCallResponse('create-after-both', 'write', { file_path: 'new.md', content: 'created' }), textResponse('saved'), ...reviewPair()], family === 'code')
+  try {
+    harness.handle.agent.followup(direct('Create new.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.fileUnavailable).toBeUndefined()
+    expect(task.fileInputs).toHaveLength(1)
+    expect(task.completion?.files?.outputPaths).toEqual(['new.md'])
+    const material = await recoverConversationTaskMaterial(harness.ctx, task)
+    expect(material.files?.entries).toEqual([{ path: 'new.md', content: null }])
+    if (material.fileExecution?.schemaVersion !== 'tianwen.file-execution-evidence.v2') throw new Error('missing file action evidence')
+    expect(material.fileExecution.actions.map(action => action.status)).toEqual(['error', 'error', 'success'])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(process.platform === 'win32' ? [
+  { parallel: false, writePath: 'new.md' }, { parallel: true, writePath: 'new.md' },
+  { parallel: false, writePath: 'NEW.md' }, { parallel: true, writePath: 'NEW.md' },
+] : [])('keeps the frozen Windows path through missing-read aliases ($parallel/$writePath)', async ({ parallel, writePath }) => {
+  const calls = [{ id: 'alias-lower', name: 'read', arguments: { file_path: 'new.md' } },
+    { id: 'alias-upper', name: 'read', arguments: { file_path: 'NEW.md' } }]
+  const harness = await mount([structured(admission), ...(parallel ? [parallelCalls(calls)] : calls.map(call => toolCallResponse(call.id, call.name, call.arguments))),
+    toolCallResponse('alias-create', 'write', { file_path: writePath, content: 'created' }), textResponse('saved'), ...reviewPair()])
+  try {
+    harness.handle.agent.followup(direct('Create new.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.fileUnavailable).toBeUndefined()
+    expect(task.fileInputs).toEqual([expect.objectContaining({ path: 'new.md', content: null })])
+    expect(task.completion?.files?.entries).toEqual([{ path: 'new.md', content: 'created' }])
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files?.outputPaths).toEqual(['new.md'])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['no-create', 'other-output', 'failed-create', 'other-error', 'existing-preimage', 'prior-create', 'deleted-final'] as const)('does not certify incomplete or unrelated missing-read recovery (%s)', async scenario => {
+  let harness: Awaited<ReturnType<typeof mount>>
+  harness = await mount([structured(admission),
+    ...(scenario === 'prior-create' ? [toolCallResponse('prior-create-write', 'write', { file_path: 'new.md', content: 'first' }), () => {
+      unlinkSync(join(harness.root, 'new.md')); return toolCallResponse('not-created-read', 'read', { file_path: 'new.md' })
+    }] : [toolCallResponse('not-created-read', 'read', { file_path: 'new.md' })]),
+    ...(scenario === 'no-create' ? [] : [toolCallResponse('not-created-write', 'write', {
+      file_path: scenario === 'other-output' ? 'other.md' : 'new.md', content: 'created',
+    })]), () => { if (scenario === 'deleted-final') unlinkSync(join(harness.root, 'new.md')); return textResponse('saved') }, ...reviewPair()])
+  if (scenario === 'existing-preimage') writeFileSync(join(harness.root, 'new.md'), 'existing')
+  const readFailure = ['other-error', 'existing-preimage'].includes(scenario)
+    ? harness.ctx.on('tools/execute', async (exec, next) => {
+      if (exec.name !== 'read') return next()
+      throw Object.assign(new Error('synthetic native failure control'), {
+        name: 'FsError', code: scenario === 'existing-preimage' ? 'FS_NOT_FOUND' : 'FS_PERMISSION_DENIED',
+      })
+    }) : undefined
+  const denyCreate = scenario === 'failed-create' ? harness.handle.agent.ctx.tools.guard(exec => exec.name === 'write' ? 'creation denied by test control' : undefined) : undefined
+  try {
+    harness.handle.agent.followup(direct('Create new.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.completion?.status).toBe('completed')
+    expect(task.completion?.files).toBeUndefined()
+    expect(task.review?.verdict).toBe('inconclusive')
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files).toBeUndefined()
+  } finally { readFailure?.(); denyCreate?.(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('requires the unique native missing-read and subsequent creation identities, without rewriting the error action', async () => {
+  const harness = await mount([structured(admission), toolCallResponse('identity-missing', 'read', { file_path: 'new.md' }),
+    toolCallResponse('identity-create', 'write', { file_path: 'new.md', content: 'created' }), textResponse('saved'), ...reviewPair()])
+  try {
+    harness.handle.agent.followup(direct('Create new.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    const saved = await harness.ctx.sessionPersistence.inspect(harness.handle.agent.session.id)
+    const call = saved.events.find(event => event.type === 'tool/call' && String(event.data.callId) === 'identity-missing')!
+    if (call.type !== 'tool/call') throw new Error('missing native fixture')
+    const result = saved.events.find(event => event.type === 'tool/result' && String(event.data.message.source.callId) === 'identity-missing')!
+    const create = saved.events.find(event => event.type === 'tool/call' && String(event.data.callId) === 'identity-create')!
+    const createResult = saved.events.find(event => event.type === 'tool/result' && String(event.data.message.source.callId) === 'identity-create')!
+    const boundary = task.completion!.files!.captureSeq
+    expect(isCreatedFileMissingRead(task, harness.root, call, saved.events, boundary)).toBe(true)
+    const failures: { name: string, mutate(events: (typeof saved.events)[number][]): void }[] = [
+      { name: 'wrong error code', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') row.data.error!.code = 'FS_PERMISSION_DENIED' } },
+      { name: 'wrong error class', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') row.data.error!.name = 'OtherError' } },
+      { name: 'no error metadata', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') delete row.data.error } },
+      { name: 'not an error result', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') row.data.message.content[0].isError = false } },
+      { name: 'duplicate result', mutate: events => { events.push(structuredClone(result)) } },
+      { name: 'wrong result source', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') row.sourceEventSeqs = [create.seq] } },
+      { name: 'wrong result step', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') row.data.step++ } },
+      { name: 'replacement result', mutate: events => { const row = events.find(event => event.seq === result.seq)!; if (row.type === 'tool/result') row.surfaceOp = { op: 'replace', start: 0, end: 1 } } },
+      { name: 'late result', mutate: events => { events.find(event => event.seq === result.seq)!.seq = boundary + 1 } },
+      { name: 'other creation path', mutate: events => { const row = events.find(event => event.seq === create.seq)!; if (row.type === 'tool/call') row.data.arguments = JSON.stringify({ file_path: 'other.md', content: 'created' }) } },
+      { name: 'duplicate creation result', mutate: events => { events.push(structuredClone(createResult)) } },
+      { name: 'failed creation result', mutate: events => { const row = events.find(event => event.seq === createResult.seq)!; if (row.type === 'tool/result') row.data.message.content[0].isError = true } },
+    ]
+    for (const failure of failures) {
+      const events = [...structuredClone(saved.events)]; failure.mutate(events)
+      expect(isCreatedFileMissingRead(task, harness.root, call, events, boundary), failure.name).toBe(false)
+    }
+    expect(isCreatedFileMissingRead({ ...task, fileInputs: task.fileInputs!.map(input => ({ ...input, content: 'existing' })) }, harness.root, call, saved.events, boundary)).toBe(false)
+    expect(isCreatedFileMissingRead(task, harness.root, call, saved.events, createResult.seq - 1)).toBe(false)
+    const material = await recoverConversationTaskMaterial(harness.ctx, task)
+    if (material.fileExecution?.schemaVersion !== 'tianwen.file-execution-evidence.v2') throw new Error('missing file action evidence')
+    expect(material.fileExecution.actions[0]?.status).toBe('error')
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 

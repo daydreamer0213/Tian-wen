@@ -6,7 +6,7 @@ import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, conversationFileCaptureOut
 import { isAbsolute } from 'node:path'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationFilePath, readConversationFile } from './conversation-file-material.js'
-import { ConversationFileAncillaryCapture, isFileAncillaryTool, verifyConversationFileAncillary, type ConversationFileAncillaryConfig } from './conversation-file-ancillary.js'
+import { ConversationFileAncillaryCapture, isCreatedFileMissingRead, isFileAncillaryTool, verifyConversationFileAncillary, type ConversationFileAncillaryConfig } from './conversation-file-ancillary.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 declare module '@deepseek-ai/cordis' {
@@ -21,6 +21,7 @@ interface CaptureState {
   readonly captures: Map<string, Promise<void>>
   readonly outputPaths: Map<string, string>
   readonly successfulReads: Set<string>
+  readonly missingReads: Map<string, string>
   readonly native: ConversationFileAncillaryCapture
   unavailable: boolean
   revoked: boolean
@@ -161,7 +162,7 @@ export class TianwenConversationFileObserverService extends Service {
     let state = this.states.get(task.source.taskId)
     if (state === undefined) {
       state = { taskId: task.source.taskId, consentRevision: task.source.consentRevision, cwd, outputKind,
-        captures: new Map(), outputPaths: new Map(), successfulReads: new Set(), unavailable: false, revoked: false,
+        captures: new Map(), outputPaths: new Map(), successfulReads: new Set(), missingReads: new Map(), unavailable: false, revoked: false,
         native: new ConversationFileAncillaryCapture(this.ctx, task, cwd, this.config) }
       this.states.set(task.source.taskId, state)
     }
@@ -209,7 +210,13 @@ export class TianwenConversationFileObserverService extends Service {
       this.unavailable(state, this.reason(error)); this.warn(error)
     }
     const result = await state.native.execute(exec, next)
-    if (result.isError) this.unavailable(state, 'capture-interrupted')
+    if (result.isError) {
+      const input = this.ctx.tianwenEvolution.listConversationTasks(String(exec.agent!.session.id))
+        .find(item => item.source.taskId === task.source.taskId)?.fileInputs?.find(entry => entry.path.toLowerCase() === path?.toLowerCase())
+      if (state.outputKind === 'files' && exec.name === 'read' && path !== undefined && input?.content === null
+        && result.error.info?.name === 'FsError' && result.error.info.code === 'FS_NOT_FOUND') state.missingReads.set(String(exec.callId), input.path)
+      else this.unavailable(state, 'capture-interrupted')
+    }
     else if (exec.name === 'read') state.successfulReads.add(String(exec.callId))
     else if (path !== undefined) state.outputPaths.set(path.toLowerCase(), path)
     return result
@@ -232,13 +239,27 @@ export class TianwenConversationFileObserverService extends Service {
     if (state.revoked || state.unavailable || !this.authorized(state.consentRevision)) return
     await Promise.all(state.captures.values())
     const inputs = task.fileInputs?.map(input => ({ path: input.path, content: input.content })) ?? []
-    if (inputs.length === 0 || state.outputKind === 'files' && state.outputPaths.size === 0
+    if (state.outputKind === 'files' && state.outputPaths.size === 0 && state.missingReads.size > 0) this.unavailable(state, 'capture-interrupted')
+    if (state.unavailable || inputs.length === 0 || state.outputKind === 'files' && state.outputPaths.size === 0
       || state.outputKind === 'chat' && state.successfulReads.size === 0) return
-    const entries = parseConversationFileEntries(await Promise.all(inputs.map(entry => readConversationFile(state.cwd, entry.path))))
+    const entries = parseConversationFileEntries(await Promise.all(inputs.map(async entry => {
+      const current = await readConversationFile(state.cwd, entry.path)
+      // A new Windows file may be created with a different spelling of the same path.
+      return process.platform === 'win32' && entry.content === null && current.path.toLowerCase() === entry.path.toLowerCase()
+        ? { path: entry.path, content: current.content } : current
+    })))
     if (state.outputKind === 'chat' && sha256(entries) !== sha256(inputs)) throw new Error('conversation read-only file changed before capture boundary')
     const captureSeq = agent.session.events.at(-1)?.seq
     if (captureSeq === undefined) throw new Error('native file capture boundary is unavailable')
     const current = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === task.source.taskId)!
+    for (const [callId, path] of state.missingReads) {
+      const call = agent.session.events.find(event => event.type === 'tool/call' && String(event.data.callId) === callId)
+      if (call?.type !== 'tool/call' || !state.outputPaths.has(path.toLowerCase())
+        || !entries.some(entry => entry.path === path && entry.content !== null)
+        || !isCreatedFileMissingRead(current, state.cwd, call, agent.session.events, captureSeq)) {
+        this.unavailable(state, 'capture-interrupted'); return
+      }
+    }
     const ancillary = await state.native.freeze(current, agent, captureSeq)
     const fresh = ancillary.filter(record => !current.fileAncillary?.some(existing => sha256(existing) === sha256(record)))
     if (fresh.length > 0) {
