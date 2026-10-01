@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 后续独立负面结果已接入原回滚；离线失效先于新研究
+
+从b72c4a2干净继续E结果消费者。审查否决无条件rejected；最终只认可信事前requiredCondition及本次匹配failedRequiredConditionDigest，旧rejected/一般编译错误不追认。具体ancillary合同仅原保护条件直接违反标记；原review不改。runtime与ledger共享资格，仅含程序独有失败时保存显式failure政策，原两失败/输入独立/模型/族/版本/时间/质量/作用域保持，旧无政策严格not-met重放/幂等。离线wake先回滚再select，停止早返回、异常Promise化且合并Promise身份保持，不resume Agent凑回滚。见[范围、重要审查与验证](tianwen-checked-regression-20261001.md)。
+
+原离线not-met真首红1失败，条件资格首红1失败/1过；初无条件方案及初实施旧mock三异常均保留。最终六组367/367、八包类型/声明0；全部修改源码/脚本与完整三测试联合strict0，独立审查重要问题收口。模型/反馈/自然研究/新激活/真实未来效果0，E仅负面消费者机制，不证明收益；小记录/自有测试根清空，D约18.59GiB。完整目标active、C—F/NO-GO/隔离/原门槛/十日窗口保持；下一仍需真实独立案例及适用事前结果依据，条件声明不能替代十臂验证，不重做旧题凑来源。
+
 ## 2026-10-01 文件生成案例别名复制已拦截；旧身份与历史重放保持
 
 自主选核心C实际缺口：相同要求/内容仅排列或路径大小写不同，旧raw摘要不同而允许打开研究。052dc9d设计后复用原canonical投影加前瞻副身份；loop比较恢复三原输入与两生成输入，设计消费后停止/冷重启不重试；ledger新打开/新激活只检查有完整prompt的生成二案例。旧raw/material/study摘要、普通任务身份、解析/重放/重复幂等/旧accepted与已发生activation不改，旧accepted不能新激活别名复制。见[范围、失败和验证](tianwen-generated-file-input-identity-20261001.md)。

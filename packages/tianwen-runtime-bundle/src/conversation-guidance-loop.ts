@@ -13,7 +13,7 @@ import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversa
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { recoverConversationCaseDesign } from './conversation-case-design.js'
-import { hasSatisfiedConversationCodeCheck, conversationFileTaskInputDigest, conversationTaskInputDigest, conversationRequestContentDigest, guidanceFileInputIdentity } from '@tianwen/evolution'
+import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationFileTaskInputDigest, conversationTaskInputDigest, conversationRequestContentDigest, guidanceFileInputIdentity } from '@tianwen/evolution'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 
@@ -223,6 +223,11 @@ export class TianwenConversationGuidanceLoopService extends Service {
       await Promise.allSettled([...this.lanes.values(), ...this.persistedWakes.values()])
   }
   private wakeTask(task: ConversationTask): Promise<void> {
+    if (!this.accepting) return Promise.resolve()
+    // Preserve the exact coalesced lane Promise and the event subscriber's
+    // rejection boundary when synchronous ledger invalidation fails.
+    try { this.rollbackIfNeeded(task.source.scopeKey) }
+    catch (error) { return Promise.reject(error) }
     const live = this.ctx.agents.get(SessionId(task.source.sessionId))
     if (live !== undefined) return this.schedule(live)
     const scopeKey = task.source.scopeKey
@@ -533,14 +538,16 @@ export class TianwenConversationGuidanceLoopService extends Service {
         && conversationTaskModelDigest(task) === study.opened.modelConfigDigest
         && sha256(task.admission?.qualityContract ?? null) === sha256(study.opened.qualityContract ?? null)
         && task.admission?.decision?.evaluationMode === (study.opened.evaluationMode ?? 'text') && task.admission.decision.fileOutputKind === study.opened.fileOutputKind
-        && effectiveConversationFamily(task) === study.opened.family && task.review?.verdict === 'not-met')
+        && effectiveConversationFamily(task) === study.opened.family && (task.review?.verdict === 'not-met' || hasRejectedConversationCodeCheck(task)))
         .filter(task => task.source.admissionPolicy === sourcePolicy)
       const identities = failures.map(task => conversationTaskInputDigest(task))
       const distinct = failures.filter((_, index) => identities[index] !== undefined && identities.indexOf(identities[index]) === index)
       if (!disabled && !retracted && distinct.length < 2) continue
+      const evidence = distinct.slice(-2)
       evolution.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
-        expectedCurrentVersion: guidanceVersion(study.candidate.candidateSnapshot), reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : distinct.slice(-2).map(task => task.source.taskId),
-        ...(!disabled && !retracted ? { evidenceInputPolicy: 'request-content.v1' as const } : {}) })
+        expectedCurrentVersion: guidanceVersion(study.candidate.candidateSnapshot), reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : evidence.map(task => task.source.taskId),
+        ...(!disabled && !retracted ? { evidenceInputPolicy: 'request-content.v1' as const,
+          ...(evidence.some(task => task.review?.verdict !== 'not-met') ? { evidenceFailurePolicy: 'model-or-code-check.v1' as const } : {}) } : {}) })
     }
   }
   private async study(agent: Agent, group: EvidenceGroup): Promise<void> {

@@ -15,12 +15,16 @@ export interface ConversationExternalCheckPrepared {
   readonly checkerDigest: Sha256Digest
   readonly contractDigest: Sha256Digest
   readonly inputsDigest: Sha256Digest
+  /** Trusted pre-answer condition from the original requirement; not model supplied. */
+  readonly requiredCondition?: string
 }
 
 export interface ConversationExternalCheckOutcome {
   /** Result of this specific check, never an automatic task/learning permission. */
   readonly status: 'verified' | 'rejected' | 'unverifiable'
   readonly detail: string
+  /** Only a proved failure of the prepared condition, never generic diagnostics. */
+  readonly failedRequiredConditionDigest?: Sha256Digest
 }
 
 export interface ConversationExternalCheckFinished extends ConversationExternalCheckOutcome {
@@ -42,6 +46,13 @@ export function supportsConversationCodeCheck(decision: ConversationAdmissionDec
 export function hasSatisfiedConversationCodeCheck(task: ConversationTask | undefined): boolean {
   return task !== undefined && (task.externalCheckPrepared === undefined || task.externalCheckFinished?.status === 'verified')
 }
+/** Negative evidence only. Legacy or unrelated checker rejection is diagnostic. */
+export function hasRejectedConversationCodeCheck(task: ConversationTask | undefined): boolean {
+  return task !== undefined && task.admission?.decision?.evaluationMode === 'local-files'
+    && supportsConversationCodeCheck(task.admission.decision)
+    && task.externalCheckPrepared?.requiredCondition !== undefined && task.externalCheckFinished?.status === 'rejected'
+    && task.externalCheckFinished.failedRequiredConditionDigest === sha256(task.externalCheckPrepared.requiredCondition)
+}
 
 function fields(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
@@ -62,25 +73,30 @@ export function conversationExternalInputsDigest(value: readonly ConversationFil
   return sha256([...entries].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
 }
 export function parseConversationExternalCheckOutcome(value: unknown): ConversationExternalCheckOutcome {
-  const row = fields(value, ['status', 'detail'])
+  const qualified = value !== null && typeof value === 'object' && Object.hasOwn(value, 'failedRequiredConditionDigest')
+  const row = fields(value, ['status', 'detail', ...(qualified ? ['failedRequiredConditionDigest'] : [])])
   if (typeof row.status !== 'string' || !['verified', 'rejected', 'unverifiable'].includes(row.status)) throw new TypeError('invalid external check status')
-  return { status: row.status as ConversationExternalCheckOutcome['status'], detail: text(row.detail, 4096) }
+  if (qualified && row.status !== 'rejected') throw new TypeError('failed required condition requires rejection')
+  return { status: row.status as ConversationExternalCheckOutcome['status'], detail: text(row.detail, 4096),
+    ...(qualified ? { failedRequiredConditionDigest: digest(row.failedRequiredConditionDigest) } : {}) }
 }
 export function parseConversationExternalCheck(value: unknown): ConversationExternalCheckPrepared | ConversationExternalCheckFinished {
   const kind = (value as { kind?: unknown } | null)?.kind
   if (kind === 'task-external-check-prepared') {
-    const row = fields(value, ['kind', 'taskId', 'preparedSeq', 'requestDigest', 'contextDigest', 'admissionDigest', 'modelConfigDigest', 'checkerId', 'checkerDigest', 'contractDigest', 'inputsDigest'])
+    const qualified = Object.hasOwn(value as object, 'requiredCondition')
+    const row = fields(value, ['kind', 'taskId', 'preparedSeq', 'requestDigest', 'contextDigest', 'admissionDigest', 'modelConfigDigest', 'checkerId', 'checkerDigest', 'contractDigest', 'inputsDigest', ...(qualified ? ['requiredCondition'] : [])])
     if (!Number.isSafeInteger(row.preparedSeq) || (row.preparedSeq as number) < 1) throw new TypeError('invalid external check boundary')
     return { kind, taskId: text(row.taskId, 512), preparedSeq: row.preparedSeq as number,
       requestDigest: digest(row.requestDigest), contextDigest: digest(row.contextDigest), admissionDigest: digest(row.admissionDigest),
       modelConfigDigest: digest(row.modelConfigDigest), checkerId: text(row.checkerId, 512), checkerDigest: digest(row.checkerDigest),
-      contractDigest: digest(row.contractDigest), inputsDigest: digest(row.inputsDigest) }
+      contractDigest: digest(row.contractDigest), inputsDigest: digest(row.inputsDigest), ...(qualified ? { requiredCondition: text(row.requiredCondition, 4096) } : {}) }
   }
   if (kind !== 'task-external-check-finished') throw new TypeError('invalid external check kind')
-  const row = fields(value, ['kind', 'taskId', 'preparationDigest', 'resultDigest', 'fileResultDigest', 'status', 'detail'])
+  const qualified = Object.hasOwn(value as object, 'failedRequiredConditionDigest')
+  const row = fields(value, ['kind', 'taskId', 'preparationDigest', 'resultDigest', 'fileResultDigest', 'status', 'detail', ...(qualified ? ['failedRequiredConditionDigest'] : [])])
   return { kind, taskId: text(row.taskId, 512), preparationDigest: digest(row.preparationDigest), resultDigest: digest(row.resultDigest),
     fileResultDigest: row.fileResultDigest === null ? null : digest(row.fileResultDigest),
-    ...parseConversationExternalCheckOutcome({ status: row.status, detail: row.detail }) }
+    ...parseConversationExternalCheckOutcome({ status: row.status, detail: row.detail, ...(qualified ? { failedRequiredConditionDigest: row.failedRequiredConditionDigest } : {}) }) }
 }
 
 export function validateConversationExternalCheck(record: ConversationExternalCheckPrepared | ConversationExternalCheckFinished, task: ConversationTask): void {
@@ -98,6 +114,8 @@ export function validateConversationExternalCheck(record: ConversationExternalCh
     || record.resultDigest !== completion.resultDigest || record.fileResultDigest !== (completion.files === undefined ? null : sha256(completion.files))) {
     throw new Error('external check result does not match its preparation and task result')
   }
+  if (record.failedRequiredConditionDigest !== undefined && (record.status !== 'rejected' || prepared.requiredCondition === undefined
+    || record.failedRequiredConditionDigest !== sha256(prepared.requiredCondition))) throw new Error('failed required condition does not match its pre-answer contract')
   if (record.status === 'unverifiable') return
   if (completion.status !== 'completed' || completion.files?.outputKind !== 'files' || task.fileUnavailable !== undefined
     || (task.models?.length ?? 0) === 0 || task.models!.some(model => model.modelConfigDigest !== prepared.modelConfigDigest)

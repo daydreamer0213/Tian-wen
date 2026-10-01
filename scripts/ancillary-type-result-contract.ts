@@ -123,6 +123,7 @@ export function createAncillaryTypeResultContract(config: ConversationTypeScript
     const frozen = skeleton(original, slot)
     const bindings = typeBindings(original)
     return { ...prepared,
+      requiredCondition: REQUIREMENT,
       checkerId: 'ancillary-type-preservation',
       checkerDigest: sha256({ compiler: prepared.checkerDigest, wrapperDigest }),
       contractDigest: sha256({ compiler: prepared.contractDigest, wrapperDigest, requirement: REQUIREMENT, slot, skeleton: frozen.text, bindings }),
@@ -132,7 +133,7 @@ export function createAncillaryTypeResultContract(config: ConversationTypeScript
         if (output?.path !== targetPath || typeof output.content !== 'string') return { status: 'unverifiable', detail: 'Frozen ancillary type repair output unavailable.' }
         const file = source(output.content, targetPath), value = skeleton(file, slot)
         if (value.text !== frozen.text || value.type === undefined || forbidden(value.type) || !preservesBindings(bindings, typeBindings(file))) {
-          return { status: 'rejected', detail: 'Frozen ancillary type repair violates execution, assertion or type-preservation requirements.' }
+          return { status: 'rejected', detail: 'Frozen ancillary type repair violates execution, assertion or type-preservation requirements.', failedRequiredConditionDigest: sha256(REQUIREMENT) }
         }
         const result = await prepared.evaluate(candidate)
         return result.status === 'verified' ? { status: 'verified', detail: 'Frozen ancillary type repair: strict compiler and original execution/assertion/type skeleton preserved; no broader task or learning claim.' } : result

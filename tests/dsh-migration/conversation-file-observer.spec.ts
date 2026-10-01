@@ -9,7 +9,7 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
-import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { sha256, hasRejectedConversationCodeCheck } from '../../packages/tianwen-evolution/src/index.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
@@ -184,6 +184,36 @@ it.each(['provider-defaults', 'outer-request-hook', 'later-config-drift'] as con
   } finally { off(); modelInfo.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('carries an original required-condition failure through native observation and cold replay without changing model met', async () => {
+  const requiredCondition = 'Replace input.ts with after.', conditionDigest = sha256(requiredCondition)
+  let preparedBeforeCandidate = false, evaluations = 0
+  let harness: Awaited<ReturnType<typeof mount>>
+  const check: ConversationExternalCodeCheck = { async prepare() { return {
+    checkerId: 'required-output-mechanism-probe', checkerDigest: sha256('probe implementation'), contractDigest: sha256(requiredCondition), requiredCondition,
+    inputs: [{ path: 'input.ts', content: 'before' }], async evaluate(candidate) {
+      evaluations++; expect(candidate.request[0]?.content).toEqual([{ type: 'text', text: requiredCondition }])
+      return { status: 'rejected', detail: 'Required bytes do not match.', failedRequiredConditionDigest: conditionDigest }
+    },
+  } } }
+  harness = await mount([structured({ ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }), () => {
+    preparedBeforeCandidate = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckPrepared?.requiredCondition === requiredCondition
+    return toolCallResponse('condition-write', 'write', { file_path: 'input.ts', content: 'wrong' })
+  }, textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  let cold: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    harness.handle.agent.followup(direct(requiredCondition))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(preparedBeforeCandidate).toBe(true); expect(evaluations).toBe(1)
+    expect(task.externalCheckFinished).toMatchObject({ status: 'rejected', failedRequiredConditionDigest: conditionDigest, preparationDigest: sha256(task.externalCheckPrepared) })
+    expect(task.review?.verdict).toBe('met'); expect(hasRejectedConversationCodeCheck(task)).toBe(true)
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    cold = await mount([], false, undefined, harness.root)
+    expect(cold.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(task)
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { if (cold !== undefined) { await cold.handle.dispose(); await cold.ctx.fiber.dispose() } else { await harness.handle.dispose(); await harness.ctx.fiber.dispose() } }
+})
 it('prepares an external check before the candidate and records its result separately from model review', async () => {
   let preparedBeforeCandidate = false
   let preparations = 0, evaluations = 0

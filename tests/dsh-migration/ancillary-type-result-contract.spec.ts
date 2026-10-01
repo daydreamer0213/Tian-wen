@@ -17,7 +17,7 @@ export const marker: ApiMarker = 1
 const valid = original.replace('{ paths: string[] }', '{ readonly tool: "glob"; readonly root: string; readonly paths: readonly string[] }')
 let cwd: string, material: ConversationExternalCodePreparation, prepared: PreparedConversationExternalCodeCheck
 beforeAll(async () => {
-  const base = 'D:/DevData/tianwen-preserved-execution-contract-20261001/test-roots'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-preserved-execution-contract-20261001/test-roots'
   mkdirSync(base, { recursive: true }); cwd = mkdtempSync(join(base, 'contract-'))
   writeFileSync(join(cwd, 'package.json'), '{"type":"module"}')
   writeFileSync(join(cwd, 'task.ts'), original)
@@ -36,6 +36,18 @@ afterAll(() => { if (cwd !== undefined) rmSync(cwd, { recursive: true, force: tr
 const candidate = (content: string) => ({ request: material.request, context: [], signal: material.signal,
   inputs: [{ path: 'task.ts', content: original }], outputs: [{ path: 'task.ts', content }], outputPaths: ['task.ts'] })
 
+it('marks only a proven original preservation violation as failed required condition', async () => {
+  expect(typeof prepared.requiredCondition).toBe('string')
+  const changed = valid.replace('.paths, 2)', '.paths, 0)')
+  const result = await prepared.evaluate(candidate(changed))
+  expect(result.status).toBe('rejected')
+  expect(result.failedRequiredConditionDigest).toBe(sha256(prepared.requiredCondition))
+})
+it('keeps compiler rejection diagnostic rather than inventing a failed required condition', async () => {
+  expect((await prepared.evaluate(candidate(original))).status).toBe('rejected')
+  expect((await prepared.evaluate(candidate(original))).failedRequiredConditionDigest).toBeUndefined()
+  expect((await prepared.evaluate(candidate(valid))).failedRequiredConditionDigest).toBeUndefined()
+})
 it('independently rejects the original error and verifies only a complete permitted repair', async () => {
   expect((await prepared.evaluate(candidate(original))).status).toBe('rejected')
   expect((await prepared.evaluate(candidate(valid))).status).toBe('verified')

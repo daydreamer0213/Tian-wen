@@ -27,6 +27,8 @@ export interface PreparedConversationExternalCodeCheck {
   readonly checkerDigest: ReturnType<typeof sha256>
   readonly contractDigest: ReturnType<typeof sha256>
   readonly inputs: readonly ConversationFileEntry[]
+  /** Original mandatory condition; evaluator marks only a proved failure of it. */
+  readonly requiredCondition?: string
   /** Trusted host code: frozen sources only, no execution of generated code. */
   readonly evaluate: (candidate: ConversationExternalCodeCandidate) => Promise<ConversationExternalCheckOutcome>
 }
@@ -93,7 +95,7 @@ export class ConversationExternalCodeChecks {
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-external-check-prepared', taskId: task.source.taskId, preparedSeq,
         requestDigest: task.source.requestDigest, contextDigest: task.source.contextDigest, admissionDigest: sha256(task.admission), modelConfigDigest,
         checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
-        inputsDigest: conversationExternalInputsDigest(prepared.inputs) })
+        inputsDigest: conversationExternalInputsDigest(prepared.inputs), ...(prepared.requiredCondition === undefined ? {} : { requiredCondition: prepared.requiredCondition }) })
       this.states.set(task.source.taskId, prepared.evaluate)
     } catch (error) { this.ctx.logger.warn('External check preparation unavailable: %s', this.detail(error)) }
     finally { this.controllers.delete(controller) }

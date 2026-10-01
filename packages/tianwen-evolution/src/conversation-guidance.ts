@@ -162,6 +162,8 @@ export interface GuidanceRollbackRecord {
   readonly evidenceTaskIds: readonly string[]
   /** Absence and captured-files.v1 retain their exact historical rules. */
   readonly evidenceInputPolicy?: 'captured-files.v1' | 'request-content.v1'
+  /** Absence retains model-only failure evidence in every historical record. */
+  readonly evidenceFailurePolicy?: 'model-or-code-check.v1'
 }
 export interface GuidanceHistoricalStoppedRecord {
   readonly kind: 'study-stopped'
@@ -373,16 +375,19 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
     return { kind: input.kind, studyId, expectedParentVersion: digest(input.expectedParentVersion), decisionDigest: digest(input.decisionDigest) }
   }
   if (input.kind === 'guidance-rolled-back') {
-    object(input, ['kind', 'studyId', 'expectedCurrentVersion', 'reason', 'evidenceTaskIds', ...(input.reason === 'ancestor-invalidated' ? ['ancestorStudyId'] : []), ...(Object.hasOwn(input, 'evidenceInputPolicy') ? ['evidenceInputPolicy'] : [])])
+    object(input, ['kind', 'studyId', 'expectedCurrentVersion', 'reason', 'evidenceTaskIds', ...(input.reason === 'ancestor-invalidated' ? ['ancestorStudyId'] : []), ...(Object.hasOwn(input, 'evidenceInputPolicy') ? ['evidenceInputPolicy'] : []), ...(Object.hasOwn(input, 'evidenceFailurePolicy') ? ['evidenceFailurePolicy'] : [])])
     const reason = oneOf(input.reason, ['support-retracted', 'consent-disabled', 'regression', 'quality-contract-changed', 'ancestor-invalidated'])
     const evidenceTaskIds = uniqueIds(input.evidenceTaskIds, 64)
     const filePolicy = Object.hasOwn(input, 'evidenceInputPolicy')
     if (filePolicy && (reason !== 'regression' || !['captured-files.v1', 'request-content.v1'].includes(input.evidenceInputPolicy as string))) throw new TypeError('invalid guidance regression input policy')
+    const failurePolicy = Object.hasOwn(input, 'evidenceFailurePolicy')
+    if (failurePolicy && (reason !== 'regression' || input.evidenceInputPolicy !== 'request-content.v1' || input.evidenceFailurePolicy !== 'model-or-code-check.v1')) throw new TypeError('invalid guidance regression failure policy')
     if (reason === 'regression' && evidenceTaskIds.length === 0) throw new TypeError('guidance regression rollback requires task evidence')
     if (reason === 'quality-contract-changed' && evidenceTaskIds.length !== 0) throw new TypeError('quality contract rollback must not claim task regression evidence')
     if (reason === 'ancestor-invalidated' && (typeof input.ancestorStudyId !== 'string' || !/^guidance-study:[a-f0-9]{64}$/u.test(input.ancestorStudyId) || evidenceTaskIds.length !== 0)) throw new TypeError('guidance ancestor rollback requires an exact ancestor study and no regression evidence')
     return { kind: input.kind, studyId, expectedCurrentVersion: digest(input.expectedCurrentVersion), reason, evidenceTaskIds,
       ...(filePolicy ? { evidenceInputPolicy: input.evidenceInputPolicy as 'captured-files.v1' | 'request-content.v1' } : {}),
+      ...(failurePolicy ? { evidenceFailurePolicy: 'model-or-code-check.v1' as const } : {}),
       ...(reason === 'ancestor-invalidated' ? { ancestorStudyId: input.ancestorStudyId as GuidanceStudyId } : {}) }
   }
   if (input.kind === 'study-stopped') {

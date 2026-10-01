@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { hasSatisfiedConversationCodeCheck } from './conversation-external-check.js'
+import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck } from './conversation-external-check.js'
 import { conversationFileTaskInputDigest } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import {
@@ -3295,7 +3295,7 @@ export class EvolutionLedger {
           || task.admission?.decision?.evaluationMode !== (study.evaluationMode ?? 'text') || task.admission?.decision?.fileOutputKind !== study.fileOutputKind
           || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
-          || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
+          || !(task.review?.verdict === 'not-met' || record.evidenceFailurePolicy === 'model-or-code-check.v1' && hasRejectedConversationCodeCheck(task)) || task.recordedAt <= full.activatedAt!)
           || (record.evidenceInputPolicy === 'captured-files.v1' && study.evaluationMode !== 'local-files')
           || identities.some(identity => identity === undefined)
           || new Set(identities).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
