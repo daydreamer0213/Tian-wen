@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-02有限C/D主链审查无新明确实现缺口，合同身份及冷恢复设计疑点排除；不是全仓库或自然学习验收。首组合1448通过/9失败/3跳过，9属控制端漏既有CI环境，补原环境同源码16/16，合并1457不同项通过/3显式Docker跳过、首失败保持，非单次全绿/真实问题来源。0真实模型/新任务/反馈/研究/激活，正式10task/0study/隔离true及b8a71177…账本不变。完整目标active/incomplete、NO-GO/原门槛/原窗口不变；不追加标准、伪造失败、索题或重跑旧题，下一先找真实项目需求及事前依据。见[验证范围和失败归属](tianwen-core-route-audit-20261002.md)。
+
 2026-10-02 自主真实功能索引92af1bfd事前41案例/原条件/只读合同及目标read/write/edit固定，原41/41 verified、双原模型met、完整文件证据及0请求两复核准确恢复；0b0986b接纳原样候选，未重跑旧题或增加事后门槛。仅证明该普通任务原功能成功，不能填重复问题/自然研究/方法效果。正式现10task/0study/隔离、awaiting-compatible-sources，可信功能失败来源为空，旧9前缀保持、现账本b8a71177…；完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一自主实际学习主链待办，不以维护小题成功造来源。见[范围和控制端失败归属](tianwen-functional-index-native-20261001.md)。
 
 2026-10-01具体closed五不同功能合同研究供应器3f5c49a交付，完整host saved material/原条件/各自独立期望事前冻结，生成前来源精确匹配及五prepare，角色/材料漂移不fallback。八组246+1实际loop/Docker控制、类型/bundle/三完整TS和审查通过；控制研究accepted但隔离未激活，十臂实际执行及0请求准确caseDesign/study恢复仅机制，semanticIndependence仍unestablished。0真实提供者/反馈/自然来源/正式研究，正式原9task/0study/隔离及04324ee8…账本全字节不改。不能借宿主登记或本控制补来源资格；完整目标active/incomplete、NO-GO/原门槛/窗口保持。见[具体边界及失败归属](tianwen-functional-study-cohort-20261001.md)。
