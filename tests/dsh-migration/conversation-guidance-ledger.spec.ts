@@ -13,6 +13,7 @@ import {
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { conversationFileTaskInputDigest } from '../../packages/tianwen-evolution/src/conversation-files.js'
+import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import * as taskMaterial from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { conversationFeedbackAssessmentId, type ConversationFeedbackSource, type ConversationFeedbackStarted } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
@@ -49,7 +50,7 @@ function ledgerRoot() {
 }
 
 // Synthetic native receipts exercise real ledger gates and disk replay; no model is run here.
-function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat', proposalCluePolicy: boolean | 'feedback.v2' = false, completeFiles = true, mode?: 'external' | 'subjective', family: 'summarization' | 'writing' = 'summarization', fileInputs = [{ path: 'pilot.txt', content: request }], nativeRequest = false, captureContent = true): ConversationTask {
+function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat', proposalCluePolicy: boolean | 'feedback.v2' = false, completeFiles = true, mode?: 'external' | 'subjective', family: 'summarization' | 'writing' | 'code' = 'summarization', fileInputs = [{ path: 'pilot.txt', content: request }], nativeRequest = false, captureContent = true): ConversationTask {
   const identity = { sessionId: 'ordinary-guidance', sessionLifecycleFingerprint: sha256('ordinary-guidance-lifecycle'), turn }
   const taskId = conversationTaskId(identity)
   const message = nativeRequest ? createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: request }] }) : undefined
@@ -88,6 +89,45 @@ function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondS
   const tasks = [task(ledger, 1, verdict, firstScope, undefined, undefined, qualityContract, root), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels, qualityContract, root), task(ledger, 3, 'met', firstScope, undefined, undefined, qualityContract, root)] as const
   return { root, ledger: qualityContract === null || !['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11'].includes(qualityContract.schemaVersion) ? new EvolutionLedger(root) : ledger, tasks }
 }
+
+function resultCheckOpening() {
+  const { root, ledger } = seeded()
+  const sources = [4, 5, 6].map(turn => task(ledger, turn, turn === 6 ? 'met' : 'not-met', scope, undefined, undefined,
+    undefined, undefined, 'files', false, true, undefined, 'code')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const { kind: _kind, studyId: _id, ...prior } = fileOpening(sources)
+  const resultChecks = prior.cases.map(item => {
+    const inputs = 'prompt' in item ? item.files!.entries : sources.find(task => task.source.taskId === item.sourceTaskId)!.fileInputs!.map(({ path, content }) => ({ path, content }))
+    return { caseId: item.id, checkerId: 'controlled-frozen-file-check', checkerDigest: sha256('trusted checker'),
+      contractDigest: sha256(`condition:${item.id}`), inputsDigest: conversationExternalInputsDigest(inputs), requiredCondition: `Preserve original ${item.id} value.` }
+  })
+  const body: GuidanceStudyBody = { ...prior, family: 'code', resultChecks }
+  return { root, ledger, body, opened: { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body } }
+}
+for (const missing of [3, 4]) it(`rejects missing study result check slot ${missing} before writing durable history`, () => {
+  const { root, ledger, body } = resultCheckOpening()
+  const checks = [...body.resultChecks!]
+  delete checks[missing]
+  const changed = { ...body, resultChecks: checks }
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(changed), ...changed })).toThrow(/result check/)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  expect(new EvolutionLedger(root).hasRecoveryFailure()).toBe(false)
+})
+
+it('binds study result check preparation to exact original task file inputs', () => {
+  const { ledger, body } = resultCheckOpening()
+  const changed = { ...body, resultChecks: body.resultChecks!.map((check, index) => index === 0 ? { ...check, inputsDigest: sha256('different preimage') } : check) }
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(changed), ...changed })).toThrow(/result check/)
+  expect(ledger.listConversationGuidanceStudies()).toHaveLength(0)
+})
+it('persists study result check preparation and cold restores exact metadata without rewriting the ledger', () => {
+  const { root, ledger, opened } = resultCheckOpening()
+  ledger.recordConversationGuidance(opened)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8'), cold = new EvolutionLedger(root)
+  expect(cold.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+  expect(cold.recordConversationGuidance(opened)).toEqual({ duplicate: true })
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
 
 it('persists consumed case-design pairs without inventing studies, and permits genuinely new source pairs', () => {
   const { root, ledger, tasks } = seeded()

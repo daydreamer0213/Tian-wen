@@ -16,6 +16,8 @@ import { recoverConversationCaseDesign } from './conversation-case-design.js'
 import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationFileTaskInputDigest, conversationTaskInputDigest, conversationRequestContentDigest, guidanceFileInputIdentity, conversationCodeCheckIdentity, conversationCheckedFailureSource, type ConversationCheckedFailureSource, type ConversationCheckedFailureSources } from '@tianwen/evolution'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
+import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@tianwen/evolution'
+import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationGuidanceLoop: TianwenConversationGuidanceLoopService }
@@ -95,9 +97,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private accepting = true
 
   private readonly sourceConfig: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
-  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean } = {}) {
+  private readonly studyResultCheck: ConversationStudyResultCheck | undefined
+  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly studyResultCheck?: ConversationStudyResultCheck } = {}) {
     super(ctx, 'tianwenConversationGuidanceLoop')
-    this.sourceConfig = structuredClone(config)
+    const { studyResultCheck, ...sourceConfig } = config
+    this.sourceConfig = structuredClone(sourceConfig)
+    this.studyResultCheck = studyResultCheck
   }
   private sourceEnvironment(): string | undefined {
     const evolutionRoot = this.sourceConfig.evolutionRoot
@@ -348,7 +353,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     if (this.sourceConfig.guidanceActivationQuarantine === true) return
     const evolution = this.ctx.tianwenEvolution
     for (const study of evolution.listConversationGuidanceStudies(scopeKey)) {
-      if (!this.recoverable.delete(study.opened.studyId) || study.decision?.verdict !== 'accepted' || study.candidate === undefined || study.activation !== undefined) continue
+      if (!this.recoverable.delete(study.opened.studyId) || study.decision?.verdict !== 'accepted' || study.candidate === undefined || study.activation !== undefined || !hasSatisfiedGuidanceResultChecks(study)) continue
       const controller = new AbortController(); this.controllers.add(controller)
       try {
         await this.assertCurrent(study.opened, controller.signal)
@@ -457,6 +462,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
           }
         }
         await this.assertCurrent(study.opened, controller.signal)
+        controller.signal.throwIfAborted()
         evolution.recordConversationGuidance(study.decision)
         evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId, expectedParentVersion: study.opened.parentVersion, decisionDigest: sha256(study.decision) })
       } catch (error) { this.warn(error) }
@@ -644,13 +650,21 @@ export class TianwenConversationGuidanceLoopService extends Service {
       // Keep the historical no-clue catalog lookup after opening the study.
       let catalog = group.proposalClues.length === 0 ? undefined : await loadCatalog()
       if (catalog !== undefined && !catalog.complete) throw new Error('source-unavailable')
+      let preparedChecks: PreparedStudyResultChecks | undefined
       const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
         scopeKey: source.source.scopeKey, family: effectiveConversationFamily(source)!, failureCategory: group.category, consentRevision: source.source.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId], counterexampleTaskId: group.counterexample.source.taskId,
         cases, modelConfigDigest: sha256(callConfig), caseDesignProof: generated.proof, qualityContract: qualityContract!, ...checkedEvidence,
         ...(proposalClues.length === 0 ? {} : { proposalClues: proposalClues.map(item => item.reference) }),
         ...(fileMode ? { evaluationMode: 'local-files' as const, fileOutputKind: fileConfig!.outputKind } : {}),
+        ...(preparedChecks === undefined ? {} : { resultChecks: preparedChecks.checks }),
       })
+      if (this.studyResultCheck !== undefined && effectiveConversationFamily(source) === 'code' && fileConfig?.outputKind === 'files') {
+        preparedChecks = await prepareConversationStudyResultChecks(this.studyResultCheck, bodyFor([]), cases.map(item => 'sourceTaskId' in item
+          ? item.kind === 'counterexample' ? counter : sources[item.kind === 'source1' ? 0 : 1]!
+          : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }), signal)
+        signal.throwIfAborted()
+      }
       const fitted: EvidenceGroup['proposalClues'][number][] = []
       for (const clue of group.proposalClues) {
         const candidate = [...fitted, clue]
@@ -784,14 +798,28 @@ export class TianwenConversationGuidanceLoopService extends Service {
         for (const role of ['baseline', 'candidate'] as const) {
           const snapshot = role === 'baseline' ? parentSnapshot : candidateSnapshot
           const { execution, judged, outputDigest } = await executeAndReview(material, rule(snapshot), { kind: 'formal', caseId: item.id, role }, item.materialDigest)
-          evolution.recordConversationGuidance(parseConversationGuidanceRecord({ kind: 'arm-recorded', studyId: opened.studyId, caseId: item.id, role,
-            materialDigest: item.materialDigest, behaviorVersion: guidanceVersion(snapshot), executionProof: execution.proof, judgeProof: judged.proof, reviewChecks: judged.reviewChecks, outputDigest, verdict: judged.verdict }))
+          const arm: GuidanceArmRecord = { kind: 'arm-recorded', studyId: opened.studyId, caseId: item.id, role,
+            materialDigest: item.materialDigest, behaviorVersion: guidanceVersion(snapshot), executionProof: execution.proof, judgeProof: judged.proof, reviewChecks: judged.reviewChecks, outputDigest, verdict: judged.verdict }
+          if (preparedChecks !== undefined) {
+            const study = evolution.listConversationGuidanceStudies().find(study => study.opened.studyId === opened!.studyId)!
+            const output = await this.recoverArmFile(study, arm)
+            await this.assertCurrent(studyOpened, signal)
+            const outcome = await evaluateConversationStudyResultCheck(preparedChecks, item.id, output, signal)
+            await this.recoverArmFile(study, arm)
+            await this.assertCurrent(studyOpened, signal)
+            signal.throwIfAborted()
+            evolution.recordConversationGuidance(parseConversationGuidanceRecord({ ...arm, resultCheck: {
+              preparationDigest: guidanceResultCheckDigest(opened, preparedChecks.checks.find(check => check.caseId === item.id)!), outputDigest, ...outcome,
+            } }))
+          } else { signal.throwIfAborted(); evolution.recordConversationGuidance(parseConversationGuidanceRecord(arm)) }
         }
       }
       await this.assertCurrent(opened, signal)
+      signal.throwIfAborted()
       const decision = evolution.conversationGuidanceDecision(opened.studyId)
       evolution.recordConversationGuidance(decision)
-      if (decision.verdict === 'accepted' && this.sourceConfig.guidanceActivationQuarantine !== true) evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
+      if (decision.verdict === 'accepted' && this.sourceConfig.guidanceActivationQuarantine !== true
+        && hasSatisfiedGuidanceResultChecks(evolution.listConversationGuidanceStudies().find(study => study.opened.studyId === opened!.studyId)!)) evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
     } catch (error) {
       if (opened !== undefined) {
         const study = evolution.listConversationGuidanceStudies().find(item => item.opened.studyId === opened!.studyId)
@@ -841,5 +869,6 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const feedback = this.ctx.get('tianwenConversationFeedback')
       if (assessment === undefined || feedback === undefined || !await feedback.isAssessmentActive(assessment)) throw new Error('source-unavailable')
     }
+    signal.throwIfAborted()
   }
 }

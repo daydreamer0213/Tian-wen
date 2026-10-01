@@ -5,6 +5,7 @@ import type { Sha256Digest } from './ledger.js'
 import { canonicalConversationFileEntries, parseConversationFileMaterial, parseConversationFileTrialReceipt, type ConversationFileMaterial, type ConversationFileTrialReceipt } from './conversation-files.js'
 import { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceUse } from './conversation-skill-source.js'
 import { parseConversationCheckedFailureSources, type ConversationCheckedFailureSources } from './conversation-external-check.js'
+import { parseGuidanceCaseResultChecks, parseGuidanceArmResultCheck, validateGuidanceArmResultCheck, hasSatisfiedGuidanceResultChecks, type GuidanceCaseResultCheck, type GuidanceArmResultCheck } from './guidance-result-check.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
 export interface GuidanceSnapshot {
@@ -71,6 +72,7 @@ export interface GuidanceProposalClue {
   readonly materialDigest: Sha256Digest
 }
 export interface GuidanceStudyBody {
+  readonly resultChecks?: readonly GuidanceCaseResultCheck[]
   readonly checkedFailureSources?: ConversationCheckedFailureSources
   readonly evaluationMode?: 'local-files'
   readonly fileOutputKind?: 'files' | 'chat'
@@ -110,6 +112,7 @@ export interface GuidanceSourceReferenceReadRecord {
   readonly selectionProof: GuidanceProof
 }
 export interface GuidanceArmRecord {
+  readonly resultCheck?: GuidanceArmResultCheck
   readonly kind: 'arm-recorded'
   readonly studyId: GuidanceStudyId
   readonly caseId: string
@@ -296,7 +299,7 @@ function parseProposalClue(value: unknown): GuidanceProposalClue {
     assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
 }
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : []), ...(Object.hasOwn(input, 'resultChecks') ? ['resultChecks'] : [])])
   const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
@@ -326,6 +329,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
     ...(Object.hasOwn(input, 'caseDesignProof') ? { caseDesignProof: proof(input.caseDesignProof) } : {}),
     ...(Object.hasOwn(input, 'proposalClues') ? { proposalClues } : {}),
     ...(Object.hasOwn(input, 'checkedFailureSources') ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [sourceTaskIds[0]!, sourceTaskIds[1]!]) } : {}),
+    ...(Object.hasOwn(input, 'resultChecks') ? { resultChecks: parseGuidanceCaseResultChecks(input.resultChecks, { cases, family: input.family as GuidanceStudyBody['family'], ...mode }) } : {}),
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')
   if (guidanceStudyId(body) !== studyId) throw new TypeError('guidance study identity does not match its frozen body')
@@ -356,11 +360,12 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
       ...(Object.hasOwn(input, 'sourceUse') ? { sourceUse: parseGuidanceSourceUse(input.sourceUse) } : {}) }
   }
   if (input.kind === 'arm-recorded') {
-    object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict', ...(Object.hasOwn(input, 'reviewChecks') ? ['reviewChecks'] : [])])
+    object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict', ...(Object.hasOwn(input, 'reviewChecks') ? ['reviewChecks'] : []), ...(Object.hasOwn(input, 'resultCheck') ? ['resultCheck'] : [])])
     return { kind: input.kind, studyId, caseId: text(input.caseId, 512), role: oneOf(input.role, ['baseline', 'candidate']),
       materialDigest: digest(input.materialDigest), behaviorVersion: digest(input.behaviorVersion), executionProof: proof(input.executionProof),
       judgeProof: proof(input.judgeProof), outputDigest: digest(input.outputDigest), verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']),
-      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}) }
+      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}),
+      ...(Object.hasOwn(input, 'resultCheck') ? { resultCheck: parseGuidanceArmResultCheck(input.resultCheck) } : {}) }
   }
   if (input.kind === 'exploration-requested') {
     object(input, ['kind', 'studyId', 'request'])
@@ -489,6 +494,7 @@ export class ConversationGuidanceState {
       return
     }
     const opened = study.opened
+    if (record.kind === 'arm-recorded') validateGuidanceArmResultCheck(opened, record)
     if (record.kind === 'study-file-trial-captured') {
       if (opened.evaluationMode !== 'local-files' || record.receipt.outputKind !== opened.fileOutputKind) throw new Error('guidance file receipt mode disagrees with its study')
       if (study.decision !== undefined) throw new Error('guidance file receipt cannot follow a decision')
@@ -575,6 +581,7 @@ export class ConversationGuidanceState {
     const currentVersion = guidanceVersion(this.snapshot(opened.scopeKey))
     if (record.kind === 'guidance-activated') {
       if (study.decision?.verdict !== 'accepted' || sha256(study.decision) !== record.decisionDigest) throw new Error('guidance activation requires its exact accepted decision')
+      if (!hasSatisfiedGuidanceResultChecks(study)) throw new Error('guidance activation requires complete satisfied independent result checks')
       if (record.expectedParentVersion !== opened.parentVersion || currentVersion !== opened.parentVersion) throw new Error('guidance activation has a stale current parent version')
       return
     }

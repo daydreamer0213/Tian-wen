@@ -93,8 +93,11 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/continuous-goal-host.ts',
     'src/controlled-session-archive.ts',
     'src/conversation-judgment.ts',
+    'src/conversation-case-design.ts',
     'src/conversation-task-material.ts',
     'src/conversation-observer.ts',
+    'src/conversation-external-check.ts',
+    'src/conversation-study-result-check.ts',
     'src/conversation-guidance-loop.ts',
     'src/conversation-feedback-assessment.ts',
     'src/conversation-claim-review.ts',
@@ -157,6 +160,8 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/conversation-files.js',
       '../tianwen-evolution/dist/conversation-file-facts.js',
       '../tianwen-evolution/dist/conversation-guidance.js',
+      '../tianwen-evolution/dist/conversation-external-check.js',
+      '../tianwen-evolution/dist/guidance-result-check.js',
       '../tianwen-evolution/dist/conversation-skill-source.js',
       '../tianwen-evolution/dist/conversation-claim-audit.js',
       '../tianwen-evolution/dist/conversation-file-ancillary.js',
@@ -479,7 +484,7 @@ describe('archive credential literal detection', () => {
 })
 
 describe('@tianwen/runtime-bundle', () => {
-  it('lets a host implement external checks through public package types without exposing the private runner', () => {
+  it('lets a host implement external and study checks through public package types without exposing the private runner', () => {
     const consumerPath = resolve(packageRoot, '__external_check_consumer__.mts')
     const manifest = json(resolve(packageRoot, 'package.json')) as { files: readonly string[] }
     const publishedFiles = new Set([...manifest.files.map(path => resolve(packageRoot, path)), resolve(packageRoot, 'package.json')])
@@ -513,6 +518,16 @@ describe('@tianwen/runtime-bundle', () => {
         .map(item => ({ code: item.code, message: ts.flattenDiagnosticMessageText(item.messageText, '\n') }))
     }
     expect(compile(declarations)).toEqual([])
+    expect(compile(`import type { ConversationStudyResultCheck, ConversationStudyResultPreparation,
+      ConversationStudyResultCandidate, PreparedConversationStudyResultCheck } from '@tianwen/runtime-bundle';
+      const check: ConversationStudyResultCheck = { async prepare(material) {
+        const source: ConversationStudyResultPreparation = material;
+        return { checkerId: 'host-study-check', checkerDigest: 'sha256:${'0'.repeat(64)}', contractDigest: 'sha256:${'1'.repeat(64)}',
+          requiredCondition: 'Preserve original declared fields.', inputs: source.files.entries, async evaluate(candidate) {
+            const actual: ConversationStudyResultCandidate = candidate;
+            return { status: 'unverifiable', detail: 'Original output unavailable.' };
+          } } satisfies PreparedConversationStudyResultCheck;
+      } }; void check;`)).toEqual([])
     expect(compile(declarations.replace("status: 'unverifiable'", "status: 'met'")))
       .toEqual(expect.arrayContaining([expect.objectContaining({ code: 2322 })]))
     expect(compile("import { ConversationExternalCodeChecks } from '@tianwen/runtime-bundle'; void ConversationExternalCodeChecks;"))

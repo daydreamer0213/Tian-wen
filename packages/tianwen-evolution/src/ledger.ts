@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationCodeCheckIdentity, conversationCheckedFailureSource, type ConversationCheckedFailureSources } from './conversation-external-check.js'
+import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationCodeCheckIdentity, conversationCheckedFailureSource, conversationExternalInputsDigest, type ConversationCheckedFailureSources } from './conversation-external-check.js'
 import { conversationFileTaskInputDigest } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import {
@@ -3223,6 +3223,17 @@ export class EvolutionLedger {
 
   #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
     const tasks = this.#conversationLearning.list()
+    if (study.resultChecks !== undefined) {
+      for (const item of study.cases.slice(0, 3)) {
+        const task = 'sourceTaskId' in item ? tasks.find(task => task.source.taskId === item.sourceTaskId) : undefined
+        const check = study.resultChecks.find(check => check.caseId === item.id)
+        try {
+          if (task?.fileInputs === undefined || check === undefined || conversationExternalInputsDigest(task.fileInputs.map(({ path, content }) => ({ path, content }))) !== check.inputsDigest) {
+            throw new Error('unavailable or changed source input')
+          }
+        } catch { throw new LedgerIntegrityError('study result check requires exact original frozen task inputs') }
+      }
+    }
     if (study.checkedFailureSources !== undefined) {
       if (study.family !== 'code' || study.evaluationMode !== 'local-files' || study.fileOutputKind !== 'files' || study.failureCategory !== 'instruction-following'
         || study.cases.slice(0, 2).some(item => 'feedbackAssessmentId' in item)) throw new LedgerIntegrityError('checked failure study requires its explicit bounded code source branch')

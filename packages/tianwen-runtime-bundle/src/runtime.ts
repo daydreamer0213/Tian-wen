@@ -45,6 +45,7 @@ import { TianwenResearchSummaryAdmissionService } from './research-summary-admis
 import { TianwenConversationObserverService } from './conversation-observer.js'
 import { TianwenConversationFileObserverService } from './conversation-file-observer.js'
 import type { ConversationExternalCodeCheck } from './conversation-external-check.js'
+import type { ConversationStudyResultCheck } from './conversation-study-result-check.js'
 import { TianwenNativeToolObservationService } from './native-tool-observation.js'
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
@@ -62,6 +63,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly exposeCapturedFileFacts?: boolean
   /** Trusted programmatic pre-answer check; no model-supplied checker or automatic learning permission. */
   readonly externalCodeCheck?: ConversationExternalCodeCheck
+  /** Trusted pre-proposal code study checks; does not lift formal activation quarantine. */
+  readonly studyResultCheck?: ConversationStudyResultCheck
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
@@ -502,6 +505,7 @@ export async function apply(
   ctx.plugin(TianwenConversationGuidanceLoopService, {
     ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
+    ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
     guidanceActivationQuarantine: true,
   })
   ctx.plugin(TianwenLearningExplorationService)
