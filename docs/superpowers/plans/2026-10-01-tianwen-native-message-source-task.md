@@ -12,10 +12,12 @@
 
 - [x] Read current state and full roadmap; establish no live study or eligible five-case contract set, no old task retry.
 - [x] Read upstream source type and reproduce actual missing-source diagnostic without modifying the target; obtain read-only next-action review.
-- [ ] Freeze complete finite source/AST/comment/type contract, test nonconforming controls, capture original diagnostics and hash.
-- [ ] Preflight the continuous formal bundle with0 model calls, correct tool exposure, exact old task/ledger preservation and actual pre-answer preparation.
+- [x] Freeze complete finite source/AST/comment/type contract, test nonconforming controls, capture original diagnostics and hash.
+- [x] Preflight the continuous formal bundle with0 model calls, correct tool exposure and exact old task/ledger preservation; preparation must occur before first actual root forwarding.
 - [ ] Make one new native attempt with fixed budgets/0 retries. Preserve exact candidate/program/model outcome separately; stop and restore any failed attempt only after writes terminate.
 - [ ] Verify the unchanged native candidate with relevant existing tests, strict0 and independent read-only review before adoption; do not write a replacement candidate.
 - [ ] Cold-read the persistent task/ledger without models, record study/feedback/quarantine state, commit and push any verified native result, normally clean owned generated remnants and record D free space.
 
 **Stopping boundary:** This completes at most one ordinary development task, not C—F or complete automatic learning. A failure is retained without retry. No artificial user feedback, imported/regraded sources, baseline changes or release.
+
+Pre-answer evidence: D:/DevData/tianwen-next-result-basis-20261001/contract-controls.json13/13, original-target untouched; preflight.json0 calls, same original2 tasks/raw ledger digest, facts tool absent (six tools include three separate learning controls), quarantine true. Initial source-only and metadata preflight failures retained. Read-only review closed P2 by actual successful-read-before-edit snapshot checking; no important findings remain. No real attempt has been made at this checkpoint.
