@@ -8,7 +8,7 @@
 
 复用持续DEV，DeepSeek官方v4-flash/high唯一原生任务 `conversation-task:9148e4fd3843d0e813180f8f2992c383c9fa720eb3ae668fe96d46f8a6c76425`，9提供者请求（准入1/根8）、9工具、0重试/脚本请求。原生根完成，但正式 `completion.files` 缺失、`capture-interrupted`、复核 `inconclusive`，自动结果评审没有执行，proof为null；没有正式程序检查、研究或接纳。
 
-原始动作有合同read成功、尚不存在目标的read返回 `FS_NOT_FOUND`、数次write/read及两次原生edit。文件观察器当前在native结果 `isError` 时统一中断捕获（`conversation-file-observer.ts:211-212`），这包含新建文件前的不存在读取；新文件流程需要窄修，不能放宽所有读取错误。尽管暴露的工具限制是read/write，原生记录仍有edit，工具规范化与实际执行边界尚须核实，不能直接归为模型违规，也不能称限制已完整证明。
+原始动作有合同read成功、尚不存在目标的read返回 `FS_NOT_FOUND`、数次成功write/read及两次原生edit请求。文件观察器当时在native结果 `isError` 时统一中断捕获，这包含新建文件前的不存在读取；后续6da2854的窄修不重评本题。后续只读审计确认edit5746/5748由assistant5745直接请求，两结果5747/5749的isError均true、文本为守卫拒绝，**没有成功编辑或越权**；data.error缺省不是成功。restrictions隐藏schemas而guard仍负责拒绝；工具预算在拒绝前计数，9次含失败尝试。见[更正依据与修复](tianwen-new-file-evidence-20261001.md)。
 
 驱动按原停止条件另存 `unverified-candidate.py`（6,947字节），移除本轮新建项目目标，未接纳。独立审查核对源码与最后成功原生write7533/result7534完全相同，SHA-256 `542039b1c1aabe39140e94775662d58ed431eb4c34c7042e901f4479c3a8a861`。正式原评价和历史保持。
 
