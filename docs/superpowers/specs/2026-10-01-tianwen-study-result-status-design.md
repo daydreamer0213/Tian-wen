@@ -1,0 +1,13 @@
+# 研究结果状态：只读查询接入
+
+基线f26035b，上轮完整结果检查已交付；目标active。沿既有learning_status向用户解释研究accepted与方法未生效，所有者授权自主决定并持续实施，不再次要求设计批准。缺口为状态只显示模型accepted/currentlyActive，尚未投影已保存resultChecks与采用guard。
+
+比较仅加结果计数（不能解释不生效）、暴露逐题原检查详情（不需要且泄露材料）、复用既有历史/当前作用域分组的聚合结果与受限原因。选择第三种，仅修改现有conversationGuidanceStatus与测试；不建新服务、数据库或证书，不运行模型/worker/checker，不改变采用。
+
+新增independentResults：configuredStudies、unconfiguredStudies、recordedArms、pendingArms、verified/rejected/unverifiable、satisfiedStudies。仅configuredStudies的正式臂计数；每研究最多十臂，缺检查记pending，错误来源基线不是候选失败。satisfiedStudies必须复用hasSatisfiedGuidanceResultChecks，不以十个verified替代原必需失败，也不以缺一候选的九条通过放行；无字段历史不算独立通过。scope明确这是持久结果摘要，不是重新检查原生证据/整体采用资格/语义安全。
+
+新增activationPending：total为模型accepted且无activation的研究；independentResultsNotSatisfied只计算configured且guard未满足；quarantined按本次读取的准确全局隔离开关，对待采用研究计数；reasonUnestablished仅在以上均不能说明时计数。不按未知原因推断“准备好采用”，多个原因可重叠，隔离表示当前阻止新激活，不推断历史原因。既有accepted/active/rollback字段和当前Session按scope筛选意义不变。
+
+先通过实际learning_status工具测试：旧无字段结果归零、不造通过；五候选通过且至少一来源基线明确失败的合法例与全verified无改善、拒绝候选、缺结果、无法核验分开；隔离开/关独立；历史/当前作用域不同计数；无模型请求、原账本字节不变，无原任务/检查条件/输出/detail泄露。使用受控保存结果，不能声称自然效果。
+
+复用D工作区、依赖和测试根，运行小日志D:/DevData/tianwen-study-result-status-20261001；清理本轮可重建临时数据，D至少15GiB。最终相关回归、修改完整TS相对基线、八包类型、实际bundle及只读审查后仅推开发分支。完整目标、main/Daily NO-GO、正式隔离及原十工作日窗口保持。
