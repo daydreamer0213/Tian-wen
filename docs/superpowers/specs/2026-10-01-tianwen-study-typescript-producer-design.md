@@ -4,9 +4,9 @@
 
 比较重建临时工作区、伪造普通任务调用旧prepare、抽取现有编译准备核心。选择第三项：普通任务保持读取及合同；新增createConversationStudyTypeScriptCheck复用同一编译器和约束，直接消费研究保存的files.entries，不执行候选代码、不建立注册表或新增依赖。
 
-适用范围固定为单输出目标的strict noEmit检查。宿主须事前明确target/context/reference路径和原请求文本；所有context及参考必须在研究的完整冻结输入中，不能读取当前文件代替。案例criteria必须明确包含既有条件“The frozen target and context must have zero strict TypeScript noEmit diagnostics.”；缺条件、请求不符、文件缺失/路径不符、非法宿主编译选项均不准备。这里不推断功能正确性、不替开放文本建立真值，也不声称已有合法自然来源或语义独立。
+适用范围固定为单输出目标的strict noEmit检查。宿主仅对原任务明确要求零strict noEmit诊断的案例使用该入口，并事前明确target/context/reference路径、原请求文本和完整原criteria；构造器保存criteria而prepare精确匹配，不要求旧原话改写成某一句固定英文。所有context及参考必须在研究的完整冻结输入中，不能读取当前文件代替。缺原criteria、要求不符、文件缺失/路径不符、非法宿主编译选项均不准备。这里不推断功能正确性、不替开放文本建立真值，也不声称已有合法自然来源或语义独立。
 
-准备时以原保存文件覆盖所有声明输入，再冻结编译库/解析环境的观察。基线和候选共享同一闭包。输出须完整保留只读文件，原输入/要求/criteria/qualityContract及输出权限保持；新依赖不可核验。只有真实编译诊断可以归属原必需条件，抑制指令、项目约束、绑定错误和取消不能误归属。不得在结果出来后补标准或冷恢复重评。
+准备时以原保存文件覆盖所有声明输入，再冻结安装包/编译库的观察。未保存的实际本地文件（包括package metadata）或cwd外项目源码不得从今天磁盘补全；缺少便不准备。基线和候选共享同一闭包。输出须完整保留只读文件，原输入/要求/criteria/qualityContract及输出权限保持；新依赖不可核验。只有真实编译诊断可以归属原必需条件，抑制指令、项目约束、绑定错误和取消不能误归属。不得在结果出来后补标准或冷恢复重评。
 
 普通无新入口的checker身份/合同默认行为及现有API保持。正式激活隔离、main/Daily NO-GO、原发布门槛和十工作日窗口不变。工程测试不是自然研究/激活/效果证据。生成物仅D:/DevData/tianwen-study-typescript-20261001，复用依赖，不复制Profile；测试自清，D底线15GiB，偏好20GiB。
 

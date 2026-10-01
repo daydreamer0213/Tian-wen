@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { conversationExternalInputsDigest, parseConversationFileEntries, sha256, supportsConversationCodeCheck } from '../packages/tianwen-evolution/src/index.js'
+import { conversationExternalInputsDigest, parseConversationFileEntries, parseConversationFileMaterial, sha256, supportsConversationCodeCheck, type ConversationFileEntry } from '../packages/tianwen-evolution/src/index.js'
 import { readConversationFile } from '../packages/tianwen-runtime-bundle/src/conversation-file-material.js'
-import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
+import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation, PreparedConversationExternalCodeCheck } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
+import type { ConversationStudyResultCheck, ConversationStudyResultMaterial } from '../packages/tianwen-runtime-bundle/src/conversation-study-result-check.js'
 
 const CHECKER_ID = 'conversation-typescript-noemit'
 const CHECKER_PATH = fileURLToPath(import.meta.url)
@@ -105,7 +106,8 @@ function addsSuppression(candidate: string, original: string, fileName: string):
   return false
 }
 
-function captureHost(options: ts.CompilerOptions, cwd: string, targetKey: string, observations: Observations): ts.CompilerHost {
+function captureHost(options: ts.CompilerOptions, cwd: string, targetKey: string, observations: Observations,
+  allowUncapturedRead?: (path: string) => boolean): ts.CompilerHost {
   const host = ts.createCompilerHost(options, true)
   const readFile = host.readFile
   const fileExists = host.fileExists
@@ -115,7 +117,8 @@ function captureHost(options: ts.CompilerOptions, cwd: string, targetKey: string
   host.getCurrentDirectory = () => cwd
   host.readFile = (path) => {
     const key = pathKey(path)
-    if (!observations.texts.has(key)) observations.texts.set(key, readFile(path))
+    if (!observations.texts.has(key)) observations.texts.set(key,
+      allowUncapturedRead === undefined || allowUncapturedRead(path) ? readFile(path) : undefined)
     const text = observations.texts.get(key)
     return key === targetKey && text === undefined ? '' : text
   }
@@ -144,6 +147,66 @@ function captureHost(options: ts.CompilerOptions, cwd: string, targetKey: string
 }
 
 export function createConversationTypeScriptCheck(config: ConversationTypeScriptCheckConfig, constraint?: FrozenTypeScriptCandidateConstraint): ConversationExternalCodeCheck {
+  const core = createTypeScriptPreparation(config, constraint)
+  return { async prepare(material) {
+    material.signal.throwIfAborted()
+    if (!samePath(material.cwd, core.cwd) || directRequestText(material.request) !== core.requestText
+      || !supportsConversationCodeCheck(material.task.admission?.decision)) return undefined
+    return core.prepare(material.signal)
+  } }
+}
+
+/** A concrete study producer: saved declared inputs, not a fabricated ordinary Task or current target files. */
+export function createConversationStudyTypeScriptCheck(config: Omit<ConversationTypeScriptCheckConfig, 'requireCleanTypecheck'> & {
+  /** Exact original criteria; host opts in only for tasks that require this compiler condition. */
+  readonly criteria: readonly string[]
+},
+  constraint?: FrozenTypeScriptCandidateConstraint): ConversationStudyResultCheck {
+  if (!Array.isArray(config.criteria) || config.criteria.length === 0
+    || Array.from(config.criteria).some(item => typeof item !== 'string' || item.trim() === '')) throw new TypeError('Original study criteria required')
+  const criteriaDigest = sha256([...config.criteria])
+  const core = createTypeScriptPreparation({ ...config, requireCleanTypecheck: true }, constraint)
+  const contextPaths = [...config.contextPaths]
+  const materialBody = (material: ConversationStudyResultMaterial): ConversationStudyResultMaterial => ({
+    ...('request' in material ? { request: material.request, context: material.context, objective: material.objective,
+      ...(material.feedbackStandard === undefined ? {} : { feedbackStandard: material.feedbackStandard }) } : { prompt: material.prompt }),
+    criteria: material.criteria, ...(material.qualityContract === undefined ? {} : { qualityContract: material.qualityContract }), files: material.files,
+  })
+  return { async prepare(material) {
+    material.signal.throwIfAborted()
+    try {
+      const caseId = material.caseId, modelConfigDigest = material.modelConfigDigest
+      const body = structuredClone(materialBody(material))
+      const files = parseConversationFileMaterial(body.files)
+      if (files.outputKind !== 'files' || !samePath(files.cwd, core.cwd)
+        || ('request' in body ? directRequestText(body.request) : body.prompt) !== core.requestText
+        || sha256(body.criteria) !== criteriaDigest
+        || files.outputPaths.length !== 1 || files.outputPaths[0] !== core.targetPath
+        || contextPaths.some(path => !files.entries.some(entry => entry.path === path))) return undefined
+      const expected = [core.targetPath, ...core.referencePaths].map(path => files.entries.find(entry => entry.path === path))
+      if (expected.some(entry => entry === undefined)
+        || conversationExternalInputsDigest(expected as ConversationFileEntry[]) !== conversationExternalInputsDigest(files.entries)) return undefined
+      const bodyDigest = sha256(body)
+      const prepared = await core.prepare(material.signal, files.entries)
+      material.signal.throwIfAborted()
+      if (prepared === undefined || prepared.requiredCondition === undefined) return undefined
+      return { ...prepared, requiredCondition: prepared.requiredCondition,
+        contractDigest: sha256({ compilerContract: prepared.contractDigest, caseId,
+          modelConfigDigest, materialDigest: bodyDigest }),
+        async evaluate(candidate) {
+          candidate.signal.throwIfAborted()
+          try {
+            if (sha256(materialBody(candidate)) !== bodyDigest) return { status: 'unverifiable' as const, detail: 'Frozen study requirements or original files mismatch.' }
+          } catch { return { status: 'unverifiable' as const, detail: 'Frozen study requirements or original files unavailable.' } }
+          return prepared.evaluate({ request: 'request' in body ? body.request : [], context: 'request' in body ? body.context : [],
+            inputs: candidate.inputs, outputs: candidate.outputs, outputPaths: candidate.outputPaths, signal: candidate.signal })
+        },
+      }
+    } catch { material.signal.throwIfAborted(); return undefined }
+  } }
+}
+
+function createTypeScriptPreparation(config: ConversationTypeScriptCheckConfig, constraint?: FrozenTypeScriptCandidateConstraint) {
   if (config.requireCleanTypecheck !== undefined && typeof config.requireCleanTypecheck !== 'boolean') throw new TypeError('requireCleanTypecheck must be a boolean')
   const requiredCondition = config.requireCleanTypecheck === true ? TYPECHECK_REQUIRED_CONDITION : undefined
   const frozenConstraint = constraint === undefined ? undefined : { digest: constraint.digest, check: constraint.check }
@@ -165,12 +228,9 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
   const compilerDigest = sha256(readFileSync(requireFromHere.resolve('typescript'), 'utf8'))
   const checkerDigest = sha256(readFileSync(CHECKER_PATH, 'utf8'))
 
-  return {
-    async prepare(material) {
-      material.signal.throwIfAborted()
-      if (!samePath(material.cwd, cwd)) return undefined
-      if (directRequestText(material.request) !== requestText) return undefined
-      if (!supportsConversationCodeCheck(material.task.admission?.decision)) return undefined
+  return { cwd, requestText, targetPath, referencePaths,
+    async prepare(signal: AbortSignal, savedInputs?: readonly ConversationFileEntry[]): Promise<PreparedConversationExternalCodeCheck | undefined> {
+      signal.throwIfAborted()
       const targetFull = inside(cwd, targetPath)
       if (targetFull === undefined) return undefined
       const contextFulls: string[] = []
@@ -180,24 +240,55 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
         contextFulls.push(full)
       }
       const observations: Observations = { texts: new Map(), files: new Map(), directories: new Map(), children: new Map(), realPaths: new Map() }
+      if (savedInputs !== undefined) {
+        for (const entry of savedInputs) {
+          const full = inside(cwd, entry.path)
+          if (full === undefined) return undefined
+          observations.texts.set(pathKey(full), entry.content ?? undefined)
+          observations.files.set(pathKey(full), entry.content !== null)
+          observations.realPaths.set(pathKey(full), full)
+          // A saved file's containing tree is part of its virtual preimage,
+          // even when the original project directories have since disappeared.
+          let directory = dirname(full)
+          for (;;) {
+            const key = pathKey(directory)
+            observations.directories.set(key, true)
+            if (!observations.children.has(key)) observations.children.set(key, [])
+            observations.realPaths.set(key, directory)
+            if (samePath(directory, cwd)) break
+            const parent = dirname(directory), parentKey = pathKey(parent)
+            observations.children.set(parentKey, [...new Set([...(observations.children.get(parentKey) ?? []), basename(directory)])].sort())
+            directory = parent
+          }
+        }
+      }
       const references = []
       try {
         for (const path of referencePaths) {
-          material.signal.throwIfAborted()
-          const reference = await readConversationFile(cwd, path)
-          material.signal.throwIfAborted()
+          signal.throwIfAborted()
+          const reference = savedInputs === undefined ? await readConversationFile(cwd, path) : savedInputs.find(entry => entry.path === path)
+          signal.throwIfAborted()
+          if (reference === undefined) return undefined
           if (reference.content === null || reference.path !== path) return undefined
           references.push(reference)
           observations.texts.set(pathKey(resolve(cwd, path)), reference.content)
           observations.files.set(pathKey(resolve(cwd, path)), true)
         }
-      } catch { material.signal.throwIfAborted(); return undefined }
+      } catch { signal.throwIfAborted(); return undefined }
       const targetKey = pathKey(targetFull)
-      const host = captureHost(options, cwd, targetKey, observations)
+      let unsavedSource = false
+      const host = captureHost(options, cwd, targetKey, observations, savedInputs === undefined ? undefined : path => {
+        // Installed compiler/package libraries are the captured host environment.
+        // All other existing files (including local package metadata) must be saved inputs.
+        if (pathKey(path).split('/').includes('node_modules') || !existsSync(path)) return true
+        unsavedSource = true
+        return false
+      })
       const baseline = ts.createProgram([targetFull, ...contextFulls], options, host)
       ts.getPreEmitDiagnostics(baseline)
+      if (unsavedSource) return undefined
       if (requiredCondition !== undefined && baseline.getOptionsDiagnostics().length !== 0) return undefined
-      material.signal.throwIfAborted()
+      signal.throwIfAborted()
       const originalContent = observations.texts.get(targetKey) ?? null
       const inputs = [{ path: targetPath, content: originalContent }, ...references]
       let inputsDigest: ReturnType<typeof sha256> | undefined
@@ -212,6 +303,7 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
         compiler: ts.version, options, compilerDigest, checkerDigest,
         ...(requiredCondition === undefined ? {} : { requiredCondition }),
         ...(referencePaths.length === 0 ? {} : { referencePaths }),
+        ...(savedInputs === undefined ? {} : { savedInputsDigest: conversationExternalInputsDigest(savedInputs) }),
         ...(frozenConstraint === undefined ? {} : { constraintDigest: frozenConstraint.digest }),
         manifest,
         files: [...observations.files].sort(compareKeys),
