@@ -1,0 +1,27 @@
+# 可信检查错误归属已精确撤回
+
+## 产品变化
+
+实现提交02d8b23b02de9af1345159dcf169c00fab7780b0，开发分支codex/conversation-claim-evidence。可信宿主可以对确证误发的独立检查追加task-external-check-invalidated，精确绑定原task/preparation/完整finished摘要；原请求、模型评价、输出、检查结果不可覆盖。同一通知幂等，错误绑定/未完成/不同通知拒绝，关闭学习同意后仍可撤回。
+
+共享来源和成功对照不再使用失效检查。原model-not-met及真实反馈仍按原规则独立成立；研究支持、新采用与后续回归使用同一状态，既有方法支持失效沿原support-retracted回滚。历史裁决在原事件时序回放，不添加过去的检查要求；持久失效后中断回滚可由重复通知或现有启动治理补完。Runtime原宿主写接口发出失效事件并唤醒现有循环，没有模型工具可自行撤回；状态保留历史结果计数并另列invalidated。
+
+## 实际误证据结果
+
+唯一追加发生在原正式持续DEV Profile D:/DevData/tianwen-development-learning-20261001，实际task为conversation-task:1f5cb642920f172cd1a86fd9f8aef6e59d6143de120b2d8be261ec66fbf8ea86。事前只读核实原冻结检查把标题格式拒绝误标为原必需条件失败，当前共享函数确实返回qualified；这不是功能失败证明。未修改冻结检查器或原候选，未重跑旧任务、重判、修稿或接纳源码。
+
+通过正式Runtime服务精确追加一次通知后，原task只新增externalCheckInvalidated，model met/program rejected原样保留；共享conversationCheckedFailureSource返回undefined。原账本SHA-256 906a2bb793723cb7e2e22d85eff3b9e9cdf71e68b6d8600ef8dd4e526d19d502的全部字节前缀保留，新账本b67047d4767e62b962dc1db4d962d0663f79d1a83c668c0ada25058cf23aff59。正式冷启动再次确认同一task/失效通知、原成功68bca记录不变、账本不改，0模型请求。
+
+持续档仍4任务、0研究、awaiting-compatible-sources、正式隔离true；原成功任务met/verified保持。本轮实际证明的是错误证据退出资格，不是自然方法回滚、研究、采用或未来效果成功。完整目标active/incomplete，main/Daily NO-GO、原门槛和原决策窗口保持。
+
+## 检查与限制
+
+新增14项检查覆盖精确绑定/关闭同意/幂等、来源和对照、新研究和采用、有效原模型失败、现有方法回滚、后续回归、冷恢复及持久通知后回滚中断。原实现先有13项missing-record失败，补实现后检查类型声明曾未更新导致Runtime读取旧dist，以及三处测试夹具断言错误；刷新八包声明及修夹具后两组117项通过，新增中断恢复1项通过。原状态报告另验证宿主事件只发一次、保留原计数且不泄露原材料。
+
+六组回归首次451/452，一项preset审计使用默认Windows ADMINI~1临时路径，被既有安装路径校验拒绝；明确指定D盘后首次单项复核还因fixture父目录未建立失败，建立本轮自有父目录后该项通过。失败日志保留，未修改产品安装规则、未重跑自然任务。合计8组不同570项通过，非同一轮全量全绿；八包类型及实际runtime-bundle构建0，九修改TS含完整两测试虚拟strict/noEmit对992e1eb旧0/现0。独立只读审查没有重要问题，中断恢复要求随后由新增检查直接证明。
+
+## 资源和下一入口
+
+本轮小脚本/日志/摘要放D:/DevData/tianwen-check-invalidation-20261001，复用Profile/工作区/依赖，没有全量副本或模型新会话。新测试根全部清理；本轮默认路径失败留下的单个空目录精确验证后删除，旧空目录未动。D约18.49GiB，高于15GiB，未达到20GiB偏好；不绕过历史清理拒绝边界。
+
+下一自行选择不同的实际功能待办及候选之外的事前依据。未来检查合同将格式诊断和原必需条件确证失败分别归属，不复用误标的冻结脚本。继续核实兼容问题来源、可信独立案例、研究/采用及后续效果；不能把本次治理修复当这些阶段已完成，也不等待所有者提供任务或评价OfferGo原稿。

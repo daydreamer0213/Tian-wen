@@ -1,6 +1,12 @@
 # Tianwen 当前项目权威交接
 
-## 2026-10-01 新实际任务原生完成但合同拒收；下一修错误独立证据失效，停止格式门槛凑学习
+## 2026-10-01 错误宿主检查失效已实现；实际误资格退出，完整自动学习仍未完成
+
+02d8b23实现精确task/preparation/finished失效通知，原评价和结果保留；来源/对照/研究采用/后续回归一致消费，已有方法支持失效沿原治理回滚，重复和中断恢复可补完。新增14项机制检查；8组不同570项通过（首回归有Windows短路径配置失败，D盘针对复核通过，原失败保留），八包类型/实际bundle0，完整九修改TS旧0/现0，只读审查无重要问题。见[实现及实际结果](tianwen-check-invalidation-20261001.md)。
+
+原持续DEV唯一task 1f5cb已通过正式Runtime服务追加一次通知，原model met/program rejected及全部旧账本字节前缀保留，共享来源现在undefined。新账本b67047d4767e62b962dc1db4d962d0663f79d1a83c668c0ada25058cf23aff59；正式冷恢复不改账本、0请求，原68bca成功保持。仍4任务/0研究/awaiting-compatible-sources/隔离true；无真实新研究、采用或未来效果，main/Daily NO-GO、原门槛/窗口保持。完整目标active/incomplete，下一自主选择不同功能待办及事前依据，不等待用户输入、不重跑旧题或复用误标合同。本轮小记录及自有测试清理完成，D18.49GiB≥15GiB，未达20GiB偏好。
+
+## 2026-10-01 新实际任务原生完成但合同拒收；此时尚未实现检查证据失效
 
 16e34b5/83b73fb事前冻结五案例材料保护实际待办，唯一新session正式6提供者/根3/2成功read→edit/0重试，原model met、程序rejected仅因原标题缺控制端要求的index文字；驱动按原停止条件恢复目标、保存原候选/压缩原生证据，无修稿/重跑/接纳。虚拟candidate strict0，未执行新增12测试。见[准确结果与下一入口](tianwen-study-material-matrix-task-20261001.md)。
 

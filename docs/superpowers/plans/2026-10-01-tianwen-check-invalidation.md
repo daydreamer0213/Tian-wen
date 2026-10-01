@@ -23,6 +23,6 @@ Files: evolution/src/conversation-external-check.ts、conversation-learning.ts�
 
 ### Task 2: 实际误证据精确撤回
 
-- [ ] 事前保存实际ledger和原task摘要、拟通知，核对无活动调用/原结果及误归属证据；通过正式Runtime服务追加唯一通知，0模型，不改原评价或原ledger行。
-- [ ] 冷读确认原task只新增失效字段、原字节前缀保持、共享来源undefined、原成功任务不受影响；readiness及正式隔离保持。
-- [ ] 记录实际变化/资源和剩余完整学习缺口，清理本轮测试根，提交推送开发分支，不合并main。
+- [x] 事前保存实际ledger和原task摘要、拟通知，核对无活动调用/原结果及误归属证据；通过正式Runtime服务追加唯一通知，0模型，不改原评价或原ledger行。
+- [x] 冷读确认原task只新增失效字段、原字节前缀保持、共享来源undefined、原成功任务不受影响；readiness及正式隔离保持。
+- [x] 记录实际变化/资源和剩余完整学习缺口，清理本轮测试根，提交推送开发分支，不合并main。
