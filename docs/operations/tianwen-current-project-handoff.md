@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 新实际消息字段待办原生修复通过；持续档新增完整普通成功记录
+
+8f3c812事前固定两字段有限要求、13项控制及0模型预检后，复用正式持续DEV执行一次新任务：7实际请求/根3/工具2成功read后edit/0重试，天问只补原生材料测试的合成source及事件step:1。原输入/实际模型/检查/候选绑定、成功操作顺序及完整文件恢复均核对，原模型met、独立程序verified分别保存。原样候选3/3、单目标strict0、只读审查无重要问题；控制端未替换修稿。见[真实结果及接纳边界](tianwen-native-message-source-20261001.md)。
+
+初source-only控制揭露隐藏缺step，合同在真实任务前已修订；尾逗号投影及同意元数据初失败保留，未回填旧失败。本题候选仅修两个字段，合成provider/model不是历史真实消息证明。正式冷恢复0模型、原新task/material/账本字节保持；持续档3任务中旧两项inconclusive保持，新项met/verified，readiness仍awaiting-compatible-sources、0研究/反馈/激活、隔离true。完整学习C—F/NO-GO/原门槛/十工作日窗口不变，目标active；一项有限成功不能代替两条问题来源或五案例依据，不再重做本题凑来源。
+
+运行约273KB、复用Profile约3.49MB，压缩原生快照、无新副本/依赖/自有测试临时根，D18.56GiB。继续自主选择实际未完成待办与适用事前结果依据，缺证不扩空平台或编反馈；OfferGo暂不评价保持。
+
 ## 2026-10-01 已核验原要求失败可进入重复问题来源；原模型评价与裁决保持
 
 自主换选实际核心消费者缺口，合法受控探针确认原model met/qualified条件失败被旧support忽略。645cec3基线、5b55b63设计后，增加可选精确checkedFailureSources双引用：仅完整code/local-files/files、事前原requiredCondition失败、两不同原输入与同检查/条件、同检查verified且原met对照；原模型失败和持续反馈优先，pending/正面反馈与不利对照阻止。runtime与ledger一致核对，旧无字段形状/摘要/重放/幂等保持，不改十臂baseline失败规则。见[消费者实施及失败记录](tianwen-checked-failure-sources-20261001.md)。
