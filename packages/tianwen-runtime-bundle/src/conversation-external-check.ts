@@ -29,7 +29,9 @@ export interface PreparedConversationExternalCodeCheck {
   readonly inputs: readonly ConversationFileEntry[]
   /** Original mandatory condition; evaluator marks only a proved failure of it. */
   readonly requiredCondition?: string
-  /** Trusted host code: frozen sources only, no execution of generated code. */
+  /** Bounded isolated producers own cleanup and must settle before cancellation leaves the observer. */
+  readonly waitsForCancellationCleanup?: true
+  /** Trusted host code over frozen material. Generated code runs only through an explicit, bounded isolated host producer. */
   readonly evaluate: (candidate: ConversationExternalCodeCandidate) => Promise<ConversationExternalCheckOutcome>
 }
 export interface ConversationExternalCodeCheck {
@@ -37,8 +39,13 @@ export interface ConversationExternalCodeCheck {
   readonly prepare: (material: ConversationExternalCodePreparation) => Promise<PreparedConversationExternalCodeCheck | undefined>
 }
 
-export async function withConversationObservationCancellation<T>(signal: AbortSignal, start: () => Promise<T>): Promise<T> {
+export async function withConversationObservationCancellation<T>(signal: AbortSignal, start: () => Promise<T>, waitsForCleanup = false): Promise<T> {
   signal.throwIfAborted()
+  if (waitsForCleanup) {
+    const result = await start()
+    signal.throwIfAborted()
+    return result
+  }
   let remove = () => {}
   const cancelled = new Promise<never>((_resolve, reject) => {
     const abort = () => reject(new Error('external check cancelled'))
@@ -52,7 +59,7 @@ export async function withConversationObservationCancellation<T>(signal: AbortSi
 
 /** Owned by the ordinary observer, with no separate Agent loop or result store. */
 export class ConversationExternalCodeChecks {
-  private readonly states = new Map<string, PreparedConversationExternalCodeCheck['evaluate']>()
+  private readonly states = new Map<string, Pick<PreparedConversationExternalCodeCheck, 'evaluate' | 'waitsForCancellationCleanup'>>()
   private readonly checking = new Set<string>()
   private readonly controllers = new Set<AbortController>()
   constructor(private readonly ctx: Context, private readonly check?: ConversationExternalCodeCheck) {}
@@ -96,7 +103,8 @@ export class ConversationExternalCodeChecks {
         requestDigest: task.source.requestDigest, contextDigest: task.source.contextDigest, admissionDigest: sha256(task.admission), modelConfigDigest,
         checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
         inputsDigest: conversationExternalInputsDigest(prepared.inputs), ...(prepared.requiredCondition === undefined ? {} : { requiredCondition: prepared.requiredCondition }) })
-      this.states.set(task.source.taskId, prepared.evaluate)
+      this.states.set(task.source.taskId, { evaluate: prepared.evaluate,
+        ...(prepared.waitsForCancellationCleanup === true ? { waitsForCancellationCleanup: true } : {}) })
     } catch (error) { this.ctx.logger.warn('External check preparation unavailable: %s', this.detail(error)) }
     finally { this.controllers.delete(controller) }
   }
@@ -128,15 +136,16 @@ export class ConversationExternalCodeChecks {
     if (task?.externalCheckPrepared === undefined || task.completion === undefined || task.externalCheckFinished !== undefined
       || this.checking.has(taskId) || !this.authorized(task.source.consentRevision)) return
     this.checking.add(taskId)
-    const evaluate = this.states.get(taskId); this.states.delete(taskId)
+    const evaluator = this.states.get(taskId); this.states.delete(taskId)
     const controller = new AbortController(); this.controllers.add(controller)
     try {
       let outcome: ConversationExternalCheckOutcome = { status: 'unverifiable', detail: 'Prepared check state unavailable; no post-answer preparation or rerun.' }
-      if (evaluate !== undefined) {
+      if (evaluator !== undefined) {
         try {
           const material = await this.candidate(task, controller.signal)
           if (controller.signal.aborted || !this.authorized(task.source.consentRevision)) return
-          outcome = parseConversationExternalCheckOutcome(await withConversationObservationCancellation(controller.signal, () => evaluate(material)))
+          outcome = parseConversationExternalCheckOutcome(await withConversationObservationCancellation(controller.signal,
+            () => evaluator.evaluate(material), evaluator.waitsForCancellationCleanup === true))
           // The check consumes frozen values; a concurrent rewrite of original
           // native evidence must still prevent a conclusive receipt.
           await this.candidate(task, controller.signal)

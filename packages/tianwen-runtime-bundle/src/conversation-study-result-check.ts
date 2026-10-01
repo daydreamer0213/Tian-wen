@@ -27,8 +27,10 @@ export interface PreparedConversationStudyResultCheck {
   readonly checkerDigest: ReturnType<typeof sha256>
   readonly contractDigest: ReturnType<typeof sha256>
   readonly requiredCondition: string
+  /** Explicit bounded isolated producer; cancellation waits for its owned cleanup. */
+  readonly waitsForCancellationCleanup?: true
   readonly inputs: readonly ConversationFileEntry[]
-  /** Trusted host code only; never execute generated code. Shared by both arms. */
+  /** Trusted host check shared by both arms. Generated code requires an explicit, bounded isolated host producer. */
   readonly evaluate: (candidate: ConversationStudyResultCandidate) => Promise<ConversationExternalCheckOutcome>
 }
 export interface ConversationStudyResultCheck {
@@ -49,14 +51,14 @@ export interface ConversationStudyResultCheck {
 }
 export interface PreparedStudyResultChecks {
   readonly checks: readonly GuidanceCaseResultCheck[]
-  readonly evaluators: ReadonlyMap<string, { readonly material: ConversationStudyResultMaterial, readonly evaluate: PreparedConversationStudyResultCheck['evaluate'] }>
+  readonly evaluators: ReadonlyMap<string, { readonly material: ConversationStudyResultMaterial, readonly evaluate: PreparedConversationStudyResultCheck['evaluate'], readonly waitsForCancellationCleanup?: true }>
 }
 export async function prepareConversationStudyResultChecks(check: ConversationStudyResultCheck, body: GuidanceStudyBody,
   materials: readonly (ConversationTaskMaterial | { readonly prompt: string, readonly criteria: readonly string[], readonly qualityContract?: ConversationQualityContract, readonly files?: ConversationFileMaterial })[],
   signal: AbortSignal): Promise<PreparedStudyResultChecks> {
   if (body.family !== 'code' || body.evaluationMode !== 'local-files' || body.fileOutputKind !== 'files' || materials.length !== 5) throw new Error('source-unavailable')
   const checks: GuidanceCaseResultCheck[] = []
-  const evaluators = new Map<string, { material: ConversationStudyResultMaterial, evaluate: PreparedConversationStudyResultCheck['evaluate'] }>()
+  const evaluators = new Map<string, { material: ConversationStudyResultMaterial, evaluate: PreparedConversationStudyResultCheck['evaluate'], waitsForCancellationCleanup?: true }>()
   for (const [index, value] of materials.entries()) {
     if (value.files?.outputKind !== 'files' || sha256(value) !== body.cases[index]!.materialDigest) throw new Error('source-unavailable')
     const material: ConversationStudyResultMaterial = structuredClone({
@@ -71,7 +73,8 @@ export async function prepareConversationStudyResultChecks(check: ConversationSt
       || conversationExternalInputsDigest(prepared.inputs) !== conversationExternalInputsDigest(material.files.entries)) throw new Error('source-unavailable')
     checks.push({ caseId: body.cases[index]!.id, checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest,
       contractDigest: prepared.contractDigest, inputsDigest: conversationExternalInputsDigest(material.files.entries), requiredCondition: prepared.requiredCondition })
-    evaluators.set(body.cases[index]!.id, { material, evaluate: prepared.evaluate })
+    evaluators.set(body.cases[index]!.id, { material, evaluate: prepared.evaluate,
+      ...(prepared.waitsForCancellationCleanup === true ? { waitsForCancellationCleanup: true } : {}) })
   }
   return { checks: parseGuidanceCaseResultChecks(checks, body), evaluators }
 }
@@ -84,7 +87,7 @@ export async function evaluateConversationStudyResultCheck(prepared: PreparedStu
     const outcome = parseConversationExternalCheckOutcome(await withConversationObservationCancellation(signal, () => current.evaluate({
       ...structuredClone(current.material), answer: output.answer, inputs: structuredClone(current.material.files.entries),
       outputs: structuredClone(output.files), outputPaths: [...current.material.files.outputPaths], signal,
-    })))
+    }), current.waitsForCancellationCleanup === true))
     if (outcome.failedRequiredConditionDigest !== undefined && outcome.failedRequiredConditionDigest !== sha256(check.requiredCondition)) throw new Error('Check failure does not match the frozen required condition.')
     return outcome
   } catch (error) {

@@ -601,6 +601,33 @@ it.each(['prepare', 'evaluate'] as const)('releases observer work when consent i
   }
 })
 
+it('waits for opt-in isolated cleanup after ordinary consent revocation without saving a late result', async () => {
+  let entered!: () => void, release!: () => void, aborted = false
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const check: ConversationExternalCodeCheck = { async prepare() { return {
+    checkerId: 'bounded-cleanup-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'), waitsForCancellationCleanup: true,
+    inputs: [{ path: 'input.ts', content: 'before' }], async evaluate(candidate) {
+      candidate.signal.addEventListener('abort', () => { aborted = true }, { once: true }); entered(); await held
+      candidate.signal.throwIfAborted(); return { status: 'verified', detail: 'Complete bounded cleanup.' }
+    },
+  } } }
+  const harness = await mount([structured(externalCode), toolCallResponse('cleanup-write', 'write', { file_path: 'input.ts', content: 'after' }),
+    textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  let idle = false
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.')); await started
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    const pending = harness.ctx.tianwenConversationObserver.whenIdle().then(() => { idle = true })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(aborted).toBe(true); expect(idle).toBe(false)
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished).toBeUndefined()
+    release(); await pending
+    expect(idle).toBe(true); expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.externalCheckFinished).toBeUndefined()
+  } finally { release(); await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('does not evaluate an external check when the original native session cannot flush', async () => {
   let evaluations = 0
   const check: ConversationExternalCodeCheck = { async prepare() { return {

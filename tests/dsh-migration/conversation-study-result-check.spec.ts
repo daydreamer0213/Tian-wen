@@ -79,3 +79,17 @@ it('does not turn cancellation into an unverifiable result receipt', async () =>
   f.evaluate.mockImplementation(async () => { f.controller.abort(); return { status: 'verified', detail: 'late' } })
   await expect(evaluateConversationStudyResultCheck(saved, 'source1', { answer: 'actual', files: [] }, f.controller.signal)).rejects.toThrow()
 })
+it('preserves a bounded producer cleanup promise through formal study preparation and cancellation', async () => {
+  const f = fixture(), original = f.check.prepare
+  let release!: () => void, entered!: () => void
+  const held = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { entered = resolve })
+  const check: ConversationStudyResultCheck = { async prepare(material) { return { ...(await original(material))!, waitsForCancellationCleanup: true,
+    async evaluate(candidate) { entered(); await held; candidate.signal.throwIfAborted(); return { status: 'verified', detail: 'Cleanup complete.' } },
+  } } }
+  const saved = await prepareConversationStudyResultChecks(check, f.body, f.materials, f.controller.signal)
+  let settled = false
+  const pending = evaluateConversationStudyResultCheck(saved, 'source1', { answer: 'actual', files: [] }, f.controller.signal)
+  pending.catch(() => { settled = true }); await started; f.controller.abort()
+  await new Promise(resolve => setTimeout(resolve, 5)); const endedBeforeCleanup = settled
+  release(); await expect(pending).rejects.toThrow(); expect(endedBeforeCleanup).toBe(false)
+})
