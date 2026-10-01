@@ -6,6 +6,7 @@ import { sha256, parseClaimAudit, parseConversationAuditedReviewChecks, parseCon
 import { parseConversationFileMaterial, parseConversationFileEntries, parseConversationFileAncillaryContext, type ConversationFileTrialOutput } from '@tianwen/evolution'
 import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, recoverConversationJudgmentRequest, runConversationJudgment } from './conversation-judgment.js'
 import { fileExecutionTexts, parseFileExecutionEvidence } from './conversation-task-material.js'
+import { splitConversationFileReviewText } from './conversation-file-review-units.js'
 
 export type { ClaimAudit } from '@tianwen/evolution'
 
@@ -41,7 +42,7 @@ export interface ClaimEvidenceItem {
 }
 
 export interface ClaimEvidence {
-  readonly schemaVersion: 'tianwen.claim-evidence.v1'
+  readonly schemaVersion: 'tianwen.claim-evidence.v1' | 'tianwen.claim-evidence.v2'
   readonly items: readonly ClaimEvidenceItem[]
   readonly evidenceDigest: string
 }
@@ -66,7 +67,8 @@ function materialBytes(material: unknown): number {
 }
 
 /** Lossless, role-preserving projection for audited conversation review. */
-export function projectClaimEvidence(material: unknown): ClaimEvidence {
+export function projectClaimEvidence(material: unknown, projection: 'line-v1' | 'file-chunks-v1' = 'line-v1'): ClaimEvidence {
+  if (projection !== 'line-v1' && projection !== 'file-chunks-v1') throw new Error('invalid-judgment')
   boundReviewMaterial('material-bytes', materialBytes(material), CONVERSATION_MATERIAL_MAX_BYTES)
   if (!record(material)) throw new Error('invalid-judgment')
   const items: ClaimEvidenceItem[] = []
@@ -82,11 +84,13 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
   if (fileResult !== undefined && (files === undefined || !record(fileResult) || !exactKeys(fileResult, ['answer', 'files', 'outputDigest'])
     || typeof fileResult.answer !== 'string' || sha256({ answer: fileResult.answer, files: fileResult.files }) !== fileResult.outputDigest)) throw new Error('invalid-judgment')
   const finalEntries = record(fileResult) ? parseConversationFileEntries(fileResult.files) : undefined
+  if (projection === 'file-chunks-v1' && (files?.outputKind !== 'files' || finalEntries === undefined)) throw new Error('invalid-judgment')
   if (finalEntries !== undefined && files !== undefined && (sha256(finalEntries.map(entry => entry.path)) !== sha256(files.entries.map(entry => entry.path))
     || files.outputPaths.some(path => finalEntries.find(entry => entry.path === path)?.content == null))) throw new Error('invalid-judgment')
   const addFile = (path: string, content: string, stage: 'initial' | 'final') => {
     const origin = stage === 'initial' ? 'tool' : 'answer'
-    for (const text of content === '' ? [''] : splitText(content)) items.push({ id: `${origin}-${++counters[origin]}`, origin, role: origin,
+    const chunks = projection === 'file-chunks-v1' ? splitConversationFileReviewText(content) : content === '' ? [''] : splitText(content)
+    for (const text of chunks) items.push({ id: `${origin}-${++counters[origin]}`, origin, role: origin,
       text, filePath: path, fileStage: stage, ...(stage === 'initial' ? { toolStatus: 'success' as const } : {}) })
   }
   const preimages = () => {
@@ -151,7 +155,18 @@ export function projectClaimEvidence(material: unknown): ClaimEvidence {
   if (answers.length === 0) throw new Error('invalid-judgment')
   boundReviewMaterial('answer-bytes', Buffer.byteLength(answers.map(item => item.text).join(''), 'utf8'), 32_768)
   boundReviewMaterial('answer-units', answers.length, 128)
-  return { schemaVersion: 'tianwen.claim-evidence.v1', items, evidenceDigest: sha256(items) }
+  return { schemaVersion: projection === 'file-chunks-v1' ? 'tianwen.claim-evidence.v2' : 'tianwen.claim-evidence.v1', items, evidenceDigest: sha256(items) }
+}
+
+function newReviewProjection(material: unknown): 'line-v1' | 'file-chunks-v1' {
+  if (!record(material)) return 'line-v1'
+  const source = record(material.source) ? material.source : material.task
+  return record(source) && record(source.files) && source.files.outputKind === 'files' ? 'file-chunks-v1' : 'line-v1'
+}
+
+function recoverClaimEvidence(original: unknown, saved: unknown): ClaimEvidence {
+  if (!record(saved) || (saved.schemaVersion !== 'tianwen.claim-evidence.v1' && saved.schemaVersion !== 'tianwen.claim-evidence.v2')) throw new Error('invalid-judgment')
+  return projectClaimEvidence(original, saved.schemaVersion === 'tianwen.claim-evidence.v2' ? 'file-chunks-v1' : 'line-v1')
 }
 
 const kinds = ['source-fact', 'advice', 'inference', 'fiction', 'general-knowledge', 'non-factual'] as const
@@ -324,7 +339,7 @@ function studyQuoteChoices(material: unknown, purpose: 'original-result' | 'meth
 export async function runConversationClaimReview(ctx: Context, parent: Agent, input: ClaimReviewInput) {
   // File tool readbacks contain generated output and cannot ground themselves.
   if (record(input.material) && input.material.evaluationMode === 'local-files' && 'toolEvidence' in input.material) input = { ...input, material: { ...input.material, toolEvidence: [] } }
-  const evidence = projectClaimEvidence(input.material)
+  const evidence = projectClaimEvidence(input.material, newReviewProjection(input.material))
   const quoteChoices = studyQuoteChoices(input.material, input.purpose ?? 'original-result', evidence)
   const material = { original: structuredClone(input.material), claimEvidence: evidence }
   let schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
@@ -387,7 +402,7 @@ export async function verifyConversationClaimReviewCheck(ctx: Context, check: Co
     || (fileMode ? expected.fileOutput === undefined || expected.fileOutput.outputDigest !== expected.outputDigest || sha256(original.fileResult) !== sha256(expected.fileOutput) || original.answer !== expected.fileOutput.answer
       : original.fileResult !== undefined || sha256(original.answer) !== expected.outputDigest)
     || recovered.instruction !== fileClaimInstruction(original, expected.purpose, check.focus)) throw new Error('invalid-judgment')
-  const evidence = projectClaimEvidence(original)
+  const evidence = recoverClaimEvidence(original, recovered.material.claimEvidence)
   if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('invalid-judgment')
   const quoteChoices = studyQuoteChoices(original, expected.purpose, evidence)
   validateClaimAudit(check.audit, evidence, check.verdict)
@@ -403,7 +418,9 @@ export async function verifyConversationOriginalReviewCheck(ctx: Context, check:
     || !record(recovered.material) || !exactKeys(recovered.material, ['original', 'claimEvidence'])
     || sha256(recovered.material.original) !== sha256(original)
     || recovered.instruction !== fileClaimInstruction(original, 'original-result', check.focus)) throw new Error('source-unavailable')
-  const evidence = projectClaimEvidence(original)
+  let evidence: ClaimEvidence
+  try { evidence = recoverClaimEvidence(original, recovered.material.claimEvidence) }
+  catch { throw new Error('source-unavailable') }
   if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('source-unavailable')
   validateClaimAudit(check.audit, evidence, check.verdict)
   if (check.evidenceQuotes.some(quote => !evidence.items.some(item => item.text.includes(quote)))) throw new Error('source-unavailable')

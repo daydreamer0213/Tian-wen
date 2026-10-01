@@ -156,6 +156,41 @@ it('retains a verified independent result but classifies full-file review overfl
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('reviews a complete multiline file with packed v2 evidence and cold-recovers without extra requests', async () => {
+  const code = { ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }
+  const content = 'export const value = 1;\r\n\n'.repeat(343)
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    return { checkerId: 'multiline-byte-equality', checkerDigest: sha256('probe'), contractDigest: sha256(content),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate(candidate) {
+        return candidate.outputs[0]?.content === content ? { status: 'verified', detail: 'Frozen byte equality only.' }
+          : { status: 'rejected', detail: 'Frozen byte mismatch.' }
+      } }
+  } }
+  const harness = await mount([structured(code), toolCallResponse('packed-write', 'write', { file_path: 'input.ts', content }),
+    textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.followup(direct('Replace input.ts with the supplied multiline content.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.completion?.files?.entries[0]?.content).toBe(content)
+    expect(task.externalCheckFinished?.status).toBe('verified')
+    expect(task.review?.verdict).toBe('met')
+    expect(task.review?.reviewChecks).toHaveLength(2)
+    expect(harness.adapter.requests).toHaveLength(5)
+    const supplied = harness.adapter.requests[3]?.messages.flatMap(message => message.content
+      .flatMap(block => block.type === 'text' ? [block.text] : [])).join('\n') ?? ''
+    expect(supplied).toContain('tianwen.claim-evidence.v2')
+    const recovery = await mount([], false, undefined, harness.root)
+    try {
+      expect(recovery.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(task)
+      expect((await recoverConversationTaskMaterial(recovery.ctx, task)).files?.entries[0]?.content).toBe('before')
+      expect(recovery.adapter.requests).toHaveLength(0)
+      expect(recovery.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    } finally { await recovery.handle.dispose(); await recovery.ctx.fiber.dispose() }
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['external', 'local-files'] as const)('uses the concrete TypeScript host check in ordinary %s code observation without authorizing learning', async mode => {
   const requestText = 'Repair the type of value in input.ts; change only input.ts.'
   let harness: Awaited<ReturnType<typeof mount>>
