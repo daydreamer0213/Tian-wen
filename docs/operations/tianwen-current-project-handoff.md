@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 五不同功能合同具体研究供应器已交付；自然学习未完成
+
+bcea39e设计后3f5c49a在原脚本内薄组合closed五角色完整saved material及各自cases/原condition；首红旧单producer只接受第1任务拒另4。hook事前精确来源顺序/model/quality/cwd，prepare按角色+完整材料唯一派发，其他停止无fallback，不读取今天源码；五contract另绑定cohort/角色，两臂共用原期望。原入口/loop/资格/激活不改，八组246/246+1实际native loop/Docker控制、包类型/bundle、三完整TS旧0/现0/新增0及独立审查通过。见[交付、控制失败及实际范围](tianwen-functional-study-cohort-20261001.md)。
+
+实际受控研究在设计模型前1供应/5准备，随后十臂真实检查、accepted但隔离未激活，0请求准确冷恢复caseDesign/study/账本；不是自然来源或正式研究。首验证错字段、AbortSignal夹具克隆及测试类型失败分别保留，两次控制共20容器全部边界核验/清理。正式0模型恢复仍原9task/0study/隔离、原最新task/material/04324ee8…账本全字节保持。完整目标active/incomplete、NO-GO/原门槛/窗口不变；下一不同实际待办一次未知结果前瞻，原依据和必要目标内read/write/edit先固定，不索题/造来源/重跑旧题。小回执、无Profile/依赖副本，fixture自清/Docker停止、D18.41GiB≥15未达20偏好。
+
 ## 2026-10-01 自主清理摘要真实任务已执行；工具契约拒绝使结果未核验
 
 e10741c事前原合同/实际18回执/34独立案例及零模型preflight后，唯一原生9提供者/根8/7工具/0重试；具体功能检查首根请求前准备1、执行0，根completed但文件material-unavailable、程序unverifiable、原review inconclusive。seq60509 edit被read/write-only宿主guard拒绝，未进入execute却通知result，无pending使完整捕获按设计失效；不是成功edit、越权或功能失败。未修产品权限/原候选、不执行原34案例、不接纳或重跑。双臂受控拒绝对照及完整observer75/75通过，独立审查无P1/P2；首私有终态map断言错误保留。见[原结果、根因和范围](tianwen-cleanup-summary-native-20261001.md)。

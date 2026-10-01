@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-01具体closed五不同功能合同研究供应器3f5c49a交付，完整host saved material/原条件/各自独立期望事前冻结，生成前来源精确匹配及五prepare，角色/材料漂移不fallback。八组246+1实际loop/Docker控制、类型/bundle/三完整TS和审查通过；控制研究accepted但隔离未激活，十臂实际执行及0请求准确caseDesign/study恢复仅机制，semanticIndependence仍unestablished。0真实提供者/反馈/自然来源/正式研究，正式原9task/0study/隔离及04324ee8…账本全字节不改。不能借宿主登记或本控制补来源资格；完整目标active/incomplete、NO-GO/原门槛/窗口保持。见[具体边界及失败归属](tianwen-functional-study-cohort-20261001.md)。
+
 2026-10-01新清理摘要实际任务唯一9提供者/7工具/0重试，原功能检查已首根请求前准备但执行0；edit被宿主read/write-only契约拒绝导致完整文件证据material-unavailable，原program unverifiable/review inconclusive，不是功能失败或自然来源。原候选不接纳/不重跑/不执行34案例，不放宽无pending错误；两受控臂及完整75测试/独立审查确认按设计停止。0请求精确冷恢复、旧8账本前缀保持，正式9task/0study/隔离true，现04324ee8…；完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一不同实际文件任务事前匹配必要read/write/edit权限，不能借此改旧任务。见[原结果及归属](tianwen-cleanup-summary-native-20261001.md)。
 
 2026-10-01 正式具体隔离Python功能生产者接通普通任务/研究保存材料与两臂，完整事前合同/输入/参考及运行身份绑定；显式原条件对应仍由宿主负责，诊断默认不造资格。审查红后去除criteria额外逐字门，并让有界隔离取消等待清理，旧默认保持。223回归、类型/实际bundle、十完整TS及审查通过；7+11真实Docker执行仅受控验证，0真实模型/反馈/自然来源/正式研究/激活，正式8task/0study/隔离及0bb9e0b3…账本字节保持。完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一自行不同实际开发任务事前依据唯一前瞻，不补旧失败资格。见[具体证据边界](tianwen-isolated-functional-producer-20261001.md)。
