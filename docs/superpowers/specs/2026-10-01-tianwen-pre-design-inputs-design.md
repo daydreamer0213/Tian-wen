@@ -17,7 +17,7 @@
 - 仅code/local-files/files启用；prepareIndependentCases接收两项来源及成功对照的完整材料、modelConfigDigest、质量合同、cwd和signal，不接收候选方法/新答案。
 - 返回adjacent/holdout的prompt、criteria、files.entries/outputPaths；undefined视为缺证停止，绝不回退到自由生成。无此可选函数的旧prepare行为保持，不能追认为预生成独立。
 - 原来源对attempt先持久化，失败/取消不重复花费；随后克隆宿主返回值，按既有案例和文件解析器检查限额及独立输入身份，在任何模型设计调用前prepare全部五项检查。
-- 原生设计请求只传预置任务，无checker标识、合同摘要、评估函数；请求材料内保存independentCases。模型必须精确投影，变更任何字段拒绝，提案和试验尚未启动。
+- 原生设计请求传预置任务，无checker标识、单项合同摘要、评估函数；请求材料内保存independentCases及整个五检查数组的不可解释摘要independentResultChecksDigest，恢复核对它与opened.resultChecks一致，防止设计后替换检查。模型必须精确投影，变更任何字段拒绝，提案和试验尚未启动。
 - 既有caseDesignProof恢复比较independentCases与保存案例，历史无字段保持；semanticIndependence仍unestablished。宿主代码的可信边界不等于真实来源独立或自然效果证明，不增加采用权限。
 - 独立检查元数据仍按现有resultChecks持久保存；同一五项检查闭包供十臂复用，冷恢复不prepare、不复评。新路径禁止在生成后重新prepare。
 - 输入准备、结果准备及原生设计后的取消/同意/父版本变化必须在进入提案/试验前停止。原隔离保持true。

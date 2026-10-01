@@ -32,6 +32,18 @@ export interface PreparedConversationStudyResultCheck {
   readonly evaluate: (candidate: ConversationStudyResultCandidate) => Promise<ConversationExternalCheckOutcome>
 }
 export interface ConversationStudyResultCheck {
+  /** Trusted host tasks, fixed before native case design. Missing input stops; no synthetic fallback. */
+  readonly prepareIndependentCases?: (material: {
+    readonly sources: readonly ConversationTaskMaterial[]
+    readonly counterexample: ConversationTaskMaterial
+    readonly modelConfigDigest: ReturnType<typeof sha256>
+    readonly qualityContract: ConversationQualityContract
+    readonly cwd: string
+    readonly signal: AbortSignal
+  }) => Promise<{
+    readonly adjacent: { readonly prompt: string, readonly criteria: readonly string[], readonly files: { readonly entries: readonly ConversationFileEntry[], readonly outputPaths: readonly string[] } }
+    readonly holdout: { readonly prompt: string, readonly criteria: readonly string[], readonly files: { readonly entries: readonly ConversationFileEntry[], readonly outputPaths: readonly string[] } }
+  } | undefined>
   /** All applicable cases must be prepared before proposal; undefined stops this study. */
   readonly prepare: (material: ConversationStudyResultPreparation) => Promise<PreparedConversationStudyResultCheck | undefined>
 }

@@ -17,6 +17,7 @@ import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, co
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@tianwen/evolution'
+import { withConversationObservationCancellation } from './conversation-external-check.js'
 import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -604,26 +605,70 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const fileConfig = fileMode ? { outputKind: source.admission!.decision!.fileOutputKind!, cwd: sources[0]!.files!.cwd } : undefined
       const checkedEvidence = group.checkedFailureSources === undefined ? {} : { checkedFailureSources: group.checkedFailureSources }
       const designMaterial = { family: effectiveConversationFamily(source)!, failureCategory: group.category, sources, ...checkedEvidence }
-      const attemptBody = { scopeKey: source.source.scopeKey, consentRevision: source.source.consentRevision,
-        parentVersion: guidanceVersion(parentSnapshot), sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId] as const,
-        counterexampleTaskId: group.counterexample.source.taskId, modelConfigDigest: sha256(callConfig), materialDigest: sha256(designMaterial), ...checkedEvidence }
-      // Persist before spending the model call: a lost or invalid design must
-      // not turn unrelated wakeups or a restart into retries of this pair.
-      if (evolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(attemptBody), ...attemptBody }).duplicate) return
-      const generated = await runConversationJudgment(this.ctx, agent, {
-        outputSchema: fileMode ? CONVERSATION_FILE_CASES_SCHEMA : CONVERSATION_CASES_SCHEMA,
-        label: `Tianwen independent case design ${source.source.taskId}`, callConfig, signal,
-        instruction: fileMode
-          ? `Design exactly two independent bounded local-file evaluation tasks, adjacent and holdout, for outputKind ${fileConfig!.outputKind}. Each has prompt, 1 to 12 checkable criteria, and files with entries [{path,content}] and exact outputPaths. Paths are relative, at most eight UTF-8 files, 32768 total content bytes; absent initial files use null. For files output declare every output path among entries; for chat output use readable inputs and empty outputPaths. Supply initial inputs, never answers. The host supplies cwd, outputKind and schemaVersion; do not include them. Use different facts, no personal identifiers, copied problems, proposed guidance or reviewer instructions. ${RAW_FEEDBACK_GUIDANCE}`
-          : `Design exactly two independent text-only evaluation tasks for the observed task family and failure category. Return {"adjacent":{"prompt":"complete self-contained task with new facts","criteria":["checkable criterion"]},"holdout":{"prompt":"different complete self-contained task with new facts","criteria":["checkable criterion"]}}. Give each task 1 to 12 checkable criteria. Both generated tasks must use facts different from every source task and from each other. Preserve neither personal identifiers nor verbatim source problems. Include no answer, candidate instruction, tool request, or instruction to the reviewer. The holdout must expose over-generalization. These are explicitly synthetic test cases, not real user outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
-        material: designMaterial,
-      })
       const cases: GuidanceCase[] = [...group.sources, group.counterexample].map((task, index) => {
         const material = index < 2 ? sources[index]! : counter
         return { id: ['source1', 'source2', 'counterexample'][index]!, kind: (['source1', 'source2', 'counterexample'] as const)[index]!, sourceTaskId: task.source.taskId,
           inputDigest: guidanceInputDigest(conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files),
           materialDigest: sha256(material), ...(group.assessments[index] === undefined ? {} : { feedbackAssessmentId: group.assessments[index]!.started.assessmentId }) }
       })
+      const attemptBody = { scopeKey: source.source.scopeKey, consentRevision: source.source.consentRevision,
+        parentVersion: guidanceVersion(parentSnapshot), sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId] as const,
+        counterexampleTaskId: group.counterexample.source.taskId, modelConfigDigest: sha256(callConfig), materialDigest: sha256(designMaterial), ...checkedEvidence }
+      // Persist before spending the model call: a lost or invalid design must
+      // not turn unrelated wakeups or a restart into retries of this pair.
+      if (evolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(attemptBody), ...attemptBody }).duplicate) return
+      let preparedChecks: PreparedStudyResultChecks | undefined
+      let independentCases: Awaited<ReturnType<NonNullable<ConversationStudyResultCheck['prepareIndependentCases']>>> | undefined
+      const assertPreparationCurrent = () => {
+        signal.throwIfAborted()
+        const consent = evolution.getLearningAnalysisConsent()
+        if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== source.source.consentRevision
+          || guidanceVersion(evolution.getConversationGuidance(source.source.scopeKey)) !== guidanceVersion(parentSnapshot)) throw new Error('scope-changed')
+      }
+      if (this.studyResultCheck?.prepareIndependentCases !== undefined && effectiveConversationFamily(source) === 'code' && fileConfig?.outputKind === 'files') {
+        const hostCases = await withConversationObservationCancellation(signal, () => this.studyResultCheck!.prepareIndependentCases!({
+          sources: structuredClone(sources), counterexample: structuredClone(counter), modelConfigDigest: sha256(callConfig),
+          qualityContract: structuredClone(qualityContract!), cwd: fileConfig.cwd, signal,
+        }))
+        assertPreparationCurrent()
+        if (hostCases === undefined) throw new Error('source-unavailable')
+        independentCases = structuredClone(hostCases)
+        const frozenCases = [...cases, ...generatedCases(independentCases, qualityContract!, fileConfig)]
+        const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(
+          conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files!)))
+        for (const item of frozenCases.slice(3)) {
+          if (!('prompt' in item)) throw new Error('source-unavailable')
+          const identity = guidanceFileInputIdentity(item.prompt, item.files!)
+          if (fileInputs.has(identity)) throw new Error('invalid-judgment')
+          fileInputs.add(identity)
+        }
+        const frozenBody: GuidanceStudyBody = {
+          scopeKey: source.source.scopeKey, family: 'code', failureCategory: group.category, consentRevision: source.source.consentRevision,
+          parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: attemptBody.sourceTaskIds,
+          counterexampleTaskId: group.counterexample.source.taskId, cases: frozenCases, modelConfigDigest: sha256(callConfig),
+          qualityContract: qualityContract!, evaluationMode: 'local-files', fileOutputKind: 'files', ...checkedEvidence,
+        }
+        parseConversationGuidanceRecord({ kind: 'study-opened', studyId: guidanceStudyId(frozenBody), ...frozenBody })
+        preparedChecks = await prepareConversationStudyResultChecks(this.studyResultCheck, frozenBody,
+          [...sources, counter, ...frozenCases.slice(3).map(item => {
+            if (!('prompt' in item)) throw new Error('source-unavailable')
+            return { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }
+          })], signal)
+        assertPreparationCurrent()
+      }
+      const generated = await runConversationJudgment(this.ctx, agent, {
+        outputSchema: fileMode ? CONVERSATION_FILE_CASES_SCHEMA : CONVERSATION_CASES_SCHEMA,
+        label: `Tianwen independent case design ${source.source.taskId}`, callConfig, signal,
+        instruction: independentCases !== undefined
+          ? 'Return the supplied independentCases exactly, without modifying prompts, criteria, file contents, paths or output paths. These bounded tasks were fixed by the trusted host before this call. Do not add answers or instructions. A different result stops the study.'
+          : fileMode
+          ? `Design exactly two independent bounded local-file evaluation tasks, adjacent and holdout, for outputKind ${fileConfig!.outputKind}. Each has prompt, 1 to 12 checkable criteria, and files with entries [{path,content}] and exact outputPaths. Paths are relative, at most eight UTF-8 files, 32768 total content bytes; absent initial files use null. For files output declare every output path among entries; for chat output use readable inputs and empty outputPaths. Supply initial inputs, never answers. The host supplies cwd, outputKind and schemaVersion; do not include them. Use different facts, no personal identifiers, copied problems, proposed guidance or reviewer instructions. ${RAW_FEEDBACK_GUIDANCE}`
+          : `Design exactly two independent text-only evaluation tasks for the observed task family and failure category. Return {"adjacent":{"prompt":"complete self-contained task with new facts","criteria":["checkable criterion"]},"holdout":{"prompt":"different complete self-contained task with new facts","criteria":["checkable criterion"]}}. Give each task 1 to 12 checkable criteria. Both generated tasks must use facts different from every source task and from each other. Preserve neither personal identifiers nor verbatim source problems. Include no answer, candidate instruction, tool request, or instruction to the reviewer. The holdout must expose over-generalization. These are explicitly synthetic test cases, not real user outcomes. ${RAW_FEEDBACK_GUIDANCE}`,
+        material: { ...designMaterial, ...(independentCases === undefined ? {} : { independentCases,
+          independentResultChecksDigest: sha256(preparedChecks!.checks) }) },
+      })
+      assertPreparationCurrent()
+      if (independentCases !== undefined && sha256(generated.value) !== sha256(independentCases)) throw new Error('invalid-judgment')
       const independent = generatedCases(generated.value, qualityContract!, fileConfig)
       const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => conversationEvidenceTexts(material, [])).map(text => guidanceInputDigest(text)))
       if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
@@ -650,7 +695,6 @@ export class TianwenConversationGuidanceLoopService extends Service {
       // Keep the historical no-clue catalog lookup after opening the study.
       let catalog = group.proposalClues.length === 0 ? undefined : await loadCatalog()
       if (catalog !== undefined && !catalog.complete) throw new Error('source-unavailable')
-      let preparedChecks: PreparedStudyResultChecks | undefined
       const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
         scopeKey: source.source.scopeKey, family: effectiveConversationFamily(source)!, failureCategory: group.category, consentRevision: source.source.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId], counterexampleTaskId: group.counterexample.source.taskId,
@@ -659,7 +703,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         ...(fileMode ? { evaluationMode: 'local-files' as const, fileOutputKind: fileConfig!.outputKind } : {}),
         ...(preparedChecks === undefined ? {} : { resultChecks: preparedChecks.checks }),
       })
-      if (this.studyResultCheck !== undefined && effectiveConversationFamily(source) === 'code' && fileConfig?.outputKind === 'files') {
+      if (preparedChecks === undefined && this.studyResultCheck !== undefined && effectiveConversationFamily(source) === 'code' && fileConfig?.outputKind === 'files') {
         preparedChecks = await prepareConversationStudyResultChecks(this.studyResultCheck, bodyFor([]), cases.map(item => 'sourceTaskId' in item
           ? item.kind === 'counterexample' ? counter : sources[item.kind === 'source1' ? 0 : 1]!
           : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }), signal)

@@ -520,7 +520,12 @@ describe('@tianwen/runtime-bundle', () => {
     expect(compile(declarations)).toEqual([])
     expect(compile(`import type { ConversationStudyResultCheck, ConversationStudyResultPreparation,
       ConversationStudyResultCandidate, PreparedConversationStudyResultCheck } from '@tianwen/runtime-bundle';
-      const check: ConversationStudyResultCheck = { async prepare(material) {
+      const check: ConversationStudyResultCheck = { async prepareIndependentCases(material) {
+        const inputs = material.sources[0]?.files?.entries ?? [];
+        const quality = material.qualityContract; const digest = material.modelConfigDigest; void quality; void digest;
+        return { adjacent: { prompt: 'Repair new adjacent inputs.', criteria: ['Preserve original fields.'], files: { entries: inputs, outputPaths: [] } },
+          holdout: { prompt: 'Repair separate holdout inputs.', criteria: ['Preserve original fields.'], files: { entries: [], outputPaths: [] } } };
+      }, async prepare(material) {
         const source: ConversationStudyResultPreparation = material;
         return { checkerId: 'host-study-check', checkerDigest: 'sha256:${'0'.repeat(64)}', contractDigest: 'sha256:${'1'.repeat(64)}',
           requiredCondition: 'Preserve original declared fields.', inputs: source.files.entries, async evaluate(candidate) {

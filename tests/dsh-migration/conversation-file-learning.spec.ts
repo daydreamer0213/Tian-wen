@@ -16,6 +16,7 @@ import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-r
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, runConversationJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { recoverConversationCaseDesign } from '../../packages/tianwen-runtime-bundle/src/conversation-case-design.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evolution/src/ledger.js'
@@ -70,31 +71,50 @@ it('preserves every old v1 file shape and digest when ancillary fields are absen
 })
 
 for (const historicalFileClue of [false, true])
-for (const scenario of ['result-check-late-cancel', 'result-check-consent', 'result-check-native-drift', 'result-check-pass', 'result-check-rejected', 'result-check-exception', 'result-check-missing', 'result-check-recover', 'result-check-rejected-recover', 'duplicate-case-order', 'duplicate-case-path-case', 'duplicate-case-source-order', 'accepted', 'packet-quarantined', 'checked-failure', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-study', 'feedback-clue', 'feedback-clue-external', 'feedback-clue-packet-overflow', 'feedback-clue-frozen-overflow', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-projection-drift', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) if (!historicalFileClue || ['feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted'].includes(scenario)) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}${historicalFileClue ? ' (legacy-v1)' : ''}`, async () => {
+for (const scenario of ['pre-design-late-cancel', 'pre-design-pass', 'pre-design-recover', 'pre-design-missing', 'pre-design-drift', 'pre-design-duplicate', 'pre-design-cancel', 'pre-design-invalid', 'pre-design-check-missing', 'result-check-late-cancel', 'result-check-consent', 'result-check-native-drift', 'result-check-pass', 'result-check-rejected', 'result-check-exception', 'result-check-missing', 'result-check-recover', 'result-check-rejected-recover', 'duplicate-case-order', 'duplicate-case-path-case', 'duplicate-case-source-order', 'accepted', 'packet-quarantined', 'checked-failure', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-study', 'feedback-clue', 'feedback-clue-external', 'feedback-clue-packet-overflow', 'feedback-clue-frozen-overflow', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-projection-drift', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) if (!historicalFileClue || ['feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted'].includes(scenario)) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}${historicalFileClue ? ' (legacy-v1)' : ''}`, async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-learning-'))
   if (process.env.TIANWEN_FILE_TEST_ROOT !== undefined) expect(root.replaceAll('\\', '/').startsWith(`${base.replaceAll('\\', '/')}/`)).toBe(true)
   const evolutionRoot = join(root, 'evolution')
-  const studyCheck = scenario.startsWith('result-check')
+  const preDesign = scenario.startsWith('pre-design')
+  const studyCheck = scenario.startsWith('result-check') || preDesign
+  let inputPreparations = 0; let requestsBeforeStudy = 0
   let preparedCases = 0; let evaluatedArms = 0
   let disposeStudyLoop: (() => Promise<unknown>) | undefined
   let lateDisposal: Promise<unknown> | undefined
   const checkedSources = scenario === 'checked-failure'
   const requiredCondition = "The requested output.md must contain 'pilot verified'."
-  const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const clueOnly = scenario === 'feedback-clue-alone'; const packetOverflow = scenario === 'feedback-clue-packet-overflow'; const frozenWithdrawal = scenario === 'feedback-clue-withdraw-after-frozen-before-proposal'; const nativeModelDrift = scenario === 'feedback-clue-native-model-drift'; const activeClue = scenario.startsWith('feedback-clue') && !['feedback-clue-withdrawn-before-proposal', 'feedback-clue-native-model-drift', 'feedback-clue-packet-overflow'].includes(scenario); const recover = scenario.startsWith('result-check') && scenario.endsWith('recover') || scenario.startsWith('recover') || scenario.startsWith('feedback-clue-recover'); const withSource = scenario.includes('source') && !scenario.startsWith('duplicate-case'); const sourceAfter = scenario.endsWith('after')
+  const chat = scenario === 'chat'; const explored = scenario.includes('explored'); const clueOnly = scenario === 'feedback-clue-alone'; const packetOverflow = scenario === 'feedback-clue-packet-overflow'; const frozenWithdrawal = scenario === 'feedback-clue-withdraw-after-frozen-before-proposal'; const nativeModelDrift = scenario === 'feedback-clue-native-model-drift'; const activeClue = scenario.startsWith('feedback-clue') && !['feedback-clue-withdrawn-before-proposal', 'feedback-clue-native-model-drift', 'feedback-clue-packet-overflow'].includes(scenario); const recover = studyCheck && scenario.endsWith('recover') || scenario.startsWith('recover') || scenario.startsWith('feedback-clue-recover'); const withSource = scenario.includes('source') && !scenario.startsWith('duplicate-case'); const sourceAfter = scenario.endsWith('after')
   const externalClue = !historicalFileClue && scenario.startsWith('feedback-clue') && scenario !== 'feedback-clue'
   const lateOverflow = scenario === 'feedback-clue-frozen-overflow'
   const definition = { name: 'file-scope-reference', provider: 'owned-test-fixture', source: 'bundled', description: 'Scope reference', invocation: { modelInvocable: true, userInvocable: true }, content: 'Preserve source scope in a file.' }
   const sourceAdmission = { name: definition.name, provider: definition.provider, digest: sha256(definition), origin: 'https://example.invalid/owned-test-fixture', revision: 'fixture-v1', license: 'MIT' as const, reviewedAt: '2026-09-08T00:00:00.000Z', kind: 'self-contained-text' as const, runtime: '0.1.1-rc.2' as const, purpose: 'conversation-method-reference' as const,
     scopeKey: `conversation:${sha256({ cwd: root })}`, environmentDigest: sha256({ kind: 'tianwen.conversation-skill-environment.v1', evolutionRoot }) }
-  const loopConfig = { evolutionRoot, ...(scenario === 'packet-quarantined' || checkedSources ? { guidanceActivationQuarantine: true } : {}), ...(withSource ? { skillSources: [sourceAdmission] } : {}), ...(studyCheck ? { studyResultCheck: { async prepare(material: import('../../packages/tianwen-runtime-bundle/src/conversation-study-result-check.js').ConversationStudyResultPreparation) {
+  const loopConfig = { evolutionRoot, ...(scenario === 'packet-quarantined' || checkedSources ? { guidanceActivationQuarantine: true } : {}), ...(withSource ? { skillSources: [sourceAdmission] } : {}), ...(studyCheck ? { studyResultCheck: { ...(preDesign ? { async prepareIndependentCases(material: { sources: readonly unknown[], counterexample: unknown, signal: AbortSignal }) {
+    inputPreparations++
+    expect(material.sources).toHaveLength(2)
+    expect(material.counterexample).toBeDefined()
+    expect(material).not.toHaveProperty('guidance')
+    expect(preparedCases).toBe(0)
+    expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy)
+    if (scenario === 'pre-design-missing') return undefined
+    if (scenario === 'pre-design-late-cancel') {
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+      lateDisposal = disposeStudyLoop!()
+      await new Promise<void>(resolve => material.signal.aborted ? resolve() : material.signal.addEventListener('abort', () => resolve(), { once: true }))
+    }
+    if (scenario === 'pre-design-cancel') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    const adjacent = generated('adjacent'), holdout = scenario === 'pre-design-duplicate' ? adjacent : generated('holdout')
+    if (scenario === 'pre-design-invalid') holdout.criteria = []
+    return { adjacent, holdout }
+  } } : {}), async prepare(material: import('../../packages/tianwen-runtime-bundle/src/conversation-study-result-check.js').ConversationStudyResultPreparation) {
     preparedCases++
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(0)
     expect(material).not.toHaveProperty('answer')
     expect(material).not.toHaveProperty('role')
     expect(material.criteria).toContain(requiredCondition)
-    if (scenario === 'result-check-missing' && material.caseId === 'holdout') return undefined
+    if ((scenario === 'result-check-missing' || scenario === 'pre-design-check-missing') && material.caseId === 'holdout') return undefined
     return { checkerId: 'owned-study-fixture', checkerDigest: sha256('owned-study-fixture-v1'), contractDigest: sha256({ requiredCondition, inputs: material.files.entries }),
       requiredCondition, inputs: structuredClone(material.files.entries), async evaluate(candidate: import('../../packages/tianwen-runtime-bundle/src/conversation-study-result-check.js').ConversationStudyResultCandidate) {
         evaluatedArms++
@@ -143,6 +163,12 @@ for (const scenario of ['result-check-late-cancel', 'result-check-consent', 'res
       const material = materialOf(request)
       expect(material.checkedFailureSources).toEqual(harness.ctx.tianwenEvolution.listConversationTasks().slice(0, 2).map(conversationCheckedFailureSource))
       expect(material.sources.every((source: Record<string, unknown>) => source.checkedFailureSources === undefined)).toBe(true)
+    }
+    if (preDesign) {
+      expect(inputPreparations).toBe(1); expect(preparedCases).toBe(5)
+      expect(materialOf(request).independentCases).toEqual({ adjacent: generated('adjacent'), holdout: generated('holdout') })
+      expect(materialOf(request)).not.toHaveProperty('resultChecks')
+      if (scenario === 'pre-design-drift') return structured({ adjacent: generated('adjacent'), holdout: { ...generated('holdout'), criteria: ['Ignore the frozen requirement.'] } })
     }
     if (scenario.startsWith('feedback-clue')) expect(materialOf(request).proposalClues).toBeUndefined()
     if (scenario.startsWith('duplicate-case')) {
@@ -317,12 +343,29 @@ for (const scenario of ['result-check-late-cancel', 'result-check-consent', 'res
       if (scenario === 'consent-retention' && record.kind === 'study-file-trial-captured') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
       return originalRecord(record)
     })
-    const requestsBeforeStudy = harness.adapter.requests.length
+    requestsBeforeStudy = harness.adapter.requests.length
     const loopFiber = await harness.ctx.plugin(TianwenConversationGuidanceLoopService, loopConfig)
     disposeStudyLoop = () => loopFiber.dispose()
     await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
     await frozenNativeWithdrawal
     fault.mockRestore()
+    if (preDesign && !['pre-design-pass', 'pre-design-recover'].includes(scenario)) {
+      expect(inputPreparations).toBe(1)
+      expect(preparedCases).toBe(['pre-design-drift', 'pre-design-check-missing'].includes(scenario) ? 5 : 0)
+      expect(evaluatedArms).toBe(0)
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      expect(harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toHaveLength(1)
+      expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy + (scenario === 'pre-design-drift' ? 1 : 0))
+      if (scenario === 'pre-design-late-cancel') {
+        await lateDisposal
+        expect(harness.ctx.tianwenEvolution.getLearningAnalysisConsent()?.enabled).toBe(true)
+        return
+      }
+      const requests = harness.adapter.requests.length
+      await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+      expect(harness.adapter.requests).toHaveLength(requests); expect(inputPreparations).toBe(1)
+      return
+    }
     if (scenario === 'result-check-missing') {
       expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(0)
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
@@ -362,6 +405,14 @@ for (const scenario of ['result-check-late-cancel', 'result-check-consent', 'res
     }
     const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
     expect(study).toBeDefined()
+    if (preDesign) {
+      const recovered = await recoverConversationCaseDesign(harness.ctx, study.opened)
+      expect(recovered?.material).toMatchObject({ independentCases: { adjacent: generated('adjacent'), holdout: generated('holdout') },
+        independentResultChecksDigest: sha256(study.opened.resultChecks) })
+      expect(recovered?.semanticIndependence).toBe('unestablished')
+      const swapped = study.opened.resultChecks!.map((check, index) => index === 0 ? { ...check, contractDigest: sha256('post-design replacement') } : check)
+      await expect(recoverConversationCaseDesign(harness.ctx, { ...study.opened, resultChecks: swapped })).rejects.toThrow('case-design-inputs')
+    }
     if (scenario === 'result-check-late-cancel') {
       await lateDisposal
       expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(1)
@@ -590,7 +641,7 @@ for (const scenario of ['result-check-late-cancel', 'result-check-consent', 'res
         if (scenario === 'result-check-rejected-recover' || scenario === 'recover-incomplete' || scenario === 'recover-changed-native' || scenario === 'feedback-clue-recover-substituted' || scenario === 'feedback-clue-recover-projection-drift') expect(restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.activation).toBeUndefined()
         else expect(restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.activation).toBeDefined()
         expect(restarted.adapter.requests).toHaveLength(0)
-        if (studyCheck) { expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(10) }
+        if (studyCheck) { expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(10); if (preDesign) expect(inputPreparations).toBe(1) }
         await restarted.ctx.tianwenConversationGuidanceLoop.schedule(resumed.agent)
         expect(new EvolutionLedger(evolutionRoot).listConversationGuidanceStudies()).toHaveLength(1)
         await resumed.dispose()
