@@ -925,6 +925,48 @@ it.each(process.platform === 'win32' ? [
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it.each([false, true])('keeps a rejected edit from being certified by a subsequent allowed write (guarded=%s)', async guarded => {
+  let evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    return { checkerId: 'guard-control', checkerDigest: sha256('guard-control'), contractDigest: sha256('guard-contract'),
+      inputs: [{ path: 'new.md', content: null }], async evaluate() { evaluations++; return { status: 'verified', detail: 'Controlled result.' } } }
+  } }
+  const harness = await mount([structured({ ...admission, family: 'code' }),
+    toolCallResponse('guard-missing', 'read', { file_path: 'new.md' }),
+    toolCallResponse('guard-create', 'write', { file_path: 'new.md', content: 'first' }),
+    toolCallResponse('guard-read-first', 'read', { file_path: 'new.md' }),
+    toolCallResponse('guard-edit', 'edit', { file_path: 'new.md', old_string: 'first', new_string: 'edited' }),
+    toolCallResponse('guard-write-final', 'write', { file_path: 'new.md', content: 'final' }),
+    toolCallResponse('guard-read-final', 'read', { file_path: 'new.md' }), textResponse('saved'), ...reviewPair()], true, check)
+  const observed: string[] = []
+  const offExecute = harness.ctx.on('tools/execute', async (exec, next) => { observed.push(String(exec.callId)); return next() })
+  const offGuard = guarded ? harness.handle.agent.ctx.tools.guard(exec => exec.name === 'edit' ? 'edit rejected by controlled host policy' : undefined) : undefined
+  try {
+    harness.handle.agent.followup(direct('Create new.md.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(readFileSync(join(harness.root, 'new.md'), 'utf8')).toBe('final')
+    const saved = await harness.ctx.sessionPersistence.inspect(harness.handle.agent.session.id)
+    const editResult = saved.events.find(event => event.type === 'tool/result' && String(event.data.message.source.callId) === 'guard-edit')
+    if (editResult?.type !== 'tool/result') throw new Error('missing controlled edit result')
+    expect(editResult.data.message.content[0].isError).toBe(guarded)
+    expect(observed.includes('guard-edit')).toBe(!guarded)
+    expect(task.completion?.status).toBe('completed')
+    expect(task.externalCheckFinished?.status).toBe(guarded ? 'unverifiable' : 'verified')
+    expect(evaluations).toBe(guarded ? 0 : 1)
+    if (guarded) {
+      expect(task.fileUnavailable?.reason).toBe('material-unavailable')
+      expect(task.completion?.files).toBeUndefined()
+      expect(task.review?.verdict).toBe('inconclusive')
+      expect((await recoverConversationTaskMaterial(harness.ctx, task)).files).toBeUndefined()
+    } else {
+      expect(task.fileUnavailable).toBeUndefined()
+      expect(task.completion?.files?.entries).toEqual([{ path: 'new.md', content: 'final' }])
+      expect(task.review?.verdict).toBe('met')
+    }
+  } finally { offGuard?.(); offExecute(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['no-create', 'other-output', 'failed-create', 'other-error', 'existing-preimage', 'prior-create', 'deleted-final'] as const)('does not certify incomplete or unrelated missing-read recovery (%s)', async scenario => {
   let harness: Awaited<ReturnType<typeof mount>>
   harness = await mount([structured(admission),

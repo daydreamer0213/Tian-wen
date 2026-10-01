@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 自主清理摘要真实任务已执行；工具契约拒绝使结果未核验
+
+e10741c事前原合同/实际18回执/34独立案例及零模型preflight后，唯一原生9提供者/根8/7工具/0重试；具体功能检查首根请求前准备1、执行0，根completed但文件material-unavailable、程序unverifiable、原review inconclusive。seq60509 edit被read/write-only宿主guard拒绝，未进入execute却通知result，无pending使完整捕获按设计失效；不是成功edit、越权或功能失败。未修产品权限/原候选、不执行原34案例、不接纳或重跑。双臂受控拒绝对照及完整observer75/75通过，独立审查无P1/P2；首私有终态map断言错误保留。见[原结果、根因和范围](tianwen-cleanup-summary-native-20261001.md)。
+
+0请求冷恢复准确原task/material/program，原8task账本前缀保持；现9task/0study/隔离true，账本04324ee807e775f9ca1761c33909f8170866ae9d94413b309de9cd50a6b551ae。原稿原样D保存、项目目标已移除，原生压缩约0.86MiB，无新候选容器/Profile副本/依赖，测试自清、Docker恢复停止、D18.38GiB≥15未达20偏好。下一自行选不同实际待办，事前按需求允许目标内read/write/edit及完整检查/原停止条件；不再把受限驱动冲突当需扩产品规则的问题，不索题/催评/造来源。完整目标active/incomplete、main/Daily NO-GO/原门槛/窗口保持。
+
 ## 2026-10-01 正式隔离功能检查生产者已接通；完整学习未完成
 
 27473fd设计后补具体Docker runner和普通/研究共用冻结Python JSON CLI生产者，宿主显式启用、独立案例/完整输入/只读参考/唯一输出及checker/CLI/image/policy绑定，研究仅原保存body，不借当前源码。严格数值/重复键/退出/UTF-8/资源/身份/清理核对；只有原必需条件opt-in才归属功能失败。审查两P2先红关闭：原criteria不强套宿主文字，正式取消等待具体有界runner清理，旧默认不改。七组223/223、包类型/实际bundle、十完整TS旧0/现0、审查无重要问题。见[实现、失败及实际范围](tianwen-isolated-functional-producer-20261001.md)。

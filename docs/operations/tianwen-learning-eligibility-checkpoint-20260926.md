@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-01新清理摘要实际任务唯一9提供者/7工具/0重试，原功能检查已首根请求前准备但执行0；edit被宿主read/write-only契约拒绝导致完整文件证据material-unavailable，原program unverifiable/review inconclusive，不是功能失败或自然来源。原候选不接纳/不重跑/不执行34案例，不放宽无pending错误；两受控臂及完整75测试/独立审查确认按设计停止。0请求精确冷恢复、旧8账本前缀保持，正式9task/0study/隔离true，现04324ee8…；完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一不同实际文件任务事前匹配必要read/write/edit权限，不能借此改旧任务。见[原结果及归属](tianwen-cleanup-summary-native-20261001.md)。
+
 2026-10-01 正式具体隔离Python功能生产者接通普通任务/研究保存材料与两臂，完整事前合同/输入/参考及运行身份绑定；显式原条件对应仍由宿主负责，诊断默认不造资格。审查红后去除criteria额外逐字门，并让有界隔离取消等待清理，旧默认保持。223回归、类型/实际bundle、十完整TS及审查通过；7+11真实Docker执行仅受控验证，0真实模型/反馈/自然来源/正式研究/激活，正式8task/0study/隔离及0bb9e0b3…账本字节保持。完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一自行不同实际开发任务事前依据唯一前瞻，不补旧失败资格。见[具体证据边界](tianwen-isolated-functional-producer-20261001.md)。
 
 2026-10-01 新建文件缺失read证据窄修6da2854交付，完整原null/随后创建/末端非null/唯一原生结果同谓词，原read仍error，缺失参考/其他失败不放行。六组192/192、类型/bundle/四完整TS及审查通过，Windows别名P2关闭，测试错误分别保留。旧9148两edit实际被guard拒绝，审计已更正，无成功越权。0真实模型/自然来源/研究/激活，原8task/0study/隔离及0bb9e0b3…账本全字节保持，不重评旧失败或补研究资格。下一正式受限功能结果路线及不同实际待办前瞻；完整目标active/incomplete、NO-GO/原门槛/窗口保持。见[边界](tianwen-new-file-evidence-20261001.md)。
