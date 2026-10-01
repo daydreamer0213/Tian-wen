@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 新真实任务被额外事实工具调用中断；受限宿主曝光已补
+
+535ad72冻结新的outcome-learning-intake.ts单独strict2551待办、有限事前合同，持续正式DEV一次原生5请求/4工具/0重试。read/edit/read成功后额外调用禁止的文件统计，guard拒绝、完整文件证据无；原review inconclusive/file-evidence-unavailable、程序unverifiable，候选不采用，原hash精确恢复、2551尚未修复。不重跑/补检查/回填本题；冷读0模型原task及账本不变，旧账本字节前缀保持。见[失败与最小产品修复](tianwen-outcome-module-native-20261001.md)。
+
+322f8b6设计后复用上游restrict，新增正式bundle/file observer的exposeCapturedFileFacts可选false，仅不安装天问自有文件统计；默认/true、捕获、检查与拒收规则不变。新5/5，完整三组132/132、八包类型/声明0、修改产品与完整测试联合strict旧0/现0，独立只读审查无重要问题。正式0模型预检确认facts缺席及原task/ledger/隔离保持，但仍有3学习控制工具：不得称完整宿主只三工具；初遗漏依赖及过强整机预期两次预检失败保留。
+
+自然反馈/研究/激活0，普通任务未成为成功对照，本开关尚无新自然效果证明。运行约163KB、持续Profile约444KB，新夹具0，D18.58GiB；完整目标active、C—F/NO-GO/隔离/原门槛/十日窗口保持。后续不同实际待办候选前明确宿主工具配置与合同，不扩通用权限平台、去掉同意控制或重跑本题求绿。
+
 ## 2026-10-01 后续独立负面结果已接入原回滚；离线失效先于新研究
 
 从b72c4a2干净继续E结果消费者。审查否决无条件rejected；最终只认可信事前requiredCondition及本次匹配failedRequiredConditionDigest，旧rejected/一般编译错误不追认。具体ancillary合同仅原保护条件直接违反标记；原review不改。runtime与ledger共享资格，仅含程序独有失败时保存显式failure政策，原两失败/输入独立/模型/族/版本/时间/质量/作用域保持，旧无政策严格not-met重放/幂等。离线wake先回滚再select，停止早返回、异常Promise化且合并Promise身份保持，不resume Agent凑回滚。见[范围、重要审查与验证](tianwen-checked-regression-20261001.md)。

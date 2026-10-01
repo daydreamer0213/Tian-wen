@@ -58,6 +58,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly familyVerification?: boolean
   /** Default-off capture of external code task file artifacts; no effect verdict or learning permission. */
   readonly captureExternalCodeArtifacts?: boolean
+  /** False omits the host-owned initial-file facts tool in capability-limited hosts; file capture is unchanged. */
+  readonly exposeCapturedFileFacts?: boolean
   /** Trusted programmatic pre-answer check; no model-supplied checker or automatic learning permission. */
   readonly externalCodeCheck?: ConversationExternalCodeCheck
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
@@ -492,6 +494,7 @@ export async function apply(
   ctx.plugin(TianwenNativeToolObservationService)
   ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
+    ...(config.exposeCapturedFileFacts === false ? { exposeCapturedFileFacts: false } : {}),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }) })
   ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true,
     ...(config.captureExternalCodeArtifacts === true && config.externalCodeCheck !== undefined ? { externalCodeCheck: config.externalCodeCheck } : {}) })

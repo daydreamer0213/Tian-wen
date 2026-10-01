@@ -30,6 +30,8 @@ interface CaptureState {
 export interface ConversationFileObserverConfig extends ConversationFileAncillaryConfig {
   /** Prospective native read/write/edit artifacts only; does not certify code effects. */
   readonly externalCodeArtifacts?: boolean
+  /** False skips this host-owned tool; capture remains enabled. Omitted keeps normal facts access. */
+  readonly exposeCapturedFileFacts?: boolean
 }
 
 function isRoot(agent: Agent): boolean {
@@ -98,7 +100,7 @@ export class TianwenConversationFileObserverService extends Service {
   isFactsDefinition(definition: ToolDefinition): boolean { return this.factDefinitions.has(definition) }
 
   private installFacts(agent: Agent): void {
-    if (!isRoot(agent) || this.installations.has(agent)) return
+    if (this.config.exposeCapturedFileFacts === false || !isRoot(agent) || this.installations.has(agent)) return
     const service = this
     const definition = defineTool({
       name: CAPTURED_FILE_FACTS_TOOL,

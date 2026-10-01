@@ -39,7 +39,7 @@ const parallelCalls = (calls: readonly { readonly id: string, readonly name: str
   { type: 'finish', reason: { kind: 'tool-calls' } },
 ]
 
-async function mount(script: Parameters<typeof mountPersistentHarness>[1], externalCodeArtifacts = false, externalCodeCheck?: ConversationExternalCodeCheck, existingRoot?: string) {
+async function mount(script: Parameters<typeof mountPersistentHarness>[1], externalCodeArtifacts = false, externalCodeCheck?: ConversationExternalCodeCheck, existingRoot?: string, exposeCapturedFileFacts?: boolean) {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = existingRoot ?? mkdtempSync(join(base, 'file-observer-'))
@@ -51,7 +51,8 @@ async function mount(script: Parameters<typeof mountPersistentHarness>[1], exter
   await harness.ctx.plugin(fileTools, {})
   await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
   harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
-  await harness.ctx.plugin(TianwenConversationFileObserverService, { externalCodeArtifacts })
+  await harness.ctx.plugin(TianwenConversationFileObserverService, { externalCodeArtifacts,
+    ...(exposeCapturedFileFacts === undefined ? {} : { exposeCapturedFileFacts }) })
   await harness.ctx.plugin(TianwenConversationObserverService, externalCodeArtifacts && externalCodeCheck !== undefined ? { externalCodeCheck } : {})
   const handle = existingRoot === undefined
     ? await harness.ctx.agents.create({ sessionId: SessionId('file-chat'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
@@ -66,6 +67,58 @@ function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, 
 
 const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
   evaluationMode: 'external', relatedTaskId: null, feedback: null }
+
+it.each([undefined, true, false])('respects explicit host file-facts exposure %s while using native inherited-tool restriction', async exposure => {
+  const harness = await mount([], false, undefined, undefined, exposure)
+  try {
+    harness.handle.agent.ctx.tools.presentAs('native')
+    harness.handle.agent.ctx.tools.restrict({ allow: ['read', 'write', 'edit'] })
+    const names = harness.handle.agent.ctx.tools.schemas(harness.handle.agent).map(tool => tool.name).sort()
+    expect(names).toEqual(exposure === false ? ['edit', 'read', 'write'] : ['edit', 'read', 'tianwen_captured_file_facts', 'write'])
+    expect(harness.adapter.requests).toHaveLength(0)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('does not install disabled file-facts on an already-created ordinary agent', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-observer-late-')); roots.push(root)
+  const harness = await mountPersistentHarness(join(root, 'sessions'), [])
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('facts-late'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await harness.ctx.plugin(TianwenConversationFileObserverService, { exposeCapturedFileFacts: false })
+    expect(handle.agent.ctx.tools.schemas(handle.agent).some(tool => tool.name === 'tianwen_captured_file_facts')).toBe(false)
+    expect(harness.adapter.requests).toHaveLength(0)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps full file capture and independent result checking when host file-facts exposure is disabled', async () => {
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    return { checkerId: 'facts-optout-byte-probe', checkerDigest: sha256('probe'), contractDigest: sha256('after'),
+      inputs: [{ path: 'input.ts', content: 'before' }], async evaluate(candidate) {
+        return candidate.outputs[0]?.content === 'after' ? { status: 'verified', detail: 'Frozen output byte equality only.' }
+          : { status: 'rejected', detail: 'Frozen byte mismatch.' }
+      } }
+  } }
+  const code = { ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }
+  const harness = await mount([structured(code), toolCallResponse('optout-read', 'read', { file_path: 'input.ts' }),
+    toolCallResponse('optout-write', 'write', { file_path: 'input.ts', content: 'after' }), textResponse('saved'), ...reviewPair()], true, check, undefined, false)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.ctx.tools.presentAs('native')
+    harness.handle.agent.ctx.tools.restrict({ allow: ['read', 'write', 'edit'] })
+    expect(harness.handle.agent.ctx.tools.schemas(harness.handle.agent).some(tool => tool.name === 'tianwen_captured_file_facts')).toBe(false)
+    harness.handle.agent.followup(direct('Replace input.ts with after.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.fileUnavailable).toBeUndefined()
+    expect(task.completion?.files?.entries).toEqual([{ path: 'input.ts', content: 'after' }])
+    expect(task.externalCheckFinished?.status).toBe('verified')
+    expect(task.review?.verdict).toBe('met')
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files?.entries).toEqual([{ path: 'input.ts', content: 'before' }])
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it('retains a verified independent result but classifies full-file review overflow before any reviewer call', async () => {
   const code = { ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }
