@@ -42,7 +42,7 @@ Interface: host `ConversationStudyResultCheck.prepare(material)` returns per-cas
 
 - [x] Run relevant regression groups and existing eight-package type/declaration check; compare complete changed-TS strict diagnostics against frozen base for any unrelated old failures.
 - [x] Read-only correctness/architecture review, close important findings with failing controls then focused verification.
-- [ ] Commit/push verified development changes only; update current handoff and roadmap to distinguish usable feature from still-missing natural C—F evidence. Keep formal activation quarantine.
+- [x] Commit/push verified development changes only; update current handoff and roadmap to distinguish usable feature from still-missing natural C—F evidence. Keep formal activation quarantine.
 - [x] Retain small receipts/necessary native snapshots, clear new owned reproducible roots through supported mechanisms and record D free space. Select next genuinely useful functional task/input without asking for execution permission.
 
-Evidence: D:/DevData/tianwen-study-result-check-20261001. Nine distinct suites: 489 unique passing tests, eight package type/declaration checks and actual bundle build, full changed TS baseline13/current12/no added diagnostics. All are controlled engineering proof, zero real model/owner feedback. Read-only review findings reproduced and closed. Development commit/push is the remaining closure step.
+Evidence: D:/DevData/tianwen-study-result-check-20261001. Nine distinct suites: 489 unique passing tests, eight package type/declaration checks and actual bundle build, full changed TS baseline13/current12/no added diagnostics. All are controlled engineering proof, zero real model/owner feedback. Read-only review findings reproduced and closed. Implementation and updated handoff committed/pushed at 43725c8 on the development branch; formal quarantine and the full goal remain unchanged.
