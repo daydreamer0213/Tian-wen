@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 已核验原要求失败可进入重复问题来源；原模型评价与裁决保持
+
+自主换选实际核心消费者缺口，合法受控探针确认原model met/qualified条件失败被旧support忽略。645cec3基线、5b55b63设计后，增加可选精确checkedFailureSources双引用：仅完整code/local-files/files、事前原requiredCondition失败、两不同原输入与同检查/条件、同检查verified且原met对照；原模型失败和持续反馈优先，pending/正面反馈与不利对照阻止。runtime与ledger一致核对，旧无字段形状/摘要/重放/幂等保持，不改十臂baseline失败规则。见[消费者实施及失败记录](tianwen-checked-failure-sources-20261001.md)。
+
+引用绑定attempt/study、原生设计与提案恢复，原case摘要不变，不进入trial/盲审。新脚本原生场景实测2rejected/1verified且原模型均met、研究自行打开及隔离保持；完整packet旧not-met硬门槛由测试揭露，显式分支改为准确失败引用核对。真实原生提案proof仅替换引用后持久冷恢复拒绝、0请求，生成案例语义独立仍unestablished。不是自然研究、方法有效或D独立结果证明。
+
+最后七组不同387/387、八包类型/声明0、十修改TS含完整测试strict旧8/现6无新增；审查两P2先红后修，无未关闭重要问题。首红/反馈竞态/测试夹具及类型失败均保留。正式持续Profile冷读原两任务、readiness及账本字节不变，0真实模型/反馈/自然研究/激活；OfferGo暂不评价保持。新自有根0，小记录、D18.58GiB。完整目标active，main/Daily NO-GO/隔离/原门槛/十工作日窗口不变；下一仍需新实际待办和适用事前独立结果依据，五案例缺当前合同不扩空研究接口、不重试旧题凑来源。
+
 ## 2026-10-01 研究结果合同覆盖已核实；未完成的模块类型问题另行修复
 
 从852a59a干净继续，正式持续档只读readiness为awaiting-compatible-sources；两普通任务分别准入无效、完整文件证据缺失，另一档verified任务原模型评价仍超限。原账本字节不变、0模型、0研究、隔离保持；五案例没有当前合格组合及生成任务适用结果依据，故不实施空的研究检查接口，不重试E104、不否定历史反馈归因。见[覆盖核对及修复归属](tianwen-research-contract-coverage-20261001.md)。

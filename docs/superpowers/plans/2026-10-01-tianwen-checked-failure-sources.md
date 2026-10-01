@@ -27,13 +27,15 @@
 - Test tests/dsh-migration/conversation-checked-counterevidence.spec.ts, conversation-guidance.spec.ts, conversation-guidance-loop.spec.ts and appropriate existing material-recovery tests.
 
 - [x] Reproduce the missing consumer with legal persisted controlled records, preserving the first failed assertion and nonfailure/model-failure controls; obtain read-only architecture review.
-- [ ] Write focused source/ledger/parser/material tests and verify they fail for the missing branch, not setup or import errors.
-- [ ] Add optional source references and minimal shared validation; keep absent-field old behavior exact.
-- [ ] Wire runtime classification/grouping and ledger support with same-check/condition counter, original identity and feedback priority.
-- [ ] Bind design/proposal and exact recovery without leaking old outcomes to trials or blind reviews.
-- [ ] Run targeted and relevant full regression groups, source/declaration checks and modified-file strict comparison; fix attributable failures.
+- [x] Write focused source/ledger/parser/material tests and verify they fail for the missing branch, not setup or import errors.
+- [x] Add optional source references and minimal shared validation; keep absent-field old behavior exact.
+- [x] Wire runtime classification/grouping and ledger support with same-check/condition counter, original identity and feedback priority.
+- [x] Bind design/proposal and exact recovery without leaking old outcomes to trials or blind reviews.
+- [x] Run targeted and relevant full regression groups, source/declaration checks and modified-file strict comparison; fix attributable failures.
 - [ ] Obtain read-only review, close important findings, save exact feature SHA and push the development branch; no main/Daily release.
-- [ ] Cold-read the real continuous profile with zero model calls and verify its original task/ledger bytes remain unchanged. Retain compact failure/verification evidence, normally clean only newly owned test roots, report D free space.
+- [x] Cold-read the real continuous profile with zero model calls and verify its original task/ledger bytes remain unchanged. Retain compact failure/verification evidence, normally clean only newly owned test roots, report D free space.
+
+Final evidence: docs/operations/tianwen-checked-failure-sources-20261001.md. Seven final full groups387/387; eight product package checks0; all ten modified TS including complete tests strict old8/current6/no additions. Read-only review closed two P2 issues; the new native pipeline exposed and fixed the packet's old model-verdict source guard. Real continuous profile unchanged with0 model calls,0 studies and activation quarantine. Generated evidence root D:/DevData/tianwen-checked-source-feasibility-20261001.
 
 ## Completion boundary
 

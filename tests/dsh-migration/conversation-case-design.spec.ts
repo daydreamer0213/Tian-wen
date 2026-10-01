@@ -12,7 +12,7 @@ import { recoverConversationCaseDesign } from '../../packages/tianwen-runtime-bu
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
-const base = resolve(process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
+const base = resolve(process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'))
 const roots: string[] = []
 afterEach(() => {
   vi.restoreAllMocks()
@@ -23,7 +23,7 @@ afterEach(() => {
   }
 })
 
-async function mount(files = false) {
+async function mount(files = false, checked = false) {
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'case-design-')); roots.push(root)
   const source = (id: number) => ({ request: [{ content: [{ type: 'text', text: `Original requirement ${id}` }] }], context: [],
     objective: 'Summarize records', criteria: ['Preserve uncertainty'],
@@ -33,7 +33,10 @@ async function mount(files = false) {
     prompt: `New ${kind} records with uncertainty ${index}`, criteria: ['Preserve the stated uncertainty'],
     ...(files ? { files: { entries: [{ path: `${kind}.md`, content: 'new input\r\n' }], outputPaths: [] } } : {}),
   }]))
-  const material = { family: 'summarization', failureCategory: 'source-fidelity', sources }
+  const checkedFailureSources = checked ? (['s1', 's2'] as const).map(taskId => ({ taskId, preparationDigest: sha256(`prepared:${taskId}`),
+    outcomeDigest: sha256(`outcome:${taskId}`), requiredCondition: 'Preserve the supplied API.', detail: 'An original API name was replaced.' })) : undefined
+  const references = checkedFailureSources === undefined ? {} : { checkedFailureSources: [checkedFailureSources[0]!, checkedFailureSources[1]!] as const }
+  const material = { family: 'summarization', failureCategory: 'source-fidelity', sources, ...references }
   const harness = await mountPersistentHarness(join(root, 'sessions'), [toolCallResponse('design', 'structured_output', value)])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('case-design-parent'), meta: { cwd: root },
@@ -45,7 +48,7 @@ async function mount(files = false) {
   const body: GuidanceStudyBody = { scopeKey: parentSnapshot.scopeKey, family: 'summarization', failureCategory: 'source-fidelity',
     consentRevision: 1, parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: ['s1', 's2'], counterexampleTaskId: 'counter',
     modelConfigDigest: sha256(saved.events.find(event => event.type === 'request/header')!.data.header.config),
-    caseDesignProof: design.proof,
+    caseDesignProof: design.proof, ...references,
     ...(files ? { evaluationMode: 'local-files', fileOutputKind: 'chat' } : {}),
     cases: [
       ...(['source1', 'source2', 'counterexample'] as const).map((kind, index) => ({ id: kind, kind,
@@ -77,6 +80,26 @@ it.each([false, true])('recovers the complete native case design (%s file mode),
     expect(parseConversationGuidanceRecord(old)).toEqual(old)
     expect(await recoverConversationCaseDesign(harness.ctx, old)).toBeUndefined()
     expect(() => parseConversationGuidanceRecord({ ...harness.opened, caseDesignProof: { ...harness.body.caseDesignProof!, requestDigest: sha256('changed') } })).toThrow()
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+it('recovers exact checked failure references from native design material without changing original source materials', async () => {
+  const harness = await mount(true, true)
+  try {
+    const requests = harness.adapter.requests.length
+    const recovered = await recoverConversationCaseDesign(harness.ctx, harness.opened)
+    expect(recovered?.material).toEqual(harness.material)
+    expect(harness.opened.cases.slice(0, 2).map(item => item.materialDigest)).toEqual(harness.material.sources.map(sha256))
+    expect(harness.material.sources.every(source => !Object.hasOwn(source, 'checkedFailureSources'))).toBe(true)
+    expect(recovered?.semanticIndependence).toBe('unestablished')
+    const { checkedFailureSources: _references, ...absent } = harness.opened
+    await expect(recoverConversationCaseDesign(harness.ctx, absent)).rejects.toThrow(/case-design-material/)
+    for (const field of ['preparationDigest', 'outcomeDigest', 'requiredCondition', 'detail'] as const) {
+      const original = harness.opened.checkedFailureSources!
+      const changed = { ...original[0], [field]: field.endsWith('Digest') ? sha256('changed') : 'Changed reference' }
+      await expect(recoverConversationCaseDesign(harness.ctx, { ...harness.opened, checkedFailureSources: [changed, original[1]] })).rejects.toThrow(/case-design-material/)
+    }
+    expect(harness.adapter.requests).toHaveLength(requests)
+    expect(await harness.ctx.sessionPersistence.inspect(SessionId(harness.body.caseDesignProof!.sessionId))).toEqual(harness.saved)
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 

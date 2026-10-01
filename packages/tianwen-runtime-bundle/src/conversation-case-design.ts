@@ -25,7 +25,8 @@ export async function recoverConversationCaseDesign(ctx: Context, opened: Guidan
   const material = recovered.material
   if (material === null || typeof material !== 'object' || Array.isArray(material)) throw new Error('source-unavailable:case-design-material')
   const row = material as Record<string, unknown>
-  if (Object.keys(row).length !== 3 || !['family', 'failureCategory', 'sources'].every(key => Object.hasOwn(row, key))
+  if (Object.keys(row).length !== (opened.checkedFailureSources === undefined ? 3 : 4) || !['family', 'failureCategory', 'sources'].every(key => Object.hasOwn(row, key))
+    || sha256(row.checkedFailureSources ?? null) !== sha256(opened.checkedFailureSources ?? null)
     || row.family !== opened.family || row.failureCategory !== opened.failureCategory
     || !Array.isArray(row.sources) || row.sources.length !== 2
     || recovered.modelConfigDigests.length === 0 || recovered.modelConfigDigests.some(digest => digest !== opened.modelConfigDigest)) {

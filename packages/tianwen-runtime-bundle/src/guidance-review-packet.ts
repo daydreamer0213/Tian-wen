@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { conversationReviewConsensus, guidanceRule, guidanceVersion, parseConversationAuditedReviewChecks, parseConversationFileMaterial, sha256, type ConversationFileResult, type ConversationFileTrialOutput, type ConversationFileTrialReceipt, type ConversationTask, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
+import { conversationCheckedFailureSource, conversationReviewConsensus, guidanceRule, guidanceVersion, parseConversationAuditedReviewChecks, parseConversationFileMaterial, sha256, type ConversationFileResult, type ConversationFileTrialOutput, type ConversationFileTrialReceipt, type ConversationTask, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
 import { recoverConversationJudgmentRequest, recoverConversationStructuredJudgment, recoverConversationTrial } from './conversation-judgment.js'
 import { verifyConversationClaimReviewCheck, verifyConversationOriginalReviewCheck } from './conversation-claim-review.js'
 import { conversationMessages, conversationTaskModelDigest, recoverConversationTaskAnswer, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
@@ -200,7 +200,10 @@ async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStu
     const sourceIndex = kind === 'source1' ? 0 : 1
     if (item.sourceTaskId !== study.opened.sourceTaskIds[sourceIndex]) throw new Error('source-unavailable')
     if (item.feedbackAssessmentId === undefined) {
-      if (feedbackStandard !== undefined || task.review?.verdict !== 'not-met') throw new Error('source-unavailable')
+      const checked = study.opened.checkedFailureSources
+      if (feedbackStandard !== undefined || (checked === undefined ? task.review?.verdict !== 'not-met'
+        : task.review === undefined || task.review.verdict === 'not-met'
+          || sha256(conversationCheckedFailureSource(task) ?? null) !== sha256(checked[sourceIndex]))) throw new Error('source-unavailable')
       cases.push({ id: item.id, kind: 'source', materialDigest: item.materialDigest,
         originalTaskId: item.sourceTaskId, originalMaterial, originalAnswer, originalTaskReview, ...originalOutput, baseline, candidate })
       continue
@@ -236,6 +239,7 @@ async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStu
   if (!historicalProposal && proposal.material.studyId !== study.opened.studyId) throw new Error('source-unavailable:proposal-identity')
   if (!historicalProposal && sha256(proposal.material.sourceTaskIds) !== sha256(study.opened.sourceTaskIds)) throw new Error('source-unavailable:proposal-tasks')
   if (proposal.material.family !== study.opened.family || proposal.material.failureCategory !== study.opened.failureCategory
+    || sha256(proposal.material.checkedFailureSources ?? null) !== sha256(study.opened.checkedFailureSources ?? null)
     || proposal.material.currentGuidance !== (guidanceRule(study.opened.parentSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind) ?? '')) throw new Error('source-unavailable:proposal-context')
   if (proposal.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('source-unavailable:proposal-model')
   if (!Array.isArray(proposal.material.sources) || proposal.material.sources.length !== 2) throw new Error('source-unavailable:proposal-sources')

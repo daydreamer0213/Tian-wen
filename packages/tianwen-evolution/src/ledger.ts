@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck } from './conversation-external-check.js'
+import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationCodeCheckIdentity, conversationCheckedFailureSource, type ConversationCheckedFailureSources } from './conversation-external-check.js'
 import { conversationFileTaskInputDigest } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import {
@@ -3068,6 +3068,41 @@ export class EvolutionLedger {
         throw new LedgerIntegrityError('case design requires exact compatible completed sources and native model identity')
       }
     }
+    if (attempt.checkedFailureSources !== undefined) this.#validateCheckedFailureSources(attempt.sourceTaskIds, attempt.counterexampleTaskId, attempt.checkedFailureSources)
+  }
+
+  #validateCheckedFailureSources(ids: readonly [string, string], counterId: string, references: ConversationCheckedFailureSources): void {
+    const tasks = this.listConversationTasks(), sources = ids.map(id => tasks.find(task => task.source.taskId === id))
+    for (const [index, task] of sources.entries()) {
+      if (task?.review?.verdict === 'not-met') throw new LedgerIntegrityError('checked failure sources preserve original failed review priority')
+      const expected = conversationCheckedFailureSource(task)
+      if (task === undefined || task.review === undefined || task.source.requestContentDigest === undefined || expected === undefined
+        || task.fileUnavailable !== undefined || task.completion?.files?.outputKind !== 'files'
+        || sha256(expected) !== sha256(references[index])) throw new LedgerIntegrityError('checked failure source reference is absent or changed')
+      const all = this.listConversationFeedbackAssessments(task.source.taskId)
+      const latest = [...all].reverse().find(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
+        && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
+      if (all.some(item => item.result === undefined) || latest?.result?.classification === 'positive'
+        || latest?.result !== undefined && latest.result.supplementalCriteria.length > 0 && hasVerifiedContinuingPreference(latest.result)
+        || this.listLearningIntakeStatuses(task.source.sessionId).some(status => status.state === 'active' && status.rating === 'positive'
+          && status.sessionLifecycleFingerprint === task.source.sessionLifecycleFingerprint && task.completion!.assistantMessageIds.includes(status.messageId))) {
+        throw new LedgerIntegrityError('checked failure support has pending or overriding feedback')
+      }
+    }
+    const identity = conversationCodeCheckIdentity(sources[0]), counter = tasks.find(task => task.source.taskId === counterId)
+    if (identity === undefined || conversationCodeCheckIdentity(sources[1]) !== identity || conversationCodeCheckIdentity(counter) !== identity
+      || counter?.externalCheckFinished?.status !== 'verified' || counter.review?.verdict !== 'met' || counter.review.proof == null) {
+      throw new LedgerIntegrityError('checked failure sources require the same checker and original condition with a configured verified counter')
+    }
+    const counterAssessments = this.listConversationFeedbackAssessments(counter!.source.taskId)
+    const latestCounter = [...counterAssessments].reverse().find(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
+      && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
+    if (counterAssessments.some(item => item.result === undefined) || latestCounter !== undefined && latestCounter.result!.classification !== 'positive'
+      || this.listLearningIntakeStatuses(counter!.source.sessionId).some(status => status.state === 'active' && status.rating === 'negative'
+        && status.sessionLifecycleFingerprint === counter!.source.sessionLifecycleFingerprint && counter!.completion!.assistantMessageIds.includes(status.messageId))) {
+      throw new LedgerIntegrityError('checked failure counter has pending or adverse feedback')
+    }
+    if (new Set(sources.map(task => conversationTaskInputDigest(task!))).size !== 2) throw new LedgerIntegrityError('checked failure sources require distinct original input contents')
   }
 
   /** Future-only policy migration. Historical receipts and task verdicts stay
@@ -3188,6 +3223,11 @@ export class EvolutionLedger {
 
   #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
     const tasks = this.#conversationLearning.list()
+    if (study.checkedFailureSources !== undefined) {
+      if (study.family !== 'code' || study.evaluationMode !== 'local-files' || study.fileOutputKind !== 'files' || study.failureCategory !== 'instruction-following'
+        || study.cases.slice(0, 2).some(item => 'feedbackAssessmentId' in item)) throw new LedgerIntegrityError('checked failure study requires its explicit bounded code source branch')
+      this.#validateCheckedFailureSources(study.sourceTaskIds, study.counterexampleTaskId, study.checkedFailureSources)
+    }
     const sourcePolicy = tasks.find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
     for (const taskId of [...study.sourceTaskIds, study.counterexampleTaskId]) {
       const task = tasks.find(item => item.source.taskId === taskId)
@@ -3215,7 +3255,8 @@ export class EvolutionLedger {
         const assessment = assessments.find(item => item.started.assessmentId === assessmentId)
         if (assessment?.result?.proof == null || !['attributable-problem', 'preference'].includes(assessment.result.classification)
           || assessment.result.category !== study.failureCategory || assessment.result.supplementalCriteria.length === 0) throw new LedgerIntegrityError('natural learning feedback support is absent or retracted')
-      } else if (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory)) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
+      } else if (!(study.checkedFailureSources !== undefined && !isCounterexample)
+        && (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory))) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
     }
     for (const clue of study.proposalClues ?? []) {
       const task = tasks.find(item => item.source.taskId === clue.taskId)

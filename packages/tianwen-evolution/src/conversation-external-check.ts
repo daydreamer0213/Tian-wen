@@ -35,6 +35,36 @@ export interface ConversationExternalCheckFinished extends ConversationExternalC
   readonly fileResultDigest: Sha256Digest | null
 }
 
+/** Explicit source references, never a replacement task verdict. */
+export interface ConversationCheckedFailureSource {
+  readonly taskId: string
+  readonly preparationDigest: Sha256Digest
+  readonly outcomeDigest: Sha256Digest
+  readonly requiredCondition: string
+  readonly detail: string
+}
+export type ConversationCheckedFailureSources = readonly [ConversationCheckedFailureSource, ConversationCheckedFailureSource]
+
+export function conversationCodeCheckIdentity(task: ConversationTask | undefined): Sha256Digest | undefined {
+  const prepared = task?.externalCheckPrepared
+  return prepared?.requiredCondition === undefined ? undefined : sha256({ checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, requiredCondition: prepared.requiredCondition })
+}
+export function conversationCheckedFailureSource(task: ConversationTask | undefined): ConversationCheckedFailureSource | undefined {
+  if (!hasRejectedConversationCodeCheck(task)) return
+  return { taskId: task!.source.taskId, preparationDigest: sha256(task!.externalCheckPrepared), outcomeDigest: sha256(task!.externalCheckFinished),
+    requiredCondition: task!.externalCheckPrepared!.requiredCondition!, detail: task!.externalCheckFinished!.detail }
+}
+export function parseConversationCheckedFailureSources(value: unknown, ids: readonly [string, string]): ConversationCheckedFailureSources {
+  if (!Array.isArray(value) || value.length !== 2) throw new TypeError('checked failure sources require exactly two references')
+  const references = value.map((item, index) => {
+    const row = fields(item, ['taskId', 'preparationDigest', 'outcomeDigest', 'requiredCondition', 'detail'])
+    const taskId = text(row.taskId, 512)
+    if (taskId !== ids[index]) throw new TypeError('checked failure references must match the exact source order')
+    return { taskId, preparationDigest: digest(row.preparationDigest), outcomeDigest: digest(row.outcomeDigest), requiredCondition: text(row.requiredCondition, 4096), detail: text(row.detail, 4096) }
+  })
+  return [references[0]!, references[1]!]
+}
+
 /** Host-check applicability only; never a task verdict or learning permission. */
 export function supportsConversationCodeCheck(decision: ConversationAdmissionDecision | null | undefined): boolean {
   return decision?.kind === 'task' && decision.family === 'code'

@@ -4,6 +4,7 @@ import { classifyLearningExploration, parseConversationLearningExplorationReques
 import type { Sha256Digest } from './ledger.js'
 import { canonicalConversationFileEntries, parseConversationFileMaterial, parseConversationFileTrialReceipt, type ConversationFileMaterial, type ConversationFileTrialReceipt } from './conversation-files.js'
 import { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceUse } from './conversation-skill-source.js'
+import { parseConversationCheckedFailureSources, type ConversationCheckedFailureSources } from './conversation-external-check.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
 export interface GuidanceSnapshot {
@@ -23,18 +24,21 @@ export interface ConversationCaseDesignAttemptBody {
   readonly counterexampleTaskId: string
   readonly modelConfigDigest: Sha256Digest
   readonly materialDigest: Sha256Digest
+  readonly checkedFailureSources?: ConversationCheckedFailureSources
 }
 export interface ConversationCaseDesignAttempt extends ConversationCaseDesignAttemptBody {
   readonly attemptId: string
 }
 export function caseDesignAttemptId(body: ConversationCaseDesignAttemptBody): string { return `case-design-attempt:${sha256(body).slice(7)}` }
 export function parseConversationCaseDesignAttempt(value: unknown): ConversationCaseDesignAttempt {
-  const input = object(value, ['attemptId', 'scopeKey', 'consentRevision', 'parentVersion', 'sourceTaskIds', 'counterexampleTaskId', 'modelConfigDigest', 'materialDigest'])
+  const optional = Object.hasOwn(value as object, 'checkedFailureSources')
+  const input = object(value, ['attemptId', 'scopeKey', 'consentRevision', 'parentVersion', 'sourceTaskIds', 'counterexampleTaskId', 'modelConfigDigest', 'materialDigest', ...(optional ? ['checkedFailureSources'] : [])])
   const ids = uniqueIds(input.sourceTaskIds, 2)
   if (ids.length !== 2 || !Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('invalid case design attempt sources or consent')
   const body: ConversationCaseDesignAttemptBody = { scopeKey: text(input.scopeKey, 512), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), sourceTaskIds: [ids[0]!, ids[1]!], counterexampleTaskId: text(input.counterexampleTaskId, 512),
-    modelConfigDigest: digest(input.modelConfigDigest), materialDigest: digest(input.materialDigest) }
+    modelConfigDigest: digest(input.modelConfigDigest), materialDigest: digest(input.materialDigest),
+    ...(optional ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [ids[0]!, ids[1]!]) } : {}) }
   if (ids.includes(body.counterexampleTaskId) || input.attemptId !== caseDesignAttemptId(body)) throw new TypeError('invalid case design attempt identity')
   return { attemptId: input.attemptId as string, ...body }
 }
@@ -67,6 +71,7 @@ export interface GuidanceProposalClue {
   readonly materialDigest: Sha256Digest
 }
 export interface GuidanceStudyBody {
+  readonly checkedFailureSources?: ConversationCheckedFailureSources
   readonly evaluationMode?: 'local-files'
   readonly fileOutputKind?: 'files' | 'chat'
   readonly scopeKey: string
@@ -291,7 +296,7 @@ function parseProposalClue(value: unknown): GuidanceProposalClue {
     assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
 }
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : [])])
   const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
@@ -320,6 +325,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
     sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest), ...quality, ...mode,
     ...(Object.hasOwn(input, 'caseDesignProof') ? { caseDesignProof: proof(input.caseDesignProof) } : {}),
     ...(Object.hasOwn(input, 'proposalClues') ? { proposalClues } : {}),
+    ...(Object.hasOwn(input, 'checkedFailureSources') ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [sourceTaskIds[0]!, sourceTaskIds[1]!]) } : {}),
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')
   if (guidanceStudyId(body) !== studyId) throw new TypeError('guidance study identity does not match its frozen body')

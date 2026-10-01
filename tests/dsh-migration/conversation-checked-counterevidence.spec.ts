@@ -10,6 +10,7 @@ import * as taskMaterial from '../../packages/tianwen-runtime-bundle/src/convers
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { mountPersistentHarness } from '@tianwen/dsh-compat'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { conversationFeedbackAssessmentId } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
 
 const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -23,7 +24,7 @@ const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), reque
 type CheckState = 'pending' | 'verified' | 'rejected' | 'unverifiable'
 type TaskStore = Pick<EvolutionLedger, 'recordConversationLearning' | 'listConversationTasks' | 'getConversationGuidance'>
 const requiredCondition = 'Preserve the supplied API.'
-function task(store: TaskStore, turn: number, state?: CheckState, met = turn === 3, options: { contentIdentity?: boolean, inputTurn?: number, model?: ReturnType<typeof sha256>, requiredFailure?: boolean } = {}) {
+function task(store: TaskStore, turn: number, state?: CheckState, met = turn === 3, options: { contentIdentity?: boolean, inputTurn?: number, model?: ReturnType<typeof sha256>, requiredFailure?: boolean, condition?: string, checker?: string } = {}) {
   const taskModel = options.model ?? model, inputTurn = options.inputTurn ?? turn
   const identity = { sessionId: `counter-session-${turn}`, sessionLifecycleFingerprint: sha256(`lifecycle:${turn}`), turn: 1 }
   const taskId = conversationTaskId(identity), startSeq = turn * 10
@@ -36,12 +37,12 @@ function task(store: TaskStore, turn: number, state?: CheckState, met = turn ===
   const files = { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: 'files' as const, inputsDigest: sha256(input), captureSeq: startSeq + 7,
     outputPaths: ['task.ts'], entries: [{ path: 'task.ts', content: `export const value = ${turn}` }] }
   const prepared = { kind: 'task-external-check-prepared' as const, taskId, preparedSeq: startSeq + 1, requestDigest: source.requestDigest, contextDigest: source.contextDigest,
-    admissionDigest: sha256(admitted), modelConfigDigest: taskModel, checkerId: 'frozen-independent-check', checkerDigest: sha256('checker'), contractDigest: sha256(`contract:${turn}`), inputsDigest: sha256(input),
-    ...(options.requiredFailure ? { requiredCondition } : {}) }
+    admissionDigest: sha256(admitted), modelConfigDigest: taskModel, checkerId: options.checker ?? 'frozen-independent-check', checkerDigest: sha256('checker'), contractDigest: sha256(`contract:${turn}`), inputsDigest: sha256(input),
+    ...(options.requiredFailure ? { requiredCondition: options.condition ?? requiredCondition } : {}) }
   const finish = { kind: 'task-finished' as const, taskId, endSeq: startSeq + 8, status: 'completed' as const, assistantMessageIds: [`answer-${turn}`], resultDigest: sha256(`result:${turn}`), evidenceIds: [], files }
   const checked = { kind: 'task-external-check-finished' as const, taskId, preparationDigest: sha256(prepared), resultDigest: finish.resultDigest, fileResultDigest: sha256(files),
     status: state === 'pending' || state === undefined ? 'verified' as const : state, detail: 'Only the frozen check result.',
-    ...(options.requiredFailure && state === 'rejected' ? { failedRequiredConditionDigest: sha256(requiredCondition) } : {}) }
+    ...(options.requiredFailure && state === 'rejected' ? { failedRequiredConditionDigest: sha256(options.condition ?? requiredCondition) } : {}) }
   const verdict = met ? 'met' as const : 'not-met' as const
   const reviewChecks = parseConversationAuditedReviewChecks(['requirements', 'grounding'].map(focus => ({ focus, verdict, category: met ? null : 'source-fidelity', explanation: 'Checked supplied API.', evidenceQuotes: ['pilot'], proof: proof(`review:${turn}:${focus}`),
     audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: sha256(`review-material:${turn}`), units: { 'answer-1': { firstClaim: { quote: 'pilot', kind: 'source-fact', status: met ? 'supported' : 'unsupported', sourceIds: ['request-1'], explanation: 'Frozen source.' }, additionalClaims: [] } } } })))
@@ -55,39 +56,146 @@ function task(store: TaskStore, turn: number, state?: CheckState, met = turn ===
     ...conversationReviewConsensus(reviewChecks), reviewChecks, unavailableReason: null })
   return { value: store.listConversationTasks().find(item => item.source.taskId === taskId)!, checked, input }
 }
-function seeded(state?: CheckState, met = true, clock?: () => string) {
+function seeded(state?: CheckState, met = true, clock?: () => string, checkedSources = false, sourceMet = true) {
   const directory = root(), ledger = new EvolutionLedger(directory, clock === undefined ? {} : { clock })
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
-  const tasks = [task(ledger, 1).value, task(ledger, 2).value, task(ledger, 3, state, met).value] as const
+  const tasks = [task(ledger, 1, checkedSources ? 'rejected' : undefined, checkedSources ? sourceMet : undefined, { requiredFailure: checkedSources, contentIdentity: checkedSources }).value,
+    task(ledger, 2, checkedSources ? 'rejected' : undefined, checkedSources ? sourceMet : undefined, { requiredFailure: checkedSources, contentIdentity: checkedSources }).value,
+    task(ledger, 3, state, met, { requiredFailure: checkedSources, contentIdentity: checkedSources }).value] as const
+  const failureReference = (value: ConversationTask) => ({ taskId: value.source.taskId, preparationDigest: sha256(value.externalCheckPrepared),
+    outcomeDigest: sha256(value.externalCheckFinished), requiredCondition: value.externalCheckPrepared!.requiredCondition!, detail: value.externalCheckFinished!.detail })
+  const checkedFailureSources = checkedSources ? [failureReference(tasks[0]), failureReference(tasks[1])] as const : undefined
   const parentSnapshot = ledger.getConversationGuidance(scope)
   const generated = (kind: 'adjacent' | 'holdout') => {
     const material = { prompt: `Independent ${kind} code task.`, criteria: ['Preserve the supplied API.'], qualityContract: conversationQualityContract(), files: {
       schemaVersion: 'tianwen.conversation-file-material.v1' as const, cwd: directory, outputKind: 'files' as const, entries: [{ path: 'task.ts', content: `export const ${kind} = 10` }], outputPaths: ['task.ts'] } }
     return { id: kind, kind, ...material, inputDigest: guidanceInputDigest(material.prompt, material.files), materialDigest: sha256(material) }
   }
-  const body: GuidanceStudyBody = { scopeKey: scope, family: 'code', failureCategory: 'source-fidelity', consentRevision: 1, parentSnapshot, parentVersion: guidanceVersion(parentSnapshot),
+  const body: GuidanceStudyBody = { scopeKey: scope, family: 'code', failureCategory: checkedSources ? 'instruction-following' : 'source-fidelity', consentRevision: 1, parentSnapshot, parentVersion: guidanceVersion(parentSnapshot),
     sourceTaskIds: [tasks[0].source.taskId, tasks[1].source.taskId], counterexampleTaskId: tasks[2].source.taskId, modelConfigDigest: model,
-    qualityContract: conversationQualityContract(), evaluationMode: 'local-files', fileOutputKind: 'files', cases: [
+    qualityContract: conversationQualityContract(), evaluationMode: 'local-files', fileOutputKind: 'files', ...(checkedFailureSources === undefined ? {} : { checkedFailureSources }), cases: [
       ...(['source1', 'source2', 'counterexample'] as const).map((kind, index) => ({ id: kind, kind, sourceTaskId: tasks[index]!.source.taskId, inputDigest: sha256(`input:${index}`), materialDigest: sha256(`material:${index}`) })),
       generated('adjacent'), generated('holdout') ] }
-  const attemptBody = { scopeKey: scope, consentRevision: 1, parentVersion: body.parentVersion, sourceTaskIds: body.sourceTaskIds, counterexampleTaskId: body.counterexampleTaskId, modelConfigDigest: model, materialDigest: sha256('design material') }
+  const attemptBody = { scopeKey: scope, consentRevision: 1, parentVersion: body.parentVersion, sourceTaskIds: body.sourceTaskIds, counterexampleTaskId: body.counterexampleTaskId, modelConfigDigest: model, materialDigest: sha256('design material'), ...(checkedFailureSources === undefined ? {} : { checkedFailureSources }) }
   return { directory, ledger, tasks, opened: { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }, attempt: { attemptId: caseDesignAttemptId(attemptBody), ...attemptBody } }
 }
-async function readiness(f: ReturnType<typeof seeded>) {
+function serviceFor(f: ReturnType<typeof seeded>) {
   vi.spyOn(taskMaterial, 'recoverConversationTaskMaterial').mockImplementation(async (_ctx, value) => ({ request: [], context: [], objective: 'Repair the supplied code.', criteria: ['Preserve API.'], files: {
     schemaVersion: 'tianwen.conversation-file-material.v1', cwd: f.directory, outputKind: 'files', entries: value.fileInputs!.map(({ path, content }) => ({ path, content })), outputPaths: ['task.ts'] } }))
   const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
   Object.assign(service, { ctx: { tianwenEvolution: {
     getLearningAnalysisConsent: () => f.ledger.getLearningAnalysisConsent(), getConversationGuidance: () => f.ledger.getConversationGuidance(scope), listConversationTasks: () => f.ledger.listConversationTasks(),
-    listConversationGuidanceStudies: () => f.ledger.listConversationGuidanceStudies(), listConversationCaseDesignAttempts: () => f.ledger.listConversationCaseDesignAttempts(), listConversationFeedbackAssessments: () => [], listLearningIntakeStatuses: () => [],
+    listConversationGuidanceStudies: () => f.ledger.listConversationGuidanceStudies(), listConversationCaseDesignAttempts: () => f.ledger.listConversationCaseDesignAttempts(),
+    listConversationFeedbackAssessments: (id: string) => f.ledger.listConversationFeedbackAssessments(id),
+    isConversationFeedbackAssessmentActive: (id: string) => f.ledger.isConversationFeedbackAssessmentActive(id),
+    listLearningIntakeStatuses: (id: string) => f.ledger.listLearningIntakeStatuses(id),
   } } })
-  return service.readiness(scope)
+  return service
 }
+const readiness = (f: ReturnType<typeof seeded>) => serviceFor(f).readiness(scope)
 
 it.each(['pending', 'rejected', 'unverifiable'] as const)('does not select model-met counterevidence with a %s prepared check', async state => {
   const f = seeded(state)
   expect(f.tasks[2].review?.verdict).toBe('met')
   expect(await readiness(f)).toEqual({ state: 'awaiting-counterexample' })
+})
+it('selects checked failure sources with unchanged model met only with the same configured verified counter', async () => {
+  const f = seeded('verified', true, undefined, true)
+  expect(f.tasks.map(value => value.review?.verdict)).toEqual(['met', 'met', 'met'])
+  expect(await readiness(f)).toEqual({ state: 'ready-to-schedule' })
+})
+it('persists and cold replays explicit checked failure source references without regrading original reviews', () => {
+  const f = seeded('verified', true, undefined, true), before = f.ledger.listConversationTasks()
+  expect(f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toEqual({ duplicate: false })
+  expect(f.ledger.recordConversationGuidance(f.opened)).toEqual({ duplicate: false })
+  const replay = new EvolutionLedger(f.directory)
+  expect(replay.listConversationCaseDesignAttempts()).toEqual([f.attempt])
+  expect(replay.listConversationGuidanceStudies()[0]?.opened).toEqual(f.opened)
+  expect(replay.listConversationTasks()).toEqual(before)
+  expect(replay.isConversationGuidanceSupported(f.opened.studyId)).toBe(true)
+  expect(replay.recordConversationGuidance(f.opened)).toEqual({ duplicate: true })
+})
+it('does not reinterpret absent-field legacy model-met records as checked failure sources', () => {
+  const f = seeded('verified', true, undefined, true)
+  const { kind: _kind, studyId: _id, checkedFailureSources: _references, ...body } = f.opened
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+  expect(() => f.ledger.recordConversationGuidance(opened)).toThrow(/failed source reviews/)
+  expect(f.ledger.listConversationGuidanceStudies()).toEqual([])
+})
+it.each([undefined, 'pending', 'rejected', 'unverifiable'] as const)('does not count checked failure sources without a configured verified counter: %s', async state => {
+  const f = seeded(state, true, undefined, true)
+  expect(await readiness(f)).toEqual({ state: 'awaiting-counterexample' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/checked failure|counterevidence/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow()
+})
+it.each(['preparationDigest', 'outcomeDigest', 'requiredCondition', 'detail'] as const)('rejects changed checked failure source %s without any durable study', field => {
+  const f = seeded('verified', true, undefined, true)
+  const { kind: _kind, studyId: _id, ...body } = f.opened
+  const original = body.checkedFailureSources!
+  const changed = { ...original[0], [field]: field.endsWith('Digest') ? sha256('changed') : 'Changed original evidence' }
+  const changedBody = { ...body, checkedFailureSources: [changed, original[1]] as const }
+  const before = readFileSync(join(f.directory, 'ledger.jsonl'), 'utf8')
+  expect(() => f.ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(changedBody), ...changedBody })).toThrow(/checked failure/)
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+it.each(['checker', 'condition', 'duplicate-input', 'unmarked'] as const)('does not mix checked failure sources with %s', async scenario => {
+  const f = seeded('verified', true, undefined, true)
+  const other = task(f.ledger, 4, 'rejected', true, { requiredFailure: true, contentIdentity: scenario !== 'unmarked',
+    ...(scenario === 'checker' ? { checker: 'another checker' } : {}), ...(scenario === 'condition' ? { condition: 'Another required condition.' } : {}),
+    ...(scenario === 'duplicate-input' ? { inputTurn: 1 } : {}) }).value
+  vi.spyOn(f.ledger, 'listConversationTasks').mockReturnValue([f.tasks[0], other, f.tasks[2]])
+  expect(await readiness(f)).toEqual({ state: 'awaiting-compatible-sources' })
+})
+it.each(['source-positive', 'counter-negative'] as const)('honors actual durable %s feedback in new checked failure source selection and writes', async scenario => {
+  const f = seeded('verified', true, undefined, true), target = f.tasks[scenario === 'source-positive' ? 0 : 2]
+  f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId: target.completion!.assistantMessageIds[0]!,
+    feedbackVersion: 'controlled-v1', rating: scenario === 'source-positive' ? 'positive' : 'negative', note: 'Controlled actual ledger feedback fixture.',
+    scopeKey: target.source.scopeKey, sessionDigest: sha256('controlled feedback session'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  expect(await readiness(f)).toEqual({ state: scenario === 'source-positive' ? 'awaiting-compatible-sources' : 'awaiting-counterexample' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/feedback/)
+})
+it.each(['source', 'counter'] as const)('waits for pending feedback before selecting checked failure sources: %s', async role => {
+  const f = seeded('verified', true, undefined, true), target = f.tasks[role === 'source' ? 0 : 2], messageId = target.completion!.assistantMessageIds[0]!
+  f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'pending-v1',
+    rating: role === 'source' ? 'negative' : 'positive', note: 'Controlled pending feedback fixture.', scopeKey: target.source.scopeKey,
+    sessionDigest: sha256('pending feedback session'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  const status = f.ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
+  const source = { kind: 'native' as const, sessionId: target.source.sessionId, messageId, sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint,
+    feedbackVersion: 'pending-v1', feedbackFingerprint: status.feedbackFingerprint }
+  f.ledger.recordConversationFeedback({ kind: 'feedback-assessment-started', taskId: target.source.taskId,
+    assessmentId: conversationFeedbackAssessmentId({ taskId: target.source.taskId, source }), source,
+    admissionDigest: sha256(target.admission), resultDigest: target.completion!.resultDigest, materialDigest: sha256('pending material'), consentRevision: 1 })
+  expect(await readiness(f)).toEqual({ state: role === 'source' ? 'awaiting-compatible-sources' : 'awaiting-counterexample' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/feedback/)
+})
+it('preserves model not-met priority on direct checked failure source writes', () => {
+  const f = seeded('verified', true, undefined, true, false)
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/review|priority/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/review|priority/)
+})
+it('skips a checked counter with active empty preference and selects the next clean counter', async () => {
+  const f = seeded('verified', true, undefined, true), target = f.tasks[2], messageId = target.completion!.assistantMessageIds[0]!
+  f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'preference-v1', rating: 'positive',
+    note: 'A controlled preference without new evaluation standards.', scopeKey: target.source.scopeKey,
+    sessionDigest: sha256('preference feedback session'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  const status = f.ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
+  const source = { kind: 'native' as const, sessionId: target.source.sessionId, messageId, sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint,
+    feedbackVersion: 'preference-v1', feedbackFingerprint: status.feedbackFingerprint }
+  const assessmentId = conversationFeedbackAssessmentId({ taskId: target.source.taskId, source })
+  f.ledger.recordConversationFeedback({ kind: 'feedback-assessment-started', taskId: target.source.taskId, assessmentId, source,
+    admissionDigest: sha256(target.admission), resultDigest: target.completion!.resultDigest, materialDigest: sha256('preference material'), consentRevision: 1 })
+  f.ledger.recordConversationFeedback({ kind: 'feedback-assessed', taskId: target.source.taskId, assessmentId, classification: 'preference', category: 'user-preference',
+    supplementalCriteria: [], evidenceQuotes: ['controlled preference'], explanation: 'Controlled classification with no supplemental criteria.', proof: proof('preference-assessment'), unavailableReason: null })
+  const clean = task(f.ledger, 4, 'verified', true, { contentIdentity: true, requiredFailure: true }).value
+  const service = serviceFor(f)
+  Object.assign(service, { proposalClues: async () => [] })
+  const selected = await (service as unknown as { select(scopeKey: string): Promise<{ counterexample: ConversationTask } | undefined> }).select(scope)
+  expect(selected?.counterexample.source.taskId).toBe(clean.source.taskId)
 })
 it.each([undefined, 'verified'] as const)('retains successful counterevidence when check state is %s', async state => {
   const f = seeded(state)
