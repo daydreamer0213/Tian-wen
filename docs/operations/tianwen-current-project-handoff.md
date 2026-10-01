@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 新完整文件复核已接入可信操作证据；原实际任务评价不改判
+
+ddb3151设计后f4e162d实现事前source可选native-actions.v1及files操作v2，只从完整捕获原生span一对一关联恢复工具、规范冻结路径、call/result顺序和状态。原始复核可引用动作，写后内容仍不能自证，method-study不引用旧动作。旧chat v1、无marker files及原指令/质量合同/资格保持，不补旧历史。见[具体交付和失败归属](tianwen-file-action-evidence-20261001.md)。
+
+七组不同297项当前通过；首全回归295/1，Windows后续调用大小写P2先红后修、最终完整observer50/50，另1原生glob→read→write证明全部调用包括辅助工具。八包类型/实际bundle通过；七主要修改TS旧0/现0，增加辅助测试后的八完整TS旧18/现18、新增0，旧诊断不冒称清零。审查P2关闭，无剩余重要问题。正式持续DEV仍原5任务/0研究/awaiting-compatible-sources/隔离true，原96b618 task/material精确不变，原model inconclusive/program verified保持，账本ca9fdec7c5b91cbb53d72ebe1c15ba4baa65600497c65019589f94a7f2bd1541不改，0真实模型/反馈/激活。
+
+完整目标active/incomplete，main/Daily NO-GO、原门槛/十日窗口保持。下一自主选不同实际未完成任务和适用事前检查，一次真实前瞻核实新操作证据；不重跑96b618/43ad8求绿，不索任务/催评价，不把机制当学习效果。仅D约60KiB记录、自有测试根0、无新Profile/依赖副本，D18.47GiB≥15GiB、未达20GiB偏好。
+
 ## 2026-10-01 自主任务交付完整文件无损分块；原模型缺流程证据保持inconclusive
 
 631cb04/4ad5571事前冻结实际待办及检查；天问唯一原生96b618通过read→edit→read，7提供者/根4/工具3/0重试，纯函数程序verified、原样9/9及只读审查通过。7c77a04仅工程接纳相同字节，**原两模型inconclusive**因files复核剥离操作证据而不能确认原流程要求；不覆盖评价、不算成功对照或学习效果。ea5b8f5接线完整文件384码点无损块，文本/file-chat和旧v1保持，新请求v2按保存版恢复，全部原限额不变。见[实际结果与边界](tianwen-file-review-packing-20261001.md)。
