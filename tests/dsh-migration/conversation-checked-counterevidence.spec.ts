@@ -11,6 +11,7 @@ import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.
 import { mountPersistentHarness } from '@tianwen/dsh-compat'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { conversationFeedbackAssessmentId } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
+import { conversationCheckedFailureSource, hasRejectedConversationCodeCheck, hasSatisfiedConversationCodeCheck } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 
 const roots: string[] = []
 afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
@@ -260,9 +261,9 @@ it.each(['pending', 'rejected', 'unverifiable'] as const)('preserves old accepte
   expect(readFileSync(path, 'utf8')).toBe(before)
 })
 // Controlled complete records test negative-result consumption, not natural efficacy.
-function checkedRegressionScene() {
+function checkedRegressionScene(checkedSources = false, activate = true) {
   let tick = 0
-  const f = seeded(undefined, true, () => new Date(Date.UTC(2026, 9, 1) + tick++ * 1000).toISOString()), ledger = f.ledger
+  const f = seeded(checkedSources ? 'verified' : undefined, true, () => new Date(Date.UTC(2026, 9, 1) + tick++ * 1000).toISOString(), checkedSources), ledger = f.ledger
   ledger.recordConversationGuidance(f.opened)
   const candidate = { kind: 'candidate-recorded' as const, studyId: f.opened.studyId,
     candidateSnapshot: { ...f.opened.parentSnapshot, fileRules: { code: { files: 'Preserve the supplied API.' } } }, proposalProof: proof('proposal') }
@@ -280,7 +281,7 @@ function checkedRegressionScene() {
   }
   const decision = ledger.conversationGuidanceDecision(f.opened.studyId)
   expect(decision.verdict).toBe('accepted'); ledger.recordConversationGuidance(decision)
-  ledger.recordConversationGuidance({ kind: 'guidance-activated', studyId: f.opened.studyId, expectedParentVersion: f.opened.parentVersion, decisionDigest: sha256(decision) })
+  if (activate) ledger.recordConversationGuidance({ kind: 'guidance-activated', studyId: f.opened.studyId, expectedParentVersion: f.opened.parentVersion, decisionDigest: sha256(decision) })
   const later = (turn: number, state?: CheckState, met = true, options: Parameters<typeof task>[4] = {}) => task(ledger, turn, state, met, { contentIdentity: true, requiredFailure: state !== undefined, ...options })
   const rollback = (values: readonly ConversationTask[], tagged = true) => ({ kind: 'guidance-rolled-back' as const, studyId: f.opened.studyId,
     expectedCurrentVersion: guidanceVersion(candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: values.map(value => value.source.taskId), evidenceInputPolicy: 'request-content.v1' as const,
@@ -434,4 +435,98 @@ it.each(['verified', 'rejected', 'unverifiable'] as const)('rescans a persisted 
     expect(resumed.dispose).toHaveBeenCalledTimes(state === 'verified' ? 1 : 0)
     await service.whenIdle()
   } finally { release(); await pending }
+})
+
+function invalidation(value: ConversationTask) {
+  return { kind: 'task-external-check-invalidated' as const, taskId: value.source.taskId,
+    preparationDigest: sha256(value.externalCheckPrepared ?? null), outcomeDigest: sha256(value.externalCheckFinished ?? null),
+    detail: 'Host audit found that this check does not establish its claimed required condition.' }
+}
+it.each([0, 1, 2] as const)('withdraws only check %s from learning without rewriting original task history', async index => {
+  const f = seeded('verified', true, undefined, true), original = f.tasks[index], record = invalidation(original)
+  const path = join(f.directory, 'ledger.jsonl'), prefix = readFileSync(path)
+  expect(f.ledger.recordConversationLearning(record)).toEqual({ duplicate: false })
+  const current = f.ledger.listConversationTasks().find(task => task.source.taskId === original.source.taskId)!
+  expect(current).toEqual({ ...original, externalCheckInvalidated: record })
+  expect(hasRejectedConversationCodeCheck(current)).toBe(false)
+  expect(hasSatisfiedConversationCodeCheck(current)).toBe(false)
+  expect(conversationCheckedFailureSource(current)).toBeUndefined()
+  expect(await readiness(f)).toEqual({ state: index === 2 ? 'awaiting-counterexample' : 'awaiting-compatible-sources' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/check|counter|source/i)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/check|counter|source/i)
+  expect(readFileSync(path).subarray(0, prefix.length)).toEqual(prefix)
+  const after = readFileSync(path), replay = new EvolutionLedger(f.directory)
+  expect(replay.listConversationTasks()).toEqual(f.ledger.listConversationTasks())
+  expect(replay.recordConversationLearning(record)).toEqual({ duplicate: true })
+  expect(() => replay.recordConversationLearning({ ...record, detail: 'Different withdrawal' })).toThrow(/changed|freeze/)
+  expect(readFileSync(path)).toEqual(after)
+})
+it.each(['taskId', 'preparationDigest', 'outcomeDigest'] as const)('rejects an invalid withdrawal binding: %s', field => {
+  const f = seeded('verified', true, undefined, true), record = invalidation(f.tasks[0]), path = join(f.directory, 'ledger.jsonl'), before = readFileSync(path)
+  expect(() => f.ledger.recordConversationLearning({ ...record, [field]: field === 'taskId' ? f.tasks[2].source.taskId : sha256('wrong') })).toThrow(/check|withdraw|invalidat/i)
+  expect(readFileSync(path)).toEqual(before)
+})
+it('refuses to withdraw a missing or pending check', () => {
+  const f = seeded('pending'), path = join(f.directory, 'ledger.jsonl'), before = readFileSync(path)
+  expect(() => f.ledger.recordConversationLearning(invalidation(f.tasks[2]))).toThrow(/check|withdraw|invalidat/i)
+  expect(() => f.ledger.recordConversationLearning(invalidation(f.tasks[0]))).toThrow(/check|withdraw|invalidat/i)
+  expect(readFileSync(path)).toEqual(before)
+})
+it('preserves independent model failure support when its check is withdrawn', async () => {
+  const f = seeded('verified', true), first = task(f.ledger, 4, 'rejected', false).value
+  f.ledger.recordConversationLearning(invalidation(first))
+  const current = f.ledger.listConversationTasks().find(value => value.source.taskId === first.source.taskId)!
+  expect(current.review).toEqual(first.review)
+  vi.spyOn(f.ledger, 'listConversationTasks').mockReturnValue([current, f.tasks[1], f.tasks[2]])
+  expect(await readiness(f)).toEqual({ state: 'ready-to-schedule' })
+})
+it.each([0, 2] as const)('withdrawal of active study check %s rolls back through existing support governance', index => {
+  const f = checkedRegressionScene(true), originalStudy = f.ledger.listConversationGuidanceStudies()[0]!, record = invalidation(f.tasks[index])
+  f.ledger.recordConversationLearning(record)
+  const study = f.ledger.listConversationGuidanceStudies()[0]!
+  expect(f.ledger.isConversationGuidanceSupported(f.opened.studyId)).toBe(false)
+  expect(study.rollback).toMatchObject({ kind: 'guidance-rolled-back', reason: 'support-retracted', evidenceTaskIds: [] })
+  expect({ ...study, rollback: undefined, rolledBackAt: undefined }).toEqual({ ...originalStudy, rollback: undefined, rolledBackAt: undefined })
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  const path = join(f.directory, 'ledger.jsonl'), before = readFileSync(path), replay = new EvolutionLedger(f.directory)
+  expect(replay.listConversationGuidanceStudies()).toEqual([study])
+  expect(replay.recordConversationLearning(record)).toEqual({ duplicate: true })
+  expect(readFileSync(path)).toEqual(before)
+})
+it('withdraws after consent is disabled without granting learning or changing the original verdict', () => {
+  const f = seeded('verified', true, undefined, true)
+  f.ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  f.ledger.recordConversationLearning(invalidation(f.tasks[0]))
+  const replay = new EvolutionLedger(f.directory)
+  expect(replay.getLearningAnalysisConsent()?.enabled).toBe(false)
+  expect(conversationCheckedFailureSource(replay.listConversationTasks()[0])).toBeUndefined()
+  expect(replay.listConversationTasks()[0]?.review).toEqual(f.tasks[0].review)
+})
+it('does not count a withdrawn check as a later regression', () => {
+  const f = checkedRegressionScene(), first = f.later(4, 'rejected').value, second = f.later(5, 'rejected').value
+  f.ledger.recordConversationLearning(invalidation(second)); f.reconcile()
+  expect(f.ledger.listConversationGuidanceStudies()[0]?.rollback).toBeUndefined()
+  expect(() => f.ledger.recordConversationGuidance(f.rollback([first, second]))).toThrow(/regression|failed/i)
+})
+it('withdrawn supporting evidence prevents adopting an already accepted study', () => {
+  const f = checkedRegressionScene(true, false), path = join(f.directory, 'ledger.jsonl')
+  const replay = new EvolutionLedger(f.directory)
+  replay.recordConversationLearning(invalidation(f.tasks[0]))
+  const before = readFileSync(path)
+  expect(() => replay.recordConversationGuidance({ kind: 'guidance-activated', studyId: f.opened.studyId, expectedParentVersion: f.opened.parentVersion,
+    decisionDigest: sha256(replay.listConversationGuidanceStudies()[0]!.decision) })).toThrow(/source|check/i)
+  expect(readFileSync(path)).toEqual(before)
+  expect(replay.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
+})
+it('cold recovery completes an interrupted withdrawal rollback without repeating the notification', () => {
+  const f = checkedRegressionScene(true), record = invalidation(f.tasks[0])
+  const interrupted = vi.spyOn(f.ledger, 'retireIncompatibleConversationGuidance').mockImplementationOnce(() => { throw new Error('simulated interruption after durable withdrawal') })
+  expect(() => f.ledger.recordConversationLearning(record)).toThrow('simulated interruption')
+  interrupted.mockRestore()
+  const path = join(f.directory, 'ledger.jsonl'), prefix = readFileSync(path), replay = new EvolutionLedger(f.directory)
+  expect(replay.isConversationGuidanceSupported(f.opened.studyId)).toBe(false)
+  expect(replay.recordConversationLearning(record)).toEqual({ duplicate: true })
+  expect(replay.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  expect(readFileSync(path).subarray(0, prefix.length)).toEqual(prefix)
+  expect(readFileSync(path, 'utf8').split('\n').filter(line => line.includes('task-external-check-invalidated'))).toHaveLength(1)
 })

@@ -216,6 +216,7 @@ declare module '@deepseek-ai/cordis' {
     'tianwen/learning-consent-changed'(consent: LearningAnalysisConsentReceipt): void
     'tianwen/conversation-task-reviewed'(taskId: string): void
     'tianwen/conversation-code-check-finished'(taskId: string): void
+    'tianwen/conversation-code-check-invalidated'(taskId: string): void
     'tianwen/conversation-admission-recorded'(taskId: string): void
     'tianwen/conversation-feedback-reconciled'(sessionId: string): void
     'tianwen/conversation-feedback-assessed'(assessmentId: string): void
@@ -503,6 +504,7 @@ export class TianwenEvolutionService extends Service {
     const receipt = this.formalWrite(() => this.state().ledger.recordConversationLearning(input))
     if (!receipt.duplicate && input.kind === 'task-reviewed') this.ctx.emit('tianwen/conversation-task-reviewed', input.taskId)
     if (!receipt.duplicate && input.kind === 'task-external-check-finished') this.ctx.emit('tianwen/conversation-code-check-finished', input.taskId)
+    if (!receipt.duplicate && input.kind === 'task-external-check-invalidated') this.ctx.emit('tianwen/conversation-code-check-invalidated', input.taskId)
     if (!receipt.duplicate && input.kind === 'task-admitted') this.ctx.emit('tianwen/conversation-admission-recorded', input.taskId)
     return receipt
   }

@@ -131,6 +131,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     }
     const offReview = this.ctx.on('tianwen/conversation-task-reviewed', wakeTask)
     const offCheck = this.ctx.on('tianwen/conversation-code-check-finished', wakeTask)
+    const offInvalidation = this.ctx.on('tianwen/conversation-code-check-invalidated', wakeTask)
     const wakeSession = (sessionId: string) => {
       const agent = this.ctx.agents.get(SessionId(sessionId))
       if (agent !== undefined) void this.schedule(agent).catch(error => this.warn(error))
@@ -154,7 +155,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     })
     for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
     this.ctx.effect(() => async () => {
-      this.accepting = false; offReview(); offCheck(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
+      this.accepting = false; offReview(); offCheck(); offInvalidation(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
       for (const interrupt of this.laneInterrupts.values()) interrupt()
       for (const controller of this.controllers) controller.abort()
       await this.whenIdle()
@@ -180,7 +181,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       && item.sessionLifecycleFingerprint === task.source.sessionLifecycleFingerprint && task.completion?.assistantMessageIds.includes(item.messageId))
   }
   private checkedCounter(task: ConversationTask, first: ConversationTask): boolean {
-    if (task.externalCheckFinished?.status !== 'verified' || conversationCodeCheckIdentity(task) !== conversationCodeCheckIdentity(first)) return false
+    if (!hasSatisfiedConversationCodeCheck(task) || task.externalCheckFinished?.status !== 'verified' || conversationCodeCheckIdentity(task) !== conversationCodeCheckIdentity(first)) return false
     const evolution = this.ctx.tianwenEvolution, all = evolution.listConversationFeedbackAssessments(task.source.taskId)
     if (all.some(item => item.result === undefined)) return false
     const latest = [...all].reverse().find(item => item.result?.proof != null && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId)

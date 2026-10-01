@@ -2959,6 +2959,7 @@ export class EvolutionLedger {
     const existing = this.#conversationLearning.existing(record)
     if (existing !== undefined) {
       if (sha256(existing) !== sha256(record)) throw new LedgerIntegrityError('conversation learning record changed after freeze')
+      if (record.kind === 'task-external-check-invalidated') this.retireIncompatibleConversationGuidance(this.#conversationLearning.list().find(task => task.source.taskId === record.taskId)!.source.scopeKey)
       return { duplicate: true }
     }
     if (record.kind === 'task-admitted' && record.decision?.kind === 'task' && !hasCurrentConversationQuality(record.qualityContract)) throw new LedgerIntegrityError('new task admission requires the current host quality contract')
@@ -2970,6 +2971,7 @@ export class EvolutionLedger {
       this.recordArtifact(canonicalJson(snapshot))
     }
     this.#accept({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: this.#now(), record })
+    if (record.kind === 'task-external-check-invalidated') this.retireIncompatibleConversationGuidance(this.#conversationLearning.list().find(task => task.source.taskId === record.taskId)!.source.scopeKey)
     return { duplicate: false }
   }
 
@@ -3091,7 +3093,7 @@ export class EvolutionLedger {
     }
     const identity = conversationCodeCheckIdentity(sources[0]), counter = tasks.find(task => task.source.taskId === counterId)
     if (identity === undefined || conversationCodeCheckIdentity(sources[1]) !== identity || conversationCodeCheckIdentity(counter) !== identity
-      || counter?.externalCheckFinished?.status !== 'verified' || counter.review?.verdict !== 'met' || counter.review.proof == null) {
+      || counter?.externalCheckFinished?.status !== 'verified' || !hasSatisfiedConversationCodeCheck(counter) || counter.review?.verdict !== 'met' || counter.review.proof == null) {
       throw new LedgerIntegrityError('checked failure sources require the same checker and original condition with a configured verified counter')
     }
     const counterAssessments = this.listConversationFeedbackAssessments(counter!.source.taskId)
@@ -3223,6 +3225,9 @@ export class EvolutionLedger {
 
   #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
     const tasks = this.#conversationLearning.list()
+    if (tasks.find(task => task.source.taskId === study.counterexampleTaskId)?.externalCheckInvalidated !== undefined) {
+      throw new LedgerIntegrityError('study counterevidence check was invalidated')
+    }
     if (study.resultChecks !== undefined) {
       for (const item of study.cases.slice(0, 3)) {
         const task = 'sourceTaskId' in item ? tasks.find(task => task.source.taskId === item.sourceTaskId) : undefined

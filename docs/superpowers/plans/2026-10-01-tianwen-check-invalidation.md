@@ -16,10 +16,10 @@
 
 Files: evolution/src/conversation-external-check.ts、conversation-learning.ts、ledger.ts、runtime-binding.ts、index.ts；runtime-bundle/src/conversation-guidance-loop.ts、learning-consent-agent.ts；tests/dsh-migration/conversation-checked-counterevidence.spec.ts、learning-consent-agent.spec.ts。
 
-- [ ] 测试先增加绑定原task/preparation/outcome的失效通知，实际ledger写入后来源/对照不再qualified；错误digest和未完成拒绝，重复幂等，原历史保留，运行并确认当前缺少记录支持失败。
-- [ ] 在原parse/validate/existing/apply扩展task-external-check-invalidated，投影externalCheckInvalidated；资格函数拒绝失效结果，原模型失败独立成立。
-- [ ] 在研究支持核对失效对照，原record后retire既有当前链；重复通知也补完中断retire，重启恢复不重判历史。Runtime新增宿主事件唤醒，状态增加invalidated历史数。
-- [ ] 测试覆盖新来源/研究/采用、现有方法立即回滚、回放及关闭同意、后续回归撤回检查不计入、独立model-not-met来源仍有效；执行相关回归和8包类型/实际bundle构建，独立只读审查。
+- [x] 测试先增加绑定原task/preparation/outcome的失效通知，实际ledger写入后来源/对照不再qualified；错误digest和未完成拒绝，重复幂等，原历史保留，运行并确认当前缺少记录支持失败。
+- [x] 在原parse/validate/existing/apply扩展task-external-check-invalidated，投影externalCheckInvalidated；资格函数拒绝失效结果，原模型失败独立成立。
+- [x] 在研究支持核对失效对照，原record后retire既有当前链；重复通知也补完中断retire，重启恢复不重判历史。Runtime新增宿主事件唤醒，状态增加invalidated历史数。
+- [x] 测试覆盖新来源/研究/采用、现有方法立即回滚、回放及关闭同意、后续回归撤回检查不计入、独立model-not-met来源仍有效；执行相关回归和8包类型/实际bundle构建，独立只读审查。
 
 ### Task 2: 实际误证据精确撤回
 

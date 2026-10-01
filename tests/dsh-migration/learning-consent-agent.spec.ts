@@ -596,18 +596,28 @@ describe('Tianwen main-chat learning consent tool', () => {
       record(5, mainId, 'legacy')
       record(1, 'other-session', 'verified')
       record(2, 'other-session', 'pending')
+      const checkedTask = evolution.listConversationTasks(mainId).find(task => task.source.turn === 1)!
+      const invalidatedTaskIds: string[] = []
+      const offInvalidated = mounted.ctx.on('tianwen/conversation-code-check-invalidated', taskId => { invalidatedTaskIds.push(taskId) })
+      const invalidation = { kind: 'task-external-check-invalidated' as const, taskId: checkedTask.source.taskId,
+        preparationDigest: sha256(checkedTask.externalCheckPrepared), outcomeDigest: sha256(checkedTask.externalCheckFinished), detail: 'PRIVATE host correction' }
+      evolution.recordConversationLearning(invalidation)
+      evolution.recordConversationLearning(invalidation)
+      offInvalidated()
+      expect(invalidatedTaskIds).toEqual([checkedTask.source.taskId])
+      expect(evolution.listConversationTasks(mainId).find(task => task.source.taskId === checkedTask.source.taskId)).toEqual({ ...checkedTask, externalCheckInvalidated: invalidation })
       const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl')
       const beforeLedger = readFileSync(ledgerPath, 'utf8')
 
       const result = await executeLearningStatus(mounted.ctx, main.agent)
-      const scope = 'Independent code checks cover only their declared checks; they do not replace model review, whole-task acceptance, learning eligibility or activation.'
+      const scope = 'Independent code checks cover only their declared checks; they do not replace model review, whole-task acceptance, learning eligibility or activation. Counts retain original outcomes; invalidated checks cannot support learning.'
       expect(result).toMatchObject({ isError: false, value: {
         history: { naturalConversation: {
-          codeChecks: { prepared: 6, pending: 2, verified: 2, rejected: 1, unverifiable: 1, scope },
+          codeChecks: { prepared: 6, pending: 2, verified: 2, rejected: 1, unverifiable: 1, invalidated: 1, scope },
           reviews: { pending: 7, unavailable: 0, met: 0, notMet: 0, inconclusive: 0 },
         } },
         currentSession: { naturalConversation: {
-          codeChecks: { prepared: 4, pending: 1, verified: 1, rejected: 1, unverifiable: 1, scope },
+          codeChecks: { prepared: 4, pending: 1, verified: 1, rejected: 1, unverifiable: 1, invalidated: 1, scope },
           reviews: { pending: 5, unavailable: 0, met: 0, notMet: 0, inconclusive: 0 },
         } },
       } })

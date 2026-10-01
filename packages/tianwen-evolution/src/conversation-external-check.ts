@@ -35,6 +35,15 @@ export interface ConversationExternalCheckFinished extends ConversationExternalC
   readonly fileResultDigest: Sha256Digest | null
 }
 
+/** Trusted host withdrawal; the original check and task review remain immutable. */
+export interface ConversationExternalCheckInvalidated {
+  readonly kind: 'task-external-check-invalidated'
+  readonly taskId: string
+  readonly preparationDigest: Sha256Digest
+  readonly outcomeDigest: Sha256Digest
+  readonly detail: string
+}
+
 /** Explicit source references, never a replacement task verdict. */
 export interface ConversationCheckedFailureSource {
   readonly taskId: string
@@ -74,11 +83,12 @@ export function supportsConversationCodeCheck(decision: ConversationAdmissionDec
 /** A configured check may not contradict new successful counterevidence.
  * This does not establish a task verdict; unconfigured tasks keep their rules. */
 export function hasSatisfiedConversationCodeCheck(task: ConversationTask | undefined): boolean {
-  return task !== undefined && (task.externalCheckPrepared === undefined || task.externalCheckFinished?.status === 'verified')
+  return task !== undefined && task.externalCheckInvalidated === undefined
+    && (task.externalCheckPrepared === undefined || task.externalCheckFinished?.status === 'verified')
 }
 /** Negative evidence only. Legacy or unrelated checker rejection is diagnostic. */
 export function hasRejectedConversationCodeCheck(task: ConversationTask | undefined): boolean {
-  return task !== undefined && task.admission?.decision?.evaluationMode === 'local-files'
+  return task !== undefined && task.externalCheckInvalidated === undefined && task.admission?.decision?.evaluationMode === 'local-files'
     && supportsConversationCodeCheck(task.admission.decision)
     && task.externalCheckPrepared?.requiredCondition !== undefined && task.externalCheckFinished?.status === 'rejected'
     && task.externalCheckFinished.failedRequiredConditionDigest === sha256(task.externalCheckPrepared.requiredCondition)
@@ -110,8 +120,12 @@ export function parseConversationExternalCheckOutcome(value: unknown): Conversat
   return { status: row.status as ConversationExternalCheckOutcome['status'], detail: text(row.detail, 4096),
     ...(qualified ? { failedRequiredConditionDigest: digest(row.failedRequiredConditionDigest) } : {}) }
 }
-export function parseConversationExternalCheck(value: unknown): ConversationExternalCheckPrepared | ConversationExternalCheckFinished {
+export function parseConversationExternalCheck(value: unknown): ConversationExternalCheckPrepared | ConversationExternalCheckFinished | ConversationExternalCheckInvalidated {
   const kind = (value as { kind?: unknown } | null)?.kind
+  if (kind === 'task-external-check-invalidated') {
+    const row = fields(value, ['kind', 'taskId', 'preparationDigest', 'outcomeDigest', 'detail'])
+    return { kind, taskId: text(row.taskId, 512), preparationDigest: digest(row.preparationDigest), outcomeDigest: digest(row.outcomeDigest), detail: text(row.detail, 4096) }
+  }
   if (kind === 'task-external-check-prepared') {
     const qualified = Object.hasOwn(value as object, 'requiredCondition')
     const row = fields(value, ['kind', 'taskId', 'preparedSeq', 'requestDigest', 'contextDigest', 'admissionDigest', 'modelConfigDigest', 'checkerId', 'checkerDigest', 'contractDigest', 'inputsDigest', ...(qualified ? ['requiredCondition'] : [])])
@@ -129,9 +143,16 @@ export function parseConversationExternalCheck(value: unknown): ConversationExte
     ...parseConversationExternalCheckOutcome({ status: row.status, detail: row.detail, ...(qualified ? { failedRequiredConditionDigest: row.failedRequiredConditionDigest } : {}) }) }
 }
 
-export function validateConversationExternalCheck(record: ConversationExternalCheckPrepared | ConversationExternalCheckFinished, task: ConversationTask): void {
+export function validateConversationExternalCheck(record: ConversationExternalCheckPrepared | ConversationExternalCheckFinished | ConversationExternalCheckInvalidated, task: ConversationTask): void {
   const decision = task.admission?.decision
   if (!supportsConversationCodeCheck(decision)) throw new Error('external check requires file code admission')
+  if (record.kind === 'task-external-check-invalidated') {
+    if (record.taskId !== task.source.taskId || task.externalCheckPrepared === undefined || task.externalCheckFinished === undefined
+      || record.preparationDigest !== sha256(task.externalCheckPrepared) || record.outcomeDigest !== sha256(task.externalCheckFinished)) {
+      throw new Error('check invalidation requires the exact completed preparation and outcome')
+    }
+    return
+  }
   if (record.kind === 'task-external-check-prepared') {
     if (task.completion !== undefined || (task.models?.length ?? 0) > 0 || (task.fileInputs?.length ?? 0) > 0
       || task.fileUnavailable !== undefined || (task.fileAncillary?.length ?? 0) > 0) throw new Error('external check must be prepared before the candidate or file execution')
