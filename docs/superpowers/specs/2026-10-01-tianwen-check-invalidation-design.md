@@ -1,0 +1,13 @@
+# 错误宿主检查证据失效
+
+实际任务1f5cb的冻结检查器把字面标题格式拒绝标成原必需功能条件失败，共享来源消费者因此返回qualified。只读审查及qualified-source-audit.json确认。原任务不重跑，不改rejected，不接纳原修改。这是当前可信结果边界缺陷，不是新发布门槛。
+
+比较三条路线：覆盖原结果会抹掉历史；按detail关键词过滤无法由文字证明检查归属；精确追加宿主失效通知保留历史，并使现有治理路径停止使用错误证据。选择第三条，复用Evolution记录、投影、共享资格函数及既有support-retracted回滚，无新存储/调度/模型评价平台。
+
+新增task-external-check-invalidated，包含taskId、preparationDigest、outcomeDigest和有界detail。outcomeDigest绑定完整原finished记录（包括任务输出digest），不是新答案。只有存在且精确匹配的prepared及finished可撤回；重复同一通知幂等，不同通知冲突。通过原可信宿主recordConversationLearning写入，不暴露给模型工具。原始task/review/finished不可修改，没有恢复或重新检查入口。撤回不要求当前学习同意，关闭同意后仍能撤去错误证据。
+
+Task投影增加externalCheckInvalidated。hasRejected/hasSatisfied不再使用被撤回的检查；原model-not-met和真实反馈仍按原规则独立成立，旧无配置记录不受影响。显式checkedFailure来源及成功对照、研究支持和新采用一致拒绝撤回证据。源证据撤回后，既有模型失败支撑的研究可保留；成功对照检查撤回会使依赖它的研究失去支持。历史研究/采用裁决原样回放，不回填新门槛；失效事件之后按原support-retracted治理回滚当前链，重启可补完中断回滚。宿主事件唤醒现有学习循环；既有assertCurrent在写前核查新支持，无重复模型调用。
+
+状态报告保留历史verified/rejected计数，另列invalidated并说明原结果已不可用于学习。未来检查器须把格式拒绝与原必需条件的确证失败分开，本轮冻结脚本不可事后改写。
+
+验证：真实已保存任务只读复现误资格；测试先红后绿，覆盖错误绑定/未完成/幂等/关闭同意、来源和对照选择、新研究和采用、有效模型失败不受影响、自动回滚和冷恢复、后续回归不使用撤回检查、状态不泄露材料。通过后在原持续DEV精确追加一次实际失效通知，0模型、原账本字节前缀保留、原评价保留，冷读确认source消失。正式隔离、main/Daily NO-GO及原窗口保持。所有小记录存D盘，复用依赖，测试只清理本轮新建明确路径，D不少于15GiB。
