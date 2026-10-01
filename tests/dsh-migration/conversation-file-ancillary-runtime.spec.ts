@@ -96,6 +96,25 @@ const read = () => toolCallResponse('read-input', 'read', { file_path: 'input.md
 const glob = () => toolCallResponse('find-input', 'glob', { pattern: '*.md' })
 const grep = () => toolCallResponse('grep-input', 'grep', { pattern: 'needle|QUERY_CANARY', path: 'input.md' })
 const facts = (id = 'facts-input') => toolCallResponse(id, CAPTURED_FILE_FACTS_TOOL, { file_path: 'input.md' })
+
+it('keeps every ancillary and file call in writable task action evidence without importing generated content', async () => {
+  const content = 'GENERATED_FILE_ACTION_CANARY'
+  const h = await runNativeAncillaryTask([glob(), read(), toolCallResponse('write-actions', 'write', { file_path: 'input.md', content })], undefined, { outputKind: 'files' })
+  try {
+    expect(h.task.fileUnavailable).toBeUndefined()
+    const recovered = await recoverConversationTaskMaterial(h.ctx, h.task)
+    expect(recovered.fileExecution).toMatchObject({ schemaVersion: 'tianwen.file-execution-evidence.v2', actions: [
+      { tool: 'glob', path: null, status: 'success' }, { tool: 'read', path: 'input.md', status: 'success' }, { tool: 'write', path: 'input.md', status: 'success' },
+    ] })
+    const output = { answer: 'saved ORIGINAL_ANSWER_CANARY', files: h.task.completion!.files!.entries }
+    const evidence = projectClaimEvidence({ source: recovered, evaluationMode: 'local-files', conversation: [{ role: 'assistant', content: [{ type: 'text', text: output.answer }] }],
+      toolEvidence: [], fileResult: { ...output, outputDigest: sha256(output) } }, 'file-chunks-v1')
+    const sources = evidence.items.filter(item => item.role === 'tool').map(item => item.text).join('')
+    expect(sources).toContain('Native glob:')
+    expect(sources).toContain('Native write "input.md"')
+    expect(sources).not.toContain(content)
+  } finally { await h.handle.dispose(); await h.ctx.fiber.dispose() }
+})
 const parallel = (calls: readonly { id: string; name: string; arguments: Record<string, unknown> }[]): StreamChunk[] => [
   ...calls.flatMap((call, index) => [{ type: 'block-start' as const, index, blockType: 'tool-call' as const },
     { type: 'block-end' as const, index, block: { type: 'tool-call' as const, id: call.id as never, name: call.name, arguments: JSON.stringify(call.arguments) } }]),
