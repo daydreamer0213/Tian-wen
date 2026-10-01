@@ -178,6 +178,7 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
       const host = captureHost(options, cwd, targetKey, observations)
       const baseline = ts.createProgram([targetFull, ...contextFulls], options, host)
       ts.getPreEmitDiagnostics(baseline)
+      if (requiredCondition !== undefined && baseline.getOptionsDiagnostics().length !== 0) return undefined
       material.signal.throwIfAborted()
       const originalContent = observations.texts.get(targetKey) ?? null
       const manifest = [...observations.texts].map(([path, text]) => ({ path, digest: text === undefined ? null : sha256(text) }))
