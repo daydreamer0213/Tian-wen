@@ -1,5 +1,7 @@
 # 天问完整自动学习：分阶段实现路线
 
+2026-10-02 B一次真实不同功能索引任务完整交付：b6b051b事前41案例/真实9记录/工具权限后，原生92af1bfd独立功能verified41/41、双原模型met、文件证据及0请求两复核恢复，0b0986b原样接纳；原合同与历史不重写、不追加门槛。正式10task/0研究/隔离/awaiting-compatible-sources、可信功能失败来源空，C—F仍无当前自然效果。下一自主实际学习主链开发待办及原判断依据，不靠连续维护小题计成果/索题/制造失败。完整目标active/incomplete、NO-GO/原门槛/窗口保持。见[本项交付和失败边界](../../operations/tianwen-functional-index-native-20261001.md)。
+
 2026-10-01 D具体不同五任务功能依据已接线3f5c49a：closed五角色完整saved material/各自cases先冻结，来源/角色/model/quality精确匹配后prepareIndependentCases与五checks，复用原bounded runner，不改框架/门槛。八组246+1实际native loop/Docker/类型/bundle/完整三TS及审查通过；受控accepted/未激活及0请求恢复不是自然研究，semanticIndependence仍unestablished。正式原9task/0研究/隔离/账本保持，完整C—F效果、目标active/incomplete及NO-GO/原窗口不改。下一不同真实开发待办事前依据一次前瞻，不把本控制或普通成功当全目标。见[交付范围](../../operations/tianwen-functional-study-cohort-20261001.md)。
 
 2026-10-01自主清理摘要新实际任务9提供者/7工具/0重试，B具体功能检查事前准备1而执行0；模型请求受限契约禁止的edit，guard正确拒绝使完整文件证据停止，原unverifiable/inconclusive保持，不修权限/候选、不重跑原功能案例或算自然来源。两臂受控及完整75测试/审查确认按设计停止，原8账本前缀和0模型准确恢复保持，现9任务/0研究/隔离。下一不同实际文件待办事前匹配目标内必要read/write/edit，原路径/大小/预算/独立依据/停止条件保持。C—F、完整目标active/incomplete、NO-GO/原门槛/窗口不变。见[实际结果与归属](../../operations/tianwen-cleanup-summary-native-20261001.md)。

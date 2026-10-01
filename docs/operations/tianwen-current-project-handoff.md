@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-02 自主真实功能索引已接纳；完整学习仍缺研究来源
+
+b6b051b事前原合同/真实9记录/41案例/权限及0模型preflight后，唯一原生任务92af1bfd成功合同read→准确目标不存在read→write→read→edit→edit→read，12提供者/根8/7工具/0重试，检查准备1/执行1，原41/41 verified及双原复核met分别保存。0b0986b接纳相同4520字节候选，无修稿或事后加门槛；只读审查无P1/P2，0请求准确恢复task/material/program/两复核。见[交付与实际边界](tianwen-functional-index-native-20261001.md)。
+
+原9账本前缀04324ee8…保持，现10task/0study/隔离true，readiness awaiting-compatible-sources、可信功能失败来源空；现账本b8a71177b1a6c59c23e52409a237dd7c0502b603d15d5be498835dd2f8f92903。普通成功不是C—F/全学习证据。控制端冻结导入错误和后审缺subagents服务分别保留；未重跑原任务/41案例。下一自主实际学习主链待办及原依据，不再靠连续维护小工具凑成果，不索题/催评/制造失败。完整目标active/incomplete、main/Daily NO-GO/原门槛/十工作日窗口保持。
+
+41本轮容器全清、Docker恢复停止、0进程；原生gzip167102B/本轮约0.45MiB，无环境副本或下载，D18.37GiB≥15未达20偏好。自有临时docker-config目录删除被blocked by policy拒绝，保留小目录未绕过，历史停止容器未更改。
+
 ## 2026-10-01 五不同功能合同具体研究供应器已交付；自然学习未完成
 
 bcea39e设计后3f5c49a在原脚本内薄组合closed五角色完整saved material及各自cases/原condition；首红旧单producer只接受第1任务拒另4。hook事前精确来源顺序/model/quality/cwd，prepare按角色+完整材料唯一派发，其他停止无fallback，不读取今天源码；五contract另绑定cohort/角色，两臂共用原期望。原入口/loop/资格/激活不改，八组246/246+1实际native loop/Docker控制、包类型/bundle、三完整TS旧0/现0/新增0及独立审查通过。见[交付、控制失败及实际范围](tianwen-functional-study-cohort-20261001.md)。

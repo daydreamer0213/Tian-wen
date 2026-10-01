@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-02 自主真实功能索引92af1bfd事前41案例/原条件/只读合同及目标read/write/edit固定，原41/41 verified、双原模型met、完整文件证据及0请求两复核准确恢复；0b0986b接纳原样候选，未重跑旧题或增加事后门槛。仅证明该普通任务原功能成功，不能填重复问题/自然研究/方法效果。正式现10task/0study/隔离、awaiting-compatible-sources，可信功能失败来源为空，旧9前缀保持、现账本b8a71177…；完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一自主实际学习主链待办，不以维护小题成功造来源。见[范围和控制端失败归属](tianwen-functional-index-native-20261001.md)。
+
 2026-10-01具体closed五不同功能合同研究供应器3f5c49a交付，完整host saved material/原条件/各自独立期望事前冻结，生成前来源精确匹配及五prepare，角色/材料漂移不fallback。八组246+1实际loop/Docker控制、类型/bundle/三完整TS和审查通过；控制研究accepted但隔离未激活，十臂实际执行及0请求准确caseDesign/study恢复仅机制，semanticIndependence仍unestablished。0真实提供者/反馈/自然来源/正式研究，正式原9task/0study/隔离及04324ee8…账本全字节不改。不能借宿主登记或本控制补来源资格；完整目标active/incomplete、NO-GO/原门槛/窗口保持。见[具体边界及失败归属](tianwen-functional-study-cohort-20261001.md)。
 
 2026-10-01新清理摘要实际任务唯一9提供者/7工具/0重试，原功能检查已首根请求前准备但执行0；edit被宿主read/write-only契约拒绝导致完整文件证据material-unavailable，原program unverifiable/review inconclusive，不是功能失败或自然来源。原候选不接纳/不重跑/不执行34案例，不放宽无pending错误；两受控臂及完整75测试/独立审查确认按设计停止。0请求精确冷恢复、旧8账本前缀保持，正式9task/0study/隔离true，现04324ee8…；完整目标active/incomplete、NO-GO/原门槛/窗口不变。下一不同实际文件任务事前匹配必要read/write/edit权限，不能借此改旧任务。见[原结果及归属](tianwen-cleanup-summary-native-20261001.md)。
