@@ -174,6 +174,68 @@ function fileOpening(tasks: readonly [ConversationTask, ConversationTask, Conver
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 
+function aliasedGeneratedFileOpening(ledger: EvolutionLedger, scenario: 'read-order' | 'path-case' | 'output-order' | 'different-content' = 'read-order') {
+  const mode = scenario === 'output-order' ? 'files' : 'chat'
+  const tasks = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, mode)) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const { kind: _kind, studyId: _id, ...original } = fileOpening(tasks, [], mode)
+  const body: GuidanceStudyBody = { ...original, cases: original.cases.map(item => {
+    if (!('prompt' in item)) return item
+    const holdout = item.kind === 'holdout'
+    let entries = [{ path: 'a.txt', content: 'pilot alpha' }, { path: 'b.txt', content: 'pilot beta' }]
+    if (holdout && scenario === 'read-order') entries = [...entries].reverse()
+    if (holdout && scenario === 'path-case') entries = entries.map(entry => ({ ...entry, path: entry.path.toUpperCase() }))
+    if (holdout && scenario === 'different-content') entries = entries.map(entry => ({ ...entry, content: `${entry.content} new measurements` }))
+    const paths = mode === 'files' ? ['a.txt', 'b.txt'] : []
+    const files = { ...item.files!, entries, outputPaths: holdout && scenario === 'output-order' ? [...paths].reverse() : paths }
+    const material = { prompt: 'Summarize these pilot files.', criteria: item.criteria, qualityContract: item.qualityContract!, files }
+    return { id: item.id, kind: item.kind, ...material, inputDigest: guidanceInputDigest(material.prompt, files), materialDigest: sha256(material) }
+  }) }
+  return { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+}
+
+it.each(['read-order', 'path-case', 'output-order'] as const)('rejects new generated file input aliases: %s', scenario => {
+  const root = ledgerRoot(), ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const opened = aliasedGeneratedFileOpening(ledger, scenario)
+  expect(opened.cases[3]!.inputDigest).not.toBe(opened.cases[4]!.inputDigest)
+  expect(parseConversationGuidanceRecord(opened)).toEqual(opened)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance(opened)).toThrow(/duplicate.*file.*input/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it('preserves genuinely different generated file contents and exact original digests', () => {
+  const root = ledgerRoot(), ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const opened = aliasedGeneratedFileOpening(ledger, 'different-content')
+  expect(ledger.recordConversationGuidance(opened)).toEqual({ duplicate: false })
+  expect(new EvolutionLedger(root).listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+})
+
+it('cold-replays historical generated file aliases unchanged but blocks a new activation', () => {
+  const root = ledgerRoot(), ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const opened = aliasedGeneratedFileOpening(ledger)
+  appendFileSync(join(root, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-09-30T00:00:00.000Z', record: opened })}\n`)
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+  expect(replay.recordConversationGuidance(opened)).toEqual({ duplicate: true })
+  const { decision } = evaluateFileStudy(replay, opened, 'chat')
+  expect(decision.verdict).toBe('accepted')
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => replay.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId,
+    expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })).toThrow(/duplicate.*file.*input/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  expect(new EvolutionLedger(root).listConversationGuidanceStudies()[0]!.decision).toEqual(decision)
+  const activation = { kind: 'guidance-activated' as const, studyId: opened.studyId,
+    expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) }
+  appendFileSync(join(root, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: new Date().toISOString(), record: activation })}\n`)
+  const historicalBytes = readFileSync(join(root, 'ledger.jsonl'), 'utf8'), historical = new EvolutionLedger(root)
+  expect(historical.listConversationGuidanceStudies()[0]!.activation).toEqual(activation)
+  expect(historical.recordConversationGuidance(activation)).toEqual({ duplicate: true })
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(historicalBytes)
+})
+
 // Controlled receipts verify the real rollback and replay, not natural efficacy.
 function evaluateFileStudy(ledger: EvolutionLedger, opened: GuidanceStudyOpened, fileMode: 'files' | 'chat') {
   const planned = proposalPlan(opened)

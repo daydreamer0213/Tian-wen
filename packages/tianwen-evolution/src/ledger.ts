@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
 import { ConversationLearningState, effectiveConversationFamily, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
-import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, parseConversationCaseDesignAttempt, type ConversationCaseDesignAttempt, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
+import { ConversationGuidanceState, guidanceFileInputIdentity, guidanceVersion, parseConversationGuidanceRecord, parseConversationCaseDesignAttempt, type ConversationCaseDesignAttempt, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
 import { ConversationFeedbackState, hasVerifiedContinuingPreference, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
 import {
@@ -3127,6 +3127,13 @@ export class EvolutionLedger {
     if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
       const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
       if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
+      const generatedFileInputs = new Set<string>()
+      for (const item of opened!.cases) {
+        if (!('prompt' in item) || item.files === undefined) continue
+        const identity = guidanceFileInputIdentity(item.prompt, item.files)
+        if (generatedFileInputs.has(identity)) throw new LedgerIntegrityError('duplicate generated file input cannot support a new study or activation')
+        generatedFileInputs.add(identity)
+      }
       this.#requireCheckedConversationCounterevidence(opened!.counterexampleTaskId)
       this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)

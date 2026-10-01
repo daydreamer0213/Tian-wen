@@ -2,7 +2,7 @@ import { sha256 } from './learning-intake.js'
 import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationQualityReviewChecks, parseStoredConversationReviewChecks, conversationReviewConsensus, type ConversationStoredReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
 import { classifyLearningExploration, parseConversationLearningExplorationRequest, type ConversationLearningExplorationRequest, type LearningExplorationResult } from './learning-exploration.js'
 import type { Sha256Digest } from './ledger.js'
-import { parseConversationFileMaterial, parseConversationFileTrialReceipt, type ConversationFileMaterial, type ConversationFileTrialReceipt } from './conversation-files.js'
+import { canonicalConversationFileEntries, parseConversationFileMaterial, parseConversationFileTrialReceipt, type ConversationFileMaterial, type ConversationFileTrialReceipt } from './conversation-files.js'
 import { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceUse } from './conversation-skill-source.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
@@ -205,6 +205,13 @@ export function guidanceVersion(snapshot: GuidanceSnapshot): Sha256Digest { retu
 export function guidanceInputDigest(text: string, files?: ConversationFileMaterial): Sha256Digest {
   const request = text.normalize('NFKC').trim().replace(/\s+/gu, ' ')
   return sha256(files === undefined ? request : { request, files: parseConversationFileMaterial(files) })
+}
+/** A prospective duplicate check only. Never replaces frozen evidence hashes
+ * or claims that different identities establish semantic independence. */
+export function guidanceFileInputIdentity(text: string, files: ConversationFileMaterial): Sha256Digest {
+  const material = parseConversationFileMaterial(files)
+  return guidanceInputDigest(text, { ...material, entries: canonicalConversationFileEntries(material.entries),
+    outputPaths: material.outputPaths.map(path => path.toLowerCase()).sort() })
 }
 export function guidanceRule(snapshot: GuidanceSnapshot, family: ConversationFamily, evaluationMode: string = 'text', fileOutputKind?: 'files' | 'chat'): string | undefined {
   return evaluationMode === 'text' ? snapshot.rules[family]

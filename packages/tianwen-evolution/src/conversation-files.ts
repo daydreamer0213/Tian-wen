@@ -8,6 +8,12 @@ export interface ConversationFileEntry {
   readonly content: string | null
 }
 
+/** Internal shared identity projection; preserves exact content and absence. */
+export function canonicalConversationFileEntries(inputs: readonly ConversationFileEntry[]): readonly ConversationFileEntry[] {
+  return inputs.map(({ path, content }) => ({ path: path.toLowerCase(), content }))
+    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+}
+
 /** Regression identity from captured preimages, never the candidate's output.
  * Missing file evidence cannot fall back to request-only independence. */
 export function conversationFileTaskInputDigest(task: ConversationTask, requestDigest = task.source.requestContentDigest ?? task.source.requestDigest): Sha256Digest | undefined {
@@ -17,8 +23,7 @@ export function conversationFileTaskInputDigest(task: ConversationTask, requestD
     || task.completion?.status !== 'completed' || task.fileUnavailable !== undefined
     || result === undefined || result.outputKind !== decision.fileOutputKind
     || inputs === undefined || inputs.length === 0 || result.inputsDigest !== sha256(inputs)) return undefined
-  const canonicalInputs = inputs.map(({ path, content }) => ({ path: path.toLowerCase(), content }))
-    .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
+  const canonicalInputs = canonicalConversationFileEntries(inputs)
   return sha256({ requestDigest, inputs: canonicalInputs })
 }
 

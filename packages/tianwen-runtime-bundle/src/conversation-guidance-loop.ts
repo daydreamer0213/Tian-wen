@@ -13,7 +13,7 @@ import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversa
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { recoverConversationCaseDesign } from './conversation-case-design.js'
-import { hasSatisfiedConversationCodeCheck, conversationFileTaskInputDigest, conversationTaskInputDigest, conversationRequestContentDigest } from '@tianwen/evolution'
+import { hasSatisfiedConversationCodeCheck, conversationFileTaskInputDigest, conversationTaskInputDigest, conversationRequestContentDigest, guidanceFileInputIdentity } from '@tianwen/evolution'
 import { listConversationSkillReferences, readConversationSkillReference, type ConversationSkillOffer } from './learning-skill-reuse.js'
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 
@@ -598,6 +598,15 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const independent = generatedCases(generated.value, qualityContract!, fileConfig)
       const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => conversationEvidenceTexts(material, [])).map(text => guidanceInputDigest(text)))
       if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
+      if (fileMode) {
+        const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(
+          conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files!)))
+        for (const item of independent) {
+          const identity = guidanceFileInputIdentity(item.prompt, item.files!)
+          if (fileInputs.has(identity)) throw new Error('invalid-judgment')
+          fileInputs.add(identity)
+        }
+      }
       if (!fileMode) {
         const sourcePrompts = [...sources, counter].flatMap(material => conversationEvidenceTexts({ request: material.request, context: [] }, []))
         if (independent.some((item, index) => sharesCopiedQuantifiedFact([...sourcePrompts, ...independent.slice(0, index).map(previous => previous.prompt)], item.prompt))) throw new Error('invalid-judgment')
