@@ -8,7 +8,7 @@ Tech Stack: 现有TypeScript、Vitest、DSH与共享文件解析，无新增依�
 
 约束：完整目标/NO-GO/正式隔离/原发布门槛/原窗口保持；不造自然来源/用户反馈、不重试旧真实样本，不执行生成代码；生成物D盘，底线15GiB。
 
-- [ ] 在tests/dsh-migration/conversation-study-typescript.spec.ts固定适用性、原冻结文件、输入/输出/条件及取消反例；记录真正入口缺失的首次失败。
-- [ ] 修改scripts/conversation-typescript-check.ts抽取准备核心并实现createConversationStudyTypeScriptCheck；保留旧默认行为，研究仅事前明确条件和声明文件适用。
-- [ ] 验证两臂共享同一事前冻结检查及与prepareConversationStudyResultChecks/evaluateConversationStudyResultCheck接线；完整普通回归、研究相关回归、八包类型和实际bundle。
-- [ ] 独立审查并关闭重要问题；记录真实失败归属、空间、正式账本未改及目标未完成，提交/推送。
+- [x] 在tests/dsh-migration/conversation-study-typescript.spec.ts固定适用性、原冻结文件、输入/输出/条件及取消反例；记录真正入口缺失的首次失败。
+- [x] 修改scripts/conversation-typescript-check.ts抽取准备核心并实现createConversationStudyTypeScriptCheck；保留旧默认行为，研究仅事前明确条件和声明文件适用。
+- [x] 验证两臂共享同一事前冻结检查及与prepareConversationStudyResultChecks/evaluateConversationStudyResultCheck接线；当前七组178/178，八包类型和实际bundle通过。初八组guidance-loop104通过，唯独十臂编译测试20s超时已保留并仅调测试等待。
+- [x] 独立审查两P2先红后关闭；完整两个TS旧0/现0/新增0；记录真实失败归属、空间、正式账本未改及目标未完成，工程提交8d95097，推送回执见D:/DevData/tianwen-study-typescript-20261001/finish.json。
