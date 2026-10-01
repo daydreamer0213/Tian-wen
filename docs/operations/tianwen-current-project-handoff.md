@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 方法文件试验已补自身原生动作；完整学习仍待自然来源及效果
+
+b1269e4设计/计划后02aabea实现本次trialExecution，完整原生记录唯一关联全部调用/结果（包括非append重复拒绝）、冻结规范路径或null、序号/turn/step/sourceEventSeq；投影先于receipt保存。新method复核只引用当前试验动作，生成内容不作来源；冷恢复由同arm完整receipt/material/config/proof独立派生再精确对照，缺resolver/借其他同输出trial拒绝。旧receipt/digest/三字段recover/无marker wrapper不变、不补历史；loop正式/探索及冷采用、file packet接入，独立程序检查输入不扩权。见[交付及失败归属](tianwen-trial-action-evidence-20261001.md)。
+
+首原生缺metadata红测试后十组290/290，增加非append反例及保存顺序收尾两组31/31，不同291项；八包类型/actualbundle、完整八TS旧10/现10/新增0及独立审查通过。夹具undefined/测试readonly及首驱动错误loader等控制端问题保留，不记自然任务失败。正式0请求冷恢复原6任务/0研究/awaiting-compatible-sources/隔离true、原96/e00精确及账本498c8f…完整字节保持。完整目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口不变；本轮是D接缝实现，不是自然研究/效果。下一自行挑选不同实际功能任务及事前原判断依据，一次原生前瞻核实新入口，不重跑报告、不索任务/催评价或造来源。本轮小记录约43KiB、新试验根残余0、无新全量副本/依赖，D约18.44GiB≥15，未达20偏好。
+
 ## 2026-10-01 自主真实报告已验证新动作证据；引用跨块拒绝保留并薄修新入口
 
 0c200c4冻结真实当前来源后唯一e00e5e87准入summarization/local-files/files，5提供者/根3/工具2成功read→write/0重试，完整输入输出及v2动作恢复通过。原requirements返回met但首引文跨request-1/2的384码点边界，宿主严格拒绝，原review保持inconclusive，第二模型未运行；不是两模型成功或独立程序语义通过。原稿D原样保留、未接纳/修稿/重跑。六引用只首条不匹配，动作两条精确匹配，audit结构合法。见[实际结果和失败归属](tianwen-readable-status-task-20261001.md)。
