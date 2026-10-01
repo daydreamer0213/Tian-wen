@@ -326,6 +326,43 @@ it.each([true, false])('carries concrete compiler attribution opt-in=%s through 
   } finally { if (cold !== undefined) { await cold.handle.dispose(); await cold.ctx.fiber.dispose() } else { await harness.handle.dispose(); await harness.ctx.fiber.dispose() } }
 })
 
+it.each(['declared', 'undeclared', 'drift', 'final-drift'] as const)('binds concrete compiler readonly references through native observation and cold recovery: %s', async scenario => {
+  const requestText = 'Read notes.md and input.ts; repair only input.ts and preserve the reference.'
+  let harness: Awaited<ReturnType<typeof mount>>
+  const check: ConversationExternalCodeCheck = { async prepare(material) {
+    return createConversationTypeScriptCheck({ cwd: harness.root, requestText, targetPath: 'input.ts', contextPaths: [], requireCleanTypecheck: true,
+      ...(scenario === 'undeclared' ? {} : { referencePaths: ['notes.md'] }),
+      compilerOptions: { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext, types: [] } }).prepare(material)
+  } }
+  harness = await mount([structured({ ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }), () => {
+    if (scenario === 'drift') writeFileSync(join(harness.root, 'notes.md'), 'Reference changed after the pre-answer check.')
+    return toolCallResponse('reference-read', 'read', { file_path: 'notes.md' })
+  }, toolCallResponse('reference-target-read', 'read', { file_path: 'input.ts' }),
+    toolCallResponse('reference-target-write', 'write', { file_path: 'input.ts', content: 'export const value: number = 2' }),
+    () => {
+      if (scenario === 'final-drift') writeFileSync(join(harness.root, 'notes.md'), 'Reference changed after the successful read.')
+      return textResponse('saved')
+    }, ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'notes.md'), 'Use the declared number type.')
+  writeFileSync(join(harness.root, 'input.ts'), 'export const value: number = "wrong"')
+  let cold: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    harness.handle.agent.followup(direct(requestText))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.fileInputs).toHaveLength(2)
+    expect(task.completion?.files?.outputPaths).toEqual(['input.ts'])
+    expect(task.externalCheckFinished?.status).toBe(scenario === 'declared' ? 'verified' : 'unverifiable')
+    expect(task.externalCheckFinished).not.toHaveProperty('failedRequiredConditionDigest')
+    const material = await recoverConversationTaskMaterial(harness.ctx, task)
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    cold = await mount([], false, undefined, harness.root)
+    expect(cold.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(task)
+    expect(await recoverConversationTaskMaterial(cold.ctx, task)).toEqual(material)
+    expect(cold.adapter.requests).toHaveLength(0); expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+  } finally { if (cold) { await cold.handle.dispose(); await cold.ctx.fiber.dispose() } else { await harness.handle.dispose(); await harness.ctx.fiber.dispose() } }
+})
+
 it.each(['provider-defaults', 'outer-request-hook', 'later-config-drift'] as const)('binds an independent check to the actual native header with %s', async scenario => {
   let harness: Awaited<ReturnType<typeof mount>>
   let preparations = 0, evaluations = 0

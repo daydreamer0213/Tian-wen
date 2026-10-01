@@ -3,7 +3,8 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { sha256, supportsConversationCodeCheck } from '../packages/tianwen-evolution/src/index.js'
+import { conversationExternalInputsDigest, parseConversationFileEntries, sha256, supportsConversationCodeCheck } from '../packages/tianwen-evolution/src/index.js'
+import { readConversationFile } from '../packages/tianwen-runtime-bundle/src/conversation-file-material.js'
 import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
 
 const CHECKER_ID = 'conversation-typescript-noemit'
@@ -21,6 +22,8 @@ export interface ConversationTypeScriptCheckConfig {
   readonly compilerOptions: ts.CompilerOptions
   /** Opt in only when the original task requires this compiler result. Default: diagnostic only. */
   readonly requireCleanTypecheck?: boolean
+  /** Explicit readonly files the original task must read. Default: target input only. */
+  readonly referencePaths?: readonly string[]
 }
 
 /** Trusted project constraint over the already-frozen compiler program. */
@@ -149,6 +152,9 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
   const requestText = config.requestText
   const targetPath = config.targetPath
   const contextPaths = [...config.contextPaths]
+  if (config.referencePaths !== undefined && !Array.isArray(config.referencePaths)) throw new TypeError('referencePaths must be an array')
+  const referencePaths = [...(config.referencePaths ?? [])]
+  if (referencePaths.length > 0) parseConversationFileEntries([targetPath, ...referencePaths].map(path => ({ path, content: null })))
   const options: ts.CompilerOptions = { ...structuredClone(config.compilerOptions),
     strict: true, noEmit: true, noCheck: false,
     noImplicitAny: true, noImplicitThis: true, alwaysStrict: true, strictNullChecks: true,
@@ -174,6 +180,18 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
         contextFulls.push(full)
       }
       const observations: Observations = { texts: new Map(), files: new Map(), directories: new Map(), children: new Map(), realPaths: new Map() }
+      const references = []
+      try {
+        for (const path of referencePaths) {
+          material.signal.throwIfAborted()
+          const reference = await readConversationFile(cwd, path)
+          material.signal.throwIfAborted()
+          if (reference.content === null || reference.path !== path) return undefined
+          references.push(reference)
+          observations.texts.set(pathKey(resolve(cwd, path)), reference.content)
+          observations.files.set(pathKey(resolve(cwd, path)), true)
+        }
+      } catch { material.signal.throwIfAborted(); return undefined }
       const targetKey = pathKey(targetFull)
       const host = captureHost(options, cwd, targetKey, observations)
       const baseline = ts.createProgram([targetFull, ...contextFulls], options, host)
@@ -181,12 +199,19 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
       if (requiredCondition !== undefined && baseline.getOptionsDiagnostics().length !== 0) return undefined
       material.signal.throwIfAborted()
       const originalContent = observations.texts.get(targetKey) ?? null
+      const inputs = [{ path: targetPath, content: originalContent }, ...references]
+      let inputsDigest: ReturnType<typeof sha256> | undefined
+      if (references.length > 0) {
+        try { inputsDigest = conversationExternalInputsDigest(inputs) }
+        catch { return undefined }
+      }
       const manifest = [...observations.texts].map(([path, text]) => ({ path, digest: text === undefined ? null : sha256(text) }))
         .sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
       const contractDigest = sha256({
         cwd, targetPath, contextPaths, requestText,
         compiler: ts.version, options, compilerDigest, checkerDigest,
         ...(requiredCondition === undefined ? {} : { requiredCondition }),
+        ...(referencePaths.length === 0 ? {} : { referencePaths }),
         ...(frozenConstraint === undefined ? {} : { constraintDigest: frozenConstraint.digest }),
         manifest,
         files: [...observations.files].sort(compareKeys),
@@ -201,17 +226,30 @@ export function createConversationTypeScriptCheck(config: ConversationTypeScript
         checkerDigest,
         contractDigest,
         ...(requiredCondition === undefined ? {} : { requiredCondition }),
-        inputs: [{ path: targetPath, content: originalContent }],
+        inputs: structuredClone(inputs),
         evaluate: async (candidate) => {
           candidate.signal.throwIfAborted()
           const input = candidate.inputs.length === 1 ? candidate.inputs[0] : undefined
-          if (input === undefined || input.path !== targetPath || input.content !== originalContent) {
+          let inputMatches = input !== undefined && input.path === targetPath && input.content === originalContent
+          if (inputsDigest !== undefined) {
+            try { inputMatches = conversationExternalInputsDigest(candidate.inputs) === inputsDigest }
+            catch { inputMatches = false }
+          }
+          if (!inputMatches) {
             return { status: 'unverifiable', detail: `${describe(scope, [])}; original target input mismatch` }
           }
-          const output = candidate.outputs.length === 1 ? candidate.outputs[0] : undefined
+          const output = inputsDigest === undefined ? candidate.outputs.length === 1 ? candidate.outputs[0] : undefined
+            : candidate.outputs.find(entry => entry.path === targetPath)
           const outputPath = candidate.outputPaths.length === 1 ? candidate.outputPaths[0] : undefined
           if (output === undefined || outputPath !== targetPath || output.path !== targetPath || typeof output.content !== 'string') {
             return { status: 'unverifiable', detail: `${describe(scope, [])}; candidate output binding mismatch` }
+          }
+          if (inputsDigest !== undefined) {
+            let referencesUnchanged = false
+            try { referencesUnchanged = conversationExternalInputsDigest(candidate.outputs.map(entry => entry.path === targetPath
+              ? { ...entry, content: originalContent } : entry)) === inputsDigest }
+            catch { /* An invalid full final snapshot is not compilation evidence. */ }
+            if (!referencesUnchanged) return { status: 'unverifiable', detail: `${describe(scope, [])}; readonly reference final binding mismatch` }
           }
           const candidateText = output.content
           if (addsSuppression(candidateText, originalContent ?? '', targetPath)) {
