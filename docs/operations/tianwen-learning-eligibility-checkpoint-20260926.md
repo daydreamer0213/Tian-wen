@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-01 必需编译条件具体生产者9e8674d及实际宿主options误归属原生修复208698e已交付，默认不启用，抑制/约束/绑定/依赖/取消不冒充该条件失败；不改变旧身份/历史。唯一新2f8a6e23原生7请求/read→edit→read，双复核met与独立程序verified、182测试/类型/实际bundle/三完整TS/最终审查通过。0请求冷恢复task/material/两原审查及旧账本前缀保持；现7任务/0研究/awaiting-compatible-sources/隔离true，账本faa002…，没有新反馈、自然研究、采用或未来效果。完整目标active/incomplete、NO-GO/原门槛/十日窗口保持。见[交付与控制端失败归属](tianwen-required-typecheck-20261001.md)。
+
 2026-10-01方法文件试验已补本次自身动作02aabea，原生唯一关联、失败/null路径及冷恢复同arm绑定，旧来源动作不借用、旧wrapper不补历史、结果检查三字段不变。十组290加最后新反例，不同291项、类型/实际bundle、八完整TS旧10/现10新增0及审查通过。正式0模型核对6任务/0研究/awaiting-compatible-sources/隔离true、原任务及账本498c8f…全部字节保持；没有新自然来源/研究/采用/未来效果。完整目标active/incomplete、NO-GO/原门槛/十日窗口保持，下一自主不同实际待办前瞻核实新文件复核，不索任务或造反馈。见[交付与失败归属](tianwen-trial-action-evidence-20261001.md)。
 
 2026-10-01 自主真实当前进度报告e00e5e87原生read→write完整恢复，5提供者/根3/工具2/0重试，新动作引用正确进入复核；首自由引文跨请求384码点单项边界被宿主拒绝，原inconclusive保持、第二模型未运行、没有程序语义检查，不是成功对照或合法问题来源。d074fb4只为新完整files提供有界冻结单项引用选项，严格谓词/历史/资格不变；七组134/134、类型/实际bundle/三完整TS及审查通过，尚无修复后新真实任务成功。正式6任务/0研究/awaiting-compatible-sources/隔离true，0模型冷恢复task/material/账本保持，原门槛/十日窗口/NO-GO不变。见[具体归属](tianwen-readable-status-task-20261001.md)。

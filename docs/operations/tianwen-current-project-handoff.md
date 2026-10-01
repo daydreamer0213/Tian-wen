@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 自主原生功能修复成功；必需编译失败证据已补具体生产者
+
+9e8674d 为原任务明确要求零 strict noEmit 诊断提供事前 opt-in，默认诊断/旧历史保持；实际宿主 options TS5069 误归属 P2 先由真实编译器红测试复现，再交天问唯一原生修复。208698e 接纳相同候选字节，只加 enabled 且 options diagnostics 非空时退出 prepare 的 guard。事前合同的 AST 声明/正则/一元运算符遗漏均在模型前关闭，17 控制通过；不作为自然来源。见[结果及失败归属](tianwen-required-typecheck-20261001.md)。
+
+新 2f8a6e23：7 提供者/根4/工具3成功 read→edit→read/0重试，原双复核 met 与独立程序 verified 分别保留；五组182/182、八包类型/实际bundle、三完整TS旧0/现0/新增0、最终独立审查通过。0模型冷恢复新task/material及两份原审查准确，原96/e00及旧六条账本前缀保持；现7任务/0研究/awaiting-compatible-sources/隔离true，账本 faa002263340acdf48bd236816bda7a1230efb692733d12d7bf7d7554b134bef。
+
+完整目标active/incomplete、main/Daily NO-GO及原门槛/十日窗口保持；本轮不是C—F或自然学习完成。下一自主不同实际任务及适用事前依据，不等待供题/催评价，不制造问题来源或重跑此题。仅D小记录、无新全量副本/依赖，自有新fixture根0，D约18.46GiB≥15，未达20偏好。
+
 ## 2026-10-01 方法文件试验已补自身原生动作；完整学习仍待自然来源及效果
 
 b1269e4设计/计划后02aabea实现本次trialExecution，完整原生记录唯一关联全部调用/结果（包括非append重复拒绝）、冻结规范路径或null、序号/turn/step/sourceEventSeq；投影先于receipt保存。新method复核只引用当前试验动作，生成内容不作来源；冷恢复由同arm完整receipt/material/config/proof独立派生再精确对照，缺resolver/借其他同输出trial拒绝。旧receipt/digest/三字段recover/无marker wrapper不变、不补历史；loop正式/探索及冷采用、file packet接入，独立程序检查输入不扩权。见[交付及失败归属](tianwen-trial-action-evidence-20261001.md)。
