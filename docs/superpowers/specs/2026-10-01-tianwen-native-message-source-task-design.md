@@ -10,9 +10,11 @@
 
 ## 原要求与完整有限合同
 
-只修tests/dsh-migration/conversation-task-material.spec.ts中surface-projection测试、id=answer-1的message新增上述完整source对象。字段必须是三个准确字符串，禁止通过断言或计算表达式伪装。移除唯一新增字段后，原AST、注释、消息内容、所有数据和断言完全保持；可整理此字段附近的空白，不删/跳过测试、不增加屏蔽或其他文件修改。目标单独strict/noEmit为0，候选不执行。
+只修tests/dsh-migration/conversation-task-material.spec.ts中surface-projection测试、id=answer-1的message新增上述完整source对象，及其原生assistant/message事件数据新增step:1。字段必须是三个准确字符串和数值1，禁止通过断言或计算表达式伪装。移除新增两字段后，原AST、注释、消息内容、所有数据和断言完全保持；可整理字段附近空白，不删/跳过测试、不增加屏蔽或其他文件修改。目标单独strict/noEmit为0，候选不执行。
 
-新增source是运行时字段，emit JS会改变；不复用旧纯类型任务的相同emit条件。该有限任务的编译与精确结构保护足以核对所宣称的这项修复，不证明一般代码功能或语义安全。原生任务必须完整read/edit及文件结果可恢复，原准备/输入/请求/实际模型/候选摘要绑定保持；missing/changed材料拒收。
+前置控制揭露初设计只补source仍有隐藏TS2345，因为同一事件缺step；发送实际任务前已核实上游事件类型并修正为两项。初source-only控制失败保留，原目标仍未改，尚无实际候选或模型任务，不是事后增加验收标准。首个预检另因同意对象含recordedAt元数据而失败0模型，已按实际有效revision/enabled/policy核对，不删除原元数据。
+
+新增source/step是运行时字段，emit JS会改变；不复用旧纯类型任务的相同emit条件。该有限任务的编译与精确结构保护足以核对所宣称的这项修复，不证明一般代码功能或语义安全。原生任务必须完整read/edit及文件结果可恢复，原准备/输入/请求/实际模型/候选摘要绑定保持；missing/changed材料拒收。原生快照须证明成功read结果先于首次edit调用且edit成功，不接纳直接write替代。
 
 ## 执行和停止
 

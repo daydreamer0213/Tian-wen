@@ -4,7 +4,7 @@
 
 **Goal:** Complete one real pending native-material fixture repair via the persistent formal DEV runtime, with frozen independent requirements and truthful ordinary outcome attribution.
 
-**Architecture:** Reuse the existing frozen TypeScript checker and formal observer. One task-local AST constraint permits only the original answer-1 message's source field; no generalized checker or study interface.
+**Architecture:** Reuse the existing frozen TypeScript checker and formal observer. One task-local AST constraint permits only the original answer-1 message's source and its event step:1 fields; no generalized checker or study interface. The first source-only control exposed the hidden missing-step obligation before any real model attempt.
 
 **Tech Stack:** Existing TypeScript, DSH, formal runtime, current real model provider and Vitest. No new dependency.
 
