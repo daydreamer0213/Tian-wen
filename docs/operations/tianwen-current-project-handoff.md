@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 自主真实报告已验证新动作证据；引用跨块拒绝保留并薄修新入口
+
+0c200c4冻结真实当前来源后唯一e00e5e87准入summarization/local-files/files，5提供者/根3/工具2成功read→write/0重试，完整输入输出及v2动作恢复通过。原requirements返回met但首引文跨request-1/2的384码点边界，宿主严格拒绝，原review保持inconclusive，第二模型未运行；不是两模型成功或独立程序语义通过。原稿D原样保留、未接纳/修稿/重跑。六引用只首条不匹配，动作两条精确匹配，audit结构合法。见[实际结果和失败归属](tianwen-readable-status-task-20261001.md)。
+
+77d9afd设计后d074fb4新完整files复核提供冻结单项引用enum，98,304选项预算外保留自由引用并明确单项；原严格核验/指令/角色/资格/冷恢复不变，旧历史不改判。正确红后七组134/134、八包类型/实际bundle、完整三TS旧0/现0与只读审查通过；旧wrongSource测试断言、首超限夹具/测试类型/控制端误诊及驱动事前计数修正分别保留，不记自然失败。
+
+正式0模型冷恢复新task/material及旧96b618保持，recoveredChecks=0，不谎称两审查恢复；原五条账本字节前缀保留，现账本498c8f6b5f1f7932ec5e20fad52197a47a6c5fadf0bf7c72d7dd0e2698e7ce00，6任务/0研究/awaiting-compatible-sources/隔离true。完整目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口保持。下一自行选不同实际未完成任务及适用原判断依据前瞻核实新引用入口，不重做报告、索任务/反馈或造来源。小记录约286KiB、自有测试根0、无新副本/依赖，D约18.46GiB≥15，未达20偏好。
+
 ## 2026-10-01 新完整文件复核已接入可信操作证据；原实际任务评价不改判
 
 ddb3151设计后f4e162d实现事前source可选native-actions.v1及files操作v2，只从完整捕获原生span一对一关联恢复工具、规范冻结路径、call/result顺序和状态。原始复核可引用动作，写后内容仍不能自证，method-study不引用旧动作。旧chat v1、无marker files及原指令/质量合同/资格保持，不补旧历史。见[具体交付和失败归属](tianwen-file-action-evidence-20261001.md)。
