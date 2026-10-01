@@ -5,6 +5,7 @@ it.each(['', 'x', '\r\n\n\r', '😀'.repeat(385), 'x'.repeat(383) + '😀tail', 
   const chunks = splitConversationFileReviewText(raw)
   expect(chunks.join('')).toBe(raw)
   expect(chunks).toHaveLength(Math.max(1, Math.ceil([...raw].length / 384)))
+  expect(chunks.reduce((total, chunk) => total + [...chunk].length, 0)).toBe([...raw].length)
   for (const [index, chunk] of chunks.entries()) {
     expect([...chunk].length).toBeLessThanOrEqual(384)
     if (index < chunks.length - 1) expect([...chunk]).toHaveLength(384)
