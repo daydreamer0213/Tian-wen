@@ -10,6 +10,8 @@
 
 ## 当前已知问题与继承项
 
+2026-10-01后续连续三轮正式只读复核确认同一输入阻塞，原3任务/账本/readiness不变，0研究/模型，当前无有证据支持可独立实施的新核心工作。本轮按目标工具blocked收口，完整目标未完成及范围、原门槛/窗口、NO-GO/隔离保持；详见[当前交接](../../operations/tianwen-current-project-handoff.md)及[审计](../../operations/tianwen-full-learning-route-audit-20261001.md)。下段active及首次确认保留其历史时间范围，不作为最新状态；新真实任务与现成验收依据补足后再恢复，不空转维护或增加同类样本。
+
 2026-10-01真实消息字段待办已原生met/verified并原样接纳，持续档现有3任务，属于有限普通工作进展。后续完整主线复核正式0模型冷恢复仍awaiting-compatible-sources/0研究，限定来源→研究→激活审查未找到有证据支持的新核心阻断修复；实际缺兼容问题来源及五案例适用事前独立结果依据。见[收口审计](../../operations/tianwen-full-learning-route-audit-20261001.md)。停止以小型类型修复凑普通成功、扩空接口或重复评审代替C/D。下一入口是确实未完成的功能任务、原要求/已有验收依据及不同真实输入；执行授权不缺，当前没有依据命名新核心编码任务。完整目标不缩小，原门槛/窗口不变，首次确认后的连续阻塞审计按目标工具要求收口，不机械无限延续active。
 
 2026-10-01 复用正式runtime建立连续DEV Profile，五对话服务active，完整桌面host及缺skills/defaultmodel服务仍pending。一次实际进展说明任务生成稿但准入14条超过既有12、invalid-judgment/review inconclusive，无完整文件结果，原停止条件拒收、不重跑。冷读准确失败/账本不改/0调用；随后仅暴露原条数上限、组合相关要求而全保留原限制，125/125现有回归、八包类型/声明0及只读审查通过，无新自然效果证明。见[结果与范围](../../operations/tianwen-persistent-development-task-20261001.md)。反馈/研究/激活0、C—F未完成，目标active/NO-GO/隔离/原门槛/原决策窗口不变，后续实际不同待办复用环境，不造来源。
