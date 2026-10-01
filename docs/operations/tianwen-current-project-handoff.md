@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-01 研究结果合同覆盖已核实；未完成的模块类型问题另行修复
+
+从852a59a干净继续，正式持续档只读readiness为awaiting-compatible-sources；两普通任务分别准入无效、完整文件证据缺失，另一档verified任务原模型评价仍超限。原账本字节不变、0模型、0研究、隔离保持；五案例没有当前合格组合及生成任务适用结果依据，故不实施空的研究检查接口，不重试E104、不否定历史反馈归因。见[覆盖核对及修复归属](tianwen-research-contract-coverage-20261001.md)。
+
+另行直接工程修复outcome-learning-intake的单模块TS2551：只加已有声明模块的纯类型导入。当前strict诊断0、运行JavaScript相同、相关41/41、只读审查无重要问题。内容与旧未核验候选相同，但不追认旧普通任务、不回填程序结果、不计自然学习来源；原2551待办现已工程修复，旧inconclusive/unverifiable保持。
+
+小记录、无新Profile/模型会话/临时根，D约18.58GiB；完整目标active、NO-GO/隔离/原门槛/十日窗口保持。下一真实开发待办仍先核对材料、工具配置及适用事前合同，缺案例依据不扩通用平台或凑样本。
+
 ## 2026-10-01 新真实任务被额外事实工具调用中断；受限宿主曝光已补
 
 535ad72冻结新的outcome-learning-intake.ts单独strict2551待办、有限事前合同，持续正式DEV一次原生5请求/4工具/0重试。read/edit/read成功后额外调用禁止的文件统计，guard拒绝、完整文件证据无；原review inconclusive/file-evidence-unavailable、程序unverifiable，候选不采用，原hash精确恢复、2551尚未修复。不重跑/补检查/回填本题；冷读0模型原task及账本不变，旧账本字节前缀保持。见[失败与最小产品修复](tianwen-outcome-module-native-20261001.md)。
