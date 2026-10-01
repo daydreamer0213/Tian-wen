@@ -16,7 +16,7 @@
 
 ## Task 1: 完整只读输入
 
-- [ ] 新建 `tests/dsh-migration/conversation-typescript-reference-inputs.spec.ts` 行为红测试；在 `conversation-file-observer.spec.ts` 新增真实原生两输入/一输出与冷恢复红测试，保存首失败。
-- [ ] 修改 `scripts/conversation-typescript-check.ts`：捕获配置/校验路径及存在、冻结参考字节、扩展显式合同及完整 inputs 绑定；其余代码保持。
-- [ ] 回归三个旧 compiler suites、checked counterevidence/full observer 与新 suite；八包类型/实际bundle、三个完整TS相对设计SHA比较。
-- [ ] 独立只读审查、核对正式持续DEV原7task及账本0模型不变、清理自有根、更新交接并推开发分支。新受控输入场景不计自然反馈或学习效果。
+- [x] 新建 `tests/dsh-migration/conversation-typescript-reference-inputs.spec.ts` 行为红测试；在 `conversation-file-observer.spec.ts` 新增真实原生两输入/一输出与冷恢复红测试，保存首失败。
+- [x] 修改 `scripts/conversation-typescript-check.ts`：捕获配置/校验路径及存在、冻结参考字节、扩展显式合同及完整 inputs 绑定；其余代码保持。
+- [x] 回归三个旧 compiler suites、checked counterevidence/full observer 与新 suite；八包类型/实际bundle、三个完整TS相对设计SHA比较。
+- [x] 独立只读审查、核对正式持续DEV原7task及账本0模型不变、清理自有根、更新交接。新受控输入场景不计自然反馈或学习效果；推送另由最终分支回执确认。

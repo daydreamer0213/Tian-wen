@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-01 4d286be补compiler检查显式只读参考，旧默认保持；完整输入和最终参考字节同核，未声明/漂移/缺失不是原编译失败来源。六组213/213、类型/实际bundle/三完整TS及审查通过，首红/输出集合P2/控制端错误分别保留。正式0模型原7task/0研究/awaiting-compatible-sources/隔离true及账本faa002…不变；受控四原生场景不计自然问题或效果。完整目标active/incomplete、NO-GO/原门槛/窗口保持，下一不同实际多输入需求事前核验，不造来源。见[具体边界](tianwen-compiler-reference-inputs-20261001.md)。
+
 2026-10-01 必需编译条件具体生产者9e8674d及实际宿主options误归属原生修复208698e已交付，默认不启用，抑制/约束/绑定/依赖/取消不冒充该条件失败；不改变旧身份/历史。唯一新2f8a6e23原生7请求/read→edit→read，双复核met与独立程序verified、182测试/类型/实际bundle/三完整TS/最终审查通过。0请求冷恢复task/material/两原审查及旧账本前缀保持；现7任务/0研究/awaiting-compatible-sources/隔离true，账本faa002…，没有新反馈、自然研究、采用或未来效果。完整目标active/incomplete、NO-GO/原门槛/十日窗口保持。见[交付与控制端失败归属](tianwen-required-typecheck-20261001.md)。
 
 2026-10-01方法文件试验已补本次自身动作02aabea，原生唯一关联、失败/null路径及冷恢复同arm绑定，旧来源动作不借用、旧wrapper不补历史、结果检查三字段不变。十组290加最后新反例，不同291项、类型/实际bundle、八完整TS旧10/现10新增0及审查通过。正式0模型核对6任务/0研究/awaiting-compatible-sources/隔离true、原任务及账本498c8f…全部字节保持；没有新自然来源/研究/采用/未来效果。完整目标active/incomplete、NO-GO/原门槛/十日窗口保持，下一自主不同实际待办前瞻核实新文件复核，不索任务或造反馈。见[交付与失败归属](tianwen-trial-action-evidence-20261001.md)。
