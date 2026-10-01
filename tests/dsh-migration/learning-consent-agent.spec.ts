@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apply as applyCore } from '../../packages/tianwen-runtime/src/index.js'
 import {
   guidanceVersion,
+  guidanceResultCheckDigest,
   conversationQualityContract,
   conversationReviewConsensus,
   parseConversationAuditedReviewChecks,
@@ -27,6 +28,7 @@ import {
   type ConversationTask,
   type GuidanceSnapshot,
   type GuidanceStudy,
+  type GuidanceArmRecord,
 } from '../../packages/tianwen-evolution/src/index.js'
 import {
   RESEARCH_SUMMARY_SCOPE,
@@ -723,6 +725,8 @@ describe('Tianwen main-chat learning consent tool', () => {
             scope: expect.stringMatching(/historical.*not.*original.*review/iu) },
           guidanceStudies: { total: 10, waiting: 1, stopped: 1, rejected: 1, accepted: 6,
             inconclusive: 1, currentlyActive: 2, rolledBack: 1, unavailableScopes: 0,
+            independentResults: { configuredStudies: 0, unconfiguredStudies: 10, recordedArms: 0, pendingArms: 0, verified: 0, rejected: 0, unverifiable: 0, satisfiedStudies: 0 },
+            activationPending: { total: 1, independentResultsNotSatisfied: 0, quarantined: 1, reasonUnestablished: 0 },
             stoppedReasons: { insufficientEvidence: 0, cancelled: 1, invalidJudgment: 0, modelUnavailable: 0, sourceUnavailable: 0, scopeChanged: 0 },
             scope: expect.stringMatching(/accepted.*historical.*not.*improvement/iu) },
         } },
@@ -732,6 +736,8 @@ describe('Tianwen main-chat learning consent tool', () => {
             preferences: 1, positive: 1, requirementChanges: 1, inconclusive: 1 },
           guidanceStudies: { total: 9, waiting: 1, stopped: 1, rejected: 1, accepted: 5,
             inconclusive: 1, currentlyActive: 1, rolledBack: 1, unavailableScopes: 0,
+            independentResults: { configuredStudies: 0, unconfiguredStudies: 9, recordedArms: 0, pendingArms: 0, verified: 0, rejected: 0, unverifiable: 0, satisfiedStudies: 0 },
+            activationPending: { total: 1, independentResultsNotSatisfied: 0, quarantined: 1, reasonUnestablished: 0 },
             stoppedReasons: { insufficientEvidence: 0, cancelled: 1, invalidJudgment: 0, modelUnavailable: 0, sourceUnavailable: 0, scopeChanged: 0 } },
         } },
       } })
@@ -752,6 +758,80 @@ describe('Tianwen main-chat learning consent tool', () => {
       await main.dispose()
       await mounted.ctx.fiber.dispose()
     }
+  })
+
+  it('separates saved study results and known adoption blockers without rerunning checks or leaking evidence', async () => {
+    const mounted = await mountConsentRuntime('study-result-status', [], { guidanceActivationQuarantine: true })
+    const { main, child } = await createMainAndChild(mounted.ctx)
+    try {
+      const evolution = mounted.ctx.tianwenEvolution
+      evolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+      const scope = 'PRIVATE current workspace'
+      const snapshot: GuidanceSnapshot = { schemaVersion: 'tianwen.conversation-guidance.v1', scopeKey: scope, rules: {} }
+      const task: ConversationTask = { source: { kind: 'task-started', taskId: 'PRIVATE task', sessionId: String(main.agent.session.id),
+        sessionLifecycleFingerprint: sha256('PRIVATE lifecycle'), turn: 1, startSeq: 1, userMessageIds: ['PRIVATE message'],
+        requestDigest: sha256('request'), contextDigest: sha256('context'), scopeKey: scope, consentRevision: 1,
+        behaviorVersion: guidanceVersion(snapshot) }, recordedAt: '2026-10-01' }
+      // Controlled saved snapshots test the read-only projection, not ledger admission or natural efficacy.
+      function study(index: number, state: 'good' | 'bad' | 'pending' | 'stopped' | 'no-improvement' | 'unverifiable' | 'legacy', scopeKey = scope): GuidanceStudy {
+        const studyId = `guidance-study:${sha256(index).slice(7)}` as const
+        const parentSnapshot = { ...snapshot, scopeKey }, modelConfigDigest = sha256('PRIVATE model')
+        const proof = { sessionId: 'PRIVATE native proof', sessionDigest: sha256('native'), requestDigest: sha256('native request') }
+        const cases: GuidanceStudy['opened']['cases'] = (['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const).map(kind => {
+          const common = { id: kind, materialDigest: sha256(`PRIVATE material ${kind}`), inputDigest: sha256(`input ${kind}`) }
+          return kind === 'adjacent' || kind === 'holdout' ? { ...common, kind, prompt: 'PRIVATE generated request', criteria: ['PRIVATE criterion'] }
+            : { ...common, kind, sourceTaskId: `PRIVATE task ${kind}` }
+        })
+        const checks = cases.map(item => ({ caseId: item.id, checkerId: 'PRIVATE checker', checkerDigest: sha256('checker'),
+          contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'PRIVATE original required condition' }))
+        const opened: GuidanceStudy['opened'] = { kind: 'study-opened', studyId, scopeKey, family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files',
+          failureCategory: 'instruction-following', consentRevision: 1, parentSnapshot, parentVersion: guidanceVersion(parentSnapshot),
+          sourceTaskIds: ['PRIVATE task source1', 'PRIVATE task source2'], counterexampleTaskId: 'PRIVATE task counterexample', cases, modelConfigDigest,
+          ...(state === 'legacy' ? {} : { resultChecks: checks }) }
+        const arms: GuidanceArmRecord[] = []
+        if (state !== 'legacy') for (const [caseIndex, item] of cases.entries()) for (const role of ['baseline', 'candidate'] as const) {
+          const check = checks[caseIndex]!, outputDigest = sha256(`PRIVATE output ${caseIndex} ${role}`)
+          const rejected = role === 'baseline' && item.kind === 'source1' && state !== 'no-improvement'
+            || role === 'candidate' && item.kind === 'holdout' && state === 'bad'
+          const status = role === 'candidate' && item.kind === 'holdout' && state === 'unverifiable' ? 'unverifiable' as const : rejected ? 'rejected' as const : 'verified' as const
+          arms.push({ kind: 'arm-recorded', studyId, caseId: item.id, role, materialDigest: item.materialDigest,
+            behaviorVersion: opened.parentVersion, executionProof: proof, judgeProof: proof, outputDigest, verdict: role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met',
+            resultCheck: { preparationDigest: guidanceResultCheckDigest(opened, check), outputDigest, status, detail: 'PRIVATE saved check detail',
+              ...(rejected ? { failedRequiredConditionDigest: sha256(check.requiredCondition) } : {}) } })
+        }
+        if (state === 'pending' || state === 'stopped') arms.splice(8)
+        return { opened, openedAt: '2026-10-01', arms,
+          ...(state === 'stopped' ? { stopped: { kind: 'study-stopped' as const, studyId, reason: 'cancelled' as const } } : {}),
+          ...(state === 'pending' || state === 'stopped' ? {} : { decision: {
+          kind: 'study-decided' as const, studyId, armsDigest: sha256(arms), verdict: 'accepted' as const,
+        } }) }
+      }
+      const studies = [study(1, 'good'), study(2, 'bad'), study(3, 'pending'), study(4, 'no-improvement'), study(5, 'unverifiable', 'PRIVATE other workspace'), study(6, 'legacy'), study(7, 'stopped')]
+      vi.spyOn(evolution, 'listConversationTasks').mockReturnValue([task])
+      vi.spyOn(evolution, 'listConversationGuidanceStudies').mockReturnValue(studies)
+      const ledgerPath = join(mounted.root, 'evolution', 'ledger.jsonl'), before = readFileSync(ledgerPath, 'utf8')
+      const result = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(result).toMatchObject({ isError: false, value: {
+        history: { naturalConversation: { guidanceStudies: { accepted: 5, currentlyActive: 0, stopped: 1,
+          independentResults: { configuredStudies: 6, unconfiguredStudies: 1, recordedArms: 56, pendingArms: 4, verified: 49, rejected: 6, unverifiable: 1, satisfiedStudies: 1,
+            scope: expect.stringMatching(/stopped studies, not running/iu) },
+          activationPending: { total: 5, independentResultsNotSatisfied: 3, quarantined: 5, reasonUnestablished: 0 },
+        } } },
+        currentSession: { naturalConversation: { guidanceStudies: { accepted: 4,
+          independentResults: { configuredStudies: 5, unconfiguredStudies: 1, recordedArms: 46, pendingArms: 4, verified: 41, rejected: 5, unverifiable: 0, satisfiedStudies: 1 },
+          activationPending: { total: 4, independentResultsNotSatisfied: 2, quarantined: 4, reasonUnestablished: 0 },
+        } } },
+      } })
+      vi.spyOn(evolution, 'isConversationGuidanceActivationQuarantined').mockReturnValue(false)
+      const unquarantined = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(unquarantined).toMatchObject({ value: {
+        conversationGuidanceActivation: { quarantined: false },
+        history: { naturalConversation: { guidanceStudies: { activationPending: { total: 5, independentResultsNotSatisfied: 3, quarantined: 0, reasonUnestablished: 2 } } } },
+        currentSession: { naturalConversation: { guidanceStudies: { activationPending: { total: 4, independentResultsNotSatisfied: 2, quarantined: 0, reasonUnestablished: 2 } } } },
+      } })
+      expect(JSON.stringify(result.value)).not.toContain('PRIVATE'); expect(JSON.stringify(unquarantined.value)).not.toContain('PRIVATE')
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(before); expect(mounted.adapter.requests).toHaveLength(0)
+    } finally { await child.dispose(); await main.dispose(); await mounted.ctx.fiber.dispose() }
   })
 
   it('reports current-workspace readiness without exposing learning material or requesting a model', async () => {

@@ -14,6 +14,7 @@ import { defineTool, type JsonValue } from '@deepseek-ai/dsh-tools'
 import type { SkillRegistry } from '@deepseek-ai/dsh-skill'
 import {
   guidanceVersion,
+  hasSatisfiedGuidanceResultChecks,
   parseLearningSkillAdmission,
   sha256,
   type ConversationFeedbackAssessment,
@@ -194,7 +195,7 @@ function conversationFeedbackStatus(assessments: readonly ConversationFeedbackAs
   }
 }
 
-function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVersions: ReadonlyMap<string, string | null>) {
+function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVersions: ReadonlyMap<string, string | null>, quarantined: boolean) {
   const scopes = new Set(studies.map(study => study.opened.scopeKey))
   const stopped = studies.filter(study => study.stopped !== undefined)
   const stoppedCount = (reason: NonNullable<GuidanceStudy['stopped']>['reason']) => stopped.filter(study => study.stopped?.reason === reason).length
@@ -202,6 +203,10 @@ function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVer
     && study.rollback === undefined && study.candidate !== undefined
     && guidanceVersion(study.candidate.candidateSnapshot) === activeVersions.get(study.opened.scopeKey))
     .map(study => study.opened.scopeKey))
+  const configured = studies.filter(study => study.opened.resultChecks !== undefined)
+  const checkedArms = configured.flatMap(study => study.arms.flatMap(arm => arm.resultCheck === undefined ? [] : [arm.resultCheck]))
+  const pending = studies.filter(study => study.decision?.verdict === 'accepted' && study.activation === undefined)
+  const resultsBlocked = pending.filter(study => study.opened.resultChecks !== undefined && !hasSatisfiedGuidanceResultChecks(study))
   return {
     scope: 'Waiting means no final decision or stop yet; stopped means execution ended without a decision. Accepted is a historical evaluation result, not proof of improvement or current activation. Currently active counts matching stored guidance snapshots once per scope; rolled back counts withdrawals. These counts overlap. Unavailable scopes could not be checked. Current Session counts cover its observed task scopes, not only studies sourced in that Session.',
     total: studies.length,
@@ -221,6 +226,24 @@ function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVer
     currentlyActive: activeScopes.size,
     rolledBack: studies.filter(study => study.rollback !== undefined).length,
     unavailableScopes: [...scopes].filter(scope => activeVersions.get(scope) === null).length,
+    independentResults: {
+      scope: 'Saved independent checks are separate from model decisions. Pending arms means missing saved results, including stopped studies, not running checks or success; unconfigured history has no independent success claim. Satisfied means only the saved result requirements, without rechecking native evidence, overall adoption eligibility or semantic safety.',
+      configuredStudies: configured.length,
+      unconfiguredStudies: studies.length - configured.length,
+      recordedArms: checkedArms.length,
+      pendingArms: configured.reduce((total, study) => total + Math.max(0, 10 - study.arms.filter(arm => arm.resultCheck !== undefined).length), 0),
+      verified: checkedArms.filter(check => check.status === 'verified').length,
+      rejected: checkedArms.filter(check => check.status === 'rejected').length,
+      unverifiable: checkedArms.filter(check => check.status === 'unverifiable').length,
+      satisfiedStudies: configured.filter(hasSatisfiedGuidanceResultChecks).length,
+    },
+    activationPending: {
+      scope: 'Accepted decisions without a recorded activation. Reason counts overlap. Quarantine is the current setting blocking new activation, not a claim about historical causes. An unestablished reason or satisfied saved checks does not establish permission or readiness to activate.',
+      total: pending.length,
+      independentResultsNotSatisfied: resultsBlocked.length,
+      quarantined: quarantined ? pending.length : 0,
+      reasonUnestablished: quarantined ? 0 : pending.length - resultsBlocked.length,
+    },
   }
 }
 
@@ -697,11 +720,12 @@ export class TianwenLearningConsentAgentService extends Service {
   private async learningStatus(agent: Agent, signal?: AbortSignal) {
     signal?.throwIfAborted()
     const guidanceReadiness = await this.guidanceReadiness(agent, signal)
+    const guidanceActivationQuarantined = this.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()
     const snapshot: Record<string, JsonValue> = {
       guidance: LEARNING_STATUS_GUIDANCE,
       consent: statusSnapshot(this.ctx.tianwenEvolution.getLearningAnalysisConsent()),
       conversationGuidanceActivation: {
-        quarantined: this.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined(),
+        quarantined: guidanceActivationQuarantined,
         scope: GUIDANCE_ACTIVATION_SCOPE,
       },
     }
@@ -744,7 +768,7 @@ export class TianwenLearningConsentAgentService extends Service {
       naturalConversation: {
         ...naturalConversationStatus(conversationTasks, conversationFeedback),
         feedbackAssessments: conversationFeedbackStatus(feedbackAssessments),
-        guidanceStudies: conversationGuidanceStatus(guidanceStudies, guidanceVersions),
+        guidanceStudies: conversationGuidanceStatus(guidanceStudies, guidanceVersions, guidanceActivationQuarantined),
       },
       analysesBySource: {
         outcome: analyses.filter(analysis => analysis.source === 'outcome').length,
@@ -756,7 +780,7 @@ export class TianwenLearningConsentAgentService extends Service {
         ...naturalConversationStatus(currentConversationTasks, conversationFeedback),
         guidanceReadiness,
         feedbackAssessments: conversationFeedbackStatus(feedbackAssessments.filter(item => currentTaskIds.has(item.started.taskId))),
-        guidanceStudies: conversationGuidanceStatus(guidanceStudies.filter(study => currentScopes.has(study.opened.scopeKey)), guidanceVersions),
+        guidanceStudies: conversationGuidanceStatus(guidanceStudies.filter(study => currentScopes.has(study.opened.scopeKey)), guidanceVersions, guidanceActivationQuarantined),
       },
       hasFrozenGovernedBinding: currentManifest !== undefined,
       scope: currentManifest === undefined
