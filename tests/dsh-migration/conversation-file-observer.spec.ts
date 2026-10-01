@@ -5,14 +5,16 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
-import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { CallId, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
-import { sha256, hasRejectedConversationCodeCheck } from '../../packages/tianwen-evolution/src/index.js'
+import { sha256, hasRejectedConversationCodeCheck, parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/index.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
+import { projectClaimEvidence, verifyConversationOriginalReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { ConversationExternalCodeChecks, type ConversationExternalCodeCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
 import ts from 'typescript'
@@ -67,6 +69,82 @@ function captureStates(harness: Awaited<ReturnType<typeof mount>>): Map<string, 
 
 const externalCode = { kind: 'task', objective: 'Implement the requested change', criteria: ['The change compiles'], family: 'code',
   evaluationMode: 'external', relatedTaskId: null, feedback: null }
+
+it.each(process.platform === 'win32' ? ['input.ts', 'INPUT.ts'] : ['input.ts'])('supplies only exact native file actions to new original reviews and cold-recovers markerless history without them (%s)', async editPath => {
+  const code = { ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }
+  const content = 'AFTER_WRITE_CONTENT_CANARY'
+  const script = [structured(code), toolCallResponse('action-read', 'read', { file_path: 'input.ts' }),
+    toolCallResponse('action-edit', 'edit', { file_path: editPath, old_string: 'before', new_string: content }),
+    toolCallResponse('action-readback', 'read', { file_path: 'input.ts' }), textResponse('saved'), ...reviewPair()]
+  const harness = await mount(script, true)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  try {
+    harness.handle.agent.followup(direct('Read input.ts successfully, then edit it.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.source.fileExecutionProjection).toBe('native-actions.v1')
+    const recovered = await recoverConversationTaskMaterial(harness.ctx, task)
+    expect(recovered.fileExecution).toMatchObject({ schemaVersion: 'tianwen.file-execution-evidence.v2', actions: [
+      { tool: 'read', path: 'input.ts', status: 'success' }, { tool: 'edit', path: 'input.ts', status: 'success' }, { tool: 'read', path: 'input.ts', status: 'success' },
+    ] })
+    const native = await harness.ctx.sessionPersistence.inspect(SessionId(task.source.sessionId))
+    const checks = parseConversationAuditedReviewChecks(task.review?.reviewChecks)
+    const reviewMaterial = (await recoverConversationJudgmentRequest(harness.ctx, checks[0]!)).material as { original: { source: unknown } }
+    expect(sha256(reviewMaterial.original.source)).toBe(sha256(recovered))
+    const span = native.events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
+    const calls = span.filter(event => event.type === 'tool/call')
+    if (recovered.fileExecution?.schemaVersion !== 'tianwen.file-execution-evidence.v2') throw new Error('missing actions')
+    for (const [index, action] of recovered.fileExecution.actions.entries()) {
+      expect(action.callSeq).toBe(calls[index]!.seq)
+      expect(action.resultSeq).toBe(span.find(event => event.type === 'tool/result' && event.sourceEventSeqs?.[0] === action.callSeq)!.seq)
+      expect(action.resultSeq).toBeGreaterThan(action.callSeq)
+    }
+    expect(recovered.fileExecution.actions[0]!.resultSeq).toBeLessThan(recovered.fileExecution.actions[1]!.callSeq)
+    const output = { answer: 'saved', files: task.completion!.files!.entries }
+    const original = { source: recovered, evaluationMode: 'local-files', conversation: [{ role: 'assistant', content: [{ type: 'text', text: output.answer }] }],
+      toolEvidence: [], fileResult: { ...output, outputDigest: sha256(output) } }
+    const evidence = projectClaimEvidence(original, 'file-chunks-v1')
+    const sources = evidence.items.filter(item => item.role === 'tool').map(item => item.text).join('')
+    expect(sources).toContain('Native read "input.ts"')
+    expect(sources).toContain('Native edit "input.ts"')
+    expect(sources).not.toContain(content)
+    expect(sources).not.toContain('No write or edit tool call')
+    const trial = projectClaimEvidence({ task: recovered, answer: 'saved', fileResult: { ...output, outputDigest: sha256(output) } }, 'file-chunks-v1')
+    expect(trial.items.filter(item => item.role === 'tool').map(item => item.text).join('')).not.toContain('Native edit')
+    const { fileExecutionProjection: _policy, ...legacySource } = task.source
+    const legacy = await recoverConversationTaskMaterial(harness.ctx, { ...task, source: legacySource })
+    expect(legacy.fileExecution).toBeUndefined()
+    const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+    const firstResult = span.find(event => event.type === 'tool/result' && event.sourceEventSeqs?.[0] === calls[0]!.seq)!
+    for (const mutation of ['duplicate', 'wrong-step', 'wrong-call-id', 'wrong-source', 'failed', 'late'] as const) {
+      const changed = native.events.flatMap<typeof native.events[number]>(event => {
+        if (event.seq !== firstResult.seq || event.type !== 'tool/result') return [event]
+        if (mutation === 'duplicate') return [event, structuredClone(event)]
+        if (mutation === 'wrong-step') return [{ ...event, data: { ...event.data, step: event.data.step + 1 } }]
+        if (mutation === 'wrong-call-id') return [{ ...event, data: { ...event.data, message: { ...event.data.message, source: { ...event.data.message.source, callId: CallId('substitute') } } } }]
+        if (mutation === 'wrong-source') return [{ ...event, sourceEventSeqs: [calls[1]!.seq] }]
+        if (mutation === 'failed') return [{ ...event, data: { ...event.data, message: { ...event.data.message, content: [{ ...event.data.message.content[0], isError: true }] } } }]
+        return [{ ...event, seq: task.completion!.files!.captureSeq + 1 }]
+      })
+      const changedSpan = changed.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
+      const candidate = { ...task, completion: { ...task.completion!, resultDigest: sha256(changedSpan),
+        evidenceIds: changedSpan.filter(event => event.type === 'tool/result').map(event => sha256(event)) } }
+      const spy = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(id => String(id) === task.source.sessionId
+        ? Promise.resolve({ ...native, events: changed }) : inspect(id))
+      try {
+        if (mutation === 'duplicate') await expect(recoverConversationTaskMaterial(harness.ctx, candidate)).rejects.toThrow('native file action evidence unavailable')
+        else expect((await recoverConversationTaskMaterial(harness.ctx, candidate)).fileExecution).toBeUndefined()
+      } finally { spy.mockRestore() }
+    }
+    const cold = await mount([], false, undefined, harness.root)
+    try {
+      expect(cold.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(task)
+      expect(await recoverConversationTaskMaterial(cold.ctx, task)).toEqual(recovered)
+      for (const check of checks) await expect(verifyConversationOriginalReviewCheck(cold.ctx, check, reviewMaterial.original, task.models![0]!.modelConfigDigest)).resolves.toBeUndefined()
+      expect(cold.adapter.requests).toHaveLength(0)
+    } finally { await cold.handle.dispose(); await cold.ctx.fiber.dispose() }
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it.each([undefined, true, false])('respects explicit host file-facts exposure %s while using native inherited-tool restriction', async exposure => {
   const harness = await mount([], false, undefined, undefined, exposure)

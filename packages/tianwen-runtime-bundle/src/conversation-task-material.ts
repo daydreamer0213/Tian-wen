@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSessionLifecycleFingerprint, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
+import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSessionLifecycleFingerprint, parseConversationFileEntries, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
 import { isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
@@ -52,29 +52,65 @@ export interface ConversationTaskMaterial {
   }
 }
 
-export interface ConversationFileExecutionEvidence {
+interface ReadOnlyFileExecutionEvidence {
   readonly schemaVersion: 'tianwen.file-execution-evidence.v1'
   readonly capturedInputsUnchanged: true
   readonly toolCalls: readonly string[]
   readonly directoryObservations: readonly { readonly command: string; readonly stdout: string }[]
 }
 
+interface FileActionExecutionEvidence {
+  readonly schemaVersion: 'tianwen.file-execution-evidence.v2'
+  readonly actions: readonly {
+    readonly tool: string
+    readonly path: string | null
+    readonly callSeq: number
+    readonly resultSeq: number
+    readonly status: 'success' | 'error'
+  }[]
+  readonly directoryObservations: ReadOnlyFileExecutionEvidence['directoryObservations']
+}
+
+export type ConversationFileExecutionEvidence = ReadOnlyFileExecutionEvidence | FileActionExecutionEvidence
+
 export function parseFileExecutionEvidence(value: unknown): ConversationFileExecutionEvidence {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid file execution evidence')
   const row = value as Record<string, unknown>
-  if (Object.keys(row).sort().join(',') !== 'capturedInputsUnchanged,directoryObservations,schemaVersion,toolCalls'
-    || row.schemaVersion !== 'tianwen.file-execution-evidence.v1' || row.capturedInputsUnchanged !== true
-    || !Array.isArray(row.toolCalls)
-    || row.toolCalls.some(item => typeof item !== 'string' || item.length === 0 || item.length > 80)
-    || !Array.isArray(row.directoryObservations) || row.directoryObservations.length > 16
+  if (!Array.isArray(row.directoryObservations) || row.directoryObservations.length > 16
     || row.directoryObservations.some(item => item === null || typeof item !== 'object' || Array.isArray(item)
       || Object.keys(item).sort().join(',') !== 'command,stdout' || typeof item.command !== 'string'
       || typeof item.stdout !== 'string' || Buffer.byteLength(item.command, 'utf8') > 8192
       || Buffer.byteLength(item.stdout, 'utf8') > 8192)) throw new Error('invalid file execution evidence')
+  if (row.schemaVersion === 'tianwen.file-execution-evidence.v1') {
+    if (Object.keys(row).sort().join(',') !== 'capturedInputsUnchanged,directoryObservations,schemaVersion,toolCalls'
+      || row.capturedInputsUnchanged !== true || !Array.isArray(row.toolCalls)
+      || row.toolCalls.some(item => typeof item !== 'string' || item.length === 0 || item.length > 80)) throw new Error('invalid file execution evidence')
+  } else if (row.schemaVersion === 'tianwen.file-execution-evidence.v2') {
+    if (Object.keys(row).sort().join(',') !== 'actions,directoryObservations,schemaVersion'
+      || !Array.isArray(row.actions) || row.actions.length === 0) throw new Error('invalid file execution evidence')
+    let previous = 0
+    const results = new Set<number>()
+    for (const item of row.actions) {
+      if (item === null || typeof item !== 'object' || Array.isArray(item)
+        || Object.keys(item).sort().join(',') !== 'callSeq,path,resultSeq,status,tool'
+        || typeof item.tool !== 'string' || item.tool.length === 0 || item.tool.length > 80
+        || !Number.isSafeInteger(item.callSeq) || item.callSeq <= previous
+        || !Number.isSafeInteger(item.resultSeq) || item.resultSeq <= item.callSeq || results.has(item.resultSeq)
+        || item.status !== 'success' && item.status !== 'error'
+        || (['read', 'write', 'edit', CAPTURED_FILE_FACTS_TOOL].includes(item.tool) ? typeof item.path !== 'string' : item.path !== null)) throw new Error('invalid file execution evidence')
+      if (item.path !== null) parseConversationFileEntries([{ path: item.path, content: null }])
+      previous = item.callSeq; results.add(item.resultSeq)
+    }
+  } else throw new Error('invalid file execution evidence')
   return value as ConversationFileExecutionEvidence
 }
 
 export function fileExecutionTexts(value: ConversationFileExecutionEvidence): string[] {
+  if (value.schemaVersion === 'tianwen.file-execution-evidence.v2') return [
+    ...value.actions.map(action => `Native ${action.tool}${action.path === null ? '' : ` ${JSON.stringify(action.path)}`}: call seq ${action.callSeq}; ${action.status} result seq ${action.resultSeq}.`),
+    'These are all native tool calls in this captured task, listed by call sequence. They establish actions and recorded results, not file content truth or effects outside this captured task.',
+    ...value.directoryObservations.map(item => `Certified read-only directory command: ${item.command}\nDirectory stdout:\n${item.stdout}`),
+  ]
   return [
     `Verified native task tool calls in order: ${value.toolCalls.join(', ')}.`,
     'No write or edit tool call occurred in this captured task. Captured input files matched initial bytes at the task capture boundary.',
@@ -133,7 +169,8 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
   const files = recoverFiles(ctx, saved.meta.cwd, saved.events, task)
   const ancillaryContext = files === undefined ? undefined : projectConversationFileAncillaryContext(task.fileAncillary ?? [], files.entries)
-  const fileExecution = files?.outputKind === 'chat' ? recoverFileExecution(saved.events, task) : undefined
+  const fileExecution = files?.outputKind === 'chat' ? recoverFileExecution(saved.events, task)
+    : files?.outputKind === 'files' && source.fileExecutionProjection === 'native-actions.v1' ? recoverFileActions(saved.events, task, files) : undefined
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
     ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }),
     ...(files === undefined ? {} : { files }), ...(ancillaryContext === undefined ? {} : { ancillaryContext }),
@@ -155,7 +192,34 @@ export async function recoverConversationTaskAnswer(ctx: Context, task: Conversa
   return answer
 }
 
-function recoverFileExecution(events: readonly SessionEvent[], task: ConversationTask): ConversationFileExecutionEvidence {
+function recoverFileActions(events: readonly SessionEvent[], task: ConversationTask, files: ConversationFileMaterial): FileActionExecutionEvidence {
+  const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
+  const boundary = task.completion!.files!.captureSeq
+  const actions = span.flatMap(call => {
+    if (call.type !== 'tool/call') return []
+    const results = span.filter((event): event is Extract<SessionEvent, { type: 'tool/result' }> => event.type === 'tool/result'
+      && String(event.data.message.source.callId) === String(call.data.callId))
+    const result = results[0]
+    if (results.length !== 1 || result === undefined || !isAppendSurfaceEvent(result)
+      || call.seq > boundary || result.seq <= call.seq || result.seq > boundary
+      || result.sourceEventSeqs?.length !== 1 || result.sourceEventSeqs[0] !== call.seq
+      || result.data.turn !== call.data.turn || result.data.step !== call.data.step) throw new Error('native file action evidence unavailable')
+    const fileTool = ['read', 'write', 'edit', CAPTURED_FILE_FACTS_TOOL].includes(call.data.name)
+    let path: string | null = null
+    if (fileTool) {
+      const args = JSON.parse(call.data.arguments) as Record<string, unknown>
+      const nativePath = recordedToolPath(files.cwd, args.file_path)
+      path = files.entries.find(entry => entry.path.toLowerCase() === nativePath?.toLowerCase())?.path ?? null
+      if (path === null) throw new Error('native file action path unavailable')
+    }
+    return [{ tool: call.data.name, path, callSeq: call.seq, resultSeq: result.seq,
+      status: result.data.error === undefined && result.data.message.content[0].isError !== true ? 'success' as const : 'error' as const }]
+  })
+  return parseFileExecutionEvidence({ schemaVersion: 'tianwen.file-execution-evidence.v2', actions,
+    directoryObservations: recoverFileExecution(events, task).directoryObservations }) as FileActionExecutionEvidence
+}
+
+function recoverFileExecution(events: readonly SessionEvent[], task: ConversationTask): ReadOnlyFileExecutionEvidence {
   const calls = events.filter((event): event is Extract<SessionEvent, { type: 'tool/call' }> =>
     event.seq >= task.source.startSeq && event.seq <= task.completion!.files!.captureSeq && event.type === 'tool/call')
   const ancillary = new Map((task.fileAncillary ?? []).map(item => [item.callSeq, item.payload]))

@@ -310,6 +310,16 @@ describe('natural conversation task evidence', () => {
     }
   })
 
+  it('round-trips only the prospective file action marker while preserving markerless history', () => {
+    const legacy = start()
+    const current = { ...legacy, fileExecutionProjection: 'native-actions.v1' as const }
+    expect(parseConversationLearningRecord(legacy)).toEqual(legacy)
+    expect(parseConversationLearningRecord(current)).toEqual(current)
+    for (const fileExecutionProjection of [undefined, null, 'native-actions.v2']) {
+      expect(() => parseConversationLearningRecord({ ...legacy, fileExecutionProjection })).toThrow()
+    }
+  })
+
   it('round-trips the prospective feedback v2 marker while preserving v1 and markerless history', () => {
     const legacy = start()
     const v1 = { ...legacy, proposalCluePolicy: 'feedback.v1' as const }

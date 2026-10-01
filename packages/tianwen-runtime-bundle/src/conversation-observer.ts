@@ -242,6 +242,7 @@ export class TianwenConversationObserverService extends Service {
       userMessageIds: direct.map(message => String(message.id)), requestDigest: sha256(direct), contextDigest: sha256(context),
       requestContentDigest: conversationRequestContentDigest(direct),
       scopeKey, consentRevision: consent.revision, behaviorVersion: guidanceVersion(snapshot), materialProjection, proposalCluePolicy: 'feedback.v2',
+      fileExecutionProjection: 'native-actions.v1',
       ...(this.config.familyVerification === true ? { admissionPolicy: 'tianwen.family-verification.v1' as const } : {}),
     }
     this.ctx.tianwenEvolution.recordConversationLearning(source)
