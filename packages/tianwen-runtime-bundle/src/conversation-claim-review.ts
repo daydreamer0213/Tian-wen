@@ -352,6 +352,20 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       items: { type: 'string', enum: quoteChoices, description: 'Choose one complete supplied claimEvidence item. Feedback standards are not evidence.' },
     } },
   }
+  else if (evidence.schemaVersion === 'tianwen.claim-evidence.v2') {
+    // Give new complete-file reviews exactly quotable units. Raw original
+    // requests can span several units; a cross-unit quote still fails the
+    // unchanged host predicate and must not be repaired or concatenated.
+    const fileQuoteChoices = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : [item.text]))]
+    const bounded = Buffer.byteLength(JSON.stringify(fileQuoteChoices), 'utf8') <= 98_304
+    schema = { ...schema, properties: { ...schema.properties, evidenceQuotes: {
+      ...schema.properties?.evidenceQuotes, type: 'array',
+      items: bounded
+        ? { type: 'string', enum: fileQuoteChoices, description: 'Choose one complete supplied claimEvidence item, preserving its exact text.' }
+        : { type: 'string' },
+      description: 'Quote from one supplied claimEvidence item only. Do not join adjacent units, roles or files, even when the complete raw request contains that sentence. Criteria and feedback standards are requirements, not evidence.',
+    } } }
+  }
   else if (input.purpose === 'method-study' && record(input.material) && record(input.material.task) && input.material.task.feedbackStandard !== undefined) {
     const quoteExamples = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : answerQuoteChoices(item.text)))]
     if (quoteExamples.length > 0 && Buffer.byteLength(JSON.stringify(quoteExamples), 'utf8') <= 16_384) schema = {
