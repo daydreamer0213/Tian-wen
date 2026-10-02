@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 可复用DEV原生入口已交付，真实拒绝回执缺口已定位
+
+d03f61d事前固定后，天问一次未知答案交付两个纯权限/结果模块，7真实请求/6根/9工具/prepare1/eval0。额外read scripts在guard预dispatch拒绝、没有I/O；原observer把无pending的result判材料失效，原completed无files/程序unverifiable/review inconclusive，双审未尝试。原task/material/program精确0请求冷恢复；两原候选Windows及隔离原六文件功能入口通过后逐字工程接纳，不回填成功或失败来源。
+
+薄DEV宿主复用原Agent/请求观察/服务/取消，真实peer解析，原task/native先保存再作六字段投影。旧会话/旧档混用两P2以4首红后窄修，最终18相关及最终发行Runtime/固定检查器反序+edit控制通过、两原审/程序0请求cold。SDK/只读参考保持，没有包源码变化或重复整包build。4自有容器全清/原84ID/快照0/Docker关闭，小型D记录无环境全量副本。正式17观察/16识别完成/0feedback/0study/隔离true、awaiting-compatible-sources，完整be721509…及原574d6e…870269字节前缀保持。见[事实和边界](tianwen-development-native-entry-20261003.md)，容量/精确远端见本运行根final-audit.json。
+
+下一按[设计](../superpowers/specs/2026-10-03-tianwen-native-read-denial-design.md)补可信read拒绝回执、闭合ancillary及cold核验，不按错误文字/isError跳过、不追认旧任务。selector要求同checker身份和原条件，此前不同待办/发行不能凑研究组；固定交付环境后推进确有共同原功能要求的真实独立待办，各自保留合同/期望，失败不预设。完整目标active/incomplete、NO-GO/原同意/隔离/门槛/十工作日窗口保持，不索题/催评价或空转阻塞审计。本条覆盖下方“下一收敛DEV入口”的旧待办。
+
 ## 2026-10-03 实际核心前瞻已执行：原任务保留无法核验，两处产品修复已交付
 
 72fe917事前固定真实编码身份缺陷/合同/功能入口，天问一次未知答案修改Evolution文件路径与Runtime候选路径两核心模块，13真实请求/8根/10工具/0重试、原双审met/met、prepare1/eval1。原程序unverifiable：同一完整权限集合因原observer捕获顺序反转，被项目checker有序数组断言拒绝，功能容器未执行；原封存driver同顺序断言也单独失败。两原候选归档、原任务/条件保持；独立Windows及隔离原五文件/同事前入口通过后逐字工程接纳，不回填原任务成功/失败来源。
