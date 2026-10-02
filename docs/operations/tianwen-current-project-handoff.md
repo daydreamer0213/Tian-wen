@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-02 第三次同阻塞复核：目标工具已返回blocked
+
+623ff50干净源码正式Runtime再次核对13task/0study/0反馈评估/有效独立失败来源空、awaiting-compatible-sources/隔离true；完整8a5fb441…账本精确不变。自0050de5实质修复后，连续三轮均没有产品/自然学习进展，只有状态复核与文档记录。没有当前存活原生或测试进程可等待；限定已批准主链没有新的已证实核心缺陷或有事前独立依据的实际待办。公共issue本轮未刷新，旧公开观察不能代表私有待办。
+
+本轮满足目标模式连续三轮同阻塞规则，实际调用后工具返回 **blocked**，完整目标不complete、不缩小，停止自动空转。执行中断修复已交付并推送；它不产生来源资格，不重跑C或重评撤回检查。恢复入口是实际出现可归因的持续反馈或独立核验的兼容问题来源，或者发现新的有证据核心缺陷/外部实际待办变化。持续自主执行授权保持，不是缺执行许可；不能靠改门槛、造反馈、预定失败或更多维护成功恢复研究资格。
+
+当前证据D:/DevData/tianwen-source-blocked-resumed-audit-20261002/readiness.json、provenance.json、goal-status.json。正式账本、原反馈/任务结果、原门槛、十工作日窗口及main/Daily NO-GO保持。0真实模型/新任务/候选执行/旧题重跑/重复回归/环境副本，仅小回执，D18.38GiB≥15，未达20偏好。以下active/no-progress1或2均为历史当时状态。
+
 2026-10-02修复交付后第二次连续无进展核对：51aeacb干净源码实际重新挂载正式Runtime，13task/0study/0反馈评估/有效独立失败来源空、awaiting-compatible-sources/隔离true及完整8a5fb441…账本精确不变。当前三个已批准局部计划与权威交接未给出新的有事前独立依据的实际待办；此限定范围没有新的已证实实现缺口。当前匹配原生/本轮/Vitest进程0，不把状态文件当活任务等待；本轮公共issue查询未刷新，仅继承上轮公开观察。0模型/新任务/旧题重跑/重复回归/环境副本，D18.38GiB≥15。回执D:/DevData/tianwen-source-revalidation-resumed-2-20261002/readiness.json、provenance.json。本轮no-progress 2，目标active/incomplete；同一阻塞若再连续一轮且无可独立实质动作则按工具blocked，不无限循环。原门槛/窗口/NO-GO保持；文档提交不算实现进展。
 
 ## 2026-10-02 修复交付后的首次来源复核：没有新增产品或学习进展
