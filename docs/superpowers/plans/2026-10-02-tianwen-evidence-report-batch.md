@@ -10,6 +10,8 @@
 
 ## Global Constraints
 
+后续B完成31/31原功能、双原审查met、工程原字节审查及0模型两审查恢复。Task 2现A有限工程交付/原复核inconclusive，B完整有限任务交付，C未运行；完整目标仍未完成。
+
 2026-10-02检查点：Task 1事前冻结、审查与零模型预检完成。Task 2的A原候选33/33功能通过，完成原字节工程审查与0模型冷恢复；双审第二审max-tokens，整体inconclusive，不计完整成功。B/C未运行，Task 3/4未完成；准确范围见`docs/operations/tianwen-evidence-report-batch-20261002.md`。
 
 - 原完整目标、发布门槛、十工作日窗口、NO-GO/隔离保持。

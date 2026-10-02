@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+同批次B原31/31功能verified、双审met、原字节工程接纳及0模型两审查精确恢复；31容器删除。A原inconclusive保持，B不产生功能失败/反馈来源。正式12task/0study/隔离true、f0161716…账本，旧前缀保持；历史controlled accepted未当作自然研究或激活。见[批次结果](tianwen-evidence-report-batch-20261002.md)。
+
 2026-10-02已批准报告批次首题实际执行：A原33/33功能verified、双审inconclusive/model-unavailable；原子会话首审met、第二审max-tokens（65,536输出/60,602推理），不当功能失败或双审成功。原字节有限工程收录，0模型冷恢复task/material/program、33容器删除；正式11task/0study/隔离true，旧10前缀保持、现账本f70b4656…。目标工具blocked且API不能恢复，批准路线已更新并执行，完整目标未完成；原门槛/十日窗口/NO-GO保持。见[当前结果与后续](tianwen-evidence-report-batch-20261002.md)。
 
 2026-10-02有限C/D主链审查无新明确实现缺口，合同身份及冷恢复设计疑点排除；不是全仓库或自然学习验收。首组合1448通过/9失败/3跳过，9属控制端漏既有CI环境，补原环境同源码16/16，合并1457不同项通过/3显式Docker跳过、首失败保持，非单次全绿/真实问题来源。0真实模型/新任务/反馈/研究/激活，正式10task/0study/隔离true及b8a71177…账本不变。完整目标active/incomplete、NO-GO/原门槛/原窗口不变；不追加标准、伪造失败、索题或重跑旧题，下一先找真实项目需求及事前依据。见[验证范围和失败归属](tianwen-core-route-audit-20261002.md)。
