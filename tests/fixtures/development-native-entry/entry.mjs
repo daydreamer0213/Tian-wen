@@ -53,7 +53,7 @@ const {externalCheckPrepared:_prepared,...noPreparation}=baseTask
 assert.deepEqual(summary(noPreparation),{...pass,functionalCandidateVerified:false})
 const {externalCheckFinished:_finished,...noResult}=baseTask
 assert.deepEqual(summary(noResult),{...pass,functionalStatus:null,functionalCandidateVerified:false})
-assert.deepEqual(summary({...baseTask,invalidation:{kind:'task-invalidated'}}),{...pass,functionalCandidateVerified:false})
+assert.deepEqual(summary({...baseTask,externalCheckInvalidated:{kind:'task-external-check-invalidated'}}),{...pass,functionalCandidateVerified:false})
 assert.deepEqual(summary({...baseTask,completion:{...baseTask.completion,status:'failed'}}),{...pass,completionStatus:'failed',functionalCandidateVerified:false})
 assert.deepEqual(summary({...baseTask,review:{verdict:'inconclusive'}}),{...pass,reviewVerdict:'inconclusive'})
 assert.deepEqual(summarizeDevelopmentNativeTask(undefined,expected),{taskId:null,completionStatus:null,functionalStatus:null,reviewVerdict:null,permissionSetExact:false,functionalCandidateVerified:false})
