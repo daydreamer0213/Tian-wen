@@ -14,25 +14,31 @@ const localFs = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-
 
 const base = process.env.TIANWEN_PUBLISHED_HOST_PROBE_ROOT ?? 'D:/DevData/tianwen-reusable-result-checks-20261002/published-host'
 
-it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')('uses published factories in the full Runtime host and cold-recovers without preparing or executing again', async () => {
+for (const engine of ['python', 'node-project'] as const)
+it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')(`uses published ${engine} factories in the full Runtime host and cold-recovers without preparing or executing again`, async () => {
   // Resolve the built public exports only on explicit opt-in. Default tests
   // must not require generated dist files. The root is not a package consumer;
   // use the package's own public self-reference rather than a new dependency.
   const packageRequire = createRequire(new URL('../../packages/tianwen-runtime-bundle/package.json', import.meta.url))
-  const { createConversationIsolatedPythonCheck, createConversationStudyIsolatedPythonCheck } = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle')).href)
+  const { createConversationIsolatedPythonCheck, createConversationStudyIsolatedPythonCheck, createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck } = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle')).href)
   const { apply: applyBundle } = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle/runtime')).href)
   const roots = resolve(base, 'test-roots')
   mkdirSync(roots, { recursive: true })
   const cwd = mkdtempSync(join(roots, 'host-'))
-  const condition = 'Return exactly JSON {"tag":"runtime-host"} with exit code zero and empty stderr.'
-  const requestText = `Create host.py using contract.md. ${condition}`
-  writeFileSync(join(cwd, 'contract.md'), condition)
-  const config = { cwd, requestText, targetPath: 'host.py', referencePaths: ['contract.md'], requiredCondition: condition,
-    cases: [{ id: 'published-full-host', input: '{}', expectedJson: '{"tag":"runtime-host"}', exitCode: 0 }],
+  const condition = engine === 'python' ? 'Return exactly JSON {"tag":"runtime-host"} with exit code zero and empty stderr.' : 'Preserve the captured Evolution core predicates: no-task admission unsupported, unconfigured task satisfied, and unconfigured rejection false; exit zero and empty stderr.'
+  const requestText = engine === 'python' ? `Create host.py using contract.md. ${condition}` : `Implement conversation-external-check.ts and conversation-files.ts using the frozen learning-intake.ts and entry.mjs. ${condition}`
+  const sourceRoot = resolve('packages/tianwen-evolution/src')
+  const candidates = engine === 'python' ? [{ path: 'host.py', content: 'print(\'{"tag":"runtime-host"}\')' }] : ['conversation-external-check.ts', 'conversation-files.ts'].map(path => ({ path, content: readFileSync(join(sourceRoot, path), 'utf8') }))
+  const references = engine === 'python' ? [{ path: 'contract.md', content: condition }] : [{ path: 'learning-intake.ts', content: readFileSync(join(sourceRoot, 'learning-intake.ts'), 'utf8') },
+    { path: 'entry.mjs', content: `import {supportsConversationCodeCheck,hasSatisfiedConversationCodeCheck,hasRejectedConversationCodeCheck} from './conversation-external-check.js';console.log(JSON.stringify({supports:supportsConversationCodeCheck(undefined),satisfied:hasSatisfiedConversationCodeCheck({}),rejected:hasRejectedConversationCodeCheck({})}));` }]
+  for (const reference of references) writeFileSync(join(cwd, reference.path), reference.content)
+  const common = { cwd, requestText, referencePaths: references.map(file => file.path), requiredCondition: condition,
+    cases: [{ id: 'published-full-host', input: '{}', expectedJson: engine === 'python' ? '{"tag":"runtime-host"}' : '{"supports":false,"satisfied":true,"rejected":false}', exitCode: 0 }],
     isolated: { cliPath: 'D:/DevData/docker-desktop/app/resources/bin/docker.exe', endpoint: 'npipe:////./pipe/dockerDesktopLinuxEngine',
-      imageRef: 'python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7',
-      imageId: 'sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7', workRoot: resolve(base, 'receipts') } }
-  const producer = createConversationIsolatedPythonCheck(config)
+      imageRef: engine === 'python' ? 'python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7' : 'public.ecr.aws/docker/library/node@sha256:b74031e546d7f4faf561d797ac1b76beccac856a042815ca77db4fd047581605',
+      imageId: engine === 'python' ? 'sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7' : 'sha256:b74031e546d7f4faf561d797ac1b76beccac856a042815ca77db4fd047581605', workRoot: resolve(base, 'receipts') } }
+  const config = { ...common, targetPath: 'host.py' }, project = { ...common, entryPath: 'entry.mjs', outputPaths: candidates.map(file => file.path) }
+  const producer = engine === 'python' ? createConversationIsolatedPythonCheck(config) : createConversationIsolatedNodeProjectCheck(project)
   let preparations = 0, evaluations = 0
   const externalCodeCheck = { async prepare(material: Parameters<typeof producer.prepare>[0]) {
     preparations++
@@ -42,11 +48,12 @@ it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')('uses published fact
       return prepared.evaluate(candidate)
     } }
   } }
-  const admission = { kind: 'task', objective: 'Create the requested host CLI', criteria: [condition], family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files', relatedTaskId: null, feedback: null }
+  const admission = { kind: 'task', objective: engine === 'python' ? 'Create the requested host CLI' : 'Implement the declared Evolution core modules', criteria: [condition], family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files', relatedTaskId: null, feedback: null }
   const review = { verdict: 'met', category: null, explanation: 'The source is saved.', evidenceQuotes: ['saved'] }
   const script = [toolCallResponse('admit', 'structured_output', { decision: admission }),
-    toolCallResponse('read-contract', 'read', { file_path: 'contract.md' }), toolCallResponse('read-absent', 'read', { file_path: 'host.py' }),
-    toolCallResponse('write-host', 'write', { file_path: 'host.py', content: 'print(\'{"tag":"runtime-host"}\')' }),
+    ...references.map((file, index) => toolCallResponse(`read-reference-${index}`, 'read', { file_path: file.path })),
+    ...candidates.map((file, index) => toolCallResponse(`read-absent-${index}`, 'read', { file_path: file.path })),
+    ...candidates.map((file, index) => toolCallResponse(`write-host-${index}`, 'write', { file_path: file.path, content: file.content })),
     textResponse('saved'), auditedEvidenceResponse(review), auditedEvidenceResponse(review)]
   const services = ['tianwenConversationFileObserver', 'tianwenConversationObserver', 'tianwenConversationFeedback', 'tianwenConversationGuidanceLoop', 'tianwenMessageFeedbackBridge']
   async function mount(cold: boolean) {
@@ -57,7 +64,7 @@ it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')('uses published fact
       await harness.ctx.plugin(spawn, { providerName: 'spawn' })
       await harness.ctx.plugin(fileTools, {})
       await applyBundle(harness.ctx, { stateRoot: join(cwd, 'state'), evolutionRoot: join(cwd, 'evolution'), captureExternalCodeArtifacts: true,
-        externalCodeCheck, studyResultCheck: createConversationStudyIsolatedPythonCheck({ ...config, criteria: [condition] }) })
+        externalCodeCheck, studyResultCheck: engine === 'python' ? createConversationStudyIsolatedPythonCheck({ ...config, criteria: [condition] }) : createConversationStudyIsolatedNodeProjectCheck({ ...project, criteria: [condition] }) })
       for (let pass = 0; pass < 8; pass++) {
         await Promise.all([...harness.ctx.registry.values()].flatMap(runtime => [...runtime.fibers].map(fiber => fiber.await())))
         if (![...harness.ctx.registry.values()].some(runtime => [...runtime.fibers].some(fiber => fiber.inertia))) break

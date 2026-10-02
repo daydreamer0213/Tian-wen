@@ -11,7 +11,6 @@ import type { IsolatedNodeCliConfig } from './isolated-node-cli.js'
 export const nodeProjectPolicy = Object.freeze({ transformedBytes: 256 * 1024, outputBytes: 8192 })
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const modulePath = fileURLToPath(import.meta.url), moduleDigest = hash(readFileSync(modulePath))
-const compilerDigest = hash(readFileSync(process.execPath))
 const protocol = 'tianwen.node-project-result.v1'
 const loaderPath = '.tianwen-loader.mjs'
 
@@ -72,6 +71,7 @@ export interface PreparedIsolatedNodeProject {
 /** Fixed opt-in executor; mounts only its small generated read-only snapshot, never the source project. */
 export async function prepareIsolatedNodeProject(raw: IsolatedNodeCliConfig, signal: AbortSignal): Promise<PreparedIsolatedNodeProject> {
   const config = structuredClone(raw)
+  const compilerDigest = hash(readFileSync(process.execPath))
   assert.equal(process.versions.node, '22.23.1', 'Fixed host Node 22.23.1 conversion is required')
   assert.equal(typeof stripTypeScriptTypes, 'function'); assert.equal(stripTypeScriptTypes('export const n: number = 1', { mode: 'transform' }).trim(), 'export const n = 1;')
   const runner = await prepareIsolatedJsonCli(config, signal, 'node-project'), root = resolve(config.workRoot)

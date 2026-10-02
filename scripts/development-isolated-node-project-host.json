@@ -1,0 +1,8 @@
+{
+  "cliPath": "D:/DevData/docker-desktop/app/resources/bin/docker.exe",
+  "endpoint": "npipe:////./pipe/dockerDesktopLinuxEngine",
+  "imageRef": "public.ecr.aws/docker/library/node@sha256:b74031e546d7f4faf561d797ac1b76beccac856a042815ca77db4fd047581605",
+  "imageId": "sha256:b74031e546d7f4faf561d797ac1b76beccac856a042815ca77db4fd047581605",
+  "workRoot": "D:/DevData/tianwen-development-learning-20261001/functional-checks/node-22.23.1-project",
+  "timeoutMs": 20000
+}

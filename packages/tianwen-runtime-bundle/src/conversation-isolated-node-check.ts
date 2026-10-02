@@ -12,6 +12,9 @@ export function createConversationStudyIsolatedNodeCheck(config: ConversationIso
 }) {
   return createConversationStudyIsolatedJsonCheck(config, 'node')
 }
-export function createConversationStudyIsolatedNodeCohortCheck(config: Parameters<typeof createConversationStudyIsolatedJsonCohortCheck>[0]) {
+export function createConversationStudyIsolatedNodeCohortCheck(config: {
+  readonly modelConfigDigest: Parameters<typeof createConversationStudyIsolatedJsonCohortCheck>[0]['modelConfigDigest']
+  readonly cases: Readonly<Record<'source1' | 'source2' | 'counterexample' | 'adjacent' | 'holdout', ConversationIsolatedNodeStudyCase>>
+}) {
   return createConversationStudyIsolatedJsonCohortCheck(config, 'node')
 }

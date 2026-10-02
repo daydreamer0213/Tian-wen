@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 原普通/研究流程多文件绑定及实际发行宿主已交付，下一真实核心前瞻
+
+f9bf6f1之后完成原多文件计划Task2：实际根普通/单研究/五角色项目工厂与固定DEV薄入口/独立JSON；entryPath可只读，outputPaths多输出，完整保存图复用原request/context/material/cohort/取消绑定及原observer/loop。source-rejected/环境/漂移不填必需条件失败。旧单文件分支ID/合同形状及公开类型保持、原adapter/JSON无改；checkerSourceDigest仅随真实新发行字节更新，不追认旧身份或历史。
+
+264机制/3 opt-in跳过、宿主27/27、八包类型/完整build/严格实际根与runtime消费者通过。五真实核心控制角色各verified/5合同，有效错误模块实际rejected原condition，single verified，DEV/direct身份一致；7自有容器。新fullRuntime分支另1受控task经原observer prepare1/eval1、两核心输出功能verified及scripted met、同档cold task/ledger精确/0请求再执行；旧Python分支跳过。正式Runtime hook对象同一、供应/prepare/模型请求0/研究0/隔离true，原完整bc1b30d…698604字节不变，继承15观察/14识别完成/0反馈及原失败。0真实模型/新自然任务/研究/采用/收益；错误程序和scripted task均仅工程控制。
+
+旧发行根新API缺失首红、DEV缺入口及临时发行peer解析假设留原日志，复用原包peer无安装；最后纯类型收窄后原四冻结发行/adapter/JSON字节完全一致，未重跑控制。独立审查无有据P1/P2；共8自有容器全清/原84ID集合保持/快照临时根0/Docker0，运行根约0.63MB+固定宿主18KB，D约18.65GiB≥15。见[结果和准确范围](tianwen-node-project-checks-20261003.md)，精确DEV远端核对运行根remote-final.json。
+
+完整目标active/incomplete及main-Daily NO-GO/原同意/正式隔离/门槛/十工作日窗口保持。下一原Task3实际核心待办，经新DEV多输出入口一次未知答案原生执行并分别保存原结果/独立工程修复；不索题/催评价、造失败或拼条件/重复小工具。此条覆盖下面“先接多输出工厂”的当前待办。
+
 ## 2026-10-03 真实多文件项目执行器已交付，下一接原任务/研究多输出工厂
 
 e7b6d5e事前设计后完成多文件计划Task1：实际发行根公开prepareIsolatedNodeProject，复用原隔离生命周期，只将自有小型生成快照只读挂/project，旧三模式原命令/资源及0挂载保持。固定宿主只转换保存数据，完整快照≤256KiB/内帧8KiB/原传输32KiB；TS与JS别名单一URL，父子禁SIGUSR1，真正stdin/子退出，信号/超时/传输/清理不填任务失败或学习标签。
