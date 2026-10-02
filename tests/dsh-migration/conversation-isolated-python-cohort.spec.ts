@@ -8,8 +8,8 @@ import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCh
 import * as producers from '../../scripts/conversation-isolated-python-check.js'
 
 const mock = vi.hoisted(() => ({ prepare: vi.fn(), run: vi.fn() }))
-vi.mock('../../scripts/isolated-python-cli.js', async original => ({
-  ...await original<typeof import('../../scripts/isolated-python-cli.js')>(), prepareIsolatedPythonCli: mock.prepare,
+vi.mock('../../packages/tianwen-runtime-bundle/src/isolated-python-cli.js', async original => ({
+  ...await original<typeof import('../../packages/tianwen-runtime-bundle/src/isolated-python-cli.js')>(), prepareIsolatedPythonCli: mock.prepare,
 }))
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); vi.resetAllMocks() })

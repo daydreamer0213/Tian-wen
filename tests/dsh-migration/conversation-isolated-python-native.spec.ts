@@ -17,7 +17,7 @@ const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepse
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const fileTools = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-tool-fs')).href)
 const localFs = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-fs-local')).href)
-const base = 'D:/DevData/tianwen-isolated-functional-producer-20261001'
+const base = process.env.TIANWEN_ISOLATED_PROBE_ROOT ?? 'D:/DevData/tianwen-isolated-functional-producer-20261001'
 const condition = 'Return the exact integer successor as JSON with exit code zero and no stderr.'
 const requestText = `Create task.py using contract.md. ${condition}`
 const source = 'import json,sys\nx=json.load(sys.stdin)\nprint(json.dumps({"n":x["n"]+1}))'

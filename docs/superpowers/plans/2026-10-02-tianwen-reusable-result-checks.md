@@ -33,14 +33,14 @@ void factories;
 
 **Interfaces:** 保留 `createConversationIsolatedPythonCheck`、`createConversationStudyIsolatedPythonCheck`、`createConversationStudyIsolatedPythonCohortCheck` 既有参数和返回接口。必要配置类型按原源码导出，不设计另一套运行时协议。
 
-- [ ] 存档两个旧源码原字节与SHA到D盘本项运行根；核对无原生任务存活，不修改旧运行包/账本。
-- [ ] 加包根消费者失败测试：TypeScript导入上述三个具体工厂和原配置类型，目前只有接口类型而没有工厂应失败；JS检查发行index.js出口不能借工作区内部模块。
-- [ ] 保存首次失败，确认原因是缺具体出口，不是未安装依赖或旧dist。
-- [ ] 提升原模块，调整相对import到包内；src/index.ts导出原工厂/配置类型。脚本薄转发格式为 `export * from '../packages/tianwen-runtime-bundle/src/conversation-isolated-python-check.js'`，执行器同理。
-- [ ] 核对源码身份在source/发行JS两个加载边界分别取实际文件字节；checksum变化发生在事前准备，不改变原结果。
-- [ ] 运行现有 isolated-python-cli、lifecycle、check、native、cohort、cohort-native 六组机制用例；包括输入漂移、无合同、非法/重复JSON、取消等待清理、原condition失败归属及五案例事前绑定，不添加镜像字符串测试。
-- [ ] 执行现有Runtime类型/构建/声明流程，核对完整JS入口与公开声明一致；保存首失败与修复归属。
-- [ ] 用发布files清单范围的JS/声明执行实际包根消费者测试，确认无需导入仓库scripts、源码路径或未发布文件；无Docker时明确标出未执行的实际隔离验证。
-- [ ] 独立审查权限/身份/取消/历史兼容和简洁性；只修明确问题。diff检查后提交DEV及推送，更新权威交接，明确“工程入口交付，非自然学习效果”。
+- [x] 存档两个旧源码原字节与SHA到D盘本项运行根；核对无原生任务存活，不修改旧运行包/账本。
+- [x] 加包根消费者失败测试：TypeScript导入上述三个具体工厂和原配置类型，目前只有接口类型而没有工厂应失败；JS检查发行index.js出口不能借工作区内部模块。
+- [x] 保存首次失败，确认原因是缺具体出口，不是未安装依赖或旧dist。
+- [x] 提升原模块，调整相对import到包内；src/index.ts导出原工厂/配置类型。脚本薄转发格式为 `export * from '../packages/tianwen-runtime-bundle/src/conversation-isolated-python-check.js'`，执行器同理。
+- [x] 核对源码身份在source/发行JS两个加载边界分别取实际文件字节；checksum变化发生在事前准备，不改变原结果。
+- [x] 运行现有 isolated-python-cli、lifecycle、check、native、cohort、cohort-native 六组机制用例；包括输入漂移、无合同、非法/重复JSON、取消等待清理、原condition失败归属及五案例事前绑定，不添加镜像字符串测试。
+- [x] 执行现有Runtime类型/构建/声明流程，核对完整JS入口与公开声明一致；保存首失败与修复归属。
+- [x] 用发布files清单范围的JS/声明执行实际包根消费者测试，确认无需导入仓库scripts、源码路径或未发布文件；无Docker时明确标出未执行的实际隔离验证。
+- [x] 独立审查权限/身份/取消/历史兼容和简洁性；只修明确问题。diff检查后提交DEV及推送，更新权威交接，明确“工程入口交付，非自然学习效果”。
 
 执行选择在实现中顺序推进，不另建任务、不安装运行时或重复全量环境。后续宿主消费/闭环工作另按此项实际结果决定具体范围；不将未实施的后续路线当作已交付。

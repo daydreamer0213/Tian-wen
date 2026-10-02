@@ -8,8 +8,8 @@ import type { ConversationStudyResultPreparation } from '../../packages/tianwen-
 import { createConversationIsolatedPythonCheck, createConversationStudyIsolatedPythonCheck } from '../../scripts/conversation-isolated-python-check.js'
 
 const mock = vi.hoisted(() => ({ run: vi.fn(), prepare: vi.fn() }))
-vi.mock('../../scripts/isolated-python-cli.js', async importOriginal => {
-  const original = await importOriginal<typeof import('../../scripts/isolated-python-cli.js')>()
+vi.mock('../../packages/tianwen-runtime-bundle/src/isolated-python-cli.js', async importOriginal => {
+  const original = await importOriginal<typeof import('../../packages/tianwen-runtime-bundle/src/isolated-python-cli.js')>()
   return { ...original, prepareIsolatedPythonCli: mock.prepare }
 })
 const roots: string[] = []

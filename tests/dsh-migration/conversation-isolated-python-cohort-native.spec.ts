@@ -21,7 +21,7 @@ const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-su
 const fileToolsPath = cliRequire.resolve('@deepseek-ai/dsh-tool-fs')
 const localFs = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-fs-local')).href)
 const presets = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-agent-presets')).href)
-const base = 'D:/DevData/tianwen-functional-study-cohort-20261001'
+const base = process.env.TIANWEN_ISOLATED_PROBE_ROOT ?? 'D:/DevData/tianwen-functional-study-cohort-20261001'
 const structured = (value: Record<string, unknown>) => toolCallResponse('structured', 'structured_output', value)
 const user = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] })
 const pair = (verdict: 'met' | 'not-met') => [1, 2].map(() => auditedEvidenceResponse({ verdict,
