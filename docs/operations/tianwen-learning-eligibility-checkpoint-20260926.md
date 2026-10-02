@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-02用户授权自主决定后，完整目标已实际active/incomplete。事前固定c598d93受控公开三题A14/B12/C25全部功能通过、三双审met、三零请求精确冷恢复；不是自然待办/所有者反馈、研究或效果。受控3task/0study/0反馈评估/有效失败来源空、selector awaiting-compatible-sources/隔离true，D/E未运行，按原条件结束不追加题。正式账本8a5fb441…全字节不变，本轮不重复挂载；13task/0study/0反馈评估为相同账本的继承快照。原门槛/十工作日窗口/NO-GO保持；下一实际使用接入与已核验问题，不能把更多成功练习当来源变化。51容器自清/Docker停止、pnpm prune595MB，D18.91GiB≥15。受控Profile压缩核验后删除被blocked by policy拒绝，原件/备份暂留不绕过。见[完整边界及证据](tianwen-public-exercise-pilot-20261002.md)。以下blocked为历史当时状态。
+
 2026-10-02第三次连续同阻塞核对后，目标工具实际返回blocked。623ff50正式Runtime仍13task/0study/0反馈评估/有效失败来源空、awaiting-compatible-sources/隔离true及完整8a5fb441…账本不变。0050de5修复后连续三轮无实质进展，无当前活任务可等待，限定主链无新已证实核心缺陷或有事前独立依据实际待办。停止空转，完整目标不complete；恢复取决于实际可归因持续反馈/独立核验的兼容问题来源或新的有证据核心缺陷/外部待办变化，不缺执行许可、不索题或造来源。0模型/新任务/旧样本重跑，原门槛/窗口/NO-GO保持。回执D:/DevData/tianwen-source-blocked-resumed-audit-20261002，实际状态见goal-status.json。以下active均为对应历史状态。
 
 2026-10-02第二次连续无进展复核：51aeacb实际Runtime仍13task/0study/0反馈评估/有效失败来源空、awaiting-compatible-sources/隔离true，完整8a5fb441…账本不变。现有局部计划无新的有事前依据实际待办，限定范围无新已证实实现缺口；当前匹配活任务进程0。0模型/新任务/旧题重跑/重复回归，no-progress 2，目标active/incomplete；第三次同阻塞且无可独立实质动作时按工具blocked，原门槛/窗口/NO-GO保持。回执D:/DevData/tianwen-source-revalidation-resumed-2-20261002；文档及状态刷新不是实现成果。
