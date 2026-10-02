@@ -30,3 +30,17 @@
 下一项先核对持续 DEV 宿主现有配置接线，使用这个公开工厂入口接入宿主事前固定的合同；保留协议和既有生命周期，只解决实际缺失的接线。随后以受控新环境分别验证自动流程，再单独记录自然反馈及后续效果。没有新缺口时不重复空审计、索题或追加已结束的三题。
 
 运行根在最终核对时约249KB（不跟随共享依赖联接），没有依赖或环境全量副本。D余量18.87GiB，满足15GiB下限，尚未达到20GiB偏好。
+
+## 后续实际 Runtime 宿主接入核验
+
+Task1源码0d54289、事前计划44fd619之后，确认公开 runtime 子入口 apply 已有两个检查配置的接线，因此没有增加重复宿主循环。新增 `published-runtime-functional-host.spec.ts` 使用实际包 manifest 的公开 exports 解析根工厂与 runtime 子入口；DSH测试宿主复用既有反馈持久harness及依赖，不借源码版 observer 手工接线。此项不是裸包全量安装验收，裸包根消费见上面的Task1独立消费者。
+
+一个全新明确受控的 CLI 合同实际经历：完整 bundle apply→五个对话服务就绪→有效测试档同意→事前一次准备→原生read/write→一次真实Docker结果检查→保存 verified/met 原任务→同档重启原任务与账本精确恢复、零提供者请求及零再准备/执行。激活隔离始终true、研究0。研究生产者作为配置传入并挂载服务，不声明研究裁决或闭环学习已发生。
+
+首两次失败分别为测试根未声明该包依赖、普通持久harness不提供原生messageFeedback；均在候选/隔离执行前停止，是控制环境失败，不是产品功能失败或学习来源。根据 manifest 自引用和原服务 inject 定位，改用公开 self-reference 及既有feedback harness；未安装依赖/修改生产协议。第三次通过；随后将发行模块加载移入明确 opt-in 回调，避免默认CI要求未构建dist。最终同代码新临时根1/1通过，默认1项显式跳过。首次失败日志全保留，没有声称单次全绿。
+
+独立审查发现新测试固定wx报告名会让同根重跑在末端EEXIST假失败，原反馈保留。按每轮已核对归属的随机目录名生成独立结果路径，继续wx保护旧证据；审查确认P2关闭、无新P1/P2。同根实际重跑作为这次窄修的验证，不当自然任务或新增不同案例。
+
+最终同根窄修验证1/1通过。本项新增1个不同用例，与Task1共107个不同机制用例；本项三次因代码变化的验证各1容器，全项32份容器回执全部边界核验/删除。历史84ID保持，Docker恢复停止/后端0，两个本轮test-roots残余目录0。最终正式账本原SHA不变、运行根约263KB（共享联接不计入）、D18.90GiB≥15。见host-final-verification.json，前面249KB/18.87GiB是Task1当时快照。
+
+实际证据：published-host-v1/v2/v3、published-host-final、published-host-default-skip、published-host-repeat-safe日志、published-host-final/host-*-result.json及host-cleanup.json；固定名旧报告保留为前一阶段证据。不得把完整bundle对话服务就绪说成所有桌面服务启动。
