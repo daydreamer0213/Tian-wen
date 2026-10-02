@@ -10,6 +10,8 @@
 
 ## Global Constraints
 
+2026-10-02检查点：Task 1事前冻结、审查与零模型预检完成。Task 2的A原候选33/33功能通过，完成原字节工程审查与0模型冷恢复；双审第二审max-tokens，整体inconclusive，不计完整成功。B/C未运行，Task 3/4未完成；准确范围见`docs/operations/tianwen-evidence-report-batch-20261002.md`。
+
 - 原完整目标、发布门槛、十工作日窗口、NO-GO/隔离保持。
 - 原生输出不由控制器补写，不强造失败/反馈，不重跑旧题或实际批次求通过。
 - workRoot固定，contract与输入变化允许，checker/runner及model身份不得意外变化。
