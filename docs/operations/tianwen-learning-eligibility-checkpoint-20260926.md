@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-02用户恢复后目标已核对active/incomplete。未来宿主请求计数中止已移除，14工具/路径/字节/12分钟与原模型配置保留；受控13根请求完成对照、6场景及174相关回归通过，驱动自身摘要P2已关闭。完整类型范围旧依赖1/现1/新增0；未运行新真实任务，不计自然来源、研究或效果。正式13task/0study/0反馈评估/可信失败来源空/awaiting-compatible-sources/隔离true及8a5fb441…完整账本保持，0真实模型/正式新任务/旧样本重跑。NO-GO、原门槛及原窗口不变。见[修复边界](tianwen-native-task-request-observation-20261002.md)。以下blocked描述均为历史当时状态。
+
 2026-10-02报告批次终态：A功能33通过/原复核inconclusive，B功能31通过/双审met，C宿主9根请求cap终止未完成修订（约32秒，9工具/1准备/0执行），不是原功能拒绝来源，49案例不补执行。正式13task/0study/0反馈评估/可信功能失败来源空/awaiting-compatible-sources/隔离true，原账本前缀保持、现8a5fb441…，D/E与研究/激活/未来效果未发生。下一调整未来不同任务的执行限制与14工具/12分钟预算协调，不增加验收标准、重跑旧题或无限维护成功凑来源。内置目标blocked/API无法恢复，完整目标不complete；原门槛/窗口/NO-GO保持。见[准确终态](tianwen-evidence-report-batch-20261002.md)。
 
 同批次B原31/31功能verified、双审met、原字节工程接纳及0模型两审查精确恢复；31容器删除。A原inconclusive保持，B不产生功能失败/反馈来源。正式12task/0study/隔离true、f0161716…账本，旧前缀保持；历史controlled accepted未当作自然研究或激活。见[批次结果](tianwen-evidence-report-batch-20261002.md)。
