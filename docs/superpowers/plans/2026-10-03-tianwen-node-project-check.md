@@ -9,12 +9,14 @@
 **Tech Stack:** 固定Node22.23.1原生类型转换/原Docker/原Runtime，无安装或依赖副本。
 
 ## Global Constraints
-原CLI API/命令/资源策略保持，项目捕获使用原8/96KiB/128KiB上限，转换数据256KiB/内帧输出8KiB/原传输32KiB；输入树变动/信号/环境/传输超限只unverifiable。原正式隔离/同意/历史/main-Daily NO-GO/原发布门槛/十工作日窗口不变，D≥15GiB。
+原CLI API/命令/资源策略保持，项目捕获使用原8/96KiB/128KiB上限，转换数据256KiB/内帧输出8KiB/原传输32KiB；仅D:小型生成快照运行期只读挂载；前后检测另作完整性防御。输入树变动/信号/环境/传输超限只unverifiable。原正式隔离/同意/历史/main-Daily NO-GO/原发布门槛/十工作日窗口不变，D≥15GiB。
 
 ### Task 1：保存模块图执行器
-- [ ] 新API/模式先红；新增 `packages/tianwen-runtime-bundle/src/isolated-node-project.ts`，只扩原isolated-python-cli.ts固定模式及index公开导出；原检查器不改任务/资格语义。
-- [ ] 捕获数据/原生转换、别名/完整性/输入与输出帧、信号与来源转换错误分别验证，保持旧CLI相关回归。
-- [ ] 实际发行声明/JS消费、真实核心模块快照执行、修改源码/模块树/超时控制按范围分开；旧发行JS压缩保留、原正式账本不挂载且全字节保持、全部容器与残余清理/原84ID/D≥15，独立审查/DEV交付。
+- [x] 新API/模式先红；新增 `packages/tianwen-runtime-bundle/src/isolated-node-project.ts`，只扩原isolated-python-cli.ts固定模式及index公开导出；原检查器不改任务/资格语义。
+- [x] 捕获数据/原生转换、别名/完整性/输入与输出帧、信号与来源转换错误分别验证，保持旧CLI相关回归。
+- [x] 实际发行声明/JS消费、真实核心模块快照执行、修改源码/模块树/超时控制按范围分开；旧发行JS压缩保留、原正式账本不挂载且全字节保持、全部容器与残余清理/原84ID/D≥15，独立审查/DEV交付。
+
+Task1事实及首失败留存见 `docs/operations/tianwen-node-project-executor-20261003.md`；不是Task2/Task3完成或自然学习证据。
 
 ### Task 2：普通与研究结果绑定
 - [ ] 先红多输出/完整保存依赖绑定，新增公开普通/研究/五角色项目工厂，复用原绑定与取消/结果协议；原Node单文件工厂不追认多文件。

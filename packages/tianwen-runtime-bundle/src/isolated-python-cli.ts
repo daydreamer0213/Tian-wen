@@ -61,14 +61,17 @@ export function canonicalJsonResult(text: string): string {
 }
 
 export interface IsolatedPythonIdentity { readonly name: string; readonly label: string; readonly imageId: string; readonly source: string }
-type CliLanguage = 'python' | 'javascript' | 'typescript'
+type CliLanguage = 'python' | 'javascript' | 'typescript' | 'node-project'
+export interface IsolatedProjectSnapshot { readonly directory: string }
+const nodeCommand = (language: CliLanguage, source: string) => [...(language === 'node-project' ? ['--disable-sigusr1'] : []), nodeInputType(language), '--eval', source]
 const nodeInputType = (language: CliLanguage) => language === 'typescript' ? '--input-type=module-typescript' : '--input-type=module'
 export function validateIsolatedPythonContainer(value: unknown, identity: IsolatedPythonIdentity): void {
   validateIsolatedJsonContainer(value, identity, 'python')
 }
 /** Internal fixed-language adapter; no caller-defined commands or isolation flags. */
-export function validateIsolatedJsonContainer(value: unknown, identity: IsolatedPythonIdentity, language: CliLanguage): void {
-  assert(['python', 'javascript', 'typescript'].includes(language))
+export function validateIsolatedJsonContainer(value: unknown, identity: IsolatedPythonIdentity, language: CliLanguage, snapshot?: IsolatedProjectSnapshot): void {
+  assert(['python', 'javascript', 'typescript', 'node-project'].includes(language))
+  assert.equal(snapshot !== undefined, language === 'node-project')
   const row = value as Row, hc = row.HostConfig as Row, config = row.Config as Row
   assert.match(row.Id, /^[a-f0-9]{64}$/u); assert.equal(row.Name, `/${identity.name}`)
   assert.equal(row.Image, identity.imageId); assert.equal(config.Labels['tianwen.isolated-cli'], identity.label)
@@ -76,12 +79,22 @@ export function validateIsolatedJsonContainer(value: unknown, identity: Isolated
   if (language === 'python') assert(config.Entrypoint === null || Array.isArray(config.Entrypoint) && config.Entrypoint.length === 0)
   else assert.deepEqual(config.Entrypoint, ['node'])
   assert.equal(config.WorkingDir, '/tmp')
-  assert.deepEqual(config.Cmd, language === 'python' ? ['python3', '-I', '-S', '-B', '-c', identity.source] : [nodeInputType(language), '--eval', identity.source])
+  assert.deepEqual(config.Cmd, language === 'python' ? ['python3', '-I', '-S', '-B', '-c', identity.source] : nodeCommand(language, identity.source))
   assert.equal(hc.NetworkMode, 'none'); assert.equal(hc.ReadonlyRootfs, true); assert.equal(hc.Privileged, false)
   assert.equal(hc.Memory, isolatedPythonPolicy.memory); assert.equal(hc.MemorySwap, hc.Memory)
   assert.equal(hc.NanoCpus, isolatedPythonPolicy.cpu); assert.equal(hc.PidsLimit, isolatedPythonPolicy.pids)
   assert.deepEqual(hc.CapDrop, ['ALL']); assert(hc.CapAdd == null || hc.CapAdd.length === 0)
-  assert(hc.SecurityOpt.includes('no-new-privileges')); assert.deepEqual(row.Mounts, [])
+  assert(hc.SecurityOpt.includes('no-new-privileges'))
+  if (snapshot === undefined) { assert.deepEqual(row.Mounts, []); assert(hc.Mounts == null || hc.Mounts.length === 0) }
+  else {
+    assert.equal(hc.Mounts.length, 1); const mount = hc.Mounts[0]
+    assert.equal(mount.Type, 'bind'); assert.equal(mount.Source, snapshot.directory); assert.equal(mount.Target, '/project'); assert.equal(mount.ReadOnly, true)
+    assert.equal(row.Mounts.length, 1); const actual = row.Mounts[0]
+    assert.equal(actual.Type, 'bind'); assert.equal(actual.Destination, '/project'); assert.equal(actual.RW, false); assert.equal(actual.Propagation, 'rprivate')
+    const source = snapshot.directory.replaceAll('\\', '/')
+    const mapped = source.replace(/^([A-Za-z]):\//u, (_, drive: string) => `/run/desktop/mnt/host/${drive.toLowerCase()}/`)
+    assert([source, mapped].includes(actual.Source.replaceAll('\\', '/')))
+  }
   assert(hc.Binds == null || hc.Binds.length === 0); assert(hc.Devices == null || hc.Devices.length === 0)
   assert(hc.DeviceRequests == null || hc.DeviceRequests.length === 0); assert.equal(hc.PidMode, ''); assert.equal(hc.IpcMode, 'private')
   assert.equal(hc.AutoRemove, false); assert(hc.RestartPolicy !== null && typeof hc.RestartPolicy === 'object')
@@ -104,7 +117,7 @@ export type IsolatedPythonCliOutcome = { readonly status: 'unverifiable'; readon
   | { readonly status: 'completed'; readonly stdout: string; readonly stderr: string; readonly exitCode: number; readonly receiptDigest: string }
 export interface PreparedIsolatedPythonCli {
   readonly digest: string
-  readonly run: (source: string, input: string, signal: AbortSignal) => Promise<IsolatedPythonCliOutcome>
+  readonly run: (source: string, input: string, signal: AbortSignal, snapshot?: IsolatedProjectSnapshot) => Promise<IsolatedPythonCliOutcome>
 }
 
 /** Opt-in trusted host executor. Never starts the engine, pulls an image or mounts project files. */
@@ -113,7 +126,7 @@ export async function prepareIsolatedPythonCli(raw: IsolatedPythonCliConfig, sig
 }
 /** Internal fixed-language adapter; preparation never downloads or starts the engine. */
 export async function prepareIsolatedJsonCli(raw: IsolatedPythonCliConfig, signal: AbortSignal, language: CliLanguage): Promise<PreparedIsolatedPythonCli> {
-  assert(['python', 'javascript', 'typescript'].includes(language))
+  assert(['python', 'javascript', 'typescript', 'node-project'].includes(language))
   const config = structuredClone(raw), timeout = config.timeoutMs ?? isolatedPythonPolicy.maxTimeoutMs
   assert(isAbsolute(config.cliPath) && lstatSync(config.cliPath).isFile()); assert(isAbsolute(config.workRoot))
   assert((language === 'python' ? /^python@sha256:[a-f0-9]{64}$/u : /^(?:node|public\.ecr\.aws\/docker\/library\/node)@sha256:[a-f0-9]{64}$/u).test(config.imageRef)); assert(/^sha256:[a-f0-9]{64}$/u.test(config.imageId))
@@ -151,8 +164,15 @@ export async function prepareIsolatedJsonCli(raw: IsolatedPythonCliConfig, signa
     && image.Config.Env.includes('NODE_VERSION=22.23.1'), 'The fixed Node 22.23.1 runtime is required')
   const digest = hash(JSON.stringify({ moduleHash, cliHash, config, policy: isolatedPythonPolicy, ...(language === 'python' ? {} : { language }) }))
   let poisoned = false
-  return { digest, async run(source, input, currentSignal) {
+  return { digest, async run(source, input, currentSignal, snapshot) {
     currentSignal.throwIfAborted()
+    assert.equal(snapshot !== undefined, language === 'node-project')
+    if (snapshot !== undefined) {
+      const directory = resolve(snapshot.directory)
+      assert.equal(directory, snapshot.directory); assert(directory.startsWith(root + (process.platform === 'win32' ? '\\' : '/')))
+      assert.equal(realpathSync(directory), directory); assert(lstatSync(directory).isDirectory() && !lstatSync(directory).isSymbolicLink())
+      assert(!directory.includes(','))
+    }
     if (poisoned || existsSync(unknownCleanup)) return { status: 'unverifiable', detail: 'Previous container cleanup unknown; executor stopped.' }
     assert(Buffer.byteLength(source) <= isolatedPythonPolicy.sourceBytes && Buffer.byteLength(input) <= isolatedPythonPolicy.ioBytes)
     const name = `tianwen-cli-${randomUUID()}`, label = hash(JSON.stringify({ digest, name, source: hash(source), input: hash(input) }))
@@ -169,11 +189,12 @@ export async function prepareIsolatedJsonCli(raw: IsolatedPythonCliConfig, signa
         '--cpus', '0.5', '--memory', '128m', '--memory-swap', '128m', '--pids-limit', '32', '--ipc', 'private',
         '--tmpfs', `/tmp:${isolatedPythonPolicy.tmpfs}`, '--log-driver', 'local', '--log-opt', 'max-size=64k', '--log-opt', 'max-file=1', '--log-opt', 'compress=false',
         '--workdir', '/tmp', '--env', 'HOME=/tmp', '--env', 'TMPDIR=/tmp',
+        ...(snapshot === undefined ? [] : ['--mount', `type=bind,source=${snapshot.directory},target=/project,readonly`]),
         ...(language === 'python' ? ['--env', 'PYTHONDONTWRITEBYTECODE=1', config.imageRef, 'python3', '-I', '-S', '-B', '-c', source]
-          : ['--entrypoint', 'node', config.imageRef, nodeInputType(language), '--eval', source])])).stdout.toString().trim()
+          : ['--entrypoint', 'node', config.imageRef, ...nodeCommand(language, source)])])).stdout.toString().trim()
       assert.match(id, /^[a-f0-9]{64}$/u)
       const container = JSON.parse((await command(['inspect', id])).stdout.toString())[0]
-      validateIsolatedJsonContainer(container, { name, label, imageId: config.imageId, source }, language); boundaryVerified = true
+      validateIsolatedJsonContainer(container, { name, label, imageId: config.imageId, source }, language, snapshot); boundaryVerified = true
       currentSignal.throwIfAborted()
       try {
         const actual = await command(['start', '--attach', '--interactive', id], { input, signal: currentSignal, timeout, limit: isolatedPythonPolicy.ioBytes })
@@ -203,6 +224,7 @@ export async function prepareIsolatedJsonCli(raw: IsolatedPythonCliConfig, signa
     const validOutput = output !== undefined && output.stdout.length + output.stderr.length <= isolatedPythonPolicy.ioBytes
       && isUtf8(output.stdout) && isUtf8(output.stderr)
     const receipt = { name, label, executorDigest: digest, sourceDigest: hash(source), inputDigest: hash(input), imageId: config.imageId,
+      ...(snapshot === undefined ? {} : { snapshotDirectory: snapshot.directory, snapshotReadOnly: true }),
       boundaryVerified, removed, recoveredByName, failure, state: state === undefined ? null : { status: state.Status, exitCode: state.ExitCode, oom: state.OOMKilled },
       output: output === undefined ? null : { stdoutDigest: hash(output.stdout), stderrDigest: hash(output.stderr), transportCode: output.code, interrupted: output.interrupted,
         ...(validOutput ? { stdout: output.stdout.toString('utf8'), stderr: output.stderr.toString('utf8') } : {}) } }

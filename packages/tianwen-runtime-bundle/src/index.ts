@@ -17,6 +17,8 @@ export {
 } from './conversation-isolated-node-check.js'
 export type { ConversationIsolatedNodeCheckConfig, ConversationIsolatedNodeStudyCase } from './conversation-isolated-node-check.js'
 export type { IsolatedNodeCliConfig } from './isolated-node-cli.js'
+export { prepareIsolatedNodeProject } from './isolated-node-project.js'
+export type { IsolatedNodeProjectInput, IsolatedNodeProjectOutcome, PreparedIsolatedNodeProject } from './isolated-node-project.js'
 export type {
   ConversationStudyResultPreparation, ConversationStudyResultCandidate, PreparedConversationStudyResultCheck, ConversationStudyResultCheck,
 } from './conversation-study-result-check.js'
