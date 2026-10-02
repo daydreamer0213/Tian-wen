@@ -9,7 +9,7 @@ import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation
 import type { ConversationStudyResultCheck, ConversationStudyResultMaterial } from './conversation-study-result-check.js'
 import { canonicalJsonResult, isolatedPythonPolicy, prepareIsolatedPythonCli, type IsolatedPythonCliConfig } from './isolated-python-cli.js'
 
-const checkerId = 'conversation-isolated-python-json-cli.v1'
+import { prepareIsolatedNodeCli } from './isolated-node-cli.js'
 const checkerPath = fileURLToPath(import.meta.url), checkerSourceDigest = sha256(readFileSync(checkerPath).toString('utf8'))
 const pathKey = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path)
 const requestText = (request: ConversationExternalCodePreparation['request']) => request.flatMap(message =>
@@ -35,10 +35,11 @@ interface FrozenFunctionalCheck {
   readonly evaluate: (candidate: Pick<ConversationExternalCodeCandidate, 'inputs' | 'outputs' | 'outputPaths' | 'signal'>) => Promise<ConversationExternalCheckOutcome>
 }
 
-function createPreparation(raw: ConversationIsolatedPythonCheckConfig) {
+function createPreparation(raw: ConversationIsolatedPythonCheckConfig, engine: 'python' | 'node') {
+  const checkerId = engine === 'python' ? 'conversation-isolated-python-json-cli.v1' : 'conversation-isolated-node-json-cli.v1'
   const config = structuredClone(raw), cwd = resolve(config.cwd), references = [...(config.referencePaths ?? [])]
   assert(typeof config.requestText === 'string' && config.requestText.trim() !== '')
-  assert(config.targetPath.endsWith('.py'))
+  assert(engine === 'python' ? config.targetPath.endsWith('.py') : /\.(?:m?js|m?ts)$/u.test(config.targetPath))
   parseConversationFileEntries([config.targetPath, ...references].map(path => ({ path, content: null })))
   assert(config.requiredCondition === undefined || typeof config.requiredCondition === 'string' && config.requiredCondition.trim() !== '')
   assert(Array.isArray(config.cases) && config.cases.length > 0 && config.cases.length <= 64)
@@ -58,7 +59,7 @@ function createPreparation(raw: ConversationIsolatedPythonCheckConfig) {
         const inputs = saved === undefined ? await Promise.all(names.map(path => readConversationFile(cwd, path))) : parseConversationFileEntries(structuredClone(saved))
         assert(names.length === inputs.length && names.every(path => inputs.some(entry => entry.path === path)))
         assert(references.every(path => inputs.find(entry => entry.path === path)?.content != null))
-        const inputDigest = conversationExternalInputsDigest(inputs), runner = await prepareIsolatedPythonCli(config.isolated, signal)
+        const inputDigest = conversationExternalInputsDigest(inputs), runner = engine === 'python' ? await prepareIsolatedPythonCli(config.isolated, signal) : await prepareIsolatedNodeCli(config.isolated, signal, config.targetPath.endsWith('ts') ? 'typescript' : 'javascript')
         signal.throwIfAborted()
         const contract = { checkerId, checkerSourceDigest, executorDigest: runner.digest, cwd, requestText: config.requestText,
           targetPath: config.targetPath, referencePaths: references, inputsDigest: inputDigest, cases: config.cases,
@@ -101,7 +102,7 @@ function createPreparation(raw: ConversationIsolatedPythonCheckConfig) {
               if (existsSync(receiptPath)) assert.equal(readFileSync(receiptPath).toString('utf8'), receipt)
               else writeFileSync(receiptPath, receipt, { flag: 'wx' })
               candidate.signal.throwIfAborted()
-              return { status, detail: `Frozen isolated Python JSON CLI functional cases only; not whole-task quality. ${receipts.length}/${cases.length} case(s); ${receiptDigest}.`,
+              return { status, detail: `Frozen isolated ${engine} JSON CLI functional cases only; not whole-task quality. ${receipts.length}/${cases.length} case(s); ${receiptDigest}.`,
                 ...(status !== 'rejected' || config.requiredCondition === undefined ? {} : { failedRequiredConditionDigest: sha256(config.requiredCondition) }) }
             } catch { candidate.signal.throwIfAborted(); return { status: 'unverifiable', detail: 'Frozen functional check binding, environment or evidence unavailable.' } }
           },
@@ -113,7 +114,10 @@ function createPreparation(raw: ConversationIsolatedPythonCheckConfig) {
 
 /** Explicit host opt-in; no default enablement and no new model execution tool. */
 export function createConversationIsolatedPythonCheck(config: ConversationIsolatedPythonCheckConfig): ConversationExternalCodeCheck {
-  const core = createPreparation(config)
+  return createConversationIsolatedJsonCheck(config, 'python')
+}
+export function createConversationIsolatedJsonCheck(config: ConversationIsolatedPythonCheckConfig, engine: 'python' | 'node'): ConversationExternalCodeCheck {
+  const core = createPreparation(config, engine)
   return { async prepare(material) {
     material.signal.throwIfAborted()
     if (pathKey(material.cwd) !== pathKey(core.cwd) || requestText(material.request) !== core.requestText
@@ -136,11 +140,13 @@ const body = (material: ConversationStudyResultMaterial): ConversationStudyResul
   criteria: material.criteria, ...(material.qualityContract === undefined ? {} : { qualityContract: material.qualityContract }), files: material.files,
 })
 /** Saved study material only, without reading today's target files or fabricating an ordinary task. */
-export function createConversationStudyIsolatedPythonCheck(config: ConversationIsolatedPythonCheckConfig & {
-  readonly requiredCondition: string; readonly criteria: readonly string[]
-}): ConversationStudyResultCheck {
+type StudyConfig = ConversationIsolatedPythonCheckConfig & { readonly requiredCondition: string; readonly criteria: readonly string[] }
+export function createConversationStudyIsolatedPythonCheck(config: StudyConfig): ConversationStudyResultCheck {
+  return createConversationStudyIsolatedJsonCheck(config, 'python')
+}
+export function createConversationStudyIsolatedJsonCheck(config: StudyConfig, engine: 'python' | 'node'): ConversationStudyResultCheck {
   assert(Array.isArray(config.criteria) && config.criteria.length > 0 && config.criteria.every(value => typeof value === 'string' && value.trim() !== ''))
-  const criteriaDigest = sha256(config.criteria), core = createPreparation(config)
+  const criteriaDigest = sha256(config.criteria), core = createPreparation(config, engine)
   return { async prepare(material) {
     material.signal.throwIfAborted()
     try {
@@ -172,10 +178,11 @@ export interface ConversationIsolatedPythonStudyCase {
 }
 
 /** Closed host cohort, fixed before case design; not a task generator or source-eligibility decision. */
-export function createConversationStudyIsolatedPythonCohortCheck(raw: {
-  readonly modelConfigDigest: ReturnType<typeof sha256>
-  readonly cases: Readonly<Record<FunctionalStudyRole, ConversationIsolatedPythonStudyCase>>
-}): ConversationStudyResultCheck {
+type CohortConfig = { readonly modelConfigDigest: ReturnType<typeof sha256>; readonly cases: Readonly<Record<FunctionalStudyRole, ConversationIsolatedPythonStudyCase>> }
+export function createConversationStudyIsolatedPythonCohortCheck(raw: CohortConfig): ConversationStudyResultCheck {
+  return createConversationStudyIsolatedJsonCohortCheck(raw, 'python')
+}
+export function createConversationStudyIsolatedJsonCohortCheck(raw: CohortConfig, engine: 'python' | 'node'): ConversationStudyResultCheck {
   const config = structuredClone(raw), roles = ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const
   assert.match(config.modelConfigDigest, /^sha256:[a-f0-9]{64}$/u)
   assert.deepEqual(Object.keys(config.cases).sort(), [...roles].sort())
@@ -186,9 +193,9 @@ export function createConversationStudyIsolatedPythonCohortCheck(raw: {
     assert(material.qualityContract !== undefined)
     parseConversationQualityContract(material.qualityContract)
     const targetPath = files.outputPaths[0]!, referencePaths = files.entries.filter(file => file.path !== targetPath).map(file => file.path)
-    const producer = createConversationStudyIsolatedPythonCheck({ cwd: files.cwd,
+    const producer = createConversationStudyIsolatedJsonCheck({ cwd: files.cwd,
       requestText: 'request' in material ? requestText(material.request) : material.prompt,
-      targetPath, referencePaths, criteria: material.criteria, cases: entry.cases, isolated: entry.isolated, requiredCondition: entry.requiredCondition })
+      targetPath, referencePaths, criteria: material.criteria, cases: entry.cases, isolated: entry.isolated, requiredCondition: entry.requiredCondition }, engine)
     return [id, { material, materialDigest: sha256(material), producer }] as const
   }))
   const first = definitions.get('source1')!.material, cwd = first.files.cwd, qualityDigest = sha256(first.qualityContract)

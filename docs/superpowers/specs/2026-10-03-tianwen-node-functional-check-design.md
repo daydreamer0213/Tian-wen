@@ -9,7 +9,7 @@
 ## 具体范围
 - 支持单文件 `.js`/`.mjs` ESM 和 `.ts`/`.mts` 的 Node 原生可擦除类型语法，固定 `node --input-type=module[–typescript] --eval`。不承诺整个项目、外部依赖、tsconfig、枚举转换或类型检查。功能条件必须来自原任务，完整质量另判。
 - 公共接口增加三个 `createConversation*IsolatedNode*Check` 工厂及配置类型。宿主固定不可变镜像摘要，不接受模型选择执行器、命令参数或网络权限。
-- Node 镜像仅允许 `node@sha256:…` 或 Docker 官方 AWS 发布路径 `public.ecr.aws/docker/library/node@sha256:…`；校验本地 image ID、RepoDigest、Linux/amd64。Docker 默认地址当前连接超时，官方 AWS 地址实际取得 manifest；使用该入口，不更改系统 DNS 或全局 Docker 设置。
+- Node 镜像仅允许 `node@sha256:…` 或 Docker 官方 AWS 发布路径 `public.ecr.aws/docker/library/node@sha256:…`；校验本地 image ID、RepoDigest、Linux/amd64及唯一NODE_VERSION=22.23.1。版本不支持在准备期拒绝，不能伪装原任务功能失败。Docker 默认地址当前连接超时，官方 AWS 地址实际取得 manifest；使用该入口，不更改系统 DNS 或全局 Docker 设置。
 - 固定显式 entrypoint=node、只读根、无网络/挂载、非 root、原 CPU/128MB/32 PID/16MB tmpfs/20秒/20KB源码/32KB输出限制。环境只容许官方 Node 元数据和 HOME/TMPDIR。检查身份后执行，所有退出/取消/传输失败原清理机制保持。
 - 事前冻结输入、参考、用例、原请求、模型、质量合同；候选不得改变只读参考。复用无损 JSON 比较，不能让 JS 浮点舍入掩盖错误。普通/研究/候选功能失败分别记账；没有原必需条件时仅诊断。
 - Python 公共 API、原 checker ID、默认 argv/环境/边界保持；新的源码摘要只用于新准备，不改旧账本/历史身份。共享执行器与工厂不新增业务循环、依赖或宽松启用开关。

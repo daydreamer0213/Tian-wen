@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest'
 import * as publicApi from '../../packages/tianwen-runtime-bundle/src/index.js'
 import * as scriptApi from '../../scripts/conversation-isolated-python-check.js'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 
 it('uses the concrete public producer to validate host cases before any execution', () => {
   const create = publicApi.createConversationIsolatedPythonCheck
@@ -11,6 +13,20 @@ it('uses the concrete public producer to validate host cases before any executio
   expect(() => create(config)).not.toThrow()
   expect(() => create({ ...config, cases: [{ ...config.cases[0]!, expectedJson: '{"n":1,"n":2}' }] })).toThrow()
   expect(() => create({ ...config, cases: [] })).toThrow()
+})
+
+it('delivers all Node factories through the actual published JS root with bounded cases and target modes', async () => {
+  const packageRequire = createRequire(new URL('../../packages/tianwen-runtime-bundle/package.json', import.meta.url))
+  const bundled = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle')).href)
+  for (const name of ['createConversationIsolatedNodeCheck', 'createConversationStudyIsolatedNodeCheck', 'createConversationStudyIsolatedNodeCohortCheck'])
+    expect(bundled[name]).toBeTypeOf('function')
+  const config = { cwd: 'D:/DevData/tianwen-node-functional-check-20261003', requestText: 'Implement a fixed Node JSON CLI.', targetPath: 'task.ts',
+    cases: [{ id: 'exact', input: '{}', expectedJson: '9007199254740993', exitCode: 0 }],
+    isolated: { cliPath: 'D:/unused.exe', endpoint: 'unix:///unused', imageRef: 'node@sha256:' + 'a'.repeat(64), imageId: 'sha256:' + 'a'.repeat(64),
+      workRoot: 'D:/DevData/tianwen-node-functional-check-20261003/unused' } }
+  for (const targetPath of ['task.js', 'task.mjs', 'task.ts', 'task.mts']) expect(() => bundled.createConversationIsolatedNodeCheck({ ...config, targetPath })).not.toThrow()
+  for (const targetPath of ['task.py', 'task.tsx', 'task.cjs', 'task.js/../other']) expect(() => bundled.createConversationIsolatedNodeCheck({ ...config, targetPath })).toThrow()
+  expect(() => bundled.createConversationIsolatedNodeCheck({ ...config, cases: [{ ...config.cases[0]!, expectedJson: '{"a":1,"a":2}' }] })).toThrow()
 })
 
 it('keeps compatibility scripts on the exact public ordinary and study factories', () => {

@@ -10,6 +10,13 @@ export type {
   ConversationIsolatedPythonStudyCase,
 } from './conversation-isolated-python-check.js'
 export type { IsolatedPythonCliConfig } from './isolated-python-cli.js'
+export {
+  createConversationIsolatedNodeCheck,
+  createConversationStudyIsolatedNodeCheck,
+  createConversationStudyIsolatedNodeCohortCheck,
+} from './conversation-isolated-node-check.js'
+export type { ConversationIsolatedNodeCheckConfig, ConversationIsolatedNodeStudyCase } from './conversation-isolated-node-check.js'
+export type { IsolatedNodeCliConfig } from './isolated-node-cli.js'
 export type {
   ConversationStudyResultPreparation, ConversationStudyResultCandidate, PreparedConversationStudyResultCheck, ConversationStudyResultCheck,
 } from './conversation-study-result-check.js'

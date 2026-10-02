@@ -548,7 +548,7 @@ describe('@tianwen/runtime-bundle', () => {
         code: expect.toSatisfy((code: number) => code === 2305 || code === 2724),
         message: expect.stringContaining('ConversationExternalCodeChecks'),
       })]))
-    expect(compile(`import { apply, type TianwenRuntimeBundleConfig } from '@tianwen/runtime-bundle/runtime';
+    const producerConsumer = `import { apply, type TianwenRuntimeBundleConfig } from '@tianwen/runtime-bundle/runtime';
       import { createConversationIsolatedPythonCheck, createConversationStudyIsolatedPythonCheck,
         createConversationStudyIsolatedPythonCohortCheck, type ConversationIsolatedPythonCheckConfig } from '@tianwen/runtime-bundle';
       import type { Context } from '@deepseek-ai/cordis';
@@ -577,7 +577,8 @@ describe('@tianwen/runtime-bundle', () => {
         // @ts-expect-error Host prepare must return a Promise of a prepared check or undefined.
         externalCodeCheck: { prepare: () => 123 },
       };
-      void operation; void cohortOperation; void invalidCapture; void invalidCheck;`)).toEqual([])
+      void operation; void cohortOperation; void invalidCapture; void invalidCheck;`
+    for (const engine of ['Python', 'Node']) expect(compile(producerConsumer.replaceAll('IsolatedPython', `Isolated${engine}`))).toEqual([])
   }, 30_000)
 
   it('bundles the package root through the narrow research-summary entry', () => {
