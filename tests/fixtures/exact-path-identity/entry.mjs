@@ -26,7 +26,7 @@ try {
   const entries=paths.map((path,index)=>({path,content:`value ${index}\n`}))
   assert.deepEqual(parseConversationFileEntries(entries),entries)
   await seedConversationFiles(directory,entries)
-  for(const entry of entries){assert.equal(await conversationFilePath(directory,entry.path),entry.path);assert.deepEqual(await readConversationFile(directory,entry.path),entry);assert.equal(readFileSync(resolve(directory,entry.path),'utf8'),entry.content)}
+  for(const entry of entries){assert.equal(await conversationFilePath(directory,entry.path),entry.path);assert.equal(await conversationFilePath(directory,resolve(directory,entry.path)),entry.path);if(process.platform==='win32')assert.equal(await conversationFilePath(directory,entry.path.replaceAll('/','\\')),entry.path);assert.deepEqual(await readConversationFile(directory,entry.path),entry);assert.equal(readFileSync(resolve(directory,entry.path),'utf8'),entry.content)}
   assert.equal((await readConversationFile(directory,'new-valid-😀.ts')).content,null)
   await assert.rejects(seedConversationFiles(directory,entries))
   await assert.rejects(conversationFilePath(directory,'../escape.ts'))
