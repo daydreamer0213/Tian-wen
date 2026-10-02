@@ -1,6 +1,6 @@
 # 证据报告批次：原始合同
 
-三个实际程序将用于天问进度报告。仅Python标准库，stdin一个JSON对象、stdout一个JSON对象；不读文件、不联网、不执行外部程序。原合同不可修改。每个程序源码≤20,000 UTF-8字节。JSON非法、多根、重复键、非有限数均无效；每条字段恰为下列定义。ID是1–256个Unicode标量码点的非空字符串（空白是合法内容），不归一化，区分大小写；各ID数组按Unicode码点字典序升序。布尔值必须是JSON boolean，数字不能当boolean。输入无效退出2、stderr空、stdout固定`{"error":"invalid-evidence-records"}`；有效退出0、stderr空。对象键顺序和JSON空白不限制。
+三个实际程序将用于天问进度报告。仅Python标准库，stdin一个JSON对象、stdout一个JSON对象；不读文件、不联网、不执行外部程序。原合同不可修改。每个程序源码≤20,480 UTF-8字节，与既有隔离生产者上限相同。JSON非法、多根、重复键、非有限数均无效；每条字段恰为下列定义。ID是1–256个Unicode标量码点的非空字符串（空白是合法内容），不归一化，区分大小写；各ID数组按Unicode码点字典序升序。布尔值必须是JSON boolean，数字不能当boolean。输入无效退出2、stderr空、stdout固定`{"error":"invalid-evidence-records"}`；有效退出0、stderr空。对象键顺序和JSON空白不限制。
 
 共同原必需条件：**严格遵守原合同的输入有效性、证据归属与统计规则；不同证据状态不得混算或提升为整体完成；有效输入返回规定JSON/退出码0，无效输入返回规定错误/退出码2，stderr为空。**
 
