@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-02 报告批次完整终态与下一项
+
+三个原生不同尝试已结束：A原33/33功能verified但第二复核max-tokens，原inconclusive；B原31/31 verified且双审met；两原字节有限报告工具接纳。C在三次成功edit仍修改时，被宿主9根请求cap终止，原failed/inconclusive/unverifiable、49案例执行0、候选只留运行包，不补写或重跑。最终正式13task/0study/0反馈评估/可信功能失败来源空、awaiting-compatible-sources/隔离true，现8a5fb441…账本、旧前缀保持；D/E及自然研究/采用/未来收益没有发生。
+
+下一项是协调未来不同任务的宿主请求预算与14文件操作/12分钟停止界限，修正已证实的过早终止，不追加验收标准或改旧结果。三个原尝试停止条件/原门槛/十工作日窗口/NO-GO不变，停止无限追加简单维护题来凑研究。内置目标blocked且没有恢复API，批准路线已实际执行，完整目标不complete；详见[本批次结果](tianwen-evidence-report-batch-20261002.md)。
+
 ## 2026-10-02 所有者批准报告批次，首个实际交付
 
 B研究与激活报告随后完成：原31/31功能verified、两原审查met，原字节接纳、0模型精确恢复及31容器删除。历史受控accepted明确不等于正式自然研究/已激活/当前生效；A原inconclusive保持。正式此时12task/0study/隔离true、f0161716…账本，C未运行，详见同批次结果。
