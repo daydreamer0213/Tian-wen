@@ -8,6 +8,8 @@
 
 两模块的只读原合同/独立纯功能入口/原Evolution解析与intake依赖事前冻结；一个实际DEV多文件检查器，一次原生执行，不重试/修答案配期望。通过后逐字工程接纳并由薄宿主真正调用；失败原样保持，必要工程修复另记。宿主只收任务描述，使用已有请求观察函数，输出原task和压缩native；不自动改旧结果、制造反馈、加同意或解除隔离。共享运行/恢复生命周期保留上游所有权。
 
+根仓库没有Evolution裸包依赖：薄宿主在导入纯模块前，限定这两个模块的@tianwen/evolution解析到Runtime既有peer依赖的真实发行入口；隔离oracle解析到捕获的同一原路径模块。独立验收必须实际导入该宿主及模块，不能以oracle的hook通过替代真实消费。模型只消费标准库和裸包，不增加依赖/环境副本。
+
 功能覆盖允许/拒绝的read/write/edit、只读保护、session/parent/rootCall边界、字节上限、唯一edit与replace_all、UTF8真实编辑结果、正常绝对/Windows候选；结果覆盖权限反序/缺重增/缺程序/原review不同/invalidated，无程序verified不得补true。保存及真实使用控制与自然模型结果分别报告。
 
 仅D小型记录/冻结材料，复用工作区/依赖/Profile/镜像，D≥15GiB。完整目标active/incomplete，main/Daily NO-GO、原同意/隔离/门槛/十工作日窗口保持。

@@ -19,3 +19,5 @@ permissionSetExact仅在原completion.files.outputPaths是完整唯一且与expe
 ## 原功能验收
 
 只读 entry.mjs 实际导入两模块，包含以上允许及拒绝案例。全部原断言通过，stdout严格JSON {"passed":true}、exit0、stderr空。只读Evolution conversation-files.ts / learning-intake.ts为原路径/摘要依据。源码每个≤20,000 UTF8字节；只用Node22标准库及既有@tianwen/evolution。模型不运行命令、不改条件、参考或学习记录。
+
+仓库根不是Evolution的裸包消费者。两个模块通过裸包@tianwen/evolution复用parseConversationFileEntries；薄DEV宿主负责在导入模块前，将这个包解析到Runtime既有peer依赖的真实发行入口。隔离功能入口将相同裸包解析到事前捕获的原conversation-files.ts。模块不安装依赖、不复制解析器、不自行寻找工作区或全局包；宿主必须另行实际验证这个解析职责。
