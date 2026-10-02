@@ -50,9 +50,11 @@ it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')(`uses published ${en
   } }
   const admission = { kind: 'task', objective: engine === 'python' ? 'Create the requested host CLI' : 'Implement the declared Evolution core modules', criteria: [condition], family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files', relatedTaskId: null, feedback: null }
   const review = { verdict: 'met', category: null, explanation: 'The source is saved.', evidenceQuotes: ['saved'] }
+  // Ordinary native capture does not promise the host's declaration order.
+  const captureCandidates = engine === 'node-project' ? [...candidates].reverse() : candidates
   const script = [toolCallResponse('admit', 'structured_output', { decision: admission }),
     ...references.map((file, index) => toolCallResponse(`read-reference-${index}`, 'read', { file_path: file.path })),
-    ...candidates.map((file, index) => toolCallResponse(`read-absent-${index}`, 'read', { file_path: file.path })),
+    ...captureCandidates.map((file, index) => toolCallResponse(`read-absent-${index}`, 'read', { file_path: file.path })),
     ...candidates.map((file, index) => toolCallResponse(`write-host-${index}`, 'write', { file_path: file.path, content: file.content })),
     textResponse('saved'), auditedEvidenceResponse(review), auditedEvidenceResponse(review)]
   const services = ['tianwenConversationFileObserver', 'tianwenConversationObserver', 'tianwenConversationFeedback', 'tianwenConversationGuidanceLoop', 'tianwenMessageFeedbackBridge']
@@ -88,6 +90,7 @@ it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')(`uses published ${en
     expect(tasks).toHaveLength(1)
     const task = tasks[0]!
     expect(task.externalCheckFinished?.status).toBe('verified')
+    if (engine === 'node-project') expect(task.completion?.files?.outputPaths).toEqual([...project.outputPaths].reverse())
     expect(task.fileUnavailable).toBeUndefined()
     expect(task.review?.verdict).toBe('met')
     expect(preparations).toBe(1); expect(evaluations).toBe(1)

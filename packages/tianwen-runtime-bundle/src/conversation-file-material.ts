@@ -8,6 +8,14 @@ function slashPath(value: string): string {
   return value.split(sep).join('/')
 }
 
+/** Reject a candidate whose UTF-16 is ill-formed before any filesystem access,
+ * because UTF-8 encoding would replace the corrupt code unit with U+FFFD and let
+ * two distinct paths alias one encoded identity. */
+function hasExactUtf8Identity(value: string): boolean {
+  const bytes = Buffer.from(value, 'utf8')
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) === value
+}
+
 function missing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
@@ -36,7 +44,9 @@ async function inspectPath(root: string, segments: readonly string[]): Promise<v
 }
 
 export async function conversationFilePath(root: string, candidate: string): Promise<string> {
-  if (candidate.length === 0 || candidate.includes('\0')) throw new Error('invalid conversation file path')
+  if (candidate.length === 0 || candidate.includes('\0') || !hasExactUtf8Identity(candidate)) {
+    throw new Error('invalid conversation file path')
+  }
   const rootPath = await canonicalRoot(root)
   const target = resolve(isAbsolute(candidate) ? candidate : resolve(rootPath, candidate))
   const child = relative(rootPath, target)

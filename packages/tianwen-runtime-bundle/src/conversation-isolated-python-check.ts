@@ -87,7 +87,11 @@ function createPreparation(raw: InternalConfig, engine: CheckEngine) {
               assert.equal(readFileSync(manifestPath).toString('utf8'), manifest)
               const values = structuredClone({ inputs: candidate.inputs, outputs: candidate.outputs, paths: candidate.outputPaths })
               assert.equal(conversationExternalInputsDigest(parseConversationFileEntries(values.inputs)), inputDigest)
-              assert.deepEqual(values.paths, targets)
+              // Native multi-file capture order follows read completion, not the
+              // host's declaration order. Compare exact permissions without
+              // deduplication; saved contracts and single-file modes stay exact.
+              assert.deepEqual(engine === 'node-project' ? [...values.paths].sort() : values.paths,
+                engine === 'node-project' ? [...targets].sort() : targets)
               const outputs = parseConversationFileEntries(values.outputs)
               assert(outputs.length === names.length && names.every(path => outputs.some(entry => entry.path === path)))
               assert(references.every(path => outputs.find(entry => entry.path === path)?.content === inputs.find(entry => entry.path === path)?.content))

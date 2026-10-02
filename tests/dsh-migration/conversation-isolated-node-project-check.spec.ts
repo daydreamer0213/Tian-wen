@@ -36,6 +36,22 @@ it('executes the complete captured multi-output project with a read-only indepen
   expect(mock.run).toHaveBeenCalledWith({ files: output.outputs, entryPath: 'entry.mjs', input: '{}' }, f.signal)
   expect(prepared!.waitsForCancellationCleanup).toBe(true)
 })
+it.each(['ordinary', 'study'] as const)('accepts the exact output permission set in native capture order for %s', async mode => {
+  const f = fixture()
+  const prepared = mode === 'ordinary'
+    ? await createConversationIsolatedNodeProjectCheck(f.config).prepare(f.material)
+    : await createConversationStudyIsolatedNodeProjectCheck({ ...f.config, requiredCondition: condition, criteria: [condition] }).prepare(f.study)
+  const output = mode === 'ordinary' ? f.candidate() : f.studyCandidate()
+  output.outputPaths.reverse(); output.inputs.reverse(); output.outputs.reverse()
+  expect((await prepared!.evaluate(output as never)).status).toBe('verified')
+  expect(mock.run).toHaveBeenCalledWith({ files: output.outputs, entryPath: 'entry.mjs', input: '{}' }, f.signal)
+})
+it.each([['first.ts'], ['first.ts', 'first.ts'], ['first.ts', 'second.ts', 'entry.mjs']] as const)('rejects changed multi-output permissions %j before executing', async paths => {
+  const f = fixture(), prepared = await createConversationIsolatedNodeProjectCheck(f.config).prepare(f.material), output = f.candidate()
+  output.outputPaths = [...paths]
+  expect((await prepared!.evaluate(output)).status).toBe('unverifiable')
+  expect(mock.run).not.toHaveBeenCalled()
+})
 it.each(['input', 'request', 'context', 'readonly', 'missing', 'extra', 'permission', 'null', 'oversize'] as const)('rejects project %s drift before invoking isolated execution', async change => {
   const f = fixture(), prepared = await createConversationIsolatedNodeProjectCheck({ ...f.config, requiredCondition: condition }).prepare(f.material), output = f.candidate()
   if (change === 'input') output.inputs[0]!.content = 'different preimage'

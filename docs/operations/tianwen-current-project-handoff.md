@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 实际核心前瞻已执行：原任务保留无法核验，两处产品修复已交付
+
+72fe917事前固定真实编码身份缺陷/合同/功能入口，天问一次未知答案修改Evolution文件路径与Runtime候选路径两核心模块，13真实请求/8根/10工具/0重试、原双审met/met、prepare1/eval1。原程序unverifiable：同一完整权限集合因原observer捕获顺序反转，被项目checker有序数组断言拒绝，功能容器未执行；原封存driver同顺序断言也单独失败。两原候选归档、原任务/条件保持；独立Windows及隔离原五文件/同事前入口通过后逐字工程接纳，不回填原任务成功/失败来源。
+
+最窄修复仅node-project evaluate比较排序后的完整权限数组，重复/缺/增/只读冒充继续拒绝，旧single/合同摘要/保存study body不变。2首红后104相关通过，最终8组282通过/八包类型/完整build/新发行反序fullRuntime控制及0请求准确cold通过，独立审查无剩余P1/P2。正式16观察/15识别完成/0反馈/0study/隔离true/awaiting-compatible-sources，完整574d6e…870269字节及原bc1前缀保持；原双审及task/material/program冷恢复精确，0模型/重检查。3自有容器全清/原84ID保持，运行根约1.1MB，无全量副本。见[准确边界与结果](tianwen-exact-path-native-20261003.md)。
+
+原多文件Task3已执行而非首任务功能成功。下一收敛可复用DEV原生开发入口，消除一次性驱动的权限/排序/首结果处理问题，再自主不同真实核心待办前瞻；不索题/催评价/造来源或空转阻塞审计。完整目标active/incomplete、main/Daily NO-GO及原同意/门槛/隔离/窗口保持；此条覆盖下面Task3尚未发生的当前待办。
+
 ## 2026-10-03 原普通/研究流程多文件绑定及实际发行宿主已交付，下一真实核心前瞻
 
 f9bf6f1之后完成原多文件计划Task2：实际根普通/单研究/五角色项目工厂与固定DEV薄入口/独立JSON；entryPath可只读，outputPaths多输出，完整保存图复用原request/context/material/cohort/取消绑定及原observer/loop。source-rejected/环境/漂移不填必需条件失败。旧单文件分支ID/合同形状及公开类型保持、原adapter/JSON无改；checkerSourceDigest仅随真实新发行字节更新，不追认旧身份或历史。

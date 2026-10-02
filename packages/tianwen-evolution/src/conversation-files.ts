@@ -31,8 +31,17 @@ export const CONVERSATION_FILE_MAX_COUNT = 8
 export const CONVERSATION_FILE_MAX_ENTRY_BYTES = 96 * 1024
 export const CONVERSATION_FILE_MAX_BYTES = 128 * 1024
 
+/** Captured path identity must survive an exact UTF-8 encode/decode round trip.
+ * Ill-formed UTF-16 (a lone surrogate) would otherwise be encoded as U+FFFD and
+ * collapse two distinct names onto one encoded identity, so it is rejected here
+ * rather than silently replaced. */
+function hasExactUtf8Identity(value: string): boolean {
+  const bytes = Buffer.from(value, 'utf8')
+  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) === value
+}
+
 function pathSegments(path: string): string[] {
-  if (path !== path.normalize('NFC') || path.includes('\\')) throw new Error('ambiguous conversation file path')
+  if (!hasExactUtf8Identity(path) || path !== path.normalize('NFC') || path.includes('\\')) throw new Error('ambiguous conversation file path')
   const segments = path.split('/')
   if (segments.some(segment => segment === '' || segment === '.' || segment === '..'
     || segment.endsWith('.') || segment.endsWith(' ')
