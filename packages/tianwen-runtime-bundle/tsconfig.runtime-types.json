@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@tianwen/dsh-compat": ["./src/runtime-compat-types.d.ts"]
+    }
+  }
+}

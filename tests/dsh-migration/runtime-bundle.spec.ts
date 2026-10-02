@@ -106,6 +106,8 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/conversation-file-ancillary.ts',
     'src/native-tool-observation.ts',
     'src/conversation-file-trial.ts',
+    'src/conversation-file-review-units.ts',
+    'src/conversation-file-trial-evidence.ts',
     'src/explicit-correction-protocol.ts',
     'src/runtime.ts',
     'src/goal-first-service.ts',
@@ -484,9 +486,14 @@ describe('archive credential literal detection', () => {
 })
 
 describe('@tianwen/runtime-bundle', () => {
-  it('lets a host implement external and study checks through public package types without exposing the private runner', () => {
+  it('lets a host implement checks and configure the public Runtime through published types without exposing the private runner', () => {
     const consumerPath = resolve(packageRoot, '__external_check_consumer__.mts')
-    const manifest = json(resolve(packageRoot, 'package.json')) as { files: readonly string[] }
+    const manifest = json(resolve(packageRoot, 'package.json')) as {
+      files: readonly string[]; peerDependencies: Record<string, string>
+    }
+    const runtimeTypes = readFileSync(resolve(packageRoot, 'dist/runtime.d.ts'), 'utf8')
+    const runtimeImports = ts.preProcessFile(runtimeTypes).importedFiles.map(file => file.fileName)
+    expect(runtimeImports.filter(id => !id.startsWith('node:') && !(id in manifest.peerDependencies))).toEqual([])
     const publishedFiles = new Set([...manifest.files.map(path => resolve(packageRoot, path)), resolve(packageRoot, 'package.json')])
     const published = (path: string) => {
       const id = resolve(path), within = relative(packageRoot, id)
@@ -505,7 +512,8 @@ describe('@tianwen/runtime-bundle', () => {
       } }; void check;`
     function compile(text: string) {
       const options: ts.CompilerOptions = { target: ts.ScriptTarget.ES2024, module: ts.ModuleKind.NodeNext,
-        moduleResolution: ts.ModuleResolutionKind.NodeNext, strict: true, noEmit: true, skipLibCheck: true }
+        moduleResolution: ts.ModuleResolutionKind.NodeNext, strict: true, noEmit: true,
+        skipLibCheck: false, types: ['node'] }
       const host = ts.createCompilerHost(options, true)
       const getSourceFile = host.getSourceFile
       const readFile = host.readFile, fileExists = host.fileExists
@@ -540,6 +548,36 @@ describe('@tianwen/runtime-bundle', () => {
         code: expect.toSatisfy((code: number) => code === 2305 || code === 2724),
         message: expect.stringContaining('ConversationExternalCodeChecks'),
       })]))
+    expect(compile(`import { apply, type TianwenRuntimeBundleConfig } from '@tianwen/runtime-bundle/runtime';
+      import { createConversationIsolatedPythonCheck, createConversationStudyIsolatedPythonCheck,
+        createConversationStudyIsolatedPythonCohortCheck, type ConversationIsolatedPythonCheckConfig } from '@tianwen/runtime-bundle';
+      import type { Context } from '@deepseek-ai/cordis';
+      declare const ctx: Context;
+      declare const contract: ConversationIsolatedPythonCheckConfig & { readonly requiredCondition: string };
+      declare const cohort: Parameters<typeof createConversationStudyIsolatedPythonCohortCheck>[0];
+      const config: TianwenRuntimeBundleConfig = { captureExternalCodeArtifacts: true,
+        externalCodeCheck: createConversationIsolatedPythonCheck(contract),
+        studyResultCheck: createConversationStudyIsolatedPythonCheck({ ...contract, criteria: ['Original required condition.'] }) };
+      const operation: Promise<void> = apply(ctx, config);
+      const cohortConfig: TianwenRuntimeBundleConfig = { ...config, studyResultCheck: createConversationStudyIsolatedPythonCohortCheck(cohort) };
+      const cohortOperation: Promise<void> = apply(ctx, cohortConfig);
+      void ctx.tianwenEvolution; void ctx.tianwenLearningLoop; void ctx.tianwenEvidence;
+      declare const executor: NonNullable<TianwenRuntimeBundleConfig['learningLoopExecutor']>;
+      const hostConfig: TianwenRuntimeBundleConfig = { ...config, learningLoopExecutor: {
+        ...executor, freezeProtocol(context) {
+          void context.ctx.tianwenEvolution; void context.ctx.tianwenLearningLoop;
+          return { provenance: 'pre-candidate' };
+        },
+      } }; void hostConfig;
+      const invalidCapture: TianwenRuntimeBundleConfig = {
+        // @ts-expect-error Capture is a boolean; the declaration must not become any.
+        captureExternalCodeArtifacts: 'enabled',
+      };
+      const invalidCheck: TianwenRuntimeBundleConfig = {
+        // @ts-expect-error Host prepare must return a Promise of a prepared check or undefined.
+        externalCodeCheck: { prepare: () => 123 },
+      };
+      void operation; void cohortOperation; void invalidCapture; void invalidCheck;`)).toEqual([])
   }, 30_000)
 
   it('bundles the package root through the narrow research-summary entry', () => {
@@ -695,6 +733,7 @@ describe('@tianwen/runtime-bundle', () => {
       'dist/index.js',
       'dist/index.d.ts',
       'dist/runtime.js',
+      'dist/runtime.d.ts',
       'dist/native-pwsh-observer.js',
       'dist/native-pwsh-observer.d.ts',
       'dist/native-tool-observation.js',
@@ -1455,6 +1494,7 @@ describe('@tianwen/runtime-bundle', () => {
         'package/dist/native-tools-observer.d.ts',
         'package/dist/native-tools-observer.js',
         'package/dist/resume-runner.js',
+        'package/dist/runtime.d.ts',
         'package/dist/runtime.js',
         'package/dist/smoke.js',
         'package/dist/status.d.ts',
@@ -1466,7 +1506,7 @@ describe('@tianwen/runtime-bundle', () => {
       ])
       expect(entries.some(entry => /(^|\/)src\//u.test(entry))).toBe(false)
       expect(entries.some(entry => /(^|\/)node_modules\//u.test(entry))).toBe(false)
-      expect(entries).not.toContain('package/dist/runtime.d.ts')
+      expect(entries).toContain('package/dist/runtime.d.ts')
       expect(entries).not.toContain('package/dist/runtime.meta.json')
       expect(entries.some(entry => entry.includes('@tianwen'))).toBe(false)
       expect(entries.some(entry => /scripted-adapter|dsh-probe-bundle/u.test(entry))).toBe(false)
