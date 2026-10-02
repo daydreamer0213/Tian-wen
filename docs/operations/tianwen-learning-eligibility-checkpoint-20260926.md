@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-02公开练习后的第三次连续同阻塞核对，目标工具实际返回blocked。abdf43e干净源码与正式完整8a5fb441…账本不变，本轮不重复挂载；受控三题51原案例成功、0study/feedback/失败来源，原固定组已结束。连续三轮无产品/自然学习进展，当前无原生任务进程可等待，限定现有入口/主链没有新已证实缺陷或实际待办变化。停止自动空转、完整目标不complete不缩小；原门槛/十工作日窗口/隔离/NO-GO保持。恢复入口是实际可归因持续反馈、独立核验兼容问题或新已证实缺陷/待办变化，不追加题/造来源/催评价。见当前权威交接；实际工具状态D:/DevData/tianwen-public-pilot-blocked-audit-20261002/goal-status.json。以下active为此前当时状态。
+
 2026-10-02用户授权自主决定后，完整目标已实际active/incomplete。事前固定c598d93受控公开三题A14/B12/C25全部功能通过、三双审met、三零请求精确冷恢复；不是自然待办/所有者反馈、研究或效果。受控3task/0study/0反馈评估/有效失败来源空、selector awaiting-compatible-sources/隔离true，D/E未运行，按原条件结束不追加题。正式账本8a5fb441…全字节不变，本轮不重复挂载；13task/0study/0反馈评估为相同账本的继承快照。原门槛/十工作日窗口/NO-GO保持；下一实际使用接入与已核验问题，不能把更多成功练习当来源变化。51容器自清/Docker停止、pnpm prune595MB，D18.91GiB≥15。受控Profile压缩核验后删除被blocked by policy拒绝，原件/备份暂留不绕过。见[完整边界及证据](tianwen-public-exercise-pilot-20261002.md)。以下blocked为历史当时状态。
 
 2026-10-02第三次连续同阻塞核对后，目标工具实际返回blocked。623ff50正式Runtime仍13task/0study/0反馈评估/有效失败来源空、awaiting-compatible-sources/隔离true及完整8a5fb441…账本不变。0050de5修复后连续三轮无实质进展，无当前活任务可等待，限定主链无新已证实核心缺陷或有事前独立依据实际待办。停止空转，完整目标不complete；恢复取决于实际可归因持续反馈/独立核验的兼容问题来源或新的有证据核心缺陷/外部待办变化，不缺执行许可、不索题或造来源。0模型/新任务/旧样本重跑，原门槛/窗口/NO-GO保持。回执D:/DevData/tianwen-source-blocked-resumed-audit-20261002，实际状态见goal-status.json。以下active均为对应历史状态。
