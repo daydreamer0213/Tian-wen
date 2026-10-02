@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-02修复交付后首次复核：0050de5正式Runtime实际13task/0study/0反馈评估/有效独立失败来源空、awaiting-compatible-sources/隔离true及完整8a5fb441…账本保持；唯一rejected已被原记录撤回，不能重判来源。限定当前谓词/选择/已批准研究边界无新有证据实现缺口，公共issue当前开放0仅公开视图。0模型/新任务/旧题重跑/重复回归；本轮no-progress 1，目标active/incomplete，原门槛/窗口/NO-GO保持。不将状态刷新或文档算进展；连续同阻塞达到三轮且无安全实质动作时按目标工具blocked。回执D:/DevData/tianwen-source-revalidation-resumed-1-20261002。
+
 2026-10-02用户恢复后目标已核对active/incomplete。未来宿主请求计数中止已移除，14工具/路径/字节/12分钟与原模型配置保留；受控13根请求完成对照、6场景及174相关回归通过，驱动自身摘要P2已关闭。完整类型范围旧依赖1/现1/新增0；未运行新真实任务，不计自然来源、研究或效果。正式13task/0study/0反馈评估/可信失败来源空/awaiting-compatible-sources/隔离true及8a5fb441…完整账本保持，0真实模型/正式新任务/旧样本重跑。NO-GO、原门槛及原窗口不变。见[修复边界](tianwen-native-task-request-observation-20261002.md)。以下blocked描述均为历史当时状态。
 
 2026-10-02报告批次终态：A功能33通过/原复核inconclusive，B功能31通过/双审met，C宿主9根请求cap终止未完成修订（约32秒，9工具/1准备/0执行），不是原功能拒绝来源，49案例不补执行。正式13task/0study/0反馈评估/可信功能失败来源空/awaiting-compatible-sources/隔离true，原账本前缀保持、现8a5fb441…，D/E与研究/激活/未来效果未发生。下一调整未来不同任务的执行限制与14工具/12分钟预算协调，不增加验收标准、重跑旧题或无限维护成功凑来源。内置目标blocked/API无法恢复，完整目标不complete；原门槛/窗口/NO-GO保持。见[准确终态](tianwen-evidence-report-batch-20261002.md)。
