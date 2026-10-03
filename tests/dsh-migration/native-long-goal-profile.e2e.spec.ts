@@ -559,6 +559,12 @@ describe('native Long Goal profile execution', () => {
       const version=guidanceVersion(study.candidate!.candidateSnapshot)
       expect(guidanceVersion(first.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey))).toBe(version)
       await vi.waitFor(()=>expect((listLongGoals(first!.stateRoot)[0] as LongGoalRecordV3).planner.phase).toBe('complete'))
+      const beforeStatusLedger=readFileSync(join(first.evolutionRoot,'ledger.jsonl'))
+      const beforeStatusRequests=first.adapter.requests.length
+      const status=await first.main.ctx.tools.execute({callId:CallId('native-goal-current-research-status'),name:'tianwen_learning_status',arguments:{},agent:first.main,signal:new AbortController().signal})
+      expect(status).toMatchObject({isError:false,value:{history:{naturalConversation:{guidanceStudies:{total:1,accepted:1}}},currentSession:{naturalConversation:{guidanceStudies:{total:1,accepted:1}}}}})
+      expect(readFileSync(join(first.evolutionRoot,'ledger.jsonl'))).toEqual(beforeStatusLedger)
+      expect(first.adapter.requests).toHaveLength(beforeStatusRequests)
       await first.dispose()
       future=await mountProfile('Write the future DEV automatic activation control',{root,development:true,resumeMain:true,completeTaskThroughTool:true,contentVerdict:'met',taskCount:2,researchControl:true,goalTaskAcceptance:checker})
       await future.startGoal();future.releaseTask()
