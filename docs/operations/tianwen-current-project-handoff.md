@@ -1,5 +1,14 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 三项报告功能已补齐，内容评审耗尽额度已定位
+
+第三新Task事前77dde5d/99条件，原首代码18407B同时实现Goal结果显示、修复第二首代码研究对象覆盖history缺陷；原程序verified、来源41/研究35/Goal23及旧基础4通过。12真实请求=识别1/根10/requirements1，prepare/evaluate1/1；另Node0模型准确恢复原Task/完整7图/header/首代码/账本，前三Task不改。独立无有据P1/P2。见[准确交付、原因与下一步](tianwen-live-goal-report-20261004.md)。
+
+原评审inconclusive/model-unavailable，不是引用错误：原review turn/end=max-tokens，output/reasoning各65536，structured_output零调用，无grounding/proof。只读测得schema71671B/wire167979B/host初始参考110253B；负担偏大，但不严称唯一原因。下一新真实待办只给必要合同/已有接口/实际输入，以原生产者独立核字段，仍完整保留本Task图/覆盖/双审/语义规则；不增加评审协议/额度/验收，不裁剪旧材料或重评。
+
+原实际来源4/初筛4/问题1/成功候选1，反馈/研究0；旧成功候选条件不同，报告问题的有效兼容对照仍未证。问题已由真实程序失败自动收集，不需用户补题/评价。完整目标active/incomplete、main/Daily NO-GO及原门槛/十工作日窗口不变，不机械整体blocked。正式账本原hash只读，原24拒删路径不碰；本轮三个runner快照已清，D实测/停止Docker见新包final-audit。本条覆盖下方“第三任务尚未执行”的旧待办。
+
+
 ## 2026-10-04 后续评审错误引用已接原SDK捕获前反馈
 
 仅实际紧凑v2评审，原SDK tools/pre-execute精准lineage/随机label/scoped structured_output复用原validateClaimAudit，在引用错误时返回原deny及安全答案ID提示；模型可在原同一Turn更正。原schema/全部合法子串/host严格验证/两审/proof/历史不改，无新消息/外部重试。真实SDK脚本控制先红后绿、99相关单次通过、完整Runtime/两声明构建通过；独立无有据P1/P2。[准确范围与验证](tianwen-native-review-capture-quotes-20261004.md)。

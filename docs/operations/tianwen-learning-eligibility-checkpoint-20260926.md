@@ -1,5 +1,14 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 三项报告功能已补齐，内容评审耗尽额度已定位
+
+第三新Task事前77dde5d/99条件，原首代码18407B同时实现Goal结果显示、修复第二首代码研究对象覆盖history缺陷；原程序verified、来源41/研究35/Goal23及旧基础4通过。12真实请求=识别1/根10/requirements1，prepare/evaluate1/1；另Node0模型准确恢复原Task/完整7图/header/首代码/账本，前三Task不改。独立无有据P1/P2。见[准确交付、原因与下一步](tianwen-live-goal-report-20261004.md)。
+
+原评审inconclusive/model-unavailable，不是引用错误：原review turn/end=max-tokens，output/reasoning各65536，structured_output零调用，无grounding/proof。只读测得schema71671B/wire167979B/host初始参考110253B；负担偏大，但不严称唯一原因。下一新真实待办只给必要合同/已有接口/实际输入，以原生产者独立核字段，仍完整保留本Task图/覆盖/双审/语义规则；不增加评审协议/额度/验收，不裁剪旧材料或重评。
+
+原实际来源4/初筛4/问题1/成功候选1，反馈/研究0；旧成功候选条件不同，报告问题的有效兼容对照仍未证。问题已由真实程序失败自动收集，不需用户补题/评价。完整目标active/incomplete、main/Daily NO-GO及原门槛/十工作日窗口不变，不机械整体blocked。正式账本原hash只读，原24拒删路径不碰；本轮三个runner快照已清，D实测/停止Docker见新包final-audit。本条覆盖下方“第三任务尚未执行”的旧待办。
+
+
 ## 2026-10-04 后续原评审捕获前反馈接缝已交付
 
 原SDK对精准限定的紧凑v2评审在成功捕获前反馈既有逐段引文错误；同一Turn可自行更正，失败调用保留，host/全部合法子串/历史/两审/proof不变。[准确工程验证](tianwen-native-review-capture-quotes-20261004.md)：99检查与完整Runtime/两声明过，独立无有据P1/P2，0新自然Task/反馈/研究。当前发行另Node0模型精确恢复原失败Task/首代码/完整图/账本，没有重评或将工程修复计为学习。

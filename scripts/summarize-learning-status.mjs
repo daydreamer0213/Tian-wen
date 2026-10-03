@@ -160,6 +160,30 @@ const ACTIVATION_PENDING_KEYS = [
   'reasonUnestablished',
 ];
 
+// 可选原生Goal结果：只投影两个原位置 history.goalTaskOutcomes 与
+// currentSession.goalTaskOutcomes（不是 naturalConversation 或根上的同名伪字段）。
+// 5 个原计数全部有效才显示该侧；不补零、不转换类型、不判计数和/关系，两侧不合并。
+// 分析关闭也可显示保存事实。
+const GOAL_COUNT_KEYS = [
+  'observed',
+  'checkedSuccess',
+  'checkedFailure',
+  'unqualifiedRejection',
+  'unverifiable',
+];
+
+const GOAL_SCOPES = {
+  history: '此Profile保存的原生Goal任务独立结果。',
+  currentSession: '按原控制会话或实际执行子会话归属的原生Goal任务独立结果。',
+};
+
+// 严格 3 条，按原顺序，不增加条目。
+const GOAL_LIMITS = [
+  'checkedSuccess与checkedFailure只表示原独立任务结果分类；不替代内容评审或学习资格。',
+  'unqualifiedRejection不是已确认的问题来源；unverifiable不表示成功或已确认失败。',
+  '这些保存结果不是用户反馈、方法激活、未来任务收益或完整自动学习证明。',
+];
+
 const MAX_STATE_CODE_UNITS = 128;
 
 class InvalidLearningStatus extends Error {}
@@ -292,6 +316,21 @@ function projectStudyCheck(studies, scope) {
   };
 }
 
+/**
+ * 纯投影一侧可选原生Goal结果。原位置须为非 null、非数组对象，5 个声明计数全部为
+ * ≥0 安全整数；其他键（含 scope/描述）忽略，不补零、不转换类型、不判计数和/关系。
+ * 任一不合格返回 undefined（整侧忽略），不抛错、不推断。
+ */
+function projectGoalOutcome(outcome, scope) {
+  if (!isPlainObject(outcome)) return undefined;
+  if (GOAL_COUNT_KEYS.some((key) => !isStudyCount(outcome[key]))) return undefined;
+  return {
+    scope,
+    counts: pickStudyCounts(outcome, GOAL_COUNT_KEYS),
+    limits: [...GOAL_LIMITS],
+  };
+}
+
 function buildSummary(snapshot) {
   const root = requireObject(snapshot);
 
@@ -343,7 +382,17 @@ function buildSummary(snapshot) {
   );
   if (currentSessionStudyCheck !== undefined) studyChecks.currentSession = currentSessionStudyCheck;
 
-  return {
+  // 可选原生Goal结果：只读两个原位置；两侧独立，均无效则不新增顶层键。
+  const goalOutcomes = {};
+  const historyGoalOutcome = projectGoalOutcome(history.goalTaskOutcomes, GOAL_SCOPES.history);
+  if (historyGoalOutcome !== undefined) goalOutcomes.history = historyGoalOutcome;
+  const currentGoalOutcome = projectGoalOutcome(
+    currentSession.goalTaskOutcomes,
+    GOAL_SCOPES.currentSession,
+  );
+  if (currentGoalOutcome !== undefined) goalOutcomes.currentSession = currentGoalOutcome;
+
+  const summary = {
     schemaVersion: SCHEMA_VERSION,
     analysis: analysisEnabled ? ANALYSIS_ENABLED_TEXT : ANALYSIS_DISABLED_TEXT,
     activation: quarantined ? ACTIVATION_QUARANTINED_TEXT : ACTIVATION_CLEAR_TEXT,
@@ -358,10 +407,13 @@ function buildSummary(snapshot) {
       // 旧 history.studies 仍只保留原 8 基础计数，不加新子对象、不改范围。
       studies: pickCounts(guidanceStudies, GUIDANCE_STUDY_KEYS),
     },
-    // studyChecks 为空对象时不产生任何键。
-    ...studyChecks,
     limits: [...LIMITS],
   };
+
+  // 研究检查必须留在 studyChecks 内；展开到根上会覆盖旧 history。均无有效侧时不产生该键。
+  if (Object.keys(studyChecks).length > 0) summary.studyChecks = studyChecks;
+  if (Object.keys(goalOutcomes).length > 0) summary.goalOutcomes = goalOutcomes;
+  return summary;
 }
 
 function emitInvalid() {
