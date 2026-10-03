@@ -1186,7 +1186,9 @@ export function appendGoalTaskAcceptance(input: TianwenAttemptEventInput & { rea
     const task = record.tasks.find(item => item.id === input.taskId)
     const b = input.event.binding
     if (task?.execution?.goalId !== b.nativeGoalId || task.execution.sessionId !== b.childSessionId
-      || sha256(task) !== b.taskDigest || goalTaskAcceptanceGoalDigest(record) !== b.goalDigest) {
+      || sha256(task) !== b.taskDigest || goalTaskAcceptanceGoalDigest(record) !== b.goalDigest
+      || b.requirementsSnapshot !== undefined && (b.requirementsSnapshot.goal.workspaceRoot !== record.workspaceRoot
+        || b.requirementsSnapshot.permissionMode !== readTianwenTaskAttemptProjection(record, input.taskId).attempts.at(-1)?.permissionMode)) {
       throw new LongGoalIntegrityError('Acceptance preparation must bind the original Goal and Task execution')
     }
   }

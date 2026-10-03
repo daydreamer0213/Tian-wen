@@ -523,3 +523,5 @@ export async function apply(
     : { executor })
   mountTianwenLongGoalHost(ctx, config)
 }
+export { readGoalTaskOutcomeMaterial } from './goal-task-material.js'
+export type { GoalTaskOutcomeMaterial } from './goal-task-material.js'

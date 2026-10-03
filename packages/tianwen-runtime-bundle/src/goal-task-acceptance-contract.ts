@@ -1,5 +1,21 @@
 import { parseConversationExternalCheckOutcome, type ConversationExternalCheckOutcome } from '@tianwen/evolution/external-check'
 import { sha256 } from '@tianwen/evolution/learning-intake'
+import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import type { LongGoalTaskRecordV2 } from './long-goal-contract.js'
+
+/** Small original requirements only. Native requests/results remain in the SDK log. */
+export interface GoalTaskRequirementsSnapshot {
+  readonly goal: {
+    readonly id: string
+    readonly objective: string
+    readonly context: string | null
+    readonly successCriteria: string | null
+    readonly workspaceRoot: string
+    readonly origin: GoalCommandOrigin
+  }
+  readonly task: LongGoalTaskRecordV2
+  readonly permissionMode?: SandboxMode
+}
 
 export interface GoalCommandOrigin {
   readonly sessionId: string
@@ -27,6 +43,8 @@ export interface GoalTaskAcceptanceBinding {
   readonly requiredCondition: string
   /** Only enabled v3 consent observed before the original first Task request. */
   readonly learningConsentRevision?: number
+  /** Absent on legacy preparations; never reconstruct it from later requirements. */
+  readonly requirementsSnapshot?: GoalTaskRequirementsSnapshot
 }
 
 export type GoalTaskAcceptanceEvent = {
@@ -53,6 +71,24 @@ function keys(value: Record<string, unknown>, expected: readonly string[]): bool
   return Object.keys(value).length === expected.length && expected.every(key => Object.hasOwn(value, key))
 }
 
+function validSnapshot(value: unknown, b: Record<string, unknown>, taskId: string): boolean {
+  if (!record(value)) return false
+  const goal = value.goal, task = value.task
+  if (!keys(value, ['goal', 'task', ...(Object.hasOwn(value, 'permissionMode') ? ['permissionMode'] : [])])
+    || (Object.hasOwn(value, 'permissionMode') && !['read-only', 'workspace-write', 'danger-full-access'].includes(String(value.permissionMode)))
+    || !record(goal) || !keys(goal, ['id', 'objective', 'context', 'successCriteria', 'workspaceRoot', 'origin'])
+    || !['id', 'objective', 'workspaceRoot'].every(key => text(goal[key]))
+    || !['context', 'successCriteria'].every(key => goal[key] === null || typeof goal[key] === 'string')
+    || !record(goal.origin) || !text(goal.origin.sessionId)
+    || !record(task) || !keys(task, ['id', 'objective', 'execution', 'resolution'])
+    || task.id !== taskId || !text(task.objective) || ![null, 'abandoned'].includes(task.resolution as null | 'abandoned')
+    || !record(task.execution) || !keys(task.execution, ['sessionId', 'goalId'])
+    || task.execution.sessionId !== b.childSessionId || task.execution.goalId !== b.nativeGoalId) return false
+  try { parseGoalCommandOrigin(goal.origin, goal.origin.sessionId) } catch { return false }
+  const { workspaceRoot: _, ...boundGoal } = goal
+  return sha256(boundGoal) === b.goalDigest && sha256(task) === b.taskDigest
+}
+
 export function parseGoalCommandOrigin(value: unknown, sessionId: string): GoalCommandOrigin {
   if (!record(value) || !keys(value, ['sessionId', 'commandId', 'commandSeq', 'commandDigest'])
     || value.sessionId !== sessionId || !text(value.commandId) || !seq(value.commandSeq) || !digest(value.commandDigest)) {
@@ -67,7 +103,9 @@ export function parseGoalTaskAcceptanceEvent(value: unknown): GoalTaskAcceptance
     const b = value.binding
     if (!record(b) || !keys(b, ['epoch', 'parentSessionId', 'childSessionId', 'nativeGoalId', 'permissionFingerprint',
       'goalDigest', 'taskDigest', 'headerSeq', 'preparedSeq', 'prefixDigest', 'modelConfigDigest', 'checkerId', 'checkerDigest',
-      'contractDigest', 'inputsDigest', 'requiredCondition', ...(Object.hasOwn(b, 'learningConsentRevision') ? ['learningConsentRevision'] : [])])
+      'contractDigest', 'inputsDigest', 'requiredCondition', ...(Object.hasOwn(b, 'learningConsentRevision') ? ['learningConsentRevision'] : []),
+      ...(Object.hasOwn(b, 'requirementsSnapshot') ? ['requirementsSnapshot'] : [])])
+      || (Object.hasOwn(b, 'requirementsSnapshot') && !validSnapshot(b.requirementsSnapshot, b, value.taskId))
       || (Object.hasOwn(b, 'learningConsentRevision') && (!seq(b.learningConsentRevision) || b.learningConsentRevision === 0))
       || !seq(b.epoch) || b.epoch === 0 || !seq(b.headerSeq) || !seq(b.preparedSeq) || b.preparedSeq < b.headerSeq
       || !['parentSessionId', 'childSessionId', 'nativeGoalId', 'checkerId', 'requiredCondition'].every(key => text(b[key]))

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { appendGoalTaskAcceptance, appendTianwenAttemptStarted, bindGoalFirstLongGoalTask, commitLongGoalPlan, createContinuousLongGoal, readLongGoal } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type { LongGoalRecordV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
-import type { GoalTaskAcceptanceBinding } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance-contract.js'
+import { parseGoalTaskAcceptanceEvent, type GoalTaskAcceptanceBinding } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance-contract.js'
 
 const BASE = resolve('D:/DevData/tianwen-dsh-probe/goal-task-acceptance')
 function fixture() {
@@ -36,6 +36,33 @@ function fixture() {
 }
 
 describe('Goal Task acceptance durable boundaries', () => {
+  it('freezes small original requirements, rejects substituted snapshots and retains legacy exact parsing', () => {
+    const f = fixture()
+    try {
+      const snapshot = { goal: { id: f.goal.id, objective: f.goal.objective, context: f.goal.context,
+        successCriteria: f.goal.successCriteria, workspaceRoot: f.goal.workspaceRoot, origin: f.goal.origin! },
+        task: f.goal.tasks[0]!, permissionMode: 'workspace-write' as const }
+      const event = { type: 'task-acceptance-prepared' as const, taskId: f.input.taskId,
+        binding: { ...f.binding, requirementsSnapshot: snapshot } }
+      expect(parseGoalTaskAcceptanceEvent(event)).toEqual(event)
+      for (const changed of [
+        { ...snapshot, task: { ...snapshot.task, objective: 'replacement task' } },
+        { ...snapshot, goal: { ...snapshot.goal, objective: 'replacement goal' } },
+        { ...snapshot, goal: { ...snapshot.goal, context: 'later context' } },
+        { ...snapshot, goal: { ...snapshot.goal, extra: 'unowned source' } },
+        { ...snapshot, permissionMode: 'other-mode' },
+      ]) expect(() => parseGoalTaskAcceptanceEvent({ ...event, binding: { ...event.binding, requirementsSnapshot: changed } })).toThrow()
+      for (const changed of [
+        { ...snapshot, goal: { ...snapshot.goal, workspaceRoot: 'D:/other-workspace' } },
+        { ...snapshot, permissionMode: 'danger-full-access' as const },
+      ]) expect(() => appendGoalTaskAcceptance({ ...f.input, expectedRevision: f.goal.revision,
+        event: { ...event, binding: { ...event.binding, requirementsSnapshot: changed } } })).toThrow()
+      expect(readLongGoal(f.root, f.goal.id)).toEqual(f.goal)
+      const saved = appendGoalTaskAcceptance({ ...f.input, expectedRevision: f.goal.revision, event })
+      expect(readLongGoal(f.root, f.goal.id)).toEqual(saved)
+      expect(parseGoalTaskAcceptanceEvent({ ...event, binding: f.binding })).toEqual({ ...event, binding: f.binding })
+    } finally { f.remove() }
+  })
   it('rejects a prepared contract for a different native Goal without changing the original record', () => {
     const f = fixture()
     try {

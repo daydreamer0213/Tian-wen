@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 Goal Task 原始材料已恢复，原入账实际消费
+
+22da157之后，原准备首请求前保存小型 Goal/Task/权限快照，原SDK日志保持唯一；共用只读材料读取并由原入账消费，异步后同步校验/同意/关闭/保存错误保持。研究读取从既有 ./runtime 公开，给定来源逐字段核对/前后同意/完整512KiB拒绝；旧无快照明确缺失，后续context/resolution变化只返回原快照，外部文件未保存的内容不补造。见[准确交付与下一内容核验接缝](tianwen-goal-task-material-20261003.md)。
+
+实际4SDK首红、发行root依赖/公开类型问题已窄修，完整构建/两声明/SDK扫描及17文件504项通过。最终发行4控制各1/1、9scripted/0真实，./runtime实际reader准确原command/快照/完整SDK结束材料，新Context同进程0请求/原记录精确，不算自然收益。独立两轮静态审查无新有据P1/P2。正式1327364B/5af25fcd…逐字保持；最近23观察22完成/16初筛/1可信问题/8成功候选/兼容pair false/反馈0/研究0/隔离true，本轮未重新正式mount；Runtime发行按实现更新。
+
+下一在现有runConversationClaimReview/证据投影显式承接native Goal来源，区分原用户command、Planner要求和真实工具/回答，绑定原来源/准备/材料/模型proof后保存独立语义，再补实际方法版本和治理/后续效果/回滚。不能把此reader返回值直接当旧ConversationTask或默认外部文件完整。目标active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口不变，不索题/催评/造失败/重跑旧样本或加练习。D约18.20GiB>=15、无下载/新容器，新自有夹具清理；旧删除拒绝45,598B目录及两历史目录保持、不绕过。本条覆盖下方材料reader待实现的当前待办。
+
 ## 2026-10-03 普通 Goal Task 独立结果已自动进入原学习账本
 
 fe41ad4事前验收之后，原 Evolution ledger 增加明确 native-goal-task 来源，原 LongGoal owner 首请求前固定 v3 同意 revision，原 result 保存后自动入账；新 Context 消费已持久结果/幂等，不重评。成功/原条件失败/缺条件关联拒绝/无法核验分开保存，旧准备和事后同意不追认，不伪造工具/ConversationTask/用户评价，不改变原研究资格或授予激活。真实保存错误停止规划，关闭无迟到写入；实际来源等待期间 Task 漂移错误已首红并窄修，复审无新增有据P1/P2。见[准确交付和下一研究材料入口](tianwen-goal-task-outcome-intake-20261003.md)。

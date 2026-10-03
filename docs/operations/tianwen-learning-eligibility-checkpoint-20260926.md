@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 Goal Task 原始材料已接通，语义及方法仍须分别核实
+
+原准备首请求前保存小型 Goal/Task/权限快照，共用原command/SDK全prefix/end/result读取用于实际入账；既有./runtime公开研究reader核原来源逐字段/同意前后/完整512KiB，旧无快照不补造，后续要求变化仍返回原快照，外部文件内容未保存不能补。详见[准确材料交付与后续投影](tianwen-goal-task-material-20261003.md)。
+
+完整发行/两声明/SDK扫描及17文件504项通过；最终发行4SDK控制各1/1、9scripted/0真实，真实./runtime reader/newContext同进程准确原材料0请求。首红与root依赖/声明问题窄修，两轮只读审查无新有据P1/P2。正式1327364B/5af25fcd…不变；最近23/22/16/1可信问题/8成功候选/pair false/反馈0/研究0/隔离true，本轮不重新正式mount、不生成自然来源。
+
+下一在原内容证据投影显式支持native Goal材料，分清command/Planner/工具/回答并绑定原source/preparation/material/model proof，保存独立语义结果，再接实际方法版本/原研究治理与未来收益。reader和功能标签不授研究资格，不能伪装ConversationTask或宣称外部输入完整。完整目标active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口保持，不再增门槛/计时/练习/重评或索题。D约18.20GiB>=15，旧拒删目录保留，无下载/新容器，新自有夹具退出清理。本条覆盖下方reader待实现的当前待办。
+
 ## 2026-10-03 普通 Goal Task 独立结果已自动入账，资格仍分开
 
 新原生 Goal Task 结果用明确 native-goal-task 事件进入原 Evolution ledger，首实际请求前固定启用v3同意revision，原合同/command/Task/epoch/SDK材料核对后消费；冷挂载仅补保存/幂等，旧任务或事后同意不追认。四类功能结果与反馈/语义/研究/激活严格分开，没有新自然来源或方法效果宣称。等待期间Task漂移的实际P2已先红关闭；真实保存故障停止规划/原结果保留、关闭无迟到写入。详见[本包交付及边界](tianwen-goal-task-outcome-intake-20261003.md)。

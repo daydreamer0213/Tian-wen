@@ -101,6 +101,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/observation-cancellation.ts',
     'src/goal-task-acceptance.ts',
     'src/goal-task-acceptance-contract.ts',
+    'src/goal-task-material.ts',
     'src/conversation-source-readiness.ts',
     'src/conversation-study-result-check.ts',
     'src/conversation-guidance-loop.ts',
@@ -230,6 +231,7 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
   return [
     'src/goal-task-acceptance.ts',
     'src/goal-task-acceptance-contract.ts',
+    'src/goal-task-material.ts',
     'src/observation-cancellation.ts',
     'src/continuous-goal-agent.ts',
     'src/continuous-goal-feedback.ts',

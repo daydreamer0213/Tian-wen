@@ -12,6 +12,7 @@ import type { LongGoalRecordV3, LongGoalTaskRecordV2, TianwenExecutionAttempt } 
 import { appendGoalTaskAcceptance, goalTaskAcceptanceGoalDigest as goalDigest, listLongGoals, readLongGoal, readTianwenTaskAttemptProjection } from './long-goal.js'
 import { sandboxModeFromEvents } from './permission-attempt.js'
 import { readGoalStatus } from './status.js'
+import { readGoalTaskAcceptanceMaterial } from './goal-task-material.js'
 
 type CommandEvent = Extract<SessionEvent, { type: 'command/run' }>
 export interface GoalTaskAcceptancePreparation {
@@ -149,6 +150,11 @@ export class GoalTaskAcceptanceChecks {
       checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
       inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition,
       ...(learningConsentRevision === undefined ? {} : { learningConsentRevision }),
+      requirementsSnapshot: {
+        goal: { id: goal.id, objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+          workspaceRoot: goal.workspaceRoot, origin: structuredClone(goal.origin!) },
+        task: structuredClone(task), ...(attempt.permissionMode === undefined ? {} : { permissionMode: attempt.permissionMode }),
+      },
     }
     appendGoalTaskAcceptance({ stateRoot: this.stateRoot, longGoalId: goal.id, expectedRevision: latest.goal.revision,
       taskId: task.id, event: { type: 'task-acceptance-prepared', taskId: task.id, binding } })
@@ -172,28 +178,22 @@ export class GoalTaskAcceptanceChecks {
       if (revision === undefined || !this.authorized(revision)) continue
       const result = goal.tianwenEvents?.find(item => item.type === 'task-acceptance-finished' && item.taskId === event.taskId && item.epoch === b.epoch)
       if (result?.type !== 'task-acceptance-finished') continue
-      await this.source(goal)
-      const saved = await this.ctx.sessionPersistence.inspect(SessionId(b.childSessionId))
-      const events = saved.events.filter(item => item.seq <= result.endSeq)
-      const end = events.at(-1), header = events.find(item => item.seq === b.headerSeq)
+      const material = await readGoalTaskAcceptanceMaterial(this.ctx, { stateRoot: this.stateRoot,
+        goalId: goal.id, taskId: event.taskId, epoch: b.epoch })
       // All async reads precede this synchronous final Goal/Task/attempt check and ledger write.
       const latest = this.find(b.childSessionId)
       if (latest === undefined || latest.attempt.epoch !== b.epoch) continue
       if (sha256(latest.task) !== b.taskDigest || goalDigest(latest.goal) !== b.goalDigest
         || latest.task.execution?.goalId !== b.nativeGoalId || latest.attempt.permissionFingerprint !== b.permissionFingerprint
-        || sandboxModeFromEvents(events, false) !== latest.attempt.permissionMode || String(saved.meta.parentSession) !== b.parentSessionId
-        || end?.type !== 'turn/end' || end.seq !== result.endSeq || sha256(events) !== result.materialDigest
-        || sha256(events.filter(item => item.seq <= b.preparedSeq)) !== b.prefixDigest
-        || header?.type !== 'request/header' || sha256(header.data.header.config) !== b.modelConfigDigest) {
+        || sha256(material.preparation) !== sha256(b) || sha256(material.result) !== sha256(result)
+        || sha256(latest.goal.tianwenEvents?.find(item => item.type === 'task-acceptance-prepared' && item.taskId === event.taskId && item.binding.epoch === b.epoch)) !== sha256(event)
+        || sha256(latest.goal.tianwenEvents?.find(item => item.type === 'task-acceptance-finished' && item.taskId === event.taskId && item.epoch === b.epoch)) !== sha256(result)
+        || sha256(latest.goal.origin) !== sha256(goal.origin)) {
         throw new Error('Goal Task outcome original native material changed')
       }
       if (this.shutdown.signal.aborted || !this.authorized(revision)) return
       // Source verification precedes the durable write; storage errors remain in the original Goal lane.
-      this.ctx.tianwenEvolution.recordGoalTaskOutcome({ source: 'native-goal-task', goalId: goal.id, taskId: event.taskId, epoch: b.epoch,
-        origin: structuredClone(goal.origin), parentSessionId: b.parentSessionId, childSessionId: b.childSessionId, nativeGoalId: b.nativeGoalId,
-        preparedSeq: b.preparedSeq, endSeq: result.endSeq, preparationDigest: result.preparationDigest, materialDigest: result.materialDigest,
-        consentRevision: revision, modelConfigDigest: b.modelConfigDigest, checkerId: b.checkerId, checkerDigest: b.checkerDigest,
-        contractDigest: b.contractDigest, inputsDigest: b.inputsDigest, requiredConditionDigest: sha256(b.requiredCondition), outcome: structuredClone(result.outcome) })
+      this.ctx.tianwenEvolution.recordGoalTaskOutcome(material.outcomeInput!)
     }
   }
   private authorized(revision: number): boolean {

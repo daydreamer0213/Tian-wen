@@ -30,6 +30,7 @@ import { LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID } from '../../packages/tianwe
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { GoalTaskAcceptanceChecks } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance.js'
+import * as runtimePublic from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import {
   listLongGoals,
   readLongGoal,
@@ -682,6 +683,27 @@ describe('native Long Goal profile execution', () => {
       expect(observations).toHaveLength(1)
       expect(observations[0]).toMatchObject({ input: { source: 'native-goal-task', goalId: record.id,
         taskId: record.tasks[0]!.id, origin: record.origin, consentRevision: 1, outcome: { status: expected } } })
+      const preparedEvent = record.tianwenEvents?.find(event => event.type === 'task-acceptance-prepared')
+      expect(preparedEvent).toMatchObject({ binding: { requirementsSnapshot: {
+        goal: { id: record.id, objective: record.objective, workspaceRoot: record.workspaceRoot, origin: record.origin },
+        task: (captured as { task: unknown }).task,
+        permissionMode: 'workspace-write',
+      } } })
+      expect(runtimePublic).toHaveProperty('readGoalTaskOutcomeMaterial')
+      const readMaterial = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
+        ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)).readGoalTaskOutcomeMaterial as typeof runtimePublic.readGoalTaskOutcomeMaterial
+        : runtimePublic.readGoalTaskOutcomeMaterial
+      const material = await readMaterial(profile.ctx, { stateRoot: profile.stateRoot, outcome: observations[0]!.input })
+      expect(material.requirementsSnapshot).toEqual(preparedEvent?.type === 'task-acceptance-prepared' ? preparedEvent.binding.requirementsSnapshot : undefined)
+      expect(material.outcomeInput).toEqual(observations[0]!.input)
+      expect(material.source).toEqual((captured as { source: unknown }).source)
+      expect(sha256(material.events)).toBe(observations[0]!.input.materialDigest)
+      expect(material.events.at(-1)?.type).toBe('turn/end')
+      expect(material.events.some(event => event.type === 'request/header')).toBe(true)
+      expect(material.events.some(event => event.type === 'tool/result')).toBe(true)
+      expect(material.events.some(event => event.type === 'assistant/message')).toBe(true)
+      await expect(readMaterial(profile.ctx, { stateRoot: profile.stateRoot,
+        outcome: { ...observations[0]!.input, inputsDigest: sha256('another-input') } })).rejects.toThrow('differs from original')
       const status = await profile.ctx.tools.execute({ callId: CallId(`goal-learning-status-${randomUUID()}`), name: 'tianwen_learning_status',
         arguments: {}, agent: profile.main, signal: new AbortController().signal })
       expect(status).toMatchObject({ isError: false, value: { history: { goalTaskOutcomes: { observed: 1 } }, currentSession: { goalTaskOutcomes: { observed: 1 } } } })
@@ -698,6 +720,8 @@ describe('native Long Goal profile execution', () => {
         expect(cold.adapter.requests).toHaveLength(0)
         expect(evaluations).toBe(1)
         expect(cold.ctx.tianwenEvolution.listGoalTaskOutcomes()).toEqual(observations)
+        expect(await readMaterial(cold.ctx, { stateRoot: cold.stateRoot, outcome: observations[0]!.input })).toEqual(material)
+        expect(cold.adapter.requests).toHaveLength(0)
         if (process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT !== undefined) {
           const receiptRoot = resolve(process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT)
           if (!receiptRoot.startsWith(resolve('D:/DevData') + '\\')) throw new Error('receipt must stay under D:/DevData')
@@ -706,7 +730,8 @@ describe('native Long Goal profile execution', () => {
             publishedRuntime: process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1', preparations, evaluations,
             scriptedRequests: profile.adapter.requests.length, actualProviderRequests: 0, record: frozen, goalTaskOutcomes: observations,
             learningStatus: status.value,
-            cold: { newContext: true, sameProcess: true, requests: cold.adapter.requests.length, recordExact: true, outcomeExact: true } }, null, 2), { flag: 'wx' })
+            material: { requirementsExact: true, sourceExact: true, sdkEventsExact: true, completeThroughOriginalEnd: true },
+            cold: { newContext: true, sameProcess: true, requests: cold.adapter.requests.length, recordExact: true, outcomeExact: true, materialExact: true } }, null, 2), { flag: 'wx' })
         }
       } finally { await cold.dispose(true) }
     } finally { await profile.dispose() }
