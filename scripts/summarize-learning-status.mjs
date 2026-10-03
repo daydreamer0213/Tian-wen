@@ -124,6 +124,42 @@ const GUIDANCE_STUDY_KEYS = [
   'rolledBack',
 ];
 
+// 可选研究检查：只投影 history / currentSession 两侧 guidanceStudies 里的
+// independentResults 与 activationPending 原计数。两范围互相独立；一侧缺失或畸形
+// 只忽略该侧，不损坏旧报告，也不从顶层 quarantined 推算或覆盖计数。
+const STUDY_CHECK_SCOPES = {
+  history: '此Profile保存的历史研究；不等于当前会话任务或当前方法效果。',
+  currentSession: '当前会话已观察任务涉及的研究范围；不只限于本会话发起的研究。',
+};
+
+// 严格 4 条，按原顺序，不增加条目。
+const STUDY_CHECK_LIMITS = [
+  '独立结果与模型裁决分开记录；满足已保存结果要求不等于语义安全、采用资格或完整学习成功。',
+  'pendingArms是缺少已保存结果的实验臂数量，包含已停止研究；不表示仍在运行或已经成功。',
+  '启用未完成原因计数可以重叠，不能相加；quarantined描述当前隔离设置，不追认历史原因。',
+  'reasonUnestablished只是原因未确定，不是允许启用；未配置独立检查的历史不能宣称独立成功。',
+];
+
+// 仅原 8 字段，按原顺序。
+const INDEPENDENT_RESULT_KEYS = [
+  'configuredStudies',
+  'unconfiguredStudies',
+  'recordedArms',
+  'pendingArms',
+  'verified',
+  'rejected',
+  'unverifiable',
+  'satisfiedStudies',
+];
+
+// 仅原 4 字段，按原顺序。
+const ACTIVATION_PENDING_KEYS = [
+  'total',
+  'independentResultsNotSatisfied',
+  'quarantined',
+  'reasonUnestablished',
+];
+
 const MAX_STATE_CODE_UNITS = 128;
 
 class InvalidLearningStatus extends Error {}
@@ -225,6 +261,37 @@ function projectDiagnostics(value) {
   };
 }
 
+// ≥0 安全整数；缺失（undefined）与类型不符一样不合格，不补零、不转换类型。
+function isStudyCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function pickStudyCounts(source, keys) {
+  const result = {};
+  for (const key of keys) result[key] = source[key];
+  return result;
+}
+
+/**
+ * 纯投影一侧可选研究检查。guidanceStudies 及两个子对象都须是非 null、非数组对象，
+ * 12 个声明字段全部为 ≥0 安全整数；其他键忽略，不判计数间关系、不把重叠计数相加。
+ * 任一不合格返回 undefined（整侧忽略），不抛错、不修复、不推断。
+ */
+function projectStudyCheck(studies, scope) {
+  if (!isPlainObject(studies)) return undefined;
+  const independentResults = studies.independentResults;
+  const activationPending = studies.activationPending;
+  if (!isPlainObject(independentResults) || !isPlainObject(activationPending)) return undefined;
+  if (INDEPENDENT_RESULT_KEYS.some((key) => !isStudyCount(independentResults[key]))) return undefined;
+  if (ACTIVATION_PENDING_KEYS.some((key) => !isStudyCount(activationPending[key]))) return undefined;
+  return {
+    scope,
+    independentResults: pickStudyCounts(independentResults, INDEPENDENT_RESULT_KEYS),
+    activationPending: pickStudyCounts(activationPending, ACTIVATION_PENDING_KEYS),
+    limits: [...STUDY_CHECK_LIMITS],
+  };
+}
+
 function buildSummary(snapshot) {
   const root = requireObject(snapshot);
 
@@ -262,6 +329,20 @@ function buildSummary(snapshot) {
     if (diagnostics) readiness.diagnostics = diagnostics;
   }
 
+  // 可选研究检查：两个范围互相独立；一侧缺失或畸形只忽略该侧，均无效则不新增顶层键。
+  // 分析关闭时仍可显示合法的历史保存事实；不从顶层 quarantined 推算或覆盖原计数。
+  const studyChecks = {};
+  const historyStudyCheck = projectStudyCheck(
+    historyNaturalConversation.guidanceStudies,
+    STUDY_CHECK_SCOPES.history,
+  );
+  if (historyStudyCheck !== undefined) studyChecks.history = historyStudyCheck;
+  const currentSessionStudyCheck = projectStudyCheck(
+    sessionNaturalConversation.guidanceStudies,
+    STUDY_CHECK_SCOPES.currentSession,
+  );
+  if (currentSessionStudyCheck !== undefined) studyChecks.currentSession = currentSessionStudyCheck;
+
   return {
     schemaVersion: SCHEMA_VERSION,
     analysis: analysisEnabled ? ANALYSIS_ENABLED_TEXT : ANALYSIS_DISABLED_TEXT,
@@ -274,8 +355,11 @@ function buildSummary(snapshot) {
       reviews: pickCounts(reviews, REVIEW_KEYS),
       codeChecks: pickCounts(codeChecks, CODE_CHECK_KEYS),
       feedbackAssessments: pickCounts(feedbackAssessments, FEEDBACK_ASSESSMENT_KEYS),
+      // 旧 history.studies 仍只保留原 8 基础计数，不加新子对象、不改范围。
       studies: pickCounts(guidanceStudies, GUIDANCE_STUDY_KEYS),
     },
+    // studyChecks 为空对象时不产生任何键。
+    ...studyChecks,
     limits: [...LIMITS],
   };
 }

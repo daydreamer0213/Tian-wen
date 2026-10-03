@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 真实程序失败已进入原问题来源，继续修当前接缝
+
+第二新任务事前505ad3d/35条件，唯一首次程序rejected：新增研究对象被展开到根上，覆盖旧history。原首代码15960B不修不重试，25/35与原来源41通过；15真实请求=识别1/根13/requirements1，原评审inconclusive/invalid-judgment，0有效proof。新Node0模型精确原Task/完整6图/header/首代码/账本，原两Task不变。[准确首次失败](tianwen-live-study-report-first-failure-20261004.md)。
+
+原系统已经计问题来源1，不需用户补题/评价；实际原状态来源3/初筛3/问题1/成功候选1，反馈/研究0，未证明该候选与本报告来源兼容。连续两实际评审均错引分段；紧凑schema丢原逐单元enum，仅留示例，下一保留host原判定，给后续有界schema复用原SDK选择约束，再做第三项Goal统计及本报告实际缺陷修复。不是旧题补判/造失败/增加发布标准。目标active/incomplete、main/Daily NO-GO、原十工作日窗口不变；正式账本原hash只读，D约18GiB≥15、24拒删路径不碰。
+
 ## 2026-10-04 实际来源报告已交付，原评审引文错误不回写
 
 d1d30e1事前冻结后唯一真实Task程序41条件通过；首代码12133B原样，原评审inconclusive/invalid-judgment、0有效proof。11真实请求=识别2/根8/requirements1；原第一评审将代码引文绑定错误答案分段，原检查正确拒收，未进入grounding。不重试Task、修引文、重评或当问题/成功来源。另41+原4回归通过，0模型冷恢复原Task/完整5图/header/首代码/账本准确；先前原Task不变。见[准确结果及原因](tianwen-live-learning-source-report-20261004.md)。

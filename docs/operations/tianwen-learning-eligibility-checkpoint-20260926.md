@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 原程序失败自动计问题来源1
+
+第二新实际Task首次程序rejected，25/35；旧来源41兼容检查通过。原因是新增研究输出误展开到根上覆盖旧history；原评审引文跨分段而inconclusive/invalid-judgment，不修改首结果或补proof。[准确记录](tianwen-live-study-report-first-failure-20261004.md)。原checked-failure分支正确消费真实程序失败，原status来源3/初筛3/问题1/成功候选1，无人工反馈或假问题。候选对本报告问题的兼容未证，研究尚未触发。
+
+下一修后续紧凑评审schema丢原逐单元原文约束的当前接缝，原host严格检查/历史不变；再执行第三项新的Goal统计与已观察覆盖缺陷修复，先固定要求/初始代码/独立期望。完整目标active/incomplete、main/Daily NO-GO、原门槛/十工作日窗口不改，不机械blocked/索题/催评。
+
 ## 2026-10-04 来源报告完成，原无效评审不能算学习来源
 
 首次来源报告Task程序verified/独立41条件通过，原评审inconclusive/invalid-judgment、proof=null/有效reviewChecks0；原第一评审引文不在answer-36内，正确拒收。11实际请求=识别2/根8/requirements1，无grounding、重试、重评或补反馈。首代码原样、另41+4回归/0模型冷恢复完整5图/header/原Task/账本准确，见[准确分账](tianwen-live-learning-source-report-20261004.md)。
