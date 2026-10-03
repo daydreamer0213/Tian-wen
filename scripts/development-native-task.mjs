@@ -88,6 +88,19 @@ export async function runDevelopmentNativeTask(ctx, config) {
   })
   const expectedPaths = [...outputPaths], callConfig = structuredClone(config.callConfig)
   modules.summarizeDevelopmentNativeTask(undefined, expectedPaths)
+  // Denial evidence requires original tool registration provenance. A plain
+  // test-harness ToolRuntime cannot certify the reviewed file guard, even when
+  // the ordinary file calls themselves execute successfully. Refuse before an
+  // attempt or Agent exists rather than lose the first task's file evidence.
+  const fileObserver = ctx.tianwenConversationFileObserver
+  if (typeof fileObserver?.guardFiles === 'function' || typeof fileObserver?.guardRead === 'function') {
+    for (const name of ['read', 'write', 'edit']) {
+      const definition = ctx.tools?.get(name)
+      const producer = definition === undefined ? undefined : ctx.tools.nativeRegistration?.(definition)
+      assert.equal(producer?.package, '@deepseek-ai/dsh-tool-fs',
+        `native file tool provenance unavailable: ${name}; mount the original observed ToolRuntime before file tools`)
+    }
+  }
   assert.equal(ctx.tianwenEvolution.listConversationTasks(sessionId).length, 0, 'DEV host requires a fresh native session')
   const id = SessionId(sessionId)
   assert.equal(ctx.agents.get(id), undefined, 'DEV host requires a fresh native session')

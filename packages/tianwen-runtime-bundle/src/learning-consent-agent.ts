@@ -32,6 +32,7 @@ import {
 import { projectLearningAudit } from './learning-clue-status.js'
 import { inspectLearningSkills } from './learning-skill-reuse.js'
 import { projectConversationSourceReadinessDiagnostics, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
+import { collectSessionGuidanceScopes } from './conversation-current-scopes.js'
 
 const POLICY_VERSION = 'tianwen-auto-analysis.v3' as const
 const NOTICE_POLICY_VERSIONS = ['tianwen-auto-analysis.v1', 'tianwen-auto-analysis.v2', POLICY_VERSION] as const
@@ -766,7 +767,7 @@ export class TianwenLearningConsentAgentService extends Service {
     }
     const currentConversationTasks = conversationTasks.filter(task => task.source.sessionId === String(agent.session.id))
     const currentTaskIds = new Set(currentConversationTasks.map(task => task.source.taskId))
-    const currentScopes = new Set(currentConversationTasks.map(task => task.source.scopeKey))
+    const currentScopes = new Set(collectSessionGuidanceScopes(String(agent.session.id), conversationTasks, goalOutcomes, this.ctx.tianwenEvolution.listGoalTaskResearchSources()))
     const audit = projectLearningAudit({
       analyses,
       sessionId: String(agent.session.id),

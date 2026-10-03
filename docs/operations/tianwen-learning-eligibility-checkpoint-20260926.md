@@ -1,5 +1,17 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 首次真实产品修复交付，原不可核验结果保留
+
+天问按事前冻结合同首次真实修复 Goal 当前会话研究范围漏报；首次代码未被控制端重写。旧发行 history=1/currentSession=0 首红后，原样新增 scope 纯函数及原调用接入，独立14条件缓存Node隔离全过、接入/完整Runtime/两声明通过，3文件82项及发行原状态/启用回滚控制1项通过。详见[准确结果与下一接线](tianwen-first-real-status-task-20261004.md)。
+
+真实首次12请求（1识别/11执行）、prepare1/evaluate0；缺原工具注册观察导致拒绝读取后文件证据不可用，原Task unverifiable/review inconclusive，研究/反馈0、原隔离true。原Task/SDK/seal/首次代码封存，另Node0请求精确恢复且账本不变。独立产品代码通过不回写旧Task、不当学习收益或模型能力失败，不重试/重评旧题凑资格。
+
+DEV host 已在attempt/Agent前核原read/write/edit注册；实际stock SDK反例0请求/0Task/无attempt，正确装配原宿主控制保留拒绝读取并完成程序/双审、另Node0请求准确恢复。11 scripted控制另记，独立静态无有据P1/P2。首请求gate先核本次准备和原Task持久preparation，格式/字段23控制不称live写入故障试验。
+
+第三项与完整目标active/incomplete，main/Daily NO-GO及原门槛/同意/停止/十工作日窗口保持，不新增阶段/验收。下一直接补普通检查完整准备图与实际观察图的接入，未读可信entry不能靠补造SDK读取解决；再用下一项确实未完成任务验证，不索题/催评/机械整体blocked。
+
+正式1327364B/5af25fcd…只读未mount保持；本轮两个缓存Node容器已确认删除，84历史IDs不变。小D包与必要压缩原记录、清本轮自有临时目录/恢复Docker停止；五历史拒删不绕过，无安装下载/全环境副本。D约18.04GiB>=15，未达20偏好。本条覆盖下方首次状态修复尚未执行待办。
+
 ## 2026-10-04 DEV受治理运行入口交付，真实效果仍待核
 
 f120b80后显式DEV入口复用原Core/Loop同策略及原accepted/shared receipt/同意/支持/QA/结果规则，固定D独立根/原路径/baseURL/真实目录及公开JSONL实际locator；普通apply仍quarantine=true，未声明false覆盖不能解除。正式连续DEV/Daily不属于该允许根，未改变原记录。见[准确交付及下一真实任务](tianwen-development-activation-20261004.md)。

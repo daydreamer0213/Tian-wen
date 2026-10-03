@@ -46,7 +46,10 @@ const inspectArchive=async()=>{
  return view
 }
 try{
- if(readDenialControl){for(const fiber of [...h.ctx.registry.get(ToolRuntime).fibers])await fiber.dispose();const {NativeObservedToolRuntime}=await import(pathToFileURL(resolve(repo,'packages/tianwen-runtime-bundle',manifest.exports['./native-tools-observer'].default)).href);await h.ctx.plugin(NativeObservedToolRuntime);h.ctx.on('tools/execute',(exec,next)=>{if(exec.name==='read'&&exec.arguments.file_path==='outside-directory')deniedDispatches++;return next()})}
+ for(const fiber of [...h.ctx.registry.get(ToolRuntime).fibers])await fiber.dispose()
+ const {NativeObservedToolRuntime}=await import(pathToFileURL(resolve(repo,'packages/tianwen-runtime-bundle',manifest.exports['./native-tools-observer'].default)).href)
+ await h.ctx.plugin(NativeObservedToolRuntime)
+ if(readDenialControl)h.ctx.on('tools/execute',(exec,next)=>{if(exec.name==='read'&&exec.arguments.file_path==='outside-directory')deniedDispatches++;return next()})
  await h.ctx.plugin((await mod('@deepseek-ai/dsh-fs-local')).default,{cwd:root});await h.ctx.plugin(await mod('@deepseek-ai/dsh-tool-fs'))
  await h.ctx.plugin((await mod('@deepseek-ai/dsh-subagent')).default);await h.ctx.plugin(await mod('@deepseek-ai/dsh-subagent-spawn-in-process'),{providerName:'spawn'})
  await apply(h.ctx,{stateRoot:join(root,'state'),sessionsRoot:join(root,'profile/sessions'),evolutionRoot:join(root,'evolution'),captureExternalCodeArtifacts:true,exposeCapturedFileFacts:false,...(readDenialControl?{conversationReadDenialSources:[developmentNativeReadDenialProducer()]}:{}),...(mode==='--run'?{externalCodeCheck:{async prepare(material){preparations++;const prepared=await producer.prepare(material);assert(prepared);return{...prepared,async evaluate(candidate){evaluations++;return prepared.evaluate(candidate)}}}}}:{})})

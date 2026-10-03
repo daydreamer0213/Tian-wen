@@ -6,7 +6,7 @@ import { developmentNativeReadDenialProducer, developmentNativeFileMutationDenia
 import { verifyDevelopmentNativeArchiveSeal } from '../../../scripts/development-native-archive-seal.mjs'
 
 const scenario = process.argv[2], base = process.platform === 'win32' ? 'D:/DevData' : '/tmp'
-assert(['peer', 'original', 'permissions', 'file-guard', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native', 'stale-seal', 'stale-seal-failure', 'seal-write-error', 'seal-prior-error', 'archive-limit-invalid', 'archive-limit', 'archive-limit-prior-error'].includes(scenario))
+assert(['peer', 'original', 'permissions', 'file-guard', 'missing-native-provenance', 'wrong-native-provenance', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native', 'stale-seal', 'stale-seal-failure', 'seal-write-error', 'seal-prior-error', 'archive-limit-invalid', 'archive-limit', 'archive-limit-prior-error'].includes(scenario))
 const original = { source: { taskId: 'control-task' }, completion: { status: 'completed', files: { outputPaths: ['second.mjs', 'first.mjs'] } }, externalCheckPrepared: { checkerId: 'control-check' }, externalCheckFinished: { status: 'verified' }, review: { verdict: 'inconclusive' } }
 const native = { header: { id: 'control-session' }, events: [] }, log = [], guards = []
 const resultRoot = mkdtempSync(resolve(base, 'tianwen-native-host-unit-')), cancellation = new AbortController()
@@ -23,7 +23,7 @@ const assertSeal = complete => {
   assert.equal(read('archive-seal').complete, complete)
 }
 let observedGuardCalls = 0
-if (scenario === 'file-guard') ctx.tianwenConversationFileObserver = {
+if (['file-guard', 'missing-native-provenance', 'wrong-native-provenance'].includes(scenario)) ctx.tianwenConversationFileObserver = {
   guardFiles(scope, producer, guard) {
     assert.deepEqual(producer, developmentNativeFileMutationDenialProducer())
     assert.deepEqual(producer, developmentNativeReadDenialProducer())
@@ -31,8 +31,15 @@ if (scenario === 'file-guard') ctx.tianwenConversationFileObserver = {
   },
   guardRead() { throw new Error('legacy fallback must not replace available file guard') },
 }
+if (scenario === 'file-guard' || scenario === 'wrong-native-provenance') ctx.tools = {
+  get: name => ({ name }), nativeRegistration: () => ({ package: scenario === 'wrong-native-provenance' ? 'untrusted-tool' : '@deepseek-ai/dsh-tool-fs' }),
+}
 try {
-  if (scenario === 'archive-limit-invalid') {
+  if (scenario === 'missing-native-provenance' || scenario === 'wrong-native-provenance') {
+    await assert.rejects(runDevelopmentNativeTask(ctx, config), /native file tool provenance unavailable/)
+    assert.equal(submitted, undefined); assert.equal(existsSync(resolve(resultRoot, 'attempt-started.json')), false)
+    assert.equal(guards.length, 0)
+  } else if (scenario === 'archive-limit-invalid') {
     for (const maxArchiveBytes of [0, null, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
       await assert.rejects(runDevelopmentNativeTask(ctx, { ...config, maxArchiveBytes }), TypeError)
       assert.equal(submitted, undefined); assert.equal(existsSync(resolve(resultRoot, 'attempt-started.json')), false)

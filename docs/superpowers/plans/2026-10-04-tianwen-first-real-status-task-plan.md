@@ -10,3 +10,5 @@
 4. 清理本轮临时快照、已确认自有容器并恢复 Docker，保留必要压缩原始记录和小型结果。核 D >=15 GiB（偏好20）、正式账本只读原 hash、main/Daily NO-GO。
 
 真实模型执行不等于方法采用/学习收益。用户未评价的 OfferGo 不催评；缺用户反馈不阻止独立产品实现。独立检查不替代原语义裁决或新增发布要求。
+
+执行结果：旧发行 currentSession 首红已复现；未知候选由真实提供者首次写出，12 请求、prepare1/evaluate0，原文件证据缺失→unverifiable/inconclusive，已原样封存并另 Node0 请求恢复。首次代码未改，另14条件隔离验证/接入/发行构建/原状态回归通过，用于产品交付，不重判原 Task。宿主缺原工具注册已实际0请求拒绝，并正确装配控制通过；完整准备图与实际观察图缺项接线仍在原第三项内继续。准确证据见 docs/operations/tianwen-first-real-status-task-20261004.md；完整目标不标完成或机械 blocked。
