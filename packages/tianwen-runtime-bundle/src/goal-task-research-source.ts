@@ -6,6 +6,7 @@ import { sha256 } from '@tianwen/evolution/learning-intake'
 import { hasCurrentConversationQuality, type ConversationFileMaterial, type ConversationQualityContract } from '@tianwen/evolution/content-review'
 import type { GoalTaskOutcomeObservation } from '@tianwen/evolution'
 import type { GoalTaskResearchSource, GoalTaskResearchSourceInput } from '@tianwen/evolution/goal-task-research'
+import type { GuidanceStudyOpened } from '@tianwen/evolution/guidance'
 import { readGoalTaskOutcomeMaterial } from './goal-task-material.js'
 import { goalTaskContentReviewMaterial } from './goal-task-content-review.js'
 import { verifyConversationOriginalReviewCheck } from './conversation-claim-review.js'
@@ -70,6 +71,14 @@ export async function recoverGoalTaskResearchSource(ctx: Context, stateRoot: str
     throw new Error('native Goal research source differs from its original Task material')
   }
   return recovered
+}
+
+/** The same frozen reference boundary for the original study owner and read-only packet. */
+export async function recoverGoalGuidanceSource(ctx: Context, stateRoot: string | undefined, opened: GuidanceStudyOpened, sourceId: string) {
+  const reference = opened.nativeGoalSources?.find(item=>item.sourceId === sourceId)
+  const source = ctx.tianwenEvolution.listGoalTaskResearchSources().find(item=>item.sourceId === sourceId)
+  if (stateRoot === undefined || reference === undefined || source === undefined || source.inputDigest !== reference.inputDigest) throw new Error('source-unavailable')
+  return { source, ...await recoverGoalTaskResearchSource(ctx,stateRoot,source) }
 }
 
 /** Same Goal finishing operation; publishing does not schedule another ordinary task or re-evaluate it. */

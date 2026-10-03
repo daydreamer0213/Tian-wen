@@ -7,6 +7,7 @@ import { conversationExternalInputsDigest, parseConversationFileEntries, parseCo
 import { readConversationFile } from './conversation-file-material.js'
 import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation, ConversationExternalCodeCandidate, PreparedConversationExternalCodeCheck } from './conversation-external-check.js'
 import type { ConversationStudyResultCheck, ConversationStudyResultMaterial } from './conversation-study-result-check.js'
+import { parseNativeGoalStudyInput } from './goal-task-study-input.js'
 import { canonicalJsonResult, isolatedPythonPolicy, prepareIsolatedPythonCli, type IsolatedPythonCliConfig } from './isolated-python-cli.js'
 
 import { prepareIsolatedNodeCli } from './isolated-node-cli.js'
@@ -151,11 +152,18 @@ export function createConversationIsolatedJsonCheck(config: InternalConfig, engi
     } satisfies PreparedConversationExternalCodeCheck
   } }
 }
-const body = (material: ConversationStudyResultMaterial): ConversationStudyResultMaterial => ({
+const body = (material: ConversationStudyResultMaterial): ConversationStudyResultMaterial => {
+  if ('sourceKind' in material) {
+    assert(material.sourceKind === 'native-goal-task' && 'prompt' in material)
+    parseNativeGoalStudyInput(material.prompt)
+  }
+  return {
   ...('request' in material ? { request: material.request, context: material.context, objective: material.objective,
-    ...(material.feedbackStandard === undefined ? {} : { feedbackStandard: material.feedbackStandard }) } : { prompt: material.prompt }),
+    ...(material.feedbackStandard === undefined ? {} : { feedbackStandard: material.feedbackStandard }) } : { prompt: material.prompt,
+      ...('sourceKind' in material ? { sourceKind: material.sourceKind } : {}) }),
   criteria: material.criteria, ...(material.qualityContract === undefined ? {} : { qualityContract: material.qualityContract }), files: material.files,
-})
+  }
+}
 /** Saved study material only, without reading today's target files or fabricating an ordinary task. */
 type StudyConfig = ConversationIsolatedPythonCheckConfig & { readonly requiredCondition: string; readonly criteria: readonly string[] }
 type InternalStudyConfig = InternalConfig & { readonly requiredCondition: string; readonly criteria: readonly string[] }
@@ -208,7 +216,9 @@ export function createConversationStudyIsolatedJsonCohortCheck(raw: InternalCoho
   const definitions = new Map(roles.map((id, index) => {
     const entry = config.cases[id], material = body(entry.material), files = parseConversationFileMaterial(material.files)
     assert(files.outputKind === 'files' && (engine === 'node-project' ? files.outputPaths.length > 0 : files.outputPaths.length === 1))
-    assert(('request' in material) === (index < 3))
+    const native = 'sourceKind' in material && material.sourceKind === 'native-goal-task'
+    assert(index < 3 ? 'request' in material || native : 'prompt' in material && !('sourceKind' in material))
+    if (native) parseNativeGoalStudyInput(material.prompt)
     assert(material.qualityContract !== undefined)
     parseConversationQualityContract(material.qualityContract)
     const targetPath = engine === 'node-project' ? entry.entryPath! : files.outputPaths[0]!
@@ -221,6 +231,7 @@ export function createConversationStudyIsolatedJsonCohortCheck(raw: InternalCoho
     return [id, { material, materialDigest: sha256(material), producer }] as const
   }))
   const first = definitions.get('source1')!.material, cwd = first.files.cwd, qualityDigest = sha256(first.qualityContract)
+  assert(roles.slice(0,3).every(id => ('sourceKind' in definitions.get(id)!.material) === ('sourceKind' in first)))
   assert(roles.every(id => definitions.get(id)!.material.files.cwd === cwd && sha256(definitions.get(id)!.material.qualityContract) === qualityDigest))
   const cohortDigest = sha256(config)
   const independent = (id: 'adjacent' | 'holdout') => {

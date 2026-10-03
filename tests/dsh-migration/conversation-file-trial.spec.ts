@@ -68,6 +68,33 @@ async function mountTrial(script: Parameters<typeof mountPersistentHarness>[1], 
   return { ...harness, root, original, replicas, parent, material, input }
 }
 
+it.each(['files', 'chat'] as const)('preserves native Goal authority and restores its %s worker without new requests', async outputKind => {
+  let workerRequest = ''
+  const harness = await mountTrial([request => {
+    workerRequest = JSON.stringify(request)
+    return outputKind === 'files' ? toolCallResponse('native-write', 'write', { file_path: 'output.md', content: 'candidate result' })
+      : toolCallResponse('native-read', 'read', { file_path: 'input.md' })
+  }, textResponse('Done.')])
+  const material = { sourceKind: 'native-goal-task' as const,
+    prompt: JSON.stringify({ protocol: 'tianwen.native-goal-study-input.v1', originalCommand: 'Use the supplied input to complete the requested task.',
+      goal: { objective: 'Complete the file task.', context: null, successCriteria: null }, delegatedTask: harness.material.prompt }),
+    files: { ...harness.material.files, outputKind,
+      entries: outputKind === 'chat' ? [harness.material.files.entries[0]!] : harness.material.files.entries,
+      outputPaths: outputKind === 'chat' ? [] : harness.material.files.outputPaths } }
+  try {
+    const result = await runConversationFileTrial(harness.ctx, harness.parent.agent, { ...harness.input, material, retainReceipt: () => undefined })
+    expect(workerRequest).toContain('Perform only delegatedTask within that original command')
+    expect(workerRequest).toContain('native-goal-task')
+    const calls = harness.adapter.requests.length
+    expect(await recoverConversationFileTrial(harness.ctx, result.proof, { receipt: result.receipt, material,
+      callConfig: harness.input.callConfig, outputDigest: result.outputDigest })).toEqual({ answer: result.answer, files: result.files, outputDigest: result.outputDigest })
+    await expect(recoverConversationFileTrial(harness.ctx, result.proof, { receipt: result.receipt,
+      material: { prompt: material.prompt, files: material.files }, callConfig: harness.input.callConfig, outputDigest: result.outputDigest })).rejects.toThrow()
+    expect(harness.adapter.requests).toHaveLength(calls)
+    expect(readdirSync(harness.replicas)).toEqual([])
+  } finally { await harness.parent.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['files', 'chat'] as const)('discloses existing execution limits and supplied paths before the %s worker acts', async outputKind => {
   let workerRequest = ''
   const harness = await mountTrial([

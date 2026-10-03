@@ -27,6 +27,17 @@ const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (tex
 })
 
 describe('claim evidence projection', () => {
+  it('keeps the original Goal command distinct from Planner requirements in a native Goal method trial', () => {
+    const task={sourceKind:'native-goal-task',prompt:JSON.stringify({protocol:'tianwen.native-goal-study-input.v1',
+      originalCommand:'Introduce the product using only the supplied confirmed facts.',
+      goal:{objective:'Original objective',context:'Planner context says 999 units, not a confirmed user fact.',successCriteria:'Original criterion'},
+      delegatedTask:'Planner asks to claim 777 users.',permissionMode:'workspace-write'}),criteria:['Original criterion'],qualityContract:conversationQualityContract()}
+    const evidence=projectClaimEvidence({task,answer:'The product has 777 users.'})
+    expect(evidence.items.filter(item=>item.role==='user').map(item=>item.text).join('')).toBe('Introduce the product using only the supplied confirmed facts.')
+    expect(evidence.items.some(item=>item.role==='assistant' && item.text.includes('777'))).toBe(true)
+    const planner=evidence.items.find(item=>item.role==='assistant' && item.text.includes('777'))!
+    expect(()=>validateClaimAudit(auditFor(evidence,text=>claim(text,'source-fact','supported',[planner.id])),evidence,'met')).toThrow('invalid-judgment')
+  })
   const fileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', outputKind: 'files', entries: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
   const fileResult = (content: string | null) => { const output = { answer: '', files: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content }] }; return { ...output, outputDigest: sha256(output) } }
   it('never promotes ancillary methods or locations to quotable factual source IDs', () => {

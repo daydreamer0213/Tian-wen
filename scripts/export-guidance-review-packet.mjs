@@ -7,12 +7,13 @@ import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { EvolutionLedger } from '../packages/tianwen-evolution/dist/ledger.js'
-import { recoverTextGuidanceStudyReviewPacket } from '../packages/tianwen-runtime-bundle/dist/guidance-review-packet.js'
+import { recoverTextGuidanceStudyReviewPacket, recoverFileGuidanceStudyReviewPacket } from '../packages/tianwen-runtime-bundle/dist/guidance-review-packet.js'
 
 const keys = ['--study-id', '--ledger-root', '--sessions-root', '--output-dir']
+const allowed = [...keys, '--goal-state-root']
 const input = process.argv.slice(2)
-if (input.length !== keys.length * 2 || input.some((part, index) => index % 2 === 0 && !keys.includes(part))) {
-  throw new Error(`usage: node scripts/export-guidance-review-packet.mjs ${keys.map(key => `${key} VALUE`).join(' ')}`)
+if (![keys.length * 2, allowed.length * 2].includes(input.length) || input.some((part, index) => index % 2 === 0 && !allowed.includes(part))) {
+  throw new Error(`usage: node scripts/export-guidance-review-packet.mjs ${keys.map(key => `${key} VALUE`).join(' ')} [--goal-state-root VALUE]`)
 }
 const options = new Map()
 for (let index = 0; index < input.length; index += 2) {
@@ -20,7 +21,10 @@ for (let index = 0; index < input.length; index += 2) {
   options.set(input[index], input[index + 1])
 }
 const studyId = options.get('--study-id')
+if (keys.some(key => !options.has(key))) throw new Error('required export option missing')
 if (['--ledger-root', '--sessions-root', '--output-dir'].some(key => !isAbsolute(options.get(key)))) throw new Error('export paths must be absolute')
+if (options.has('--goal-state-root') && !isAbsolute(options.get('--goal-state-root'))) throw new Error('Goal state root must be absolute')
+const goalStateRoot = options.has('--goal-state-root') ? realpathSync(options.get('--goal-state-root')) : undefined
 const ledgerRoot = resolve(options.get('--ledger-root'))
 const sessionsRoot = resolve(options.get('--sessions-root'))
 const outputDir = resolve(options.get('--output-dir'))
@@ -32,6 +36,7 @@ const within = (root, target) => {
 }
 if (!existsSync(ledgerRoot) || !existsSync(sessionsRoot) || !within(dataRoot, outputRealPath)
   || within(realpathSync(ledgerRoot), outputRealPath) || within(realpathSync(sessionsRoot), outputRealPath)
+  || goalStateRoot !== undefined && within(goalStateRoot, outputRealPath)
   || existsSync(outputDir)) throw new Error('export paths are invalid or output already exists')
 
 function allFiles(root) {
@@ -52,7 +57,8 @@ function sha(bytes) { return createHash('sha256').update(bytes).digest('hex') }
 function inputManifest() {
   const ledgerPath = join(ledgerRoot, 'ledger.jsonl')
   if (!existsSync(ledgerPath)) throw new Error('ledger unavailable')
-  return [...allFiles(ledgerRoot), ...allFiles(sessionsRoot).filter(path => /session\.jsonl(?:\.zstd)?$/u.test(path))]
+  return [...new Set([...allFiles(ledgerRoot), ...allFiles(sessionsRoot).filter(path => /session\.jsonl(?:\.zstd)?$/u.test(path)),
+    ...(goalStateRoot === undefined ? [] : allFiles(goalStateRoot))])].sort()
     .map(path => ({ path, bytes: statSync(path).size, sha256: sha(readFileSync(path)) }))
 }
 const before = inputManifest()
@@ -80,7 +86,9 @@ try {
   }
   const reviewContext = { sessionPersistence: persistence, tianwenEvolution: ledger,
     get: name => name === 'tianwenConversationFeedback' ? feedbackReader : undefined }
-  const packet = await recoverTextGuidanceStudyReviewPacket(reviewContext, studies[0])
+  if (studies[0].opened.nativeGoalSources !== undefined && goalStateRoot === undefined) throw new Error('native Goal export requires --goal-state-root')
+  const recoverPacket = studies[0].opened.evaluationMode === 'local-files' ? recoverFileGuidanceStudyReviewPacket : recoverTextGuidanceStudyReviewPacket
+  const packet = await recoverPacket(reviewContext, studies[0], { goalStateRoot })
   const after = inputManifest()
   if (JSON.stringify(before) !== JSON.stringify(after)) throw new Error('evidence changed during export')
   const packetBytes = Buffer.from(JSON.stringify(packet, null, 2) + '\n')

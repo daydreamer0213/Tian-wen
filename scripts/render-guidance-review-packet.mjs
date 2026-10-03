@@ -13,7 +13,8 @@ export function verifyGuidanceReviewPacket(bytes, manifest) {
     throw new Error('review packet SHA-256 does not match manifest')
   }
   const packet = JSON.parse(bytes.toString('utf8'))
-  if (packet.schemaVersion !== 'tianwen.guidance-review-packet.v1'
+  if (!['tianwen.guidance-review-packet.v1','tianwen.file-guidance-review-packet.v1'].includes(packet.schemaVersion)
+    || packet.schemaVersion === 'tianwen.file-guidance-review-packet.v1' && !['files','chat'].includes(packet.fileOutputKind)
     || packet.opened?.studyId !== manifest.studyId || packet.reviewStatus !== manifest.reviewStatus
     || !['unreviewed', 'diagnostic-historical'].includes(packet.reviewStatus)
     || (packet.reviewStatus === 'unreviewed' && packet.activation !== undefined)
@@ -84,6 +85,10 @@ export function renderGuidanceReviewMarkdown(packet, manifest) {
   ]
   for (const item of packet.cases) {
     lines.push('', `## ${item.id}（${item.kind}）`, '')
+    if (item.nativeGoalOriginal !== undefined) {
+      lines.push('原生 Goal 子任务来源与冻结要求：', '', fenced({ source: item.nativeGoalOriginal.source, material: item.nativeGoalOriginal.material }),
+        '', '原任务材料与回答（用户要求、Planner 要求和执行证据保持各自身份）：', '', fenced(item.nativeGoalOriginal.original))
+    }
     if (item.originalMaterial !== undefined) {
       lines.push('原任务材料：', '', fenced(item.originalMaterial), '', '原任务回答正文：', '', fenced(originalAnswerText(item.originalAnswer)))
       if (item.originalTaskReview !== undefined) {
@@ -97,6 +102,7 @@ export function renderGuidanceReviewMarkdown(packet, manifest) {
     lines.push('', '本案例冻结试验任务（含当时研究使用的标准）：', '', fenced(item.baseline.task))
     for (const arm of [item.baseline, item.candidate]) {
       lines.push('', `### ${arm.role}`, '', '完整回答正文：', '', fenced(arm.answer), '', '两份原生评审：', '', judgments(arm.reviews))
+      if (arm.fileResult !== undefined) lines.push('', '本次原生执行保存的完整文件输出：', '', fenced(arm.fileResult))
     }
   }
   lines.push('', '本阅读本没有独立结论。逐项判断请填写项目的独立语义审查工作单；不要依据模型评审的 met 数字直接放行。', '')

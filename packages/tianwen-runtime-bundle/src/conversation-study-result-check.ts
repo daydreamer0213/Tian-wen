@@ -2,6 +2,7 @@ import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome
   type ConversationExternalCheckOutcome, type ConversationFileEntry, type ConversationFileMaterial, type ConversationQualityContract,
   type GuidanceCaseResultCheck, type GuidanceStudyBody } from '@tianwen/evolution'
 import type { ConversationTaskMaterial } from './conversation-task-material.js'
+import type { NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
 import { withConversationObservationCancellation } from './conversation-external-check.js'
 
 export type ConversationStudyResultMaterial = {
@@ -9,7 +10,8 @@ export type ConversationStudyResultMaterial = {
   readonly qualityContract?: ConversationQualityContract
   readonly files: ConversationFileMaterial
 } & ({ readonly request: ConversationTaskMaterial['request'], readonly context: ConversationTaskMaterial['context'],
-  readonly objective: string, readonly feedbackStandard?: ConversationTaskMaterial['feedbackStandard'] } | { readonly prompt: string })
+  readonly objective: string, readonly feedbackStandard?: ConversationTaskMaterial['feedbackStandard'] } | { readonly prompt: string }
+  | { readonly sourceKind: 'native-goal-task', readonly prompt: string })
 export type ConversationStudyResultPreparation = ConversationStudyResultMaterial & {
   readonly caseId: string
   readonly modelConfigDigest: ReturnType<typeof sha256>
@@ -36,8 +38,8 @@ export interface PreparedConversationStudyResultCheck {
 export interface ConversationStudyResultCheck {
   /** Trusted host tasks, fixed before native case design. Missing input stops; no synthetic fallback. */
   readonly prepareIndependentCases?: (material: {
-    readonly sources: readonly ConversationTaskMaterial[]
-    readonly counterexample: ConversationTaskMaterial
+    readonly sources: readonly (ConversationTaskMaterial | NativeGoalTaskStudyMaterial)[]
+    readonly counterexample: ConversationTaskMaterial | NativeGoalTaskStudyMaterial
     readonly modelConfigDigest: ReturnType<typeof sha256>
     readonly qualityContract: ConversationQualityContract
     readonly cwd: string
@@ -63,7 +65,8 @@ export async function prepareConversationStudyResultChecks(check: ConversationSt
     if (value.files?.outputKind !== 'files' || sha256(value) !== body.cases[index]!.materialDigest) throw new Error('source-unavailable')
     const material: ConversationStudyResultMaterial = structuredClone({
       ...('request' in value ? { request: value.request, context: value.context, objective: value.objective,
-        ...(value.feedbackStandard === undefined ? {} : { feedbackStandard: value.feedbackStandard }) } : { prompt: value.prompt }),
+        ...(value.feedbackStandard === undefined ? {} : { feedbackStandard: value.feedbackStandard }) } : { prompt: value.prompt,
+          ...('sourceKind' in value ? { sourceKind: value.sourceKind as 'native-goal-task' } : {}) }),
       criteria: value.criteria, ...(value.qualityContract === undefined ? {} : { qualityContract: value.qualityContract }), files: value.files,
     })
     const prepared = await withConversationObservationCancellation(signal, () => check.prepare({ ...structuredClone(material),

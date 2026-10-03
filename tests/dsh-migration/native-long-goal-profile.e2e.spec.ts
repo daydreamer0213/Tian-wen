@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -35,6 +36,7 @@ import { readGoalTaskAcceptanceMaterial } from '../../packages/tianwen-runtime-b
 import * as runtimePublic from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { finishGoalTaskContentReviews } from '../../packages/tianwen-runtime-bundle/src/goal-task-content-review.js'
+import { recoverTextGuidanceStudyReviewPacket } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import {
   listLongGoals,
   readLongGoal,
@@ -140,12 +142,14 @@ class ProfileAdapter extends LlmAdapter {
     private readonly taskCount = 1,
     private readonly fileActions?: 'read-success' | 'read-error',
     private readonly failTaskFinalResponse = false,
+    private readonly researchControl = false,
+    private readonly researchExploration = false,
   ) { super() }
   private reviews = 0
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
-    if (this.requests.length > 20) {
+    if (this.requests.length > (this.researchControl ? 96 : 20)) {
       throw new Error(JSON.stringify(this.requests.slice(-5).map(request => ({
         sessionId: request.sessionId,
         roles: request.messages.slice(-4).map(message => message.role),
@@ -172,12 +176,30 @@ class ProfileAdapter extends LlmAdapter {
       const raw = options.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes(marker))
       if (raw?.type !== 'text') throw new Error('missing actual content evidence')
       const packet = JSON.parse(raw.text.slice(raw.text.indexOf(marker) + marker.length))
+      if (this.researchControl && packet.claimEvidence === undefined) {
+        const instruction = raw.text.slice(0, raw.text.indexOf(marker))
+        const value = instruction.startsWith('Design exactly two independent')
+          ? { adjacent: { prompt: 'Write a short note about the independent orchard schedule.', criteria: ['Follow the independent orchard requirement.'] },
+            holdout: { prompt: 'Write a short note about the independent library schedule.', criteria: ['Preserve the independent library requirement.'] } }
+          : instruction.startsWith('Choose exactly one response') ? this.researchExploration && packet.exploration === undefined
+            ? { exploration: { sourceTaskId: packet.sourceTaskIds[0], hypothesis: 'The missing instruction causes the controlled original constraint failure.',
+              alternative: 'The original constraint is already satisfied without the instruction.', temporaryInstruction: 'Follow the original request and preserve every explicit constraint.',
+              expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'met', treatment: 'met' } } }
+            : { guidance: 'Follow the original request and preserve every explicit constraint.' }
+            : { answer: instruction.includes('Follow the original request and preserve every explicit constraint.') ? 'Controlled candidate answer.'
+              : packet.sourceKind === 'native-goal-task' && JSON.parse(packet.prompt).delegatedTask.endsWith('case 3') ? 'Controlled counterexample answer.' : 'Controlled baseline answer.' }
+        for (const chunk of toolCallResponse('profile-study-'+this.requests.length, 'structured_output', value)) yield chunk
+        return
+      }
       const evidence = packet.claimEvidence as { evidenceDigest: string; items: {id: string;role: string;text: string}[] }
-      const tool = packet.original.source.files === undefined ? evidence.items.find(item => item.role === 'tool' && item.text === 'profile Task completed') : undefined
+      const tool = packet.original.source?.files === undefined ? evidence.items.find(item => item.role === 'tool' && item.text === 'profile Task completed') : undefined
       const answers = evidence.items.filter(item => item.role === 'answer')
       const index = ++this.reviews
       this.beforeReview?.(index)
-      const value = { verdict: this.contentVerdict, category: this.contentVerdict === 'not-met' ? 'instruction-following' : null,
+      const verdict = this.researchControl ? packet.original.source === undefined
+        ? packet.original.answer === 'Controlled baseline answer.' ? 'not-met' : 'met'
+        : packet.original.source.nativeGoal.task.objective.endsWith('case 3') ? 'met' : 'not-met' : this.contentVerdict
+      const value = { verdict, category: verdict === 'not-met' ? 'instruction-following' : null,
         explanation: 'Scripted engineering control, not a natural quality judgment.', evidenceQuotes: [answers[0]!.text],
         audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
           units: Object.fromEntries(answers.map(item => [item.id, item.text.trim() === '' ? null : {
@@ -234,7 +256,8 @@ class ProfileAdapter extends LlmAdapter {
           : {
               expectedGoalRevision: Number(revision),
               outcome: 'continue',
-              tasks: Array.from({ length: this.taskCount - this.taskSessions.size }, () => ({ objective: this.taskObjective })),
+              tasks: Array.from({ length: this.taskCount - this.taskSessions.size }, (_, index) => ({ objective: this.researchControl
+                ? `${this.taskObjective} case ${this.taskSessions.size + index + 1}` : this.taskObjective })),
           },
       )
     } else if (
@@ -276,6 +299,8 @@ async function mountProfile(
     readonly taskCount?: number
     readonly fileActions?: 'read-success' | 'read-error'
     readonly failTaskFinalResponse?: boolean
+    readonly researchControl?: boolean
+    readonly researchExploration?: boolean
   } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -342,7 +367,7 @@ async function mountProfile(
   await ctx.plugin(SubagentRuntime)
   if (options.contentVerdict === undefined) ctx.subagents.registerProvider(spawnProvider)
   else await ctx.plugin(nativeSpawn, { providerName: 'spawn' })
-  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse)
+  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse, options.researchControl, options.researchExploration)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
   const runtimeApi = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
     ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)) as typeof runtimePublic
@@ -501,6 +526,63 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it.each([false, true])('automatically consumes original native Goal sources in the existing research owner and cold restores the exact decision without new requests (exploration=%s)', async researchExploration => {
+    const profile = await mountProfile('Write the native Goal research engineering control', {
+      completeTaskThroughTool: true, contentVerdict: 'met', taskCount: 3, researchControl: true,
+      researchExploration,
+      goalTaskAcceptance: { async methodScope() { return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { return { checkerId: 'native-study-control', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Original engineering native Task completion.', contentReview: {},
+          async evaluate() { return { status: 'verified', detail: 'Scripted functional control, not natural evidence.' } } } } },
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(profile.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(3), { timeout: 10_000 })
+      await profile.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const studies = profile.ctx.tianwenEvolution.listConversationGuidanceStudies()
+      expect(studies).toHaveLength(1)
+      expect(studies[0]!.opened.nativeGoalSources).toHaveLength(3)
+      expect(studies[0]!.arms).toHaveLength(10)
+      expect(studies[0]!.decision?.verdict).toBe('accepted')
+      expect(studies[0]!.activation).toBeUndefined()
+      if (researchExploration) {
+        expect(studies[0]!.exploration?.intent.request.sourceKind).toBe('native-goal-task')
+        expect(studies[0]!.exploration?.arms).toHaveLength(2)
+        expect(studies[0]!.exploration?.result?.classification).toBe('matches-hypothesis-prediction')
+      } else expect(studies[0]!.exploration).toBeUndefined()
+      expect(profile.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toHaveLength(1)
+      expect(profile.ctx.tianwenEvolution.listConversationTasks().some(task=>studies[0]!.opened.sourceTaskIds.includes(task.source.taskId))).toBe(false)
+      const requests=profile.adapter.requests.length
+      const packet=await recoverTextGuidanceStudyReviewPacket(profile.ctx,studies[0]!)
+      const readonlyContext={sessionPersistence:profile.ctx.sessionPersistence,tianwenEvolution:profile.ctx.tianwenEvolution,get:()=>undefined}
+      expect(await recoverTextGuidanceStudyReviewPacket(readonlyContext as unknown as Context,studies[0]!,{goalStateRoot:profile.stateRoot})).toEqual(packet)
+      await expect(recoverTextGuidanceStudyReviewPacket(readonlyContext as unknown as Context,studies[0]!)).rejects.toThrow('source-unavailable')
+      expect(packet.cases.slice(0,3).every(item=>item.nativeGoalOriginal?.sourceKind==='native-goal-task')).toBe(true)
+      expect(packet.caseDesign?.semanticIndependence).toBe('unestablished')
+      expect(profile.adapter.requests).toHaveLength(requests)
+      const ledger = readFileSync(join(profile.evolutionRoot,'ledger.jsonl'))
+      await profile.dispose(false)
+      const cold = await mountProfile('Write the native Goal research engineering control', { root: profile.root, resumeMain: true, contentVerdict: 'met', researchControl: true })
+      try {
+        await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual(studies)
+        expect(readFileSync(join(profile.evolutionRoot,'ledger.jsonl'))).toEqual(ledger)
+        expect(cold.adapter.requests).toHaveLength(0)
+        expect(await recoverTextGuidanceStudyReviewPacket(cold.ctx,studies[0]!)).toEqual(packet)
+        if(process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED==='1') {
+          const outputDir=join(profile.root,'read-only-export')
+          const exported=spawnSync(process.execPath,[resolve('scripts/export-guidance-review-packet.mjs'),'--study-id',studies[0]!.opened.studyId,
+            '--ledger-root',profile.evolutionRoot,'--sessions-root',profile.sessionsRoot,'--goal-state-root',profile.stateRoot,'--output-dir',outputDir],
+          {cwd:resolve('.'),encoding:'utf8',timeout:30_000})
+          expect(exported.status,exported.stderr || exported.stdout).toBe(0)
+          expect(JSON.parse(readFileSync(join(outputDir,'packet.json'),'utf8'))).toEqual(JSON.parse(JSON.stringify(packet)))
+          expect(readFileSync(join(profile.evolutionRoot,'ledger.jsonl'))).toEqual(ledger)
+          expect(cold.adapter.requests).toHaveLength(0)
+        }
+      } finally { await cold.dispose(true) }
+    } finally { await profile.dispose() }
+  }, 60_000)
   it('retains a completed semantic problem as research evidence when its original functional checker was unavailable', async () => {
     const profile = await mountProfile('Complete the separate checker-availability control.', {
       completeTaskThroughTool: true, contentVerdict: 'not-met',

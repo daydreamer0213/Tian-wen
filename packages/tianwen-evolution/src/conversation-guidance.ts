@@ -537,6 +537,9 @@ export class ConversationGuidanceState {
         || request.qualityContractDigest !== sha256(opened.qualityContract ?? null)) {
         throw new Error('guidance exploration request disagrees with its frozen opened study')
       }
+      if (request.sourceKind !== (opened.nativeGoalSources === undefined ? 'conversation-task' : 'native-goal-task')) {
+        throw new Error('guidance exploration source kind disagrees with its frozen opened study')
+      }
       if (this.nativeSessions.has(request.proposalProof.sessionId)) throw new Error('guidance exploration proposal must use an independent native Session')
       return
     }

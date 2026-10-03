@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { parseNativeGoalStudyInput } from '../packages/tianwen-runtime-bundle/dist/goal-task-study-input.js'
 
 // Frozen material schema constants for conversation file graphs.
 const FILE_SCHEMA_VERSION = 'tianwen.conversation-file-material.v1'
@@ -174,14 +175,17 @@ function graphMatchesContract(contract, files) {
 // returns null when the material is unknown, damaged or ambiguous.
 function resolveMaterial(config, raw) {
   if (!isObject(raw)) return null
-  if (!Array.isArray(raw.context) || typeof raw.objective !== 'string'
+  const native = raw.sourceKind === 'native-goal-task'
+  if (Object.hasOwn(raw,'sourceKind') && !native) return null
+  if ((!native && (!Array.isArray(raw.context) || typeof raw.objective !== 'string'))
     || !Array.isArray(raw.criteria) || !raw.criteria.every(isNonEmptyString)) return null
   if (!isObject(raw.qualityContract) || !isDeepStrictEqual(raw.qualityContract, config.qualityContract)) {
     return null
   }
   if (!isValidFiles(raw.files, config.cwd)) return null
 
-  const projected = projectRequest(raw.request)
+  let projected
+  try { projected = native ? parseNativeGoalStudyInput(raw.prompt).delegatedTask : projectRequest(raw.request) } catch { return null }
   if (projected === undefined) return null
 
   let matchedIndex = -1
@@ -189,6 +193,7 @@ function resolveMaterial(config, raw) {
   for (let index = 0; index < config.originals.length; index += 1) {
     const contract = config.originals[index]
     if (contract.requestText !== projected) continue
+    if (native && !raw.criteria.includes(contract.requiredCondition)) continue
     if (!graphMatchesContract(contract, raw.files)) continue
     matchedIndex = index
     matchCount += 1
@@ -202,7 +207,7 @@ function resolveMaterial(config, raw) {
 function buildOriginalEntry(config, index, raw) {
   const contract = config.originals[index]
   const material = {}
-  for (const key of ORIGINAL_MATERIAL_KEYS) {
+  for (const key of raw.sourceKind === 'native-goal-task' ? ['sourceKind','prompt','criteria','qualityContract','files'] : ORIGINAL_MATERIAL_KEYS) {
     material[key] = clone(raw[key])
   }
   if (Object.hasOwn(raw, 'feedbackStandard')) {
@@ -247,6 +252,7 @@ export function buildDevelopmentFunctionalStudyCases(config, material) {
     return undefined
   }
   if (!Array.isArray(material.sources) || material.sources.length !== 2) return undefined
+  if (new Set([...material.sources,material.counterexample].map(source=>source?.sourceKind)).size !== 1) return undefined
 
   const resolved = [
     resolveMaterial(config, material.sources[0]),

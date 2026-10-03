@@ -67,3 +67,22 @@ it('labels a new unactivated accepted study as awaiting independent review', () 
   expect(markdown).toContain('待独立审查，不代表方法已获放行')
   expect(markdown).not.toContain('历史诊断，不能用于新方法放行')
 })
+it('renders explicit native Goal provenance and file packets without granting approval or exposing reasoning',()=>{
+  const {packet,manifest}=fixture()
+  const native={...packet,schemaVersion:'tianwen.file-guidance-review-packet.v1',fileOutputKind:'files',
+    cases:packet.cases.map((item,index)=>({...item,
+      baseline:{...item.baseline,answer:'Done.',fileResult:{answer:'Done.',files:[{path:'output.md',content:'BASELINE_ACTUAL_FILE'}],outputDigest:'baseline-digest'}},
+      candidate:{...item.candidate,answer:'Done.',fileResult:{answer:'Done.',files:[{path:'output.md',content:'CANDIDATE_ACTUAL_FILE'}],outputDigest:'candidate-digest'}},
+      ...(index<3?{nativeGoalOriginal:{sourceKind:'native-goal-task',source:{sourceId:'goal-task-result:original'},
+      material:{prompt:'ORIGINAL COMMAND AND PLANNER REQUIREMENTS'},original:{conversation:[{role:'assistant',content:[{type:'reasoning',text:'PRIVATE NATIVE REASONING'},
+        {type:'text',text:'ORIGINAL NATIVE ANSWER'}]}]}}}:{})}))}
+  const bytes=Buffer.from(JSON.stringify(native))
+  const bound={...manifest,packetSha256:createHash('sha256').update(bytes).digest('hex')}
+  const rendered=renderGuidanceReviewMarkdown(verifyGuidanceReviewPacket(bytes,bound),bound)
+  expect(rendered).toContain('原生 Goal 子任务来源与冻结要求')
+  expect(rendered).toContain('ORIGINAL NATIVE ANSWER')
+  expect(rendered).not.toContain('PRIVATE NATIVE REASONING')
+  expect(rendered).toContain('不能用于新方法放行')
+  expect(rendered).toContain('BASELINE_ACTUAL_FILE')
+  expect(rendered).toContain('CANDIDATE_ACTUAL_FILE')
+})

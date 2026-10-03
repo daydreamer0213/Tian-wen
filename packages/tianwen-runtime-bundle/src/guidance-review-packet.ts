@@ -7,24 +7,31 @@ import { conversationMessages, conversationTaskModelDigest, recoverConversationT
 import { recoverConversationFileTrial, recoverConversationFileTrialExecution } from './conversation-file-trial.js'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { recoverConversationCaseDesign, type RecoveredConversationCaseDesign } from './conversation-case-design.js'
+import { recoverGoalGuidanceSource } from './goal-task-research-source.js'
+import { goalTaskResearchProblem, goalTaskResearchSuccess } from '@tianwen/evolution/goal-task-research'
+
+export interface GuidanceReviewPacketOptions { readonly goalStateRoot?: string }
+function goalStateRoot(ctx: Context, options: GuidanceReviewPacketOptions = {}) {
+  return options.goalStateRoot ?? ctx.get('tianwenConversationGuidanceLoop')?.nativeGoalStateRoot
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 /** One read-only text arm for an independent review packet. No verdict is added. */
-export async function recoverTextGuidanceArmForReview(ctx: Context, study: GuidanceStudy, arm: GuidanceArmRecord) {
+export async function recoverTextGuidanceArmForReview(ctx: Context, study: GuidanceStudy, arm: GuidanceArmRecord, options: GuidanceReviewPacketOptions = {}) {
   if (study.opened.evaluationMode === 'local-files') throw new Error('source-unavailable')
-  return recoverGuidanceArmForReview(ctx, study, arm)
+  return recoverGuidanceArmForReview(ctx, study, arm, options)
 }
 
 /** Restores actual file output and its native receipt; adds no quality verdict. */
-export async function recoverFileGuidanceArmForReview(ctx: Context, study: GuidanceStudy, arm: GuidanceArmRecord) {
+export async function recoverFileGuidanceArmForReview(ctx: Context, study: GuidanceStudy, arm: GuidanceArmRecord, options: GuidanceReviewPacketOptions = {}) {
   if (study.opened.evaluationMode !== 'local-files') throw new Error('source-unavailable')
-  return recoverGuidanceArmForReview(ctx, study, arm)
+  return recoverGuidanceArmForReview(ctx, study, arm, options)
 }
 
-async function recoverGuidanceArmForReview(ctx: Context, study: GuidanceStudy, arm: GuidanceArmRecord) {
+async function recoverGuidanceArmForReview(ctx: Context, study: GuidanceStudy, arm: GuidanceArmRecord, options: GuidanceReviewPacketOptions = {}) {
   const opened = study.opened
   if (study.decision?.verdict !== 'accepted' || study.candidate === undefined
     || study.arms.length !== 10 || sha256(study.arms) !== study.decision.armsDigest
@@ -57,13 +64,15 @@ async function recoverGuidanceArmForReview(ctx: Context, study: GuidanceStudy, a
       || captured.receipt.outputKind !== opened.fileOutputKind || files.outputKind !== opened.fileOutputKind
       || sha256(captured.receipt.executionProof) !== sha256(arm.executionProof)) throw new Error('source-unavailable')
     const source = ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === opened.sourceTaskIds[0])
-    if (source === undefined) throw new Error('source-unavailable')
-    const callConfig = await recoverConversationTaskModel(ctx, source)
+    if (source === undefined && opened.nativeGoalSources === undefined) throw new Error('source-unavailable')
+    const callConfig = opened.nativeGoalSources === undefined ? await recoverConversationTaskModel(ctx, source!)
+      : (await recoverGoalGuidanceSource(ctx, goalStateRoot(ctx, options), opened, opened.sourceTaskIds[0])).callConfig
     if (sha256(callConfig) !== opened.modelConfigDigest) throw new Error('source-unavailable')
     const original = task as unknown as ConversationTaskMaterial
     const worker = 'request' in task && 'context' in task ? { request: original.request, context: original.context, files,
       ...(original.ancillaryContext === undefined ? {} : { ancillaryContext: original.ancillaryContext }) }
-      : typeof task.prompt === 'string' ? { prompt: task.prompt, files } : undefined
+      : typeof task.prompt === 'string' ? { prompt: task.prompt, files,
+        ...(task.sourceKind === 'native-goal-task' ? { sourceKind: 'native-goal-task' as const } : {}) } : undefined
     if (worker === undefined) throw new Error('source-unavailable')
     const recovery = { receipt: captured.receipt, material: worker,
       callConfig, outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) }
@@ -79,7 +88,8 @@ async function recoverGuidanceArmForReview(ctx: Context, study: GuidanceStudy, a
       reviewStatus: study.activation === undefined ? 'unreviewed' as const : 'diagnostic-historical' as const }
   }
   const trialMaterial = 'request' in task && 'context' in task ? { request: task.request, context: task.context }
-    : 'prompt' in task ? { prompt: task.prompt } : undefined
+    : 'prompt' in task ? { prompt: task.prompt,
+      ...(task.sourceKind === 'native-goal-task' ? { sourceKind: 'native-goal-task' as const } : {}) } : undefined
   if (trialMaterial === undefined) throw new Error('source-unavailable')
   const execution = await recoverConversationTrial(ctx, arm.executionProof, {
     outputDigest: arm.outputDigest, materialDigest: sha256(trialMaterial), modelConfigDigest: opened.modelConfigDigest,
@@ -133,6 +143,12 @@ type ReviewCase = {
   readonly originalAnswer?: OriginalAnswer
   readonly originalTaskReview?: ConversationTask['review']
   readonly originalFileResult?: ConversationFileResult
+  readonly nativeGoalOriginal?: {
+    readonly sourceKind: 'native-goal-task'
+    readonly source: Awaited<ReturnType<typeof recoverGoalGuidanceSource>>['source']
+    readonly material: Awaited<ReturnType<typeof recoverGoalGuidanceSource>>['studyMaterial']
+    readonly original: Awaited<ReturnType<typeof recoverGoalGuidanceSource>>['original']
+  }
   readonly feedback?: {
     readonly assessmentId: string
     readonly originalFeedback: ConversationFeedbackMaterial['feedback']
@@ -145,7 +161,7 @@ type ReviewCase = {
 }
 
 /** Complete text-only evidence packet. Missing raw feedback or any native proof stops export. */
-async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy, fileMode: boolean): Promise<{
+async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy, fileMode: boolean, options: GuidanceReviewPacketOptions): Promise<{
   readonly schemaVersion: 'tianwen.guidance-review-packet.v1'
   readonly reviewStatus: 'unreviewed' | 'diagnostic-historical'
   readonly opened: GuidanceStudy['opened']
@@ -174,13 +190,25 @@ async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStu
     const item = matches[0]!
     const arms = study.arms.filter(arm => arm.caseId === item.id)
     if (arms.length !== 2 || arms[0]?.role !== 'baseline' || arms[1]?.role !== 'candidate') throw new Error('source-unavailable')
-    const [baseline, candidate] = await Promise.all(arms.map(arm => recoverGuidanceArmForReview(ctx, study, arm))) as [ReviewedArm, ReviewedArm]
+    const [baseline, candidate] = await Promise.all(arms.map(arm => recoverGuidanceArmForReview(ctx, study, arm, options))) as [ReviewedArm, ReviewedArm]
     if (sha256(baseline.task) !== sha256(candidate.task)) throw new Error('source-unavailable')
     if (!('sourceTaskId' in item)) {
       const generated = { prompt: item.prompt, criteria: item.criteria, ...(item.qualityContract === undefined ? {} : { qualityContract: item.qualityContract }),
         ...(item.files === undefined ? {} : { files: item.files }) }
       if (sha256(generated) !== sha256(baseline.task)) throw new Error('source-unavailable')
       cases.push({ id: item.id, kind: 'synthetic', materialDigest: item.materialDigest, baseline, candidate })
+      continue
+    }
+    if (study.opened.nativeGoalSources !== undefined) {
+      const recovered = await recoverGoalGuidanceSource(ctx, goalStateRoot(ctx, options), study.opened, item.sourceTaskId)
+      const expectedId = kind === 'counterexample' ? study.opened.counterexampleTaskId : study.opened.sourceTaskIds[kind === 'source1' ? 0 : 1]
+      if (item.sourceTaskId !== expectedId || item.feedbackAssessmentId !== undefined
+        || sha256(recovered.studyMaterial) !== sha256(baseline.task)
+        || (kind === 'counterexample' ? !goalTaskResearchSuccess(recovered.source)
+          : goalTaskResearchProblem(recovered.source)?.category !== study.opened.failureCategory)) throw new Error('source-unavailable')
+      cases.push({ id: item.id, kind: kind === 'counterexample' ? 'counterexample' : 'source', materialDigest: item.materialDigest,
+        originalTaskId: item.sourceTaskId, nativeGoalOriginal: { sourceKind: 'native-goal-task', source: recovered.source,
+          material: recovered.studyMaterial, original: recovered.original }, baseline, candidate })
       continue
     }
     const matchingTasks = tasks.filter(task => task.source.taskId === item.sourceTaskId)
@@ -242,6 +270,7 @@ async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStu
   if (!historicalProposal && sha256(proposal.material.sourceTaskIds) !== sha256(study.opened.sourceTaskIds)) throw new Error('source-unavailable:proposal-tasks')
   if (proposal.material.family !== study.opened.family || proposal.material.failureCategory !== study.opened.failureCategory
     || sha256(proposal.material.checkedFailureSources ?? null) !== sha256(study.opened.checkedFailureSources ?? null)
+    || sha256(proposal.material.nativeGoalSources ?? null) !== sha256(study.opened.nativeGoalSources ?? null)
     || proposal.material.currentGuidance !== (guidanceRule(study.opened.parentSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind) ?? '')) throw new Error('source-unavailable:proposal-context')
   if (proposal.modelConfigDigests.some(digest => digest !== study.opened.modelConfigDigest)) throw new Error('source-unavailable:proposal-model')
   if (!Array.isArray(proposal.material.sources) || proposal.material.sources.length !== 2) throw new Error('source-unavailable:proposal-sources')
@@ -255,13 +284,13 @@ async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStu
 }
 
 /** Historical text schema and fields are unchanged. */
-export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy) {
-  return recoverGuidanceStudyReviewPacket(ctx, study, false)
+export async function recoverTextGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy, options: GuidanceReviewPacketOptions = {}) {
+  return recoverGuidanceStudyReviewPacket(ctx, study, false, options)
 }
 
 /** File evidence for a trusted independent checker, never adoption permission. */
-export async function recoverFileGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy) {
-  const packet = await recoverGuidanceStudyReviewPacket(ctx, study, true)
+export async function recoverFileGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStudy, options: GuidanceReviewPacketOptions = {}) {
+  const packet = await recoverGuidanceStudyReviewPacket(ctx, study, true, options)
   return { ...packet, schemaVersion: 'tianwen.file-guidance-review-packet.v1' as const,
     fileOutputKind: study.opened.fileOutputKind! }
 }

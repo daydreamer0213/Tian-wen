@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { nativeGoalTrialInstruction } from './goal-task-study-input.js'
 import type {} from '@deepseek-ai/dsh-subagent'
 import { randomUUID } from 'node:crypto'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -243,7 +244,7 @@ export async function runConversationTrial(ctx: Context, parent: Agent, input: O
   const result = await runNativeStructured(ctx, parent, {
     ...input,
     outputSchema: TRIAL_SCHEMA,
-    instruction: trialInstruction(input.guidance),
+    instruction: trialInstruction(input.guidance) + nativeGoalTrialInstruction(input.material),
     captureReminder: true,
   }, TRIAL_PERSONA)
   if (result.value === null || typeof result.value !== 'object' || Object.keys(result.value).length !== 1
@@ -268,7 +269,7 @@ export async function recoverConversationTrial(ctx: Context, proof: Conversation
     || !('answer' in value) || typeof value.answer !== 'string' || value.answer.trim().length === 0
     || Buffer.byteLength(value.answer, 'utf8') > 32_768 || sha256(value.answer) !== expected.outputDigest) throw new Error('invalid-judgment')
   const recovered = await recoverNativeStructured(ctx, proof, value, true, TRIAL_PERSONA)
-  if (recovered.instruction !== trialInstruction(expected.guidance) || sha256(recovered.material) !== expected.materialDigest
+  if (recovered.instruction !== trialInstruction(expected.guidance) + nativeGoalTrialInstruction(recovered.material) || sha256(recovered.material) !== expected.materialDigest
     || recovered.modelConfigDigests.some(digest => digest !== expected.modelConfigDigest)) throw new Error('invalid-judgment')
   return { answer: value.answer, material: recovered.material }
 }

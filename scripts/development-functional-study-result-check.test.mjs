@@ -11,6 +11,22 @@ test('DEV result host exposes actual Runtime options with the same frozen cwd',(
   assert.equal(typeof options.studyResultCheck.prepareIndependentCases,'function')
   assert.throws(()=>host.createDevelopmentNativeCheckOptions({...f.ordinary(1),cwd:'D:/DevData/another-project'},f.config))
 })
+test('DEV resolves original native Goal contracts without manufacturing conversation sources',async()=>{
+  const f=fixture()
+  const native=n=>{const original=f.source(n);return {sourceKind:'native-goal-task',
+    prompt:JSON.stringify({protocol:'tianwen.native-goal-study-input.v1',originalCommand:'Complete these original project tasks.',
+      goal:{objective:'Complete original modules.',context:null,successCriteria:null},delegatedTask:f.original(n).requestText}),
+    criteria:[f.original(n).requestText,f.requiredCondition],qualityContract:original.qualityContract,files:original.files}}
+  const material={...f.material,sources:[native(2),native(1)],counterexample:native(3)}
+  const definitions=build(f.config,material)
+  assert(definitions)
+  assert.deepEqual(definitions.source1.material,material.sources[0])
+  assert.equal(Object.hasOwn(definitions.source1.material,'request'),false)
+  const check=host.createDevelopmentFunctionalStudyResultCheck(f.config)
+  assert(await check.prepareIndependentCases(material))
+  const changed=structuredClone(material.sources[0]);const input=JSON.parse(changed.prompt);input.delegatedTask='Unknown Task';changed.prompt=JSON.stringify(input)
+  assert.equal(await check.prepareIndependentCases({...material,sources:[changed,material.sources[1]]}),undefined)
+})
 test('no study case can be prepared before the host accepts independent cases',async()=>{
   const f=fixture(),check=host.createDevelopmentFunctionalStudyResultCheck(f.config),definition=build(f.config,f.material).source1
   assert.equal(await check.prepare({...definition.material,caseId:'source1',modelConfigDigest:f.material.modelConfigDigest,signal:f.material.signal}),undefined)

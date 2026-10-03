@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 原Goal自动研究消费已交付，进入原第三项
+
+ad9b530后，原GuidanceLoop显式消费native-goal-task及普通来源，原扫描/唤醒/根会话恢复/五案例十臂/双审/程序条件/裁决同步承接；原command保持用户身份，Goal/Planner是独立要求元数据，worker与原程序准备保留来源。原探索增加明确native v3，普通v2身份不变；原案例/提案/接受后恢复和只读packet核对原引用/材料/model/proof，不伪造ConversationTask或用户反馈。DEV原五角色合同匹配消费native冻结要求/图/条件。详见[准确交付与剩余工作](tianwen-goal-task-research-consumer-20261003.md)。
+
+实际发行SDK直接提案、一次探索两条工程路径各完成3来源/5案例/10正式臂/accepted/无activation/一次attempt；探索另2臂。新Context同进程原study/ledger/packet精确恢复0请求，另Node进程只读CLI导出一致且输入摘要不变，不称新进程自动启用恢复。文件files/chat worker实际SDK与冷proof通过，程序cohort/DEV host准备检查通过；未启动容器验证原生Goal完整代码研究，原案例语义独立性仍unestablished。0真实提供者/自然收益，不以工程accepted放行。
+
+发行2文件115通过/1源码spy跳过，9文件427通过、另4文件90通过（含重复4Markdown，不累计），DEV host2文件33通过；Evolution与完整Runtime构建/两声明/公共边界通过。独立有据文件阅读本遗漏首红后修并复核关闭，最后静态无新有据P1/P2。正式1327364B/5af25fcd…只读准确未变、未正式mount或新计数。小包约56KB，D约18.12GiB>=15，Docker未启动；正常夹具退出清理，原5拒删目录不绕过。
+
+三项收口计划第二项工程连接已完成，完整目标active/incomplete，直接进入原第三项治理启用、下一真实Goal Task效果及原回滚，不新增阶段/验收/计时。main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口保持。自行选择确实未完成的项目待办，优先核对原生Task退化进入原回滚；不索题、催OfferGo评价、造自然失败、重评旧题或追加结束练习，不把单项缺证据标成整个目标blocked。本条覆盖下方“原研究消费者尚未接入”的旧待办。
+
 ## 2026-10-03 原Goal研究来源已自动发布，原消费者实施继续
 
 a9c5361后，未来原prepare事前冻结已有质量合同，原finish lane恢复原Task/SDK/方法/两proof并幂等发布明确native-goal-task来源；原Evolution attempt/study增加显式引用及原资格/去重/程序条件/真实消息反馈否决/冷重放。全Task模型配置、当前合同对应audit、原生命周期/助手消息绑定保持，不同TaskID不伪装输入独立，原结果不改。详见[来源交付与未完成消费者](tianwen-goal-task-research-20261003.md)。

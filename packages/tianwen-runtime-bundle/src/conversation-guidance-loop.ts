@@ -21,13 +21,27 @@ import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@ti
 import { withConversationObservationCancellation } from './conversation-external-check.js'
 import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
 import { SOURCE_EXCLUSION_KEYS, type ConversationSourceExclusion, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
+import { goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
+import { recoverGoalTaskResearchSource, recoverGoalGuidanceSource, type NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationGuidanceLoop: TianwenConversationGuidanceLoopService }
 }
-interface EvidenceGroup { readonly sources: readonly [ConversationTask, ConversationTask], readonly counterexample: ConversationTask, readonly category: ConversationFailure, readonly checkedFailureSources?: ConversationCheckedFailureSources, readonly assessments: readonly (ConversationFeedbackAssessment | undefined)[], readonly proposalClues: readonly { readonly reference: GuidanceProposalClue, readonly material: ConversationProposalClueMaterial }[] }
+interface ConversationEvidenceGroup { readonly kind?: undefined; readonly sources: readonly [ConversationTask, ConversationTask], readonly counterexample: ConversationTask, readonly category: ConversationFailure, readonly checkedFailureSources?: ConversationCheckedFailureSources, readonly assessments: readonly (ConversationFeedbackAssessment | undefined)[], readonly proposalClues: readonly { readonly reference: GuidanceProposalClue, readonly material: ConversationProposalClueMaterial }[] }
+interface NativeGoalEvidenceGroup { readonly kind: 'native-goal-task'; readonly sources: readonly [GoalTaskResearchSource, GoalTaskResearchSource]; readonly counterexample: GoalTaskResearchSource; readonly category: ConversationFailure; readonly checkedFailureSources?: undefined; readonly assessments: readonly undefined[]; readonly proposalClues: readonly [] }
+type EvidenceGroup = ConversationEvidenceGroup | NativeGoalEvidenceGroup
+type StudyMaterial = ConversationTaskMaterial | NativeGoalTaskStudyMaterial
+const sourceId = (source: ConversationTask | GoalTaskResearchSource) => 'input' in source ? source.sourceId : source.source.taskId
+const sourceMetadata = (source: ConversationTask | GoalTaskResearchSource) => 'input' in source
+  ? { scopeKey:source.input.scopeKey,consentRevision:source.outcome.input.consentRevision,family:source.input.family,qualityContract:source.input.qualityContract,
+    evaluationMode:source.input.evaluationMode,fileOutputKind:source.input.fileOutputKind }
+  : { scopeKey:source.source.scopeKey,consentRevision:source.source.consentRevision,family:effectiveConversationFamily(source),qualityContract:source.admission?.qualityContract,
+    evaluationMode:source.admission?.decision?.evaluationMode,fileOutputKind:source.admission?.decision?.fileOutputKind }
+const studyTexts = (material: StudyMaterial, requestOnly=false) => 'request' in material
+  ? conversationEvidenceTexts(requestOnly ? {request:material.request,context:[]} : material,[]) : [material.prompt]
 type GuidanceReadinessState = 'analysis-disabled' | 'awaiting-compatible-sources' | 'awaiting-counterexample' | 'already-studied' | 'already-attempted' | 'ready-to-schedule'
-type SelectionScan = { readonly state: GuidanceReadinessState, readonly diagnostics?: ConversationSourceReadinessDiagnostics, readonly group?: Omit<EvidenceGroup, 'proposalClues'> }
+type SelectionScan = { readonly state: GuidanceReadinessState, readonly diagnostics?: ConversationSourceReadinessDiagnostics,
+  readonly group?: Omit<ConversationEvidenceGroup, 'proposalClues'> | Omit<NativeGoalEvidenceGroup, 'proposalClues'> }
 
 const RAW_FEEDBACK_GUIDANCE = 'When a source has feedbackStandard.originalFeedback, it is exact attributed feedback to an earlier assistant answer. Preserve its speaker, actor, negation, exception and unresolved references; use it to interpret only the attributed continuing preference or supported problem, never every new request in the feedback. The current evaluated task instruction remains authoritative, and feedback is not factual source evidence.'
 
@@ -99,9 +113,9 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private readonly recoverable = new Set<string>()
   private accepting = true
 
-  private readonly sourceConfig: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
+  private readonly sourceConfig: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
   private readonly studyResultCheck: ConversationStudyResultCheck | undefined
-  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly studyResultCheck?: ConversationStudyResultCheck } = {}) {
+  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly studyResultCheck?: ConversationStudyResultCheck } = {}) {
     super(ctx, 'tianwenConversationGuidanceLoop')
     const { studyResultCheck, ...sourceConfig } = config
     this.sourceConfig = structuredClone(sourceConfig)
@@ -134,11 +148,17 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const offReview = this.ctx.on('tianwen/conversation-task-reviewed', wakeTask)
     const offCheck = this.ctx.on('tianwen/conversation-code-check-finished', wakeTask)
     const offInvalidation = this.ctx.on('tianwen/conversation-code-check-invalidated', wakeTask)
+    const offGoalSource = this.ctx.on('tianwen/goal-task-research-source-recorded', sourceId => {
+      const source=this.ctx.tianwenEvolution.listGoalTaskResearchSources().find(item=>item.sourceId===sourceId)
+      if(source !== undefined) void this.wakeGoalSource(source).catch(error=>this.warn(error))
+    })
     const wakeSession = (sessionId: string) => {
       const agent = this.ctx.agents.get(SessionId(sessionId))
       if (agent !== undefined) void this.schedule(agent).catch(error => this.warn(error))
       else for (const task of this.ctx.tianwenEvolution.listConversationTasks().filter(item => item.source.sessionId === sessionId))
         void this.wakeTask(task).catch(error => this.warn(error))
+      for (const source of this.ctx.tianwenEvolution.listGoalTaskResearchSources().filter(item=>item.outcome.input.childSessionId === sessionId))
+        void this.wakeGoalSource(source).catch(error=>this.warn(error))
     }
     const offFeedback = this.ctx.on('tianwen/conversation-feedback-reconciled', wakeSession)
     const offAssessment = this.ctx.on('tianwen/conversation-feedback-assessed', assessmentId => {
@@ -156,8 +176,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
       for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
     })
     for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
+    if(this.sourceConfig.goalStateRoot !== undefined) for (const source of this.ctx.tianwenEvolution.listGoalTaskResearchSources())
+      void this.wakeGoalSource(source).catch(error=>this.warn(error))
     this.ctx.effect(() => async () => {
-      this.accepting = false; offReview(); offCheck(); offInvalidation(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
+      this.accepting = false; offReview(); offCheck(); offInvalidation(); offGoalSource(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
       for (const interrupt of this.laneInterrupts.values()) interrupt()
       for (const controller of this.controllers) controller.abort()
       await this.whenIdle()
@@ -247,14 +269,33 @@ export class TianwenConversationGuidanceLoopService extends Service {
       await Promise.allSettled([...this.lanes.values(), ...this.persistedWakes.values()])
   }
   private wakeTask(task: ConversationTask): Promise<void> {
+    return this.wakeSource(task)
+  }
+  private wakeGoalSource(source: GoalTaskResearchSource): Promise<void> {
+    if(this.sourceConfig?.goalStateRoot === undefined) return Promise.resolve()
+    return this.wakeSource(source)
+  }
+  get nativeGoalStateRoot(): string | undefined { return this.sourceConfig?.goalStateRoot }
+  private async sourceModel(source: ConversationTask | GoalTaskResearchSource) {
+    if(!('input' in source)) return recoverConversationTaskModel(this.ctx,source)
+    if(this.nativeGoalStateRoot === undefined) throw new Error('source-unavailable')
+    return (await recoverGoalTaskResearchSource(this.ctx,this.nativeGoalStateRoot,source)).callConfig
+  }
+  private async sourceMaterial(source: ConversationTask | GoalTaskResearchSource): Promise<StudyMaterial> {
+    if(!('input' in source)) return recoverConversationTaskMaterial(this.ctx,source)
+    if(this.nativeGoalStateRoot === undefined) throw new Error('source-unavailable')
+    return (await recoverGoalTaskResearchSource(this.ctx,this.nativeGoalStateRoot,source)).studyMaterial
+  }
+  private wakeSource(task: ConversationTask | GoalTaskResearchSource): Promise<void> {
     if (!this.accepting) return Promise.resolve()
+    const {scopeKey}=sourceMetadata(task)
+    const sessionId='input' in task ? task.outcome.input.origin.sessionId : task.source.sessionId
     // Preserve the exact coalesced lane Promise and the event subscriber's
     // rejection boundary when synchronous ledger invalidation fails.
-    try { this.rollbackIfNeeded(task.source.scopeKey) }
+    try { this.rollbackIfNeeded(scopeKey) }
     catch (error) { return Promise.reject(error) }
-    const live = this.ctx.agents.get(SessionId(task.source.sessionId))
+    const live = this.ctx.agents.get(SessionId(sessionId))
     if (live !== undefined) return this.schedule(live)
-    const scopeKey = task.source.scopeKey
     const existing = this.persistedWakes.get(scopeKey)
     if (existing !== undefined) { this.persistedWakeDirty.add(scopeKey); return existing }
     const work = Promise.resolve().then(async () => {
@@ -265,8 +306,9 @@ export class TianwenConversationGuidanceLoopService extends Service {
         && `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}` === scopeKey)
       if (current !== undefined) { await this.schedule(current); return }
       const source = evidence.sources[0]
-      const config = await recoverConversationTaskModel(this.ctx, source)
-      const handle = await this.ctx.agents.resume({ resumeSessionId: SessionId(source.source.sessionId), agentOptions: {
+      const config = await this.sourceModel(source)
+      const resumeId='input' in source ? source.outcome.input.origin.sessionId : source.source.sessionId
+      const handle = await this.ctx.agents.resume({ resumeSessionId: SessionId(resumeId), agentOptions: {
         provider: config.provider, model: config.model, ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }),
       } })
       try { await this.schedule(handle.agent) } finally { await handle.dispose() }
@@ -274,7 +316,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (this.persistedWakes.get(scopeKey) === work) this.persistedWakes.delete(scopeKey)
       // An event may arrive after scan took its task snapshot. Coalesce it into
       // one fresh serial scan, including events queued before this finalizer.
-      if (this.persistedWakeDirty.delete(scopeKey) && this.accepting) return this.wakeTask(task)
+      if (this.persistedWakeDirty.delete(scopeKey) && this.accepting) return this.wakeSource(task)
     })
     this.persistedWakes.set(scopeKey, work)
     return work
@@ -317,6 +359,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
       if (vanished && this.accepting) {
         const task = [...this.ctx.tianwenEvolution.listConversationTasks()].reverse().find(item => item.source.scopeKey === scopeKey && item.completion?.status === 'completed')
         if (task !== undefined) void this.wakeTask(task).catch(error => this.warn(error))
+        else if(this.nativeGoalStateRoot !== undefined) {
+          const source=[...this.ctx.tianwenEvolution.listGoalTaskResearchSources()].reverse().find(item=>item.input.scopeKey===scopeKey)
+          if(source !== undefined) void this.wakeGoalSource(source).catch(error=>this.warn(error))
+        }
       }
     })
     this.lanes.set(scopeKey, work)
@@ -329,6 +375,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
     if (item === undefined) throw new Error('source-unavailable')
     let material: ConversationTaskMaterial | { prompt: string, criteria: readonly string[], qualityContract?: ConversationQualityContract, files?: ConversationFileMaterial }
     if ('sourceTaskId' in item) {
+      if(study.opened.nativeGoalSources !== undefined) material=(await recoverGoalGuidanceSource(this.ctx,this.nativeGoalStateRoot,study.opened,item.sourceTaskId)).studyMaterial
+      else {
       const task = this.ctx.tianwenEvolution.listConversationTasks().find(task => task.source.taskId === item.sourceTaskId)
       if (task === undefined) throw new Error('source-unavailable')
       material = await recoverConversationTaskMaterial(this.ctx, task)
@@ -340,21 +388,25 @@ export class TianwenConversationGuidanceLoopService extends Service {
         material = { ...material, feedbackStandard: { assessmentId: assessment.started.assessmentId, classification: assessment.result.classification,
           criteria: assessment.result.supplementalCriteria, originalFeedback: recovered.feedback } }
       }
+      }
     } else material = { prompt: item.prompt, criteria: item.criteria, ...(item.qualityContract === undefined ? {} : { qualityContract: item.qualityContract }), ...(item.files === undefined ? {} : { files: item.files }) }
     if (material.files === undefined || material.files.outputKind !== study.opened.fileOutputKind || sha256(material) !== arm.materialDigest) throw new Error('source-unavailable')
     const target: GuidanceFileTrialTarget = formal ? { kind: 'formal', caseId: arm.caseId, role: arm.role }
       : { kind: 'exploration', requestDigest: sha256(study.exploration!.intent.request), arm: arm.arm }
     const retained = study.fileTrials?.find(receipt => sha256(receipt.target) === sha256(target))
     if (retained === undefined || retained.materialDigest !== arm.materialDigest || sha256(retained.receipt.executionProof) !== sha256(arm.executionProof)) throw new Error('source-unavailable')
-    const source = this.ctx.tianwenEvolution.listConversationTasks().find(task => task.source.taskId === study.opened.sourceTaskIds[0])
+    const source = study.opened.nativeGoalSources !== undefined
+      ? (await recoverGoalGuidanceSource(this.ctx,this.nativeGoalStateRoot,study.opened,study.opened.sourceTaskIds[0])).source
+      : this.ctx.tianwenEvolution.listConversationTasks().find(task => task.source.taskId === study.opened.sourceTaskIds[0])
     if (source === undefined) throw new Error('source-unavailable')
-    const callConfig = await recoverConversationTaskModel(this.ctx, source)
+    const callConfig = await this.sourceModel(source)
     if (sha256(callConfig) !== study.opened.modelConfigDigest) throw new Error('source-unavailable')
     const parentRule = guidanceRule(study.opened.parentSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind)
     const guidance = formal ? guidanceRule(arm.role === 'baseline' ? study.opened.parentSnapshot : study.candidate!.candidateSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind)
       : arm.arm === 'control' ? parentRule : [parentRule, study.exploration!.intent.request.proposal.temporaryInstruction].filter(value => value !== undefined).join('\n\n')
     const worker = 'request' in material ? { request: material.request, context: material.context, files: material.files,
-      ...(material.ancillaryContext === undefined ? {} : { ancillaryContext: material.ancillaryContext }) } : { prompt: material.prompt, files: material.files }
+      ...(material.ancillaryContext === undefined ? {} : { ancillaryContext: material.ancillaryContext }) } : { prompt: material.prompt, files: material.files,
+        ...('sourceKind' in material ? { sourceKind: material.sourceKind as 'native-goal-task' } : {}) }
     return { proof: arm.executionProof, input: { receipt: retained.receipt, material: worker, callConfig,
       outputDigest: arm.outputDigest, ...(guidance === undefined ? {} : { guidance }) } }
   }
@@ -380,6 +432,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
             || material.currentGuidance !== (guidanceRule(study.opened.parentSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind) ?? '')
             || !Array.isArray(material.sources) || material.sources.length !== 2
             || sha256(material.checkedFailureSources ?? null) !== sha256(study.opened.checkedFailureSources ?? null)
+            || sha256(material.nativeGoalSources ?? null) !== sha256(study.opened.nativeGoalSources ?? null)
             || sha256(material.proposalClues ?? null) !== sha256(proposalClues.length === 0 ? null : proposalClues)) throw new Error('invalid-judgment')
           for (const [index, source] of material.sources.entries()) {
             const frozen = study.opened.cases.find(item => item.kind === (index === 0 ? 'source1' : 'source2'))
@@ -390,7 +443,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         // Historical source-free studies have no clue dependency and retain
         // their prior recovery surface. New clues, and the existing optional
         // source-reference flow, require recovering the exact proposal packet.
-        const requiresFrozenProposalRecovery = proposalClues.length > 0 || study.sourceReference !== undefined || study.opened.checkedFailureSources !== undefined
+        const requiresFrozenProposalRecovery = proposalClues.length > 0 || study.sourceReference !== undefined || study.opened.checkedFailureSources !== undefined || study.opened.nativeGoalSources !== undefined
         const candidateValue = { guidance: guidanceRule(study.candidate.candidateSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind),
           ...(study.candidate.sourceUse === undefined ? {} : { sourceUse: study.candidate.sourceUse }) }
         const candidate = requiresFrozenProposalRecovery
@@ -494,11 +547,55 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private async select(scopeKey: string): Promise<EvidenceGroup | undefined> {
     const { group } = await this.scan(scopeKey)
     if (group === undefined) return undefined
+    if(group.kind === 'native-goal-task') return {...group,proposalClues:[]}
     const proposalClues = await this.proposalClues(scopeKey, group.sources[1], group.category,
       [...group.sources, group.counterexample].map(task => task.source.taskId))
     return { ...group, proposalClues }
   }
   private async scan(scopeKey: string): Promise<SelectionScan> {
+    const ordinary=await this.scanConversation(scopeKey)
+    if(ordinary.group !== undefined || ordinary.state === 'analysis-disabled' || this.nativeGoalStateRoot === undefined) return ordinary
+    const goal=await this.scanGoal(scopeKey)
+    // Keep the ordinary diagnostics separate; native Goal records are not ConversationTasks.
+    return goal === undefined ? ordinary : {...goal,...(ordinary.diagnostics === undefined ? {} : {diagnostics:ordinary.diagnostics})}
+  }
+  private async scanGoal(scopeKey: string): Promise<SelectionScan | undefined> {
+    const evolution=this.ctx.tianwenEvolution,consent=evolution.getLearningAnalysisConsent()
+    if(consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || this.nativeGoalStateRoot === undefined) return
+    const version=guidanceVersion(evolution.getConversationGuidance(scopeKey))
+    const all=evolution.listGoalTaskResearchSources().filter(item=>item.input.scopeKey===scopeKey)
+    if(all.length===0) return
+    const eligible: GoalTaskResearchSource[]=[]
+    for(const source of all) {
+      if(source.outcome.input.consentRevision !== consent.revision || source.input.behaviorVersion !== version || !hasCurrentConversationQuality(source.input.qualityContract)) continue
+      try { await recoverGoalTaskResearchSource(this.ctx,this.nativeGoalStateRoot,source); eligible.push(source) } catch { /* Original unavailable evidence is not re-evaluated. */ }
+    }
+    const contradictory=(source:GoalTaskResearchSource,counter:boolean)=>goalTaskResearchFeedbackContradicts(source,evolution.listLearningIntakeStatuses(source.outcome.input.childSessionId),counter)
+    const failed=eligible.filter(source=>goalTaskResearchProblem(source)!==undefined && !contradictory(source,false)).reverse()
+    const successful=eligible.filter(source=>goalTaskResearchSuccess(source) && !contradictory(source,true))
+    const checkIdentity=(source:GoalTaskResearchSource)=>{const b=source.outcome.input;return sha256({checkerId:b.checkerId,checkerDigest:b.checkerDigest,contractDigest:b.contractDigest,requiredConditionDigest:b.requiredConditionDigest})}
+    const compatible=(source:GoalTaskResearchSource,first:GoalTaskResearchSource)=>source.input.family===first.input.family
+      && source.input.evaluationMode===first.input.evaluationMode && source.input.fileOutputKind===first.input.fileOutputKind
+      && sha256(source.input.qualityContract)===sha256(first.input.qualityContract) && source.outcome.input.modelConfigDigest===first.outcome.input.modelConfigDigest
+    const attempts=evolution.listConversationCaseDesignAttempts(scopeKey),studies=evolution.listConversationGuidanceStudies(scopeKey)
+    let paired=false,attempted=false,unstudied=false
+    for(const first of failed) for(const second of failed) {
+      const problem=goalTaskResearchProblem(first)!,other=goalTaskResearchProblem(second)!
+      if(first.sourceId===second.sourceId || first.input.inputDigest===second.input.inputDigest || !compatible(second,first)
+        || problem.category!==other.category || problem.checkedFailure!==other.checkedFailure
+        || problem.checkedFailure && (checkIdentity(second)!==checkIdentity(first) || [first,second].some(source=>source.input.fileInputsDigest!==source.outcome.input.inputsDigest))) continue
+      paired=true
+      const sources=[second,first] as const
+      if(studies.some(study=>sources.every(source=>study.opened.sourceTaskIds.includes(source.sourceId)))) continue
+      if(attempts.some(attempt=>sources.every(source=>attempt.sourceTaskIds.includes(source.sourceId)))) {attempted=true;continue}
+      unstudied=true
+      const counterexample=successful.find(source=>compatible(source,first) && (!problem.checkedFailure
+        || checkIdentity(source)===checkIdentity(first) && source.input.fileInputsDigest===source.outcome.input.inputsDigest))
+      if(counterexample !== undefined) return {state:'ready-to-schedule',group:{kind:'native-goal-task',sources,counterexample,category:problem.category,assessments:[]}}
+    }
+    return {state:unstudied?'awaiting-counterexample':attempted?'already-attempted':paired?'already-studied':'awaiting-compatible-sources'}
+  }
+  private async scanConversation(scopeKey: string): Promise<SelectionScan> {
     const evolution = this.ctx.tianwenEvolution
     const consent = evolution.getLearningAnalysisConsent()
     if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3') return { state: 'analysis-disabled' }
@@ -613,14 +710,17 @@ export class TianwenConversationGuidanceLoopService extends Service {
     let opened: GuidanceStudyOpened | undefined
     try {
       const source = group.sources[0]
-      const qualityContract = source.admission?.qualityContract
+      const metadata=sourceMetadata(source),native=group.kind === 'native-goal-task'
+      const qualityContract = metadata.qualityContract
       if (!hasCurrentConversationQuality(qualityContract)) throw new Error('scope-changed')
-      const parentSnapshot = evolution.getConversationGuidance(source.source.scopeKey)
-      const sourceConfigs = await Promise.all([...group.sources, group.counterexample].map(task => recoverConversationTaskModel(this.ctx, task)))
+      if(metadata.family === null) throw new Error('source-unavailable')
+      const family=metadata.family
+      const parentSnapshot = evolution.getConversationGuidance(metadata.scopeKey)
+      const sourceConfigs = await Promise.all([...group.sources, group.counterexample].map(task => this.sourceModel(task)))
       const callConfig = await this.ctx.llm.resolveCallConfig(sourceConfigs[0]!, signal)
       if (sourceConfigs.some(config => sha256(config) !== sha256(callConfig))) throw new Error('source native model configuration drift')
       const sources = await Promise.all(group.sources.map(async (task, index) => {
-        const original = await recoverConversationTaskMaterial(this.ctx, task)
+        const original = await this.sourceMaterial(task)
         const assessment = group.assessments[index]
         // Preserve origin and timing: these standards evaluate newly generated
         // trial answers, not the earlier answer or its original requirements.
@@ -633,21 +733,22 @@ export class TianwenConversationGuidanceLoopService extends Service {
           criteria: assessment.result.supplementalCriteria, originalFeedback: recovered.feedback,
         } }
       }))
-      const counter = await recoverConversationTaskMaterial(this.ctx, group.counterexample)
-      const fileMode = source.admission!.decision!.evaluationMode === 'local-files'
-      if (fileMode && [...sources, counter].some(material => material.files?.outputKind !== source.admission!.decision!.fileOutputKind)) throw new Error('source-unavailable')
-      const fileConfig = fileMode ? { outputKind: source.admission!.decision!.fileOutputKind!, cwd: sources[0]!.files!.cwd } : undefined
-      const checkedEvidence = group.checkedFailureSources === undefined ? {} : { checkedFailureSources: group.checkedFailureSources }
-      const designMaterial = { family: effectiveConversationFamily(source)!, failureCategory: group.category, sources, ...checkedEvidence }
+      const counter = await this.sourceMaterial(group.counterexample)
+      const fileMode = metadata.evaluationMode === 'local-files'
+      if (fileMode && [...sources, counter].some(material => material.files?.outputKind !== metadata.fileOutputKind)) throw new Error('source-unavailable')
+      const fileConfig = fileMode ? { outputKind: metadata.fileOutputKind!, cwd: sources[0]!.files!.cwd } : undefined
+      const nativeGoalSources=native ? [...group.sources,group.counterexample].map(source=>({sourceId:source.sourceId,inputDigest:source.inputDigest})) as unknown as GuidanceNativeGoalSources : undefined
+      const checkedEvidence = nativeGoalSources !== undefined ? {nativeGoalSources} : group.checkedFailureSources === undefined ? {} : { checkedFailureSources: group.checkedFailureSources }
+      const designMaterial = { family, failureCategory: group.category, sources, ...checkedEvidence }
       const cases: GuidanceCase[] = [...group.sources, group.counterexample].map((task, index) => {
         const material = index < 2 ? sources[index]! : counter
-        return { id: ['source1', 'source2', 'counterexample'][index]!, kind: (['source1', 'source2', 'counterexample'] as const)[index]!, sourceTaskId: task.source.taskId,
-          inputDigest: guidanceInputDigest(conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files),
+        return { id: ['source1', 'source2', 'counterexample'][index]!, kind: (['source1', 'source2', 'counterexample'] as const)[index]!, sourceTaskId: sourceId(task),
+          inputDigest: guidanceInputDigest(studyTexts(material,true).join('\n'), material.files),
           materialDigest: sha256(material), ...(group.assessments[index] === undefined ? {} : { feedbackAssessmentId: group.assessments[index]!.started.assessmentId }) }
       })
-      const attemptBody = { scopeKey: source.source.scopeKey, consentRevision: source.source.consentRevision,
-        parentVersion: guidanceVersion(parentSnapshot), sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId] as const,
-        counterexampleTaskId: group.counterexample.source.taskId, modelConfigDigest: sha256(callConfig), materialDigest: sha256(designMaterial), ...checkedEvidence }
+      const attemptBody = { scopeKey: metadata.scopeKey, consentRevision: metadata.consentRevision,
+        parentVersion: guidanceVersion(parentSnapshot), sourceTaskIds: [sourceId(group.sources[0]), sourceId(group.sources[1])] as const,
+        counterexampleTaskId: sourceId(group.counterexample), modelConfigDigest: sha256(callConfig), materialDigest: sha256(designMaterial), ...checkedEvidence }
       // Persist before spending the model call: a lost or invalid design must
       // not turn unrelated wakeups or a restart into retries of this pair.
       if (evolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(attemptBody), ...attemptBody }).duplicate) return
@@ -656,10 +757,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const assertPreparationCurrent = () => {
         signal.throwIfAborted()
         const consent = evolution.getLearningAnalysisConsent()
-        if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== source.source.consentRevision
-          || guidanceVersion(evolution.getConversationGuidance(source.source.scopeKey)) !== guidanceVersion(parentSnapshot)) throw new Error('scope-changed')
+        if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== metadata.consentRevision
+          || guidanceVersion(evolution.getConversationGuidance(metadata.scopeKey)) !== guidanceVersion(parentSnapshot)) throw new Error('scope-changed')
       }
-      if (this.studyResultCheck?.prepareIndependentCases !== undefined && effectiveConversationFamily(source) === 'code' && fileConfig?.outputKind === 'files') {
+      if (this.studyResultCheck?.prepareIndependentCases !== undefined && family === 'code' && fileConfig?.outputKind === 'files') {
         const hostCases = await withConversationObservationCancellation(signal, () => this.studyResultCheck!.prepareIndependentCases!({
           sources: structuredClone(sources), counterexample: structuredClone(counter), modelConfigDigest: sha256(callConfig),
           qualityContract: structuredClone(qualityContract!), cwd: fileConfig.cwd, signal,
@@ -669,7 +770,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         independentCases = structuredClone(hostCases)
         const frozenCases = [...cases, ...generatedCases(independentCases, qualityContract!, fileConfig)]
         const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(
-          conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files!)))
+          studyTexts(material,true).join('\n'), material.files!)))
         for (const item of frozenCases.slice(3)) {
           if (!('prompt' in item)) throw new Error('source-unavailable')
           const identity = guidanceFileInputIdentity(item.prompt, item.files!)
@@ -677,9 +778,9 @@ export class TianwenConversationGuidanceLoopService extends Service {
           fileInputs.add(identity)
         }
         const frozenBody: GuidanceStudyBody = {
-          scopeKey: source.source.scopeKey, family: 'code', failureCategory: group.category, consentRevision: source.source.consentRevision,
+          scopeKey: metadata.scopeKey, family: 'code', failureCategory: group.category, consentRevision: metadata.consentRevision,
           parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: attemptBody.sourceTaskIds,
-          counterexampleTaskId: group.counterexample.source.taskId, cases: frozenCases, modelConfigDigest: sha256(callConfig),
+          counterexampleTaskId: sourceId(group.counterexample), cases: frozenCases, modelConfigDigest: sha256(callConfig),
           qualityContract: qualityContract!, evaluationMode: 'local-files', fileOutputKind: 'files', ...checkedEvidence,
         }
         parseConversationGuidanceRecord({ kind: 'study-opened', studyId: guidanceStudyId(frozenBody), ...frozenBody })
@@ -692,7 +793,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       }
       const generated = await runConversationJudgment(this.ctx, agent, {
         outputSchema: fileMode ? CONVERSATION_FILE_CASES_SCHEMA : CONVERSATION_CASES_SCHEMA,
-        label: `Tianwen independent case design ${source.source.taskId}`, callConfig, signal,
+        label: `Tianwen independent case design ${sourceId(source)}`, callConfig, signal,
         instruction: independentCases !== undefined
           ? 'Return the supplied independentCases exactly, without modifying prompts, criteria, file contents, paths or output paths. These bounded tasks were fixed by the trusted host before this call. Do not add answers or instructions. A different result stops the study.'
           : fileMode
@@ -704,11 +805,11 @@ export class TianwenConversationGuidanceLoopService extends Service {
       assertPreparationCurrent()
       if (independentCases !== undefined && sha256(generated.value) !== sha256(independentCases)) throw new Error('invalid-judgment')
       const independent = generatedCases(generated.value, qualityContract!, fileConfig)
-      const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => conversationEvidenceTexts(material, [])).map(text => guidanceInputDigest(text)))
+      const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => studyTexts(material)).map(text => guidanceInputDigest(text)))
       if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
       if (fileMode) {
         const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(
-          conversationEvidenceTexts({ request: material.request, context: [] }, []).join('\n'), material.files!)))
+          studyTexts(material,true).join('\n'), material.files!)))
         for (const item of independent) {
           const identity = guidanceFileInputIdentity(item.prompt, item.files!)
           if (fileInputs.has(identity)) throw new Error('invalid-judgment')
@@ -716,7 +817,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         }
       }
       if (!fileMode) {
-        const sourcePrompts = [...sources, counter].flatMap(material => conversationEvidenceTexts({ request: material.request, context: [] }, []))
+        const sourcePrompts = [...sources, counter].flatMap(material => studyTexts(material,true))
         if (independent.some((item, index) => sharesCopiedQuantifiedFact([...sourcePrompts, ...independent.slice(0, index).map(previous => previous.prompt)], item.prompt))) throw new Error('invalid-judgment')
       }
       cases.push(...independent)
@@ -724,20 +825,20 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const registry = this.ctx.get('skills') as Context['skills'] | undefined
       const viewOptions = { cwd: agent.session.header.cwd, scope: agent, signal }
       const loadCatalog = () => environmentDigest === undefined ? Promise.resolve({ complete: true, skills: [] }) : listConversationSkillReferences(
-        registry, this.sourceConfig.skillSources ?? [], source.source.scopeKey, environmentDigest, viewOptions)
+        registry, this.sourceConfig.skillSources ?? [], metadata.scopeKey, environmentDigest, viewOptions)
       // Optional clues must fit the exact initial packet, including its catalog.
       // Keep the historical no-clue catalog lookup after opening the study.
       let catalog = group.proposalClues.length === 0 ? undefined : await loadCatalog()
       if (catalog !== undefined && !catalog.complete) throw new Error('source-unavailable')
       const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
-        scopeKey: source.source.scopeKey, family: effectiveConversationFamily(source)!, failureCategory: group.category, consentRevision: source.source.consentRevision,
-        parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [group.sources[0].source.taskId, group.sources[1].source.taskId], counterexampleTaskId: group.counterexample.source.taskId,
+        scopeKey: metadata.scopeKey, family: family!, failureCategory: group.category, consentRevision: metadata.consentRevision,
+        parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [sourceId(group.sources[0]), sourceId(group.sources[1])], counterexampleTaskId: sourceId(group.counterexample),
         cases, modelConfigDigest: sha256(callConfig), caseDesignProof: generated.proof, qualityContract: qualityContract!, ...checkedEvidence,
         ...(proposalClues.length === 0 ? {} : { proposalClues: proposalClues.map(item => item.reference) }),
         ...(fileMode ? { evaluationMode: 'local-files' as const, fileOutputKind: fileConfig!.outputKind } : {}),
         ...(preparedChecks === undefined ? {} : { resultChecks: preparedChecks.checks }),
       })
-      if (preparedChecks === undefined && this.studyResultCheck !== undefined && effectiveConversationFamily(source) === 'code' && fileConfig?.outputKind === 'files') {
+      if (preparedChecks === undefined && this.studyResultCheck !== undefined && family === 'code' && fileConfig?.outputKind === 'files') {
         preparedChecks = await prepareConversationStudyResultChecks(this.studyResultCheck, bodyFor([]), cases.map(item => 'sourceTaskId' in item
           ? item.kind === 'counterexample' ? counter : sources[item.kind === 'source1' ? 0 : 1]!
           : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }), signal)
@@ -769,7 +870,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
         await this.assertCurrent(studyOpened, signal)
         // Workers see the exact original request/context, never old answers,
         // feedback standards, predictions or reviewer-only criteria.
-        const request = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt }
+        const request = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt,
+          ...('sourceKind' in material ? {sourceKind:material.sourceKind} : {}) }
         const execution: Awaited<ReturnType<typeof runConversationTrial>> & Partial<ConversationFileTrialOutput> & { trialExecution?: ConversationFileTrialExecutionEvidence } = fileMode ? await (async () => {
           if (material.files === undefined || this.sourceConfig.evolutionRoot === undefined || !isAbsolute(this.sourceConfig.evolutionRoot)) throw new Error('source-unavailable')
           const replicaParent = join(this.sourceConfig.evolutionRoot, 'conversation-file-trials')
@@ -833,7 +935,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
         let request
         try {
           request = prepareConversationLearningExploration(exploration, {
-            studyId: opened.studyId, sourceTaskId: body.sourceTaskIds[index]! as `conversation-task:${string}`, parentVersion: body.parentVersion,
+            studyId: opened.studyId, sourceTaskId: body.sourceTaskIds[index]! as `conversation-task:${string}` | `goal-task-result:${string}`, parentVersion: body.parentVersion,
+            ...(native ? { sourceKind: 'native-goal-task' as const } : {}),
             sourceMaterialDigest: cases[index]!.materialDigest, environmentDigest: body.modelConfigDigest,
             qualityContractDigest: sha256(body.qualityContract), proposalProof: proposal.proof,
           })
@@ -870,7 +973,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         : { ...parentSnapshot, rules: { ...parentSnapshot.rules, [body.family]: proposal.choice.guidance } }
       evolution.recordConversationGuidance({ kind: 'candidate-recorded', studyId: opened.studyId, candidateSnapshot, proposalProof: proposal.proof,
         ...(proposal.choice.sourceUse === undefined ? {} : { sourceUse: proposal.choice.sourceUse }) })
-      const materialByTask = new Map<string, ConversationTaskMaterial>([[group.sources[0].source.taskId, sources[0]!], [group.sources[1].source.taskId, sources[1]!], [group.counterexample.source.taskId, counter]])
+      const materialByTask = new Map<string, StudyMaterial>([[sourceId(group.sources[0]), sources[0]!], [sourceId(group.sources[1]), sources[1]!], [sourceId(group.counterexample), counter]])
       for (const item of opened.cases) {
         const material = 'sourceTaskId' in item ? materialByTask.get(item.sourceTaskId)! : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, ...(item.files === undefined ? {} : { files: item.files }) }
         for (const role of ['baseline', 'candidate'] as const) {
@@ -942,11 +1045,21 @@ export class TianwenConversationGuidanceLoopService extends Service {
       || !this.ctx.tianwenEvolution.isConversationGuidanceSupported(study.studyId)) throw new Error('scope-changed')
     await this.recoverProposalClues(study)
     await recoverConversationCaseDesign(this.ctx, study)
+    if(study.nativeGoalSources !== undefined) for(const reference of study.nativeGoalSources) {
+      const recovered=await recoverGoalGuidanceSource(this.ctx,this.nativeGoalStateRoot,study,reference.sourceId)
+      const item=study.cases.find(item=>'sourceTaskId' in item && item.sourceTaskId===reference.sourceId)
+      if(item?.materialDigest !== sha256(recovered.studyMaterial) || item.inputDigest !== recovered.input.inputDigest
+        || sha256(recovered.callConfig)!==study.modelConfigDigest) throw new Error('source-unavailable')
+    }
     for (const item of study.cases) if ('feedbackAssessmentId' in item && item.feedbackAssessmentId !== undefined) {
       const assessment = this.ctx.tianwenEvolution.listConversationFeedbackAssessments().find(value => value.started.assessmentId === item.feedbackAssessmentId)
       const feedback = this.ctx.get('tianwenConversationFeedback')
       if (assessment === undefined || feedback === undefined || !await feedback.isAssessmentActive(assessment)) throw new Error('source-unavailable')
     }
     signal.throwIfAborted()
+    const latest=this.ctx.tianwenEvolution.getLearningAnalysisConsent()
+    if(latest?.enabled !== true || latest.policyVersion !== 'tianwen-auto-analysis.v3' || latest.revision !== study.consentRevision
+      || guidanceVersion(this.ctx.tianwenEvolution.getConversationGuidance(study.scopeKey)) !== study.parentVersion
+      || !this.ctx.tianwenEvolution.isConversationGuidanceSupported(study.studyId)) throw new Error('scope-changed')
   }
 }

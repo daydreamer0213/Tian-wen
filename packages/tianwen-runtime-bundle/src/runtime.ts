@@ -509,8 +509,10 @@ export async function apply(
   ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true,
     ...(config.captureExternalCodeArtifacts === true && config.externalCodeCheck !== undefined ? { externalCodeCheck: config.externalCodeCheck } : {}) })
   ctx.plugin(TianwenConversationFeedbackService)
+  const goalStateRoot = config.stateRoot ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state'))
   ctx.plugin(TianwenConversationGuidanceLoopService, {
     ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
+    ...(goalStateRoot === undefined ? {} : { goalStateRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
     ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
     guidanceActivationQuarantine: true,

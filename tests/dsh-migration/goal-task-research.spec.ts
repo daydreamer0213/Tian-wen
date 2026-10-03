@@ -8,6 +8,7 @@ import { guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemp
 import type { GoalTaskOutcomeInput } from '../../packages/tianwen-evolution/src/goal-task-outcome.js'
 import type { GoalTaskResearchSourceInput } from '../../packages/tianwen-evolution/src/goal-task-research.js'
 import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
+import { prepareConversationLearningExploration, parseConversationLearningExplorationRequest } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 
 const BASE = resolve('D:/DevData/tianwen-dsh-probe/goal-task-research')
 const scopeKey = `conversation:${sha256({ cwd: 'D:/original-Goal' })}`
@@ -79,6 +80,34 @@ it('consumes explicit native Goal source references in the original attempt and 
     expect(cold.recordConversationGuidance(opened as never)).toEqual({duplicate:true})
     expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
     expect(cold.isConversationGuidanceActivationQuarantined()).toBe(true)
+  }finally{f.remove()}
+})
+
+it('retains explicit native Goal identity in one bounded original exploration and its cold ledger',()=>{
+  const f=fixture()
+  try {
+    const opened={kind:'study-opened' as const,...f.body,studyId:guidanceStudyId(f.body as never)}
+    f.ledger.recordConversationGuidance(opened as never)
+    const sourceTaskId=f.sources[0]!.sourceId
+    const proposal={sourceTaskId,hypothesis:'The original constraint is missed without the temporary instruction.',alternative:'The answer already satisfies the original constraint.',
+      temporaryInstruction:'Preserve every explicit original constraint.',expectedIfHypothesis:{control:'not-met',treatment:'met'},expectedIfAlternative:{control:'met',treatment:'met'}}
+    const context={sourceKind:'native-goal-task' as const,studyId:opened.studyId,sourceTaskId,parentVersion:opened.parentVersion,
+      sourceMaterialDigest:opened.cases[0]!.materialDigest,environmentDigest:opened.modelConfigDigest,
+      qualityContractDigest:sha256(opened.qualityContract),proposalProof:proof('native-bounded-exploration')}
+    const request=prepareConversationLearningExploration(proposal,context)
+    expect(request.sourceKind).toBe('native-goal-task')
+    expect(request.schemaVersion).toBe('tianwen.learning-exploration-request.v3')
+    expect(request.metric).toBe('native-goal-task-quality.v1')
+    expect(parseConversationLearningExplorationRequest(request)).toEqual(request)
+    expect(()=>prepareConversationLearningExploration(proposal,{...context,sourceKind:'conversation-task'})).toThrow()
+    expect(()=>parseConversationLearningExplorationRequest({...request,sourceKind:'conversation-task'})).toThrow()
+    const intent={kind:'exploration-requested' as const,studyId:opened.studyId,request}
+    expect(f.ledger.recordConversationGuidance(intent)).toEqual({duplicate:false})
+    const bytes=readFileSync(join(f.root,'ledger.jsonl'))
+    const cold=new EvolutionLedger(f.root,{guidanceActivationQuarantine:true})
+    expect(cold.listConversationGuidanceStudies()).toEqual(f.ledger.listConversationGuidanceStudies())
+    expect(cold.recordConversationGuidance(intent)).toEqual({duplicate:true})
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
   }finally{f.remove()}
 })
 

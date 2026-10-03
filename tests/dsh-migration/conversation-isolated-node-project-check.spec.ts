@@ -108,6 +108,31 @@ it('binds five distinct saved multi-output roles and supplies original independe
   }
   expect(new Set(contracts).size).toBe(5); expect(mock.prepare).toHaveBeenCalledTimes(5); expect(mock.run).toHaveBeenCalledTimes(5)
 })
+it('binds native Goal originals in the same closed five-role program cohort without changing their identity',async()=>{
+  const f=cohortFixture()
+  const cases=structuredClone(f.cases)
+  for(const id of ['source1','source2','counterexample'] as const) {
+    const original=cases[id].material
+    if(!('request' in original)) throw new Error('Original fixture unavailable')
+    cases[id].material={sourceKind:'native-goal-task',prompt:JSON.stringify({protocol:'tianwen.native-goal-study-input.v1',originalCommand:'Complete the original projects.',
+      goal:{objective:'Complete projects.',context:null,successCriteria:null},delegatedTask:original.objective}),
+      criteria:original.criteria,qualityContract:original.qualityContract!,files:original.files}
+  }
+  const check=createConversationStudyIsolatedNodeProjectCohortCheck({...f.config,cases})
+  const host={...f.host,sources:[cases.source1.material,cases.source2.material],counterexample:cases.counterexample.material} as typeof f.host
+  expect(await check.prepareIndependentCases!(host)).toBeDefined()
+  for(const [index,id] of f.ids.entries()) {
+    const material=cases[id].material
+    const prepared=await check.prepare({...material,caseId:id,modelConfigDigest:f.config.modelConfigDigest,signal:f.signal})
+    expect(prepared).toBeDefined()
+    mock.run.mockResolvedValue({status:'completed',stdout:`{"n":${index+1}}`,stderr:'',exitCode:0,receiptDigest:'receipt'})
+    expect((await prepared!.evaluate({...material,answer:'Controlled output.',inputs:material.files.entries,
+      outputs:material.files.entries.map(entry=>({...entry,content:entry.content??'export const n=7;'})),outputPaths:material.files.outputPaths,signal:f.signal})).status).toBe('verified')
+  }
+  const {sourceKind:_kind,...generic}=cases.source1.material as {sourceKind:string}&ConversationStudyResultMaterial
+  expect(await check.prepare({...generic,caseId:'source1',modelConfigDigest:f.config.modelConfigDigest,signal:f.signal})).toBeUndefined()
+  expect(()=>createConversationStudyIsolatedNodeProjectCohortCheck({...f.config,cases:{...cases,source2:f.cases.source2}})).toThrow()
+})
 it.each(['model', 'source', 'quality', 'role', 'files'] as const)('declines cohort %s drift without new preparation', async change => {
   const f = cohortFixture()
   if (change === 'model') { expect(await f.check.prepare({ ...f.cases.adjacent.material, caseId: 'adjacent', modelConfigDigest: sha256('other'), signal: f.signal })).toBeUndefined() }

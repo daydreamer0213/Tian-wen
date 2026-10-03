@@ -27,9 +27,11 @@ export async function recoverConversationCaseDesign(ctx: Context, opened: Guidan
   const row = material as Record<string, unknown>
   const frozen = Object.hasOwn(row, 'independentCases')
   const keys = ['family', 'failureCategory', 'sources', ...(opened.checkedFailureSources === undefined ? [] : ['checkedFailureSources']),
+    ...(opened.nativeGoalSources === undefined ? [] : ['nativeGoalSources']),
     ...(frozen ? ['independentCases', 'independentResultChecksDigest'] : [])]
   if (Object.keys(row).length !== keys.length || !keys.every(key => Object.hasOwn(row, key))
     || sha256(row.checkedFailureSources ?? null) !== sha256(opened.checkedFailureSources ?? null)
+    || sha256(row.nativeGoalSources ?? null) !== sha256(opened.nativeGoalSources ?? null)
     || row.family !== opened.family || row.failureCategory !== opened.failureCategory
     || !Array.isArray(row.sources) || row.sources.length !== 2
     || recovered.modelConfigDigests.length === 0 || recovered.modelConfigDigests.some(digest => digest !== opened.modelConfigDigest)) {

@@ -8,6 +8,7 @@ import { packConversationFileClaimPacket } from '@tianwen/evolution/file-claim-p
 import { CONVERSATION_MATERIAL_MAX_BYTES, CONVERSATION_REVIEW_SCHEMA, conversationEvidenceSchema, recoverConversationJudgmentRequest, runConversationJudgment } from './conversation-judgment.js'
 import { fileExecutionTexts, parseFileExecutionEvidence } from './conversation-task-material.js'
 import { splitConversationFileReviewText } from './conversation-file-review-units.js'
+import { parseNativeGoalStudyInput } from './goal-task-study-input.js'
 import { conversationFileTrialExecutionTexts, parseConversationFileTrialExecutionEvidence, type ConversationFileTrialExecutionEvidence } from './conversation-file-trial-evidence.js'
 
 export type { ClaimAudit } from '@tianwen/evolution/content-review'
@@ -149,7 +150,13 @@ export function projectClaimEvidence(material: unknown, projection: 'line-v1' | 
   } else if ('task' in material && 'answer' in material) {
     if (!record(material.task) || typeof material.answer !== 'string') throw new Error('invalid-judgment')
     boundReviewMaterial('answer-bytes', Buffer.byteLength(material.answer, 'utf8'), 32_768)
-    if (typeof material.task.prompt === 'string') add('request', 'user', material.task.prompt)
+    if (material.task.sourceKind === 'native-goal-task') {
+      if (typeof material.task.prompt !== 'string') throw new Error('invalid-judgment')
+      const input = parseNativeGoalStudyInput(material.task.prompt)
+      add('request', 'user', input.originalCommand)
+      add('context', 'assistant', JSON.stringify({ goal: input.goal, delegatedTask: input.delegatedTask,
+        ...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }) }))
+    } else if (typeof material.task.prompt === 'string') add('request', 'user', material.task.prompt)
     else {
       messages(material.task.context, 'context')
       messages(material.task.request, 'request', 'user')

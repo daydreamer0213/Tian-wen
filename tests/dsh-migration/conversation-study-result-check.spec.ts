@@ -40,6 +40,17 @@ it('keeps a single frozen checker for both outputs and isolates mutable host arg
   expect(received[0]![0].inputs).toEqual(f.materials[0]!.files.entries)
   expect(received[0]![0]).not.toHaveProperty('role'); expect(received[0]![0]).not.toHaveProperty('verdict')
 })
+it('preserves original native Goal identity for the prepared host check and both outputs', async () => {
+  const f=fixture()
+  const materials=f.materials.map((material,index)=>index<3 ? {...material,sourceKind:'native-goal-task' as const,
+    prompt:JSON.stringify({protocol:'tianwen.native-goal-study-input.v1',originalCommand:'Complete the supplied original tasks.',
+      goal:{objective:'Complete original tasks.',context:null,successCriteria:null},delegatedTask:material.prompt})} : material)
+  const body={...f.body,cases:f.body.cases.map((item,index)=>({...item,materialDigest:sha256(materials[index]),inputDigest:guidanceInputDigest(materials[index]!.prompt,materials[index]!.files)}))}
+  const prepared=await prepareConversationStudyResultChecks(f.check,body,materials,f.controller.signal)
+  expect(vi.mocked(f.check.prepare).mock.calls[0]![0]).toHaveProperty('sourceKind','native-goal-task')
+  await evaluateConversationStudyResultCheck(prepared,'source1',{answer:'Actual trial result.',files:materials[0]!.files.entries},f.controller.signal)
+  expect(vi.mocked(f.evaluate).mock.calls[0]![0]).toHaveProperty('sourceKind','native-goal-task')
+})
 it('rejects preparation with substituted complete inputs before returning any study metadata', async () => {
   const f = fixture(), original = f.check.prepare
   const check: ConversationStudyResultCheck = { async prepare(material) {
