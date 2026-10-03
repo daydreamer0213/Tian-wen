@@ -2,7 +2,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import '@deepseek-ai/dsh-commands'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type { GoalTaskOutcomeInput } from '@tianwen/evolution'
-import { sha256 } from '@tianwen/evolution/learning-intake'
+import { sha256, learningSessionLifecycleFingerprint } from '@tianwen/evolution/learning-intake'
 import type { GoalTaskAcceptanceBinding, GoalTaskAcceptanceEvent, GoalTaskRequirementsSnapshot } from './goal-task-acceptance-contract.js'
 import { readLongGoal, readTianwenTaskAttemptProjection } from './long-goal.js'
 import { sandboxModeFromEvents } from './permission-attempt.js'
@@ -11,6 +11,7 @@ import { readGoalTaskMethodUsage } from './goal-task-method.js'
 type Finished = Extract<GoalTaskAcceptanceEvent, { type: 'task-acceptance-finished' }>
 export interface GoalTaskOutcomeMaterial {
   readonly sourceKind: 'native-goal-task'
+  readonly sessionLifecycleFingerprint: ReturnType<typeof sha256>
   /** Missing for old preparations. This does not certify referenced external file contents. */
   readonly requirementsSnapshot?: GoalTaskRequirementsSnapshot
   readonly source: Extract<SessionEvent, { type: 'command/run' }>
@@ -61,7 +62,9 @@ export async function readGoalTaskAcceptanceMaterial(ctx: Context, input: {
     contractDigest: b.contractDigest, inputsDigest: b.inputsDigest, requiredConditionDigest: sha256(b.requiredCondition), outcome: structuredClone(result.outcome),
   }
   const methodUsage = readGoalTaskMethodUsage(b, events)
-  return structuredClone({ sourceKind: 'native-goal-task', ...(methodUsage === undefined ? {} : { methodUsage }), ...(snapshot === undefined ? {} : { requirementsSnapshot: snapshot }),
+  return structuredClone({ sourceKind: 'native-goal-task', sessionLifecycleFingerprint: learningSessionLifecycleFingerprint({
+    sessionId: String(saved.meta.id), createdAt: saved.meta.createdAt, ...(saved.meta.cwd === undefined ? {} : { cwd: saved.meta.cwd }) }),
+    ...(methodUsage === undefined ? {} : { methodUsage }), ...(snapshot === undefined ? {} : { requirementsSnapshot: snapshot }),
     source, preparation: b, result, events, ...(outcomeInput === undefined ? {} : { outcomeInput }) })
 }
 

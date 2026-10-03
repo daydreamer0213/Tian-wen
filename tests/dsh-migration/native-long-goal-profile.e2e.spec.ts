@@ -29,6 +29,7 @@ import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bund
 import { LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID } from '../../packages/tianwen-runtime-bundle/src/learning-consent-agent.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
+import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { GoalTaskAcceptanceChecks } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance.js'
 import { readGoalTaskAcceptanceMaterial } from '../../packages/tianwen-runtime-bundle/src/goal-task-material.js'
 import * as runtimePublic from '../../packages/tianwen-runtime-bundle/src/runtime.js'
@@ -138,6 +139,7 @@ class ProfileAdapter extends LlmAdapter {
     private readonly beforeReview?: (index: number) => void,
     private readonly taskCount = 1,
     private readonly fileActions?: 'read-success' | 'read-error',
+    private readonly failTaskFinalResponse = false,
   ) { super() }
   private reviews = 0
 
@@ -253,6 +255,9 @@ class ProfileAdapter extends LlmAdapter {
       chunks = textResponse('Planner relayed the Task result to the main chat.')
     }
     for (const chunk of chunks) yield chunk
+    if (this.failTaskFinalResponse && last?.source.kind === 'tool' && last.source.callId === 'profile-complete-goal') {
+      throw new Error('Controlled native final response failure after Goal completion; not a capability observation.')
+    }
   }
 }
 
@@ -270,6 +275,7 @@ async function mountProfile(
     readonly produceFiles?: (workspace: string) => void
     readonly taskCount?: number
     readonly fileActions?: 'read-success' | 'read-error'
+    readonly failTaskFinalResponse?: boolean
   } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -336,7 +342,7 @@ async function mountProfile(
   await ctx.plugin(SubagentRuntime)
   if (options.contentVerdict === undefined) ctx.subagents.registerProvider(spawnProvider)
   else await ctx.plugin(nativeSpawn, { providerName: 'spawn' })
-  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions)
+  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
   const runtimeApi = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
     ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)) as typeof runtimePublic
@@ -495,6 +501,119 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it('retains a completed semantic problem as research evidence when its original functional checker was unavailable', async () => {
+    const profile = await mountProfile('Complete the separate checker-availability control.', {
+      completeTaskThroughTool: true, contentVerdict: 'not-met',
+      goalTaskAcceptance: { async methodScope() { return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { return { checkerId: 'research-checker-unavailable', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Original native Task completion.', contentReview: {},
+          async evaluate() { throw new Error('Controlled infrastructure unavailable after a completed native turn.') } } } },
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(profile.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(1))
+      const source = profile.ctx.tianwenEvolution.listGoalTaskResearchSources()[0]!
+      expect(source.outcome.classification).toBe('unverifiable')
+      expect(source.input.checks.every(check => check.verdict === 'not-met')).toBe(true)
+      const material = await profile.runtimeApi.readGoalTaskOutcomeMaterial(profile.ctx, { stateRoot: profile.stateRoot, outcome: source.outcome.input })
+      const end = material.events.at(-1)
+      expect(end?.type === 'turn/end' && end.data.reason.kind).toBe('completed')
+    } finally { await profile.dispose() }
+  }, 30_000)
+  it('excludes an incomplete native final response from research while retaining the original unverifiable result', async () => {
+    const profile = await mountProfile('Complete the native terminal eligibility control.', {
+      completeTaskThroughTool: true, contentVerdict: 'not-met', failTaskFinalResponse: true,
+      goalTaskAcceptance: { async methodScope() { return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { return { checkerId: 'research-terminal', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Original native Task completion.', contentReview: {},
+          async evaluate() { throw new Error('A noncompleted native turn must not call the functional checker.') } } } },
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.planner.planRevision).toBe(2))
+      const outcome = profile.ctx.tianwenEvolution.listGoalTaskOutcomes()[0]!
+      const material = await profile.runtimeApi.readGoalTaskOutcomeMaterial(profile.ctx, { stateRoot: profile.stateRoot, outcome: outcome.input })
+      const end = material.events.at(-1)
+      expect(end?.type === 'turn/end' && end.data.reason.kind).not.toBe('completed')
+      expect(outcome.classification).toBe('unverifiable')
+      expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3).tianwenEvents?.find(event => event.type === 'task-content-review-finished')).toMatchObject({ result: { status: 'unverifiable' } })
+      expect(profile.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(0)
+    } finally { await profile.dispose() }
+  }, 30_000)
+  it('keeps a Task with a changed later native model outside research without changing its original result', async () => {
+    let childId: string | undefined
+    const profile = await mountProfile('Complete the mixed native model research control.', {
+      completeTaskThroughTool: true, contentVerdict: 'met',
+      goalTaskAcceptance: { async methodScope(material) { childId = material.attempt.childSessionId; return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { return { checkerId: 'research-mixed-model', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Original Task completion.', contentReview: {},
+          async evaluate() { return { status: 'verified', detail: 'Original functional result remains verified.' } } } } },
+    })
+    const off = profile.ctx.on('agent/request', async ({ agent }, next) => {
+      const config = await next()
+      return String(agent.session.id) === childId && profile.adapter.requests.some(request => String(request.sessionId) === childId)
+        ? { ...config, maxTokens: (config.maxTokens ?? 1024) + 1 } : config
+    }, { prepend: true })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-content-review-finished')).toBe(true))
+      const goal = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      await profile.ctx.get('tianwenConversationGuidanceLoop')?.whenIdle()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.planner.planRevision).toBe(2))
+      const outcome = profile.ctx.tianwenEvolution.listGoalTaskOutcomes()[0]!
+      const material = await profile.runtimeApi.readGoalTaskOutcomeMaterial(profile.ctx, { stateRoot: profile.stateRoot, outcome: outcome.input })
+      const configs = material.events.filter(event => event.type === 'request/header').map(event => event.type === 'request/header' ? sha256(event.data.header.config) : '')
+      expect(new Set(configs).size).toBeGreaterThan(1)
+      expect(outcome.classification).toBe('checked-success')
+      expect(goal.tianwenEvents?.find(event => event.type === 'task-content-review-finished')).toMatchObject({ result: { status: 'reviewed' } })
+      expect((profile.ctx.tianwenEvolution as any).listGoalTaskResearchSources()).toHaveLength(0)
+    } finally { off(); await profile.dispose() }
+  }, 30_000)
+  it.each(['met', 'not-met'] as const)('freezes the original research contract and publishes a native Goal source after both original checks: %s', async verdict => {
+    let preparations = 0, evaluations = 0
+    const profile = await mountProfile('Complete the original Goal research source control.', {
+      completeTaskThroughTool: true, contentVerdict: verdict,
+      goalTaskAcceptance: { async methodScope() { return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { preparations++; return { checkerId: 'research-control', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Complete the original native Task.', contentReview: {},
+          async evaluate() { evaluations++; return { status: 'verified', detail: 'Original functional control passed.' } } } } },
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-prepared')).toBe(true))
+      const before = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      const prepared = before.tianwenEvents!.find(event => event.type === 'task-acceptance-prepared')!
+      expect(prepared).toMatchObject({ binding: { contentReview: { qualityContract: conversationQualityContract() } } })
+      profile.releaseTask()
+      await vi.waitFor(() => expect((profile.ctx.tianwenEvolution as any).listGoalTaskResearchSources()).toHaveLength(1), { timeout: 10_000 })
+      const sources = (profile.ctx.tianwenEvolution as any).listGoalTaskResearchSources()
+      expect(sources[0]).toMatchObject({ input: { sourceKind: 'native-goal-task', qualityContract: conversationQualityContract(), family: 'writing', evaluationMode: 'text' },
+        outcome: { classification: 'checked-success' } })
+      expect(sources[0].input.checks.map((check: any) => check.verdict)).toEqual([verdict, verdict])
+      expect(new Set(sources[0].input.checks.map((check: any) => check.proof.sessionId)).size).toBe(2)
+      for (const check of sources[0].input.checks) {
+        const recovered = await recoverConversationJudgmentRequest(profile.ctx, check)
+        expect((recovered.material as any).original.source.qualityContract).toEqual(conversationQualityContract())
+      }
+      expect(profile.ctx.tianwenEvolution.listConversationTasks().some(task => task.source.taskId === sources[0].input.sourceId)).toBe(false)
+      const ledger = readFileSync(join(profile.evolutionRoot, 'ledger.jsonl'))
+      const goal = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      await profile.dispose(false)
+      const cold = await mountProfile(goal.objective, { root: profile.root, resumeMain: true, contentVerdict: verdict,
+        goalTaskAcceptance: { async prepare() { throw new Error('cold must not prepare a completed source') } } })
+      try {
+        await cold.ctx.get('tianwenConversationGuidanceLoop')?.whenIdle()
+        expect((cold.ctx.tianwenEvolution as any).listGoalTaskResearchSources()).toEqual(sources)
+        expect(cold.adapter.requests).toHaveLength(0)
+        expect(preparations).toBe(1); expect(evaluations).toBe(1)
+        expect(readFileSync(join(cold.evolutionRoot, 'ledger.jsonl'))).toEqual(ledger)
+      } finally { await cold.dispose(true) }
+    } finally { await profile.dispose() }
+  }, 30_000)
   it('expires an orphan native method after a new Context removes the project check, then continues only the unexecuted Task', async () => {
     const objective = 'Complete the orphan method recovery control Task'
     let preparations = 0
@@ -967,7 +1086,9 @@ describe('native Long Goal profile execution', () => {
       finally { await cold.dispose(true) }
     } finally { await profile.dispose() }
   }, 30_000)
-  it('propagates actual acceptance storage failure before issuing the next planning request', async () => {
+  // The source prototype spy cannot observe the independent class embedded in the published bundle.
+  // Keep this storage failure check in the source suite; published controls use the public Runtime API.
+  it.skipIf(process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1')('propagates actual acceptance storage failure before issuing the next planning request', async () => {
     const failures: unknown[] = []
     const originalFinish = GoalTaskAcceptanceChecks.prototype.finishGoal
     const spy = vi.spyOn(GoalTaskAcceptanceChecks.prototype, 'finishGoal').mockImplementation(function(id) {

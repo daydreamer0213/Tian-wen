@@ -5,10 +5,13 @@ import type { LongGoalTaskRecordV2 } from './long-goal-contract.js'
 import { parseGoalTaskMethodBinding, type GoalTaskMethodBinding } from './goal-task-method.js'
 import { parseConversationFileMaterial, parseConversationFileEntries, parseConversationAuditedReviewChecks,
   type ConversationFileMaterial, type ConversationFileTrialOutput, type ConversationAuditedReviewChecks } from '@tianwen/evolution/content-review'
+import { parseConversationQualityContract, type ConversationQualityContract } from '@tianwen/evolution/content-review'
 
 export interface GoalTaskContentReviewPlan {
   readonly protocol: 'tianwen.goal-task-content-review.v1'
   readonly files?: ConversationFileMaterial
+  /** Frozen before execution; historical plans without it keep their original meaning. */
+  readonly qualityContract?: ConversationQualityContract
 }
 export type GoalTaskContentReviewEvent = {
   readonly type: 'task-content-review-started'
@@ -116,9 +119,10 @@ function validSnapshot(value: unknown, b: Record<string, unknown>, taskId: strin
 }
 
 export function parseGoalTaskContentReviewPlan(value: unknown): GoalTaskContentReviewPlan {
-  if (!record(value) || !keys(value, ['protocol', ...(Object.hasOwn(value, 'files') ? ['files'] : [])])
+  if (!record(value) || !keys(value, ['protocol', ...(Object.hasOwn(value, 'files') ? ['files'] : []), ...(Object.hasOwn(value, 'qualityContract') ? ['qualityContract'] : [])])
     || value.protocol !== 'tianwen.goal-task-content-review.v1') throw new TypeError('Goal Task content review plan is invalid')
-  return { protocol: value.protocol, ...(Object.hasOwn(value, 'files') ? { files: parseConversationFileMaterial(value.files) } : {}) }
+  return { protocol: value.protocol, ...(Object.hasOwn(value, 'files') ? { files: parseConversationFileMaterial(value.files) } : {}),
+    ...(Object.hasOwn(value, 'qualityContract') ? { qualityContract: parseConversationQualityContract(value.qualityContract) } : {}) }
 }
 
 export function parseGoalTaskContentReviewEvent(value: unknown): GoalTaskContentReviewEvent {

@@ -6,6 +6,7 @@ import { canonicalConversationFileEntries, parseConversationFileMaterial, parseC
 import { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceUse } from './conversation-skill-source.js'
 import { parseConversationCheckedFailureSources, type ConversationCheckedFailureSources } from './conversation-external-check.js'
 import { parseGuidanceCaseResultChecks, parseGuidanceArmResultCheck, validateGuidanceArmResultCheck, hasSatisfiedGuidanceResultChecks, type GuidanceCaseResultCheck, type GuidanceArmResultCheck } from './guidance-result-check.js'
+import { parseGuidanceNativeGoalSources, type GuidanceNativeGoalSources } from './goal-task-research.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
 export interface GuidanceSnapshot {
@@ -18,6 +19,7 @@ export type GuidanceStudyId = `guidance-study:${string}`
 export type GuidanceProof = ConversationJudgmentProof
 /** A consumed generation opportunity, not a completed study or a model verdict. */
 export interface ConversationCaseDesignAttemptBody {
+  readonly nativeGoalSources?: GuidanceNativeGoalSources
   readonly scopeKey: string
   readonly consentRevision: number
   readonly parentVersion: Sha256Digest
@@ -33,13 +35,16 @@ export interface ConversationCaseDesignAttempt extends ConversationCaseDesignAtt
 export function caseDesignAttemptId(body: ConversationCaseDesignAttemptBody): string { return `case-design-attempt:${sha256(body).slice(7)}` }
 export function parseConversationCaseDesignAttempt(value: unknown): ConversationCaseDesignAttempt {
   const optional = Object.hasOwn(value as object, 'checkedFailureSources')
-  const input = object(value, ['attemptId', 'scopeKey', 'consentRevision', 'parentVersion', 'sourceTaskIds', 'counterexampleTaskId', 'modelConfigDigest', 'materialDigest', ...(optional ? ['checkedFailureSources'] : [])])
+  const native = Object.hasOwn(value as object, 'nativeGoalSources')
+  if (native && optional) throw new TypeError('Goal sources cannot claim ConversationTask check identities')
+  const input = object(value, ['attemptId', 'scopeKey', 'consentRevision', 'parentVersion', 'sourceTaskIds', 'counterexampleTaskId', 'modelConfigDigest', 'materialDigest', ...(optional ? ['checkedFailureSources'] : []), ...(native ? ['nativeGoalSources'] : [])])
   const ids = uniqueIds(input.sourceTaskIds, 2)
   if (ids.length !== 2 || !Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('invalid case design attempt sources or consent')
   const body: ConversationCaseDesignAttemptBody = { scopeKey: text(input.scopeKey, 512), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), sourceTaskIds: [ids[0]!, ids[1]!], counterexampleTaskId: text(input.counterexampleTaskId, 512),
     modelConfigDigest: digest(input.modelConfigDigest), materialDigest: digest(input.materialDigest),
-    ...(optional ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [ids[0]!, ids[1]!]) } : {}) }
+    ...(optional ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [ids[0]!, ids[1]!]) } : {}),
+    ...(native ? { nativeGoalSources: parseGuidanceNativeGoalSources(input.nativeGoalSources, [...ids, input.counterexampleTaskId as string]) } : {}) }
   if (ids.includes(body.counterexampleTaskId) || input.attemptId !== caseDesignAttemptId(body)) throw new TypeError('invalid case design attempt identity')
   return { attemptId: input.attemptId as string, ...body }
 }
@@ -72,6 +77,7 @@ export interface GuidanceProposalClue {
   readonly materialDigest: Sha256Digest
 }
 export interface GuidanceStudyBody {
+  readonly nativeGoalSources?: GuidanceNativeGoalSources
   readonly resultChecks?: readonly GuidanceCaseResultCheck[]
   readonly checkedFailureSources?: ConversationCheckedFailureSources
   readonly evaluationMode?: 'local-files'
@@ -299,12 +305,14 @@ function parseProposalClue(value: unknown): GuidanceProposalClue {
     assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
 }
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : []), ...(Object.hasOwn(input, 'resultChecks') ? ['resultChecks'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : []), ...(Object.hasOwn(input, 'resultChecks') ? ['resultChecks'] : []), ...(Object.hasOwn(input, 'nativeGoalSources') ? ['nativeGoalSources'] : [])])
   const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
   if (sourceTaskIds.length !== 2 || sourceTaskIds.includes(counterexampleTaskId)) throw new TypeError('guidance requires two distinct failure sources and a separate counterexample')
   const cases = list(input.cases, parseCase, 5)
+  if (Object.hasOwn(input, 'nativeGoalSources') && (Object.hasOwn(input, 'checkedFailureSources') || Object.hasOwn(input, 'proposalClues')
+    || cases.some(item => 'feedbackAssessmentId' in item))) throw new TypeError('Goal study preserves its explicit native source branch')
   if (cases.some(item => !('sourceTaskId' in item) && (mode.evaluationMode === 'local-files'
     ? item.files?.outputKind !== mode.fileOutputKind : item.files !== undefined))) throw new TypeError('guidance cases require the frozen file mode and output kind')
   const quality = Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}
@@ -329,6 +337,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
     ...(Object.hasOwn(input, 'caseDesignProof') ? { caseDesignProof: proof(input.caseDesignProof) } : {}),
     ...(Object.hasOwn(input, 'proposalClues') ? { proposalClues } : {}),
     ...(Object.hasOwn(input, 'checkedFailureSources') ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [sourceTaskIds[0]!, sourceTaskIds[1]!]) } : {}),
+    ...(Object.hasOwn(input, 'nativeGoalSources') ? { nativeGoalSources: parseGuidanceNativeGoalSources(input.nativeGoalSources, [...sourceTaskIds, counterexampleTaskId]) } : {}),
     ...(Object.hasOwn(input, 'resultChecks') ? { resultChecks: parseGuidanceCaseResultChecks(input.resultChecks, { cases, family: input.family as GuidanceStudyBody['family'], ...mode }) } : {}),
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')

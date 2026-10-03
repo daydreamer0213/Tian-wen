@@ -3,6 +3,7 @@ import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, co
 import { conversationFileTaskInputDigest } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
+import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
 import {
   closeSync,
   existsSync,
@@ -385,6 +386,7 @@ export interface RecoveryFailedEvent {
 
 export type LedgerEvent =
   | GoalTaskOutcomeRecordedEvent
+  | GoalTaskResearchSourceRecordedEvent
   | ConversationLearningEvent
   | { readonly type: 'conversation-guidance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-record.v1', readonly at: string, readonly record: ConversationGuidanceRecord }
   | { readonly type: 'conversation-case-design-attempted', readonly schemaVersion: 'tianwen.conversation-case-design-attempt.v1', readonly at: string, readonly attempt: ConversationCaseDesignAttempt }
@@ -1882,6 +1884,14 @@ function parseEvent(value: unknown): LedgerEvent {
     if (value.sourceId !== goalTaskOutcomeSourceId(input) || value.inputDigest !== sha256(input)) throw new LedgerIntegrityError('Goal Task outcome source identity changed')
     return { type, schemaVersion: value.schemaVersion, at, sourceId: value.sourceId, inputDigest: sha256(input), input }
   }
+  if (type === 'goal-task-research-source-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'sourceId', 'inputDigest', 'input'])
+    const input = parseGoalTaskResearchSourceInput(value.input)
+    if (value.schemaVersion !== 'tianwen.goal-task-research-source.v1' || value.sourceId !== input.sourceId || value.inputDigest !== sha256(input)) {
+      throw new LedgerIntegrityError('native Goal research source identity changed')
+    }
+    return { type, schemaVersion: value.schemaVersion, at, sourceId: input.sourceId, inputDigest: sha256(input), input }
+  }
   if (type === 'conversation-learning-recorded') {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
     if (value.schemaVersion !== 'tianwen.conversation-learning.v1') throw new LedgerIntegrityError('unknown conversation learning schema')
@@ -2767,6 +2777,7 @@ type LearningRevisionWrite =
 
 export class EvolutionLedger {
   readonly #goalTaskOutcomes = new Map<string, GoalTaskOutcomeRecordedEvent>()
+  readonly #goalTaskResearchSources = new Map<string, GoalTaskResearchSourceRecordedEvent>()
   readonly #root: string
   readonly #artifactsRoot: string
   readonly #ledgerPath: string
@@ -3008,6 +3019,24 @@ export class EvolutionLedger {
   listGoalTaskOutcomes(): readonly GoalTaskOutcomeObservation[] {
     return clone([...this.#goalTaskOutcomes.values()].map(event => ({ ...event, classification: goalTaskOutcomeClassification(event.input) })))
   }
+  recordGoalTaskResearchSource(raw: GoalTaskResearchSourceInput): { readonly sourceId: string; readonly duplicate: boolean } {
+    const input = parseGoalTaskResearchSourceInput(raw), inputDigest = sha256(input)
+    const previous = this.#goalTaskResearchSources.get(input.sourceId)
+    if (previous !== undefined) {
+      if (previous.inputDigest !== inputDigest) throw new LedgerIntegrityError('original Goal research source changed after freeze')
+      return { sourceId: input.sourceId, duplicate: true }
+    }
+    if (!hasCurrentConversationQuality(input.qualityContract)) throw new LedgerIntegrityError('new Goal research source requires its original current quality contract')
+    this.#accept({ type: 'goal-task-research-source-recorded', schemaVersion: 'tianwen.goal-task-research-source.v1',
+      at: this.#now(), sourceId: input.sourceId, inputDigest, input })
+    return { sourceId: input.sourceId, duplicate: false }
+  }
+  listGoalTaskResearchSources(): readonly GoalTaskResearchSource[] {
+    return clone([...this.#goalTaskResearchSources.values()].map(event => {
+      const outcome = this.#goalTaskOutcomes.get(event.sourceId)!
+      return { ...event, outcome: { ...outcome, classification: goalTaskOutcomeClassification(outcome.input) } }
+    }))
+  }
   recordConversationFeedback(input: ConversationFeedbackRecord): { readonly duplicate: boolean } {
     const record = parseConversationFeedbackRecord(input)
     const previous = this.#conversationFeedback.existing(record)
@@ -3061,6 +3090,14 @@ export class EvolutionLedger {
     }
     // Current-contract eligibility applies to new writes only; old attempts
     // must retain their frozen meaning when the host contract advances.
+    if (attempt.nativeGoalSources !== undefined) {
+      if (attempt.nativeGoalSources.some(reference => !hasCurrentConversationQuality(this.#goalTaskResearchSources.get(reference.sourceId)?.input.qualityContract))) {
+        throw new LedgerIntegrityError('new native Goal case design requires the original current quality contract')
+      }
+      this.#validateConversationCaseDesignAttempt(attempt)
+      this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
+      return { duplicate: false }
+    }
     const tasks = this.listConversationTasks()
     if ([...attempt.sourceTaskIds, attempt.counterexampleTaskId].some(id => !hasCurrentConversationQuality(tasks.find(task => task.source.taskId === id)?.admission?.qualityContract))) {
       throw new LedgerIntegrityError('new case design attempts require the current quality contract')
@@ -3077,6 +3114,7 @@ export class EvolutionLedger {
       || this.listConversationCaseDesignAttempts(attempt.scopeKey).some(item => attempt.sourceTaskIds.every(id => item.sourceTaskIds.includes(id)))) {
       throw new LedgerIntegrityError('case design requires current parent and an unattempted source pair')
     }
+    if (attempt.nativeGoalSources !== undefined) { this.#validateNativeGoalGuidanceSupport(attempt); return }
     const tasks = this.listConversationTasks()
     const first = tasks.find(task => task.source.taskId === attempt.sourceTaskIds[0])
     if (first === undefined) throw new LedgerIntegrityError('case design source is unavailable')
@@ -3206,8 +3244,10 @@ export class EvolutionLedger {
         if (generatedFileInputs.has(identity)) throw new LedgerIntegrityError('duplicate generated file input cannot support a new study or activation')
         generatedFileInputs.add(identity)
       }
-      this.#requireNewConversationCounterevidence(opened!.counterexampleTaskId)
-      this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
+      if (opened!.nativeGoalSources === undefined) {
+        this.#requireNewConversationCounterevidence(opened!.counterexampleTaskId)
+        this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
+      }
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
     if (record.kind === 'study-opened') {
@@ -3259,6 +3299,7 @@ export class EvolutionLedger {
   }
 
   #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
+    if (study.nativeGoalSources !== undefined) { this.#validateNativeGoalGuidanceSupport(study); return }
     const tasks = this.#conversationLearning.list()
     if (tasks.find(task => task.source.taskId === study.counterexampleTaskId)?.externalCheckInvalidated !== undefined) {
       throw new LedgerIntegrityError('study counterevidence check was invalidated')
@@ -3340,6 +3381,56 @@ export class EvolutionLedger {
       const task = tasks.find(task => task.source.taskId === id)!
       return study.evaluationMode === 'local-files' ? sha256({ requestDigest: task.source.requestDigest, inputs: task.fileInputs!.map(({ path, content }) => ({ path, content })), outputKind: task.completion!.files!.outputKind, outputPaths: task.completion!.files!.outputPaths }) : task.source.requestDigest
     })).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
+  }
+
+  #validateNativeGoalGuidanceSupport(binding: ConversationCaseDesignAttempt | GuidanceStudyOpened): void {
+    const references = binding.nativeGoalSources
+    if (references === undefined) throw new LedgerIntegrityError('native Goal study references unavailable')
+    const all = this.listGoalTaskResearchSources()
+    const sources = references.map((reference, index) => {
+      const source = all.find(item => item.sourceId === reference.sourceId)
+      if (source === undefined || source.inputDigest !== reference.inputDigest
+        || reference.sourceId !== [...binding.sourceTaskIds, binding.counterexampleTaskId][index]) throw new LedgerIntegrityError('native Goal study source changed or unavailable')
+      return source
+    })
+    const first = sources[0]!, second = sources[1]!, counter = sources[2]!
+    if (sources.some((source, index) => goalTaskResearchFeedbackContradicts(source,
+      this.listLearningIntakeStatuses(source.outcome.input.childSessionId), index === 2))) {
+      throw new LedgerIntegrityError('native Goal learning support or counterevidence has contradictory active feedback')
+    }
+    const compatible = (source: GoalTaskResearchSource) => source.input.scopeKey === binding.scopeKey
+      && source.input.behaviorVersion === binding.parentVersion && source.outcome.input.consentRevision === binding.consentRevision
+      && source.outcome.input.modelConfigDigest === binding.modelConfigDigest && source.input.family === first.input.family
+      && source.input.evaluationMode === first.input.evaluationMode && source.input.fileOutputKind === first.input.fileOutputKind
+      && sha256(source.input.qualityContract) === sha256(first.input.qualityContract)
+    const firstProblem = goalTaskResearchProblem(first), secondProblem = goalTaskResearchProblem(second)
+    if (!sources.every(compatible) || firstProblem === undefined || secondProblem === undefined
+      || firstProblem.category !== secondProblem.category || firstProblem.checkedFailure !== secondProblem.checkedFailure
+      || first.input.inputDigest === second.input.inputDigest || !goalTaskResearchSuccess(counter)) {
+      throw new LedgerIntegrityError('native Goal learning requires two distinct compatible original problems and a verified independent counterexample')
+    }
+    if (firstProblem.checkedFailure) {
+      const checkIdentity = (source: GoalTaskResearchSource) => {
+        const b = source.outcome.input
+        return sha256({ checkerId: b.checkerId, checkerDigest: b.checkerDigest, contractDigest: b.contractDigest, requiredConditionDigest: b.requiredConditionDigest })
+      }
+      if (sources.some(source => checkIdentity(source) !== checkIdentity(first) || source.input.fileInputsDigest !== source.outcome.input.inputsDigest)) {
+        throw new LedgerIntegrityError('native Goal checked failure requires the same original checker and condition with exact frozen file inputs')
+      }
+    }
+    if (!('cases' in binding)) return
+    if (binding.family !== first.input.family || (binding.evaluationMode ?? 'text') !== first.input.evaluationMode
+      || binding.fileOutputKind !== first.input.fileOutputKind || binding.failureCategory !== firstProblem.category
+      || sha256(binding.qualityContract) !== sha256(first.input.qualityContract)) throw new LedgerIntegrityError('native Goal study scope or original quality contract changed')
+    for (const [index, source] of sources.entries()) {
+      const item = binding.cases[index]
+      if (item === undefined || !('sourceTaskId' in item) || item.sourceTaskId !== source.sourceId
+        || item.inputDigest !== source.input.inputDigest || item.materialDigest !== source.input.materialDigest) throw new LedgerIntegrityError('native Goal study requires exact original material and actual input identity')
+      if (binding.resultChecks !== undefined && binding.resultChecks.find(check => check.caseId === item.id)?.inputsDigest !== source.input.fileInputsDigest) {
+        throw new LedgerIntegrityError('native Goal study program check inputs differ from original frozen files')
+      }
+    }
+    if (firstProblem.checkedFailure && binding.resultChecks === undefined) throw new LedgerIntegrityError('native Goal program failure study requires independent prepared program checks')
   }
 
   #validateConversationGuidance(record: ConversationGuidanceRecord): void {
@@ -7394,6 +7485,7 @@ export class EvolutionLedger {
     if (commitError !== undefined) {
       if (
         parsed.type === 'conversation-learning-recorded'
+        || parsed.type === 'goal-task-research-source-recorded'
         || parsed.type === 'conversation-guidance-recorded'
         || parsed.type === 'conversation-case-design-attempted'
         || parsed.type === 'conversation-feedback-recorded'
@@ -7477,6 +7569,13 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'goal-task-research-source-recorded') {
+      const outcome = this.#goalTaskOutcomes.get(event.sourceId)
+      if (outcome === undefined || outcome.inputDigest !== event.input.outcomeInputDigest
+        || this.#goalTaskResearchSources.has(event.sourceId)) throw new LedgerIntegrityError('Goal research source requires its exact immutable original result')
+      this.#requireConversationConsent(outcome.input.consentRevision)
+      return
+    }
     if (event.type === 'goal-task-outcome-recorded') {
       this.#requireConversationConsent(event.input.consentRevision)
       if (this.#goalTaskOutcomes.has(event.sourceId)) throw new LedgerIntegrityError('duplicate Goal Task outcome event')
@@ -9046,6 +9145,10 @@ export class EvolutionLedger {
 
   #apply(event: LedgerEvent): void {
     this.#events.push(event)
+    if (event.type === 'goal-task-research-source-recorded') {
+      this.#goalTaskResearchSources.set(event.sourceId, event)
+      return
+    }
     if (event.type === 'goal-task-outcome-recorded') {
       this.#goalTaskOutcomes.set(event.sourceId, event)
       return

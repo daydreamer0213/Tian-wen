@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 原Goal来源/资格已接入，原研究消费仍进行中
+
+a9c5361后，未来原contentReview事前固定已有质量合同，原finish lane沿共用reader/原两proof发布明确native-goal-task来源；原attempt/study账本明确三引用，继承输入独立/同意/方法版本/完整模型配置/合同/任务族/模式/原程序条件/成功反例及原消息反馈否决。旧缺合同/方法/材料不补造，不同TaskID不冒充不同实际输入。execution仍unknown，不将提供当采用。见[准确中间检查点](tianwen-goal-task-research-20261003.md)。
+
+实际SDK中途换模型、纯旧audit覆盖及真实反馈漏项有行为首红后修；非completed原内容已unverifiable，未复现reviewed误入，归因缩窄。completed原功能检查器不可用且原双审not-met仍保留语义问题，不把基础设施故障一律当模型失败或取消。纯9项，最终reader/发行/发行SDK合计123通过/1源码spy跳过、完整构建/两声明通过；0真实提供者/自然来源，同进程新Context准确0请求恢复，不称自然闭环。
+
+Runtime原scan/wake/study执行/恢复及case-design/review packet尚未消费Goal分支，第二步整体IN PROGRESS；继续原消费者union/原角色材料/十臂/裁决/停止恢复，再核对第三步治理/未来效果/回滚。source事件与纯ledger opening不是自动研究完成，不伪造ConversationTask/用户评价，不重评旧结果、不索题/催评/造失败或追加练习。目标active/incomplete、main/Daily NO-GO及原资格/门槛/同意/隔离/停止/十工作日窗口不变，不加标准/计时或整体blocked。正式1327364B/5af25fcd…只读准确未变，未重新正式mount；D约18.14GiB>=15、小包/环境复用/正常夹具清理，五历史拒删目录保持不绕过。本条覆盖原Goal来源/账本尚待接入的旧待办，原消费者仍未完成。
+
 ## 2026-10-03 原Goal Task方法事实已可核对，研究消费仍待连接
 
 6aa5189之后，原Task适用族/输出模式由可信项目回调声明，首请求前真实plugin提供既有库方法并冻结原版本/同意/消息身份。原reader/内容材料核对正文/来源/唯一ID/seq，不读后来active pointer重写历史；未提供、提供及撤销明确，execution仍unknown，Skill原事件保留、不将读取或提供当采用。原撤回/版本变化/配置移除先撤销、请求竞态拒绝、孤立消息新Context无检查器也先撤销；原Task不重复执行。见[准确交付及原研究下一步](tianwen-goal-task-method-20261003.md)。

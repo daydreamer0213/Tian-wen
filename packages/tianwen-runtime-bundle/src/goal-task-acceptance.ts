@@ -15,6 +15,8 @@ import { readGoalStatus } from './status.js'
 import { readGoalTaskAcceptanceMaterial } from './goal-task-material.js'
 import { readConversationFile } from './conversation-file-material.js'
 import { finishGoalTaskContentReviews } from './goal-task-content-review.js'
+import { conversationQualityContract } from '@tianwen/evolution/content-review'
+import { publishGoalTaskResearchSources } from './goal-task-research-source.js'
 import { guidanceVersion, parseGuidanceSnapshot } from '@tianwen/evolution/guidance'
 import { GOAL_TASK_METHOD_PLUGIN, goalTaskMethodMessage, goalTaskMethodRule, goalTaskMethodWithdrawal, goalTaskUnboundMethodWithdrawal, parseGoalTaskMethodScope, readGoalTaskMethodUsage,
   type GoalTaskMethodBinding, type GoalTaskMethodScope } from './goal-task-method.js'
@@ -259,7 +261,7 @@ export class GoalTaskAcceptanceChecks {
       && String(event.data.id) === selectedMethod.messageId)
     if (selectedMethod !== undefined && (methodEvent?.type !== 'user/message' || methodEvent.seq >= header.seq)) throw new Error('Goal Task method was not provided before its original request')
     const contentReview = prepared.contentReview === undefined ? undefined : parseGoalTaskContentReviewPlan({
-      protocol: 'tianwen.goal-task-content-review.v1', ...structuredClone(prepared.contentReview),
+      protocol: 'tianwen.goal-task-content-review.v1', qualityContract: conversationQualityContract(), ...structuredClone(prepared.contentReview),
     })
     if (contentReview?.files !== undefined) {
       if (contentReview.files.cwd !== goal.workspaceRoot) throw new Error('content review files must belong to original Goal workspace')
@@ -301,6 +303,7 @@ export class GoalTaskAcceptanceChecks {
     if (prior !== undefined) return prior
     const operation = this.finish(longGoalId).then(() => this.consumeOutcomes(longGoalId))
       .then(() => finishGoalTaskContentReviews(this.ctx, { stateRoot: this.stateRoot, goalId: longGoalId, signal: this.shutdown.signal }))
+      .then(() => publishGoalTaskResearchSources(this.ctx, { stateRoot: this.stateRoot, goalId: longGoalId, signal: this.shutdown.signal }))
     this.pending.set(longGoalId, operation)
     try { await operation } finally { this.pending.delete(longGoalId) }
   }

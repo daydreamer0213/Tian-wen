@@ -38,6 +38,10 @@
       "types": "./dist/conversation-guidance.d.ts",
       "default": "./dist/conversation-guidance.js"
     },
+    "./goal-task-research": {
+      "types": "./dist/goal-task-research.d.ts",
+      "default": "./dist/goal-task-research.js"
+    },
     "./content-review": {
       "types": "./dist/content-review-contract.d.ts",
       "default": "./dist/content-review-contract.js"

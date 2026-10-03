@@ -1,6 +1,7 @@
 import { Service } from '@tianwen/dsh-compat'
 import type { ConversationLearningRecord, ConversationTask } from './conversation-learning.js'
 import type { GoalTaskOutcomeInput, GoalTaskOutcomeReceipt, GoalTaskOutcomeObservation } from './goal-task-outcome.js'
+import type { GoalTaskResearchSourceInput, GoalTaskResearchSource } from './goal-task-research.js'
 import type { ConversationGuidanceRecord, ConversationCaseDesignAttempt, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord } from './conversation-guidance.js'
 import type { ConversationFeedbackRecord, ConversationFeedbackAssessment } from './conversation-feedback.js'
 import type {
@@ -216,6 +217,7 @@ declare module '@deepseek-ai/cordis' {
   interface Events {
     'tianwen/learning-consent-changed'(consent: LearningAnalysisConsentReceipt): void
     'tianwen/conversation-task-reviewed'(taskId: string): void
+    'tianwen/goal-task-research-source-recorded'(sourceId: string): void
     'tianwen/conversation-code-check-finished'(taskId: string): void
     'tianwen/conversation-code-check-invalidated'(taskId: string): void
     'tianwen/conversation-admission-recorded'(taskId: string): void
@@ -563,6 +565,14 @@ export class TianwenEvolutionService extends Service {
   }
   listGoalTaskOutcomes(): readonly GoalTaskOutcomeObservation[] {
     return this.state().ledger.listGoalTaskOutcomes()
+  }
+  recordGoalTaskResearchSource(input: GoalTaskResearchSourceInput): { readonly sourceId: string; readonly duplicate: boolean } {
+    const receipt = this.formalWrite(() => this.state().ledger.recordGoalTaskResearchSource(input))
+    if (!receipt.duplicate) this.ctx.emit('tianwen/goal-task-research-source-recorded', receipt.sourceId)
+    return receipt
+  }
+  listGoalTaskResearchSources(): readonly GoalTaskResearchSource[] {
+    return this.state().ledger.listGoalTaskResearchSources()
   }
 
   recordRunSkillManifest(

@@ -1,6 +1,6 @@
 /** Pure existing content/file protocols for owner records without importing services. */
 export { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationReviewChecks, parseConversationAuditedReviewChecks,
-  parseConversationQualityContract, conversationReviewConsensus, conversationFileCaptureOutputKind, conversationRequestContentDigest } from './conversation-learning.js'
+  conversationQualityContract, hasCurrentConversationQuality, parseConversationQualityContract, conversationReviewConsensus, conversationFileCaptureOutputKind, conversationRequestContentDigest } from './conversation-learning.js'
 export type { ConversationAuditedReviewChecks, ConversationAuditedReviewCheck, ConversationReviewCheck,
   ConversationJudgmentProof, ConversationQualityContract, ConversationTask, ConversationTaskSource, ConversationFamily } from './conversation-learning.js'
 export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERSATION_FILE_MAX_COUNT,

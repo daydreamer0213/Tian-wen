@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 原Goal研究来源已自动发布，原消费者实施继续
+
+a9c5361后，未来原prepare事前冻结已有质量合同，原finish lane恢复原Task/SDK/方法/两proof并幂等发布明确native-goal-task来源；原Evolution attempt/study增加显式引用及原资格/去重/程序条件/真实消息反馈否决/冷重放。全Task模型配置、当前合同对应audit、原生命周期/助手消息绑定保持，不同TaskID不伪装输入独立，原结果不改。详见[来源交付与未完成消费者](tianwen-goal-task-research-20261003.md)。
+
+第二步整体仍IN PROGRESS：原conversation-guidance-loop的scan/wake/study执行/恢复与case-design/review packet尚未消费Goal分支，不能把source query/event或纯账本opening当自动研究闭环。下一直接实现原来源union、根会话恢复、案例/十臂/盲审/裁决及0重复恢复；然后第三步治理启用和真实未来效果/回滚，不另建研究服务、不增阶段或门槛。
+
+独立有据问题已首红后修，静态复核无新增P1/P2；非completed控制原内容已unverifiable，撤回曾称reviewed误入的过强归因。纯来源/账本9项通过；初次14源码495通过/10旧SDK夹具缺元数据失败后reader10通过；发行清单窄修后最终三文件123通过/1源码spy跳过（reader10+发行73+发行SDK40），源码保存故障原项已通过。完整构建/两声明及原SDK边界检查通过，0真实提供者/自然观测，恢复同进程新Context，不称自然收益或新进程。
+
+正式1327364B/5af25fcd…只读准确未变，未重新正式mount、不冒充新计数。目标active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口保持，不加标准/计时/索题/催评/造失败/重评旧题或整体blocked。必要小D包约42KB，D约18.14GiB>=15，无安装下载/新容器；新正常夹具已清理，五历史拒删目录保持不绕过。本条覆盖下方研究来源及原账本接线待实现的待办；Runtime消费者仍待做。
+
 ## 2026-10-03 原Goal Task方法提供、版本与恢复保护已交付
 
 6aa5189之后，原可信检查器可选声明Task适用族/输出模式，原owner首请求前追加既有库精确方法的真实plugin消息，原preparation冻结版本/快照/同意/seq；共用材料reader核对真实正文/插件身份/唯一消息/请求边界，原内容视图保留native-goal-task元数据。未提供、提供和撤销可核对，execution仍unknown，旧缺项不补造，不将提供当采用/收益。详见[交付及原研究下一步](tianwen-goal-task-method-20261003.md)。

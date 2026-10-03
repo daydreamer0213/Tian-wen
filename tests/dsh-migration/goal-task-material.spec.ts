@@ -51,8 +51,8 @@ function fixture(options: { legacy?: boolean; large?: boolean } = {}) {
     event: { type: 'task-acceptance-finished', taskId, epoch: 1, preparationDigest: sha256(binding), endSeq: 5,
       materialDigest: sha256(events), outcome: { status: 'verified', detail: 'Independent control assertion passed.' } } })
   let consent = { enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' }
-  const logs = new Map([['control', { meta: { id: 'control' }, events: [command] }],
-    ['child', { meta: { id: 'child', parentSession: goal.planner.sessionId, cwd: root }, events }]])
+  const logs = new Map([['control', { meta: { id: 'control', createdAt: 1 }, events: [command] }],
+    ['child', { meta: { id: 'child', createdAt: 2, parentSession: goal.planner.sessionId, cwd: root }, events }]])
   const calls: string[] = []
   let afterRead: ((id: string) => void) | undefined
   const ctx = { sessionPersistence: { async inspect(id: string) {
