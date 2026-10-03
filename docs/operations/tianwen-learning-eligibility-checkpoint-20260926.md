@@ -1,5 +1,12 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 DEV原合同研究接线已交付，下一修未来评审引用提示
+
+冻结dddcfbc后，天问一次实际未知答案交付纯合同装配模块：9 forwarded/5根、prepare1/evaluate1、功能verified、review inconclusive/invalid-judgment。原候选/task/material/program先封存，新进程准确cold、0模型/程序重执行；两原合同遗漏以5首红加消费者缺入口1首红后单独工程修复，不回填原结果。DEV新工厂委托原固定host和实际公开cohort，五角色正确/错误原条件控制及相关18项通过，独立审查关闭P2；发行/原checker根JS逐字保持，不重复整包build。见[交付与准确边界](tianwen-dev-study-case-binding-20261003.md)。
+
+0请求原native诊断确认两模型有raw met，但grounding answer-29 claim.quote不是对应单位逐字子串，原host正确拒绝；requirements原audit有效。不是缺任务/环境，不能把raw met当双审通过。下一按[未来紧凑引用提示设计](../superpowers/specs/2026-10-03-tianwen-compact-audit-quote-design.md)在预算内提供单位准确引用示例，保留全部单位/原验证/门槛，不修旧引文或重评旧任务。
+
+正式实际发行/真实status0模型/程序：20观察19完成、13初筛/1可信问题/5成功初筛候选/兼容pair false，反馈归因0/study0/隔离true；原91f83d10…前缀准确、现034d966f…。原84历史ID/自有新容器0/快照0，无下载或整环境副本，D≥15GiB；最终容量/远端见小型运行根final-audit。完整目标active/incomplete、main/Daily NO-GO与原同意/门槛/去重/停止/十工作日窗口保持，不重新计时。不索题/造失败/重评或空转blocked。此条覆盖下方原DEV接线仍待做及正式19任务的当时状态。
 2026-10-03最新：普通checker回报与事前功能条件不符时，原finish晚写入失败且无结果；两首红后在callback内复用原验证器预检，无效回报一次unverifiable/无qualified failure，真实Ledger保存/历史错误仍拒绝。定向4项在五组242回归内，八包类型/实际完整发行声明/静态审查通过，原completed/双审met/正确失败/cold字节及零重试保持。正式最终发行状态0模型/程序/新自然任务，19观察18完成/12初筛/1可信问题/5成功初筛/兼容pair false，反馈归因0/study0/隔离true；完整91f83d10…与固定checker根JS准确未变。D约18.58GiB≥15，无Docker/下载/环境副本；控制夹具不算学习来源。完整目标active/incomplete，继续自主实际项目工作，不索题/造来源/重评或空转blocked，main/Daily NO-GO与原同意/隔离/门槛/十工作日窗口不变。见[本次结果](tianwen-ordinary-check-outcome-20261003.md)。以下为此前当时事实。
 
 2026-10-03最新：修复无效成功对照提前消耗问题pair的真实消费者冲突；原study-open拒绝有效偏好counter，而旧普通初筛/attempt先接受。Runtime复用原latest/active/proof判定，Ledger仅新写提前拒绝原反馈/native negative，干净counter仍可首次尝试。普通pending不增门槛、checked pending/positive覆盖/失活/无proof/旧attempt与历史恢复保持。五组373项、八包类型/完整发行声明/独立审查通过；实际发行状态0模型/程序，新自然任务0，19观察18完成/12初筛/1可信问题/5成功初筛/兼容pair false，反馈归因0/study0/隔离true。正式完整91f83d10…及checker根JS准确未变，无Docker/下载/整档副本，D约18.58GiB≥15。具体缺来源不等于整体开发应停止；继续自主实际项目工作，原合同/首结果固定，不索题/造失败/重评或空转blocked。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/门槛/十工作日窗口不变、不重置。见[本次实际修复与责任](tianwen-counter-feedback-consistency-20261003.md)。以下为此前当时事实。

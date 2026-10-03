@@ -1,4 +1,11 @@
 # Tianwen 当前项目权威交接
+## 2026-10-03 DEV原合同研究接线已交付，下一修未来评审引用提示
+
+冻结dddcfbc后，天问一次实际未知答案交付纯合同装配模块：9 forwarded/5根、prepare1/evaluate1、功能verified、review inconclusive/invalid-judgment。原候选/task/material/program先封存，新进程准确cold、0模型/程序重执行；两原合同遗漏以5首红加消费者缺入口1首红后单独工程修复，不回填原结果。DEV新工厂委托原固定host和实际公开cohort，五角色正确/错误原条件控制及相关18项通过，独立审查关闭P2；发行/原checker根JS逐字保持，不重复整包build。见[交付与准确边界](tianwen-dev-study-case-binding-20261003.md)。
+
+0请求原native诊断确认两模型有raw met，但grounding answer-29 claim.quote不是对应单位逐字子串，原host正确拒绝；requirements原audit有效。不是缺任务/环境，不能把raw met当双审通过。下一按[未来紧凑引用提示设计](../superpowers/specs/2026-10-03-tianwen-compact-audit-quote-design.md)在预算内提供单位准确引用示例，保留全部单位/原验证/门槛，不修旧引文或重评旧任务。
+
+正式实际发行/真实status0模型/程序：20观察19完成、13初筛/1可信问题/5成功初筛候选/兼容pair false，反馈归因0/study0/隔离true；原91f83d10…前缀准确、现034d966f…。原84历史ID/自有新容器0/快照0，无下载或整环境副本，D≥15GiB；最终容量/远端见小型运行根final-audit。完整目标active/incomplete、main/Daily NO-GO与原同意/门槛/去重/停止/十工作日窗口保持，不重新计时。不索题/造失败/重评或空转blocked。此条覆盖下方原DEV接线仍待做及正式19任务的当时状态。
 ## 2026-10-03 普通检查合同不符的失败收尾已修复
 
 a000b56普通checker回报错误失败摘要或无事前条件时，原Ledger晚拒绝导致没有完成回执。7aff228事前固定后，finish callback内五行复用原验证器预检，错误回报一次unverifiable、无qualified failure；真实存储/历史错误仍catch外拒绝。两首红、定向4项及五组242不同回归、八包类型/实际完整发行声明与独立审查通过；原completed/双审met、正确拒绝/普通诊断拒绝、字节精确cold/零prepare/evaluate重试保持。见[具体缺陷与边界](tianwen-ordinary-check-outcome-20261003.md)。
