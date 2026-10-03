@@ -4,6 +4,7 @@ import { createRequire, registerHooks } from 'node:module'
 import { isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
+import { createHash } from 'node:crypto'
 import { SessionId, createUserMessage } from '@tianwen/dsh-compat'
 import { observeNativeTaskRequests } from './native-task-request-observer.ts'
 import { withConversationObservationCancellation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.ts'
@@ -20,6 +21,11 @@ export async function loadDevelopmentNativeModules() {
     const [policy, result] = await Promise.all(paths.map(path => import(path)))
     return { createDevelopmentNativeFilePolicy: policy.createDevelopmentNativeFilePolicy, summarizeDevelopmentNativeTask: result.summarizeDevelopmentNativeTask }
   } finally { hooks.deregister() }
+}
+
+/** The caller admits these reviewed policy bytes before mounting the Runtime. */
+export function developmentNativeReadDenialProducer() {
+  return { id: 'tianwen.development-native-file-policy.v1', digest: 'sha256:' + createHash('sha256').update(readFileSync(new URL('./development-native-file-policy.mjs', import.meta.url))).digest('hex') }
 }
 
 /** Caller mounts the actual Runtime/checker and owns Context shutdown. No learning or activation decisions here. */
@@ -63,10 +69,13 @@ export async function runDevelopmentNativeTask(ctx, config) {
   try {
     handle = await ctx.agents.create({ sessionId: SessionId(sessionId), meta: { cwd }, agentOptions: callConfig, signal, setup(local) {
       local.tools.presentAs('native'); local.tools.restrict({ allow: ['read', 'write', 'edit'] })
-      local.tools.guard(execution => {
+      const nativeGuard = execution => {
         if (String(execution.agent?.session.id) !== sessionId) return
         return guard({ name: execution.name, sessionId, parent: execution.parent, callId: execution.callId, rootCallId: execution.rootCallId, arguments: execution.arguments })
-      })
+      }
+      const observer = ctx.tianwenConversationFileObserver
+      if (typeof observer?.guardRead === 'function') observer.guardRead(local, developmentNativeReadDenialProducer(), nativeGuard)
+      else local.tools.guard(nativeGuard)
     } })
     signal?.addEventListener('abort', cancel, { once: true }); if (signal?.aborted) cancel()
     signal?.throwIfAborted()

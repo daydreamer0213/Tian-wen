@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path'
 import { parseConversationFileEntries, type ConversationFileEntry } from './conversation-files.js'
 import { canonicalJson, sha256 } from './learning-intake.js'
+import { parseConversationReadDenialReceipt } from './conversation-read-denial.js'
 import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type CapturedFileFacts } from './conversation-file-facts.js'
 import type { Sha256Digest } from './ledger.js'
 import {
@@ -15,7 +16,7 @@ const ANCILLARY_RESULT_MAX_COUNT = 256
 const ANCILLARY_CONTEXT_MAX_BYTES = 24576
 
 export interface ConversationAncillaryProducer {
-  readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh' | '@tianwen/runtime-bundle'
+  readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh' | '@deepseek-ai/dsh-tool-fs' | '@tianwen/runtime-bundle'
   readonly version: '0.1.1-rc.2' | '1'
   readonly adapter: 'tianwen.file-ancillary.v1' | 'tianwen.captured-file-facts.v1' | 'tianwen.pwsh-denial.v1'
 }
@@ -26,6 +27,7 @@ export type ConversationAncillaryPayload =
   | { readonly tool: 'skill'; readonly reference: ConversationSkillAdmission; readonly definition: Readonly<Record<string, unknown>> }
   | { readonly tool: 'pwsh'; readonly nativeReceiptJson: string; readonly nativeValueJson: string }
   | { readonly tool: 'pwsh-denied'; readonly nativeDenialJson: string }
+  | { readonly tool: 'read-denied'; readonly nativeDenialJson: string }
   | { readonly tool: typeof CAPTURED_FILE_FACTS_TOOL; readonly facts: CapturedFileFacts; readonly inputDigest: Sha256Digest }
 
 export interface ConversationTaskFileAncillary {
@@ -139,7 +141,7 @@ function parseProducer(value: unknown): ConversationAncillaryProducer {
     return { package: input.package, version: input.version, adapter: input.adapter }
   }
   if ((input.package !== '@deepseek-ai/dsh-tool-fs-search' && input.package !== '@deepseek-ai/dsh-tool-skill'
-      && input.package !== '@deepseek-ai/dsh-tool-pwsh')
+      && input.package !== '@deepseek-ai/dsh-tool-pwsh' && input.package !== '@deepseek-ai/dsh-tool-fs')
     || input.version !== '0.1.1-rc.2' || input.adapter !== 'tianwen.file-ancillary.v1') {
     throw new TypeError('conversation file ancillary producer is invalid')
   }
@@ -198,6 +200,12 @@ function parsePayload(value: unknown): ConversationAncillaryPayload {
     const input = exactObject(value, ['tool', 'nativeDenialJson'])
     return { tool, nativeDenialJson: canonicalObjectJson(input.nativeDenialJson, 'native denial JSON') }
   }
+  if (tool === 'read-denied') {
+    const input = exactObject(value, ['tool', 'nativeDenialJson'])
+    const nativeDenialJson = canonicalObjectJson(input.nativeDenialJson, 'native read denial JSON')
+    parseConversationReadDenialReceipt(JSON.parse(nativeDenialJson))
+    return { tool, nativeDenialJson }
+  }
   if (tool === CAPTURED_FILE_FACTS_TOOL) {
     const input = exactObject(value, ['tool', 'facts', 'inputDigest'])
     const facts = exactObject(input.facts, ['path', 'bytes', 'lines', 'sha256'])
@@ -219,7 +227,7 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
   const producer = parseProducer(input.producer)
   const payload = parsePayload(input.payload)
   const expectedPackage = payload.tool === 'skill' ? '@deepseek-ai/dsh-tool-skill'
-    : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh'
+    : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh' : payload.tool === 'read-denied' ? '@deepseek-ai/dsh-tool-fs'
       : payload.tool === CAPTURED_FILE_FACTS_TOOL || payload.tool === 'pwsh-denied' ? '@tianwen/runtime-bundle' : '@deepseek-ai/dsh-tool-fs-search'
   if (producer.package !== expectedPackage) throw new TypeError('conversation file ancillary producer does not match its tool')
   if (payload.tool === 'pwsh-denied' && producer.adapter !== 'tianwen.pwsh-denial.v1') throw new TypeError('conversation file denial producer is invalid')
@@ -231,6 +239,15 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
     producer, payload,
   }
   if (result.callSeq >= result.resultSeq) throw new TypeError('conversation file ancillary call/result sequence is invalid')
+  if (payload.tool === 'read-denied') {
+    const receipt = parseConversationReadDenialReceipt(JSON.parse(payload.nativeDenialJson))
+    if (receipt.identity.taskId !== result.taskId || receipt.identity.callId !== result.callId
+      || receipt.callSeq !== result.callSeq || receipt.resultSeq !== result.resultSeq
+      || receipt.argumentsDigest !== result.argumentsDigest || receipt.resultDigest !== result.resultDigest
+      || sha256(receipt) !== result.valueDigest || sha256(receipt.nativeTool) !== sha256(producer)) {
+      throw new TypeError('conversation native read denial record binding is invalid')
+    }
+  }
   if (serializedBytes(result) > ANCILLARY_RECORD_MAX_BYTES) throw new TypeError('conversation file ancillary record exceeds the byte limit')
   return result
 }

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 可信read拒绝及实际发行接线已交付，下一缩减真实评审重复schema
+
+一次原自然纯模块任务11真实请求/9根、prepare1/eval1，原功能verified、review inconclusive/proof null。持久首审max-tokens：input140989/output65536/reasoning60588，无有效structured_output，无第二审；不追认为网络问题或原学习成功。三P2以5首红工程修复；可信同步guard/实际fs注册/opaque token/原事件/producer/hash/取消绑定接入ancillary、冻结和cold；v3拒绝动作不创建输入/成功/学习，旧v1/v2指令保持。
+
+12不同组252检查、八包类型/完整发行/公开导入/独立审查通过。最终实际发行SDK控制越界read执行0/拒绝1、正常反序输出和edit通过；11scripted/8根、prepare1/eval1、verified/双met；原task/material/program/两审0请求cold。正式18观察/17识别结束/0feedback/0study/隔离true/awaiting-compatible-sources，完整62438424…1042766字节及922060原前缀保持，原自然记录准确冷恢复。三自有容器清除/历史84ID保持/快照0/Docker关闭；小型D记录无全量副本、无下载，约18.57GiB≥15。残留16测试目录450296字节的删除两次被自动审批拒绝，未绕过。
+
+只读原评审量化prompt227410B/schema297701B、65单元audit228723B、多处源码重复。下一窄修新评审schema重复表达，保留原完整覆盖/固定v2单元/host绑定，不回退漏单元协议、不重评旧任务；随后固定SDK推进真实兼容不同核心待办，失败不预设。见[准确结果](tianwen-native-read-denial-20261003.md)。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/门槛/十日窗口不变；继续有证据的实现，不空转blocked或索用户动作。本条覆盖下方read拒绝尚未交付的当前待办。
+
 ## 2026-10-03 可复用DEV原生入口已交付，真实拒绝回执缺口已定位
 
 d03f61d事前固定后，天问一次未知答案交付两个纯权限/结果模块，7真实请求/6根/9工具/prepare1/eval0。额外read scripts在guard预dispatch拒绝、没有I/O；原observer把无pending的result判材料失效，原completed无files/程序unverifiable/review inconclusive，双审未尝试。原task/material/program精确0请求冷恢复；两原候选Windows及隔离原六文件功能入口通过后逐字工程接纳，不回填成功或失败来源。

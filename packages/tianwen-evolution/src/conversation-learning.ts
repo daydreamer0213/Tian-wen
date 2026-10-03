@@ -571,7 +571,9 @@ export class ConversationLearningState {
       return
     }
     if (record.kind === 'task-file-ancillary-captured') {
-      if (task.admission?.decision?.kind !== 'task' || task.admission.decision.evaluationMode !== 'local-files' || task.completion !== undefined) {
+      if (task.admission?.decision?.kind !== 'task' || (task.admission.decision.evaluationMode !== 'local-files'
+        && !(task.admission.decision.evaluationMode === 'external' && conversationFileCaptureOutputKind(task.admission.decision) === 'files'
+          && record.payload.tool === 'read-denied')) || task.completion !== undefined) {
         throw new Error('task file ancillary capture requires local-files admission and must precede the completed result')
       }
       if (task.fileUnavailable !== undefined) throw new Error('task file ancillary capture is unavailable')

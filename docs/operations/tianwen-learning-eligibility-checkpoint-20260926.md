@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 可信read拒绝及实际发行接线已交付，下一缩减真实评审重复schema
+
+一次原自然纯模块任务11真实请求/9根、prepare1/eval1，原功能verified、review inconclusive/proof null。持久首审max-tokens：input140989/output65536/reasoning60588，无有效structured_output，无第二审；不追认为网络问题或原学习成功。三P2以5首红工程修复；可信同步guard/实际fs注册/opaque token/原事件/producer/hash/取消绑定接入ancillary、冻结和cold；v3拒绝动作不创建输入/成功/学习，旧v1/v2指令保持。
+
+12不同组252检查、八包类型/完整发行/公开导入/独立审查通过。最终实际发行SDK控制越界read执行0/拒绝1、正常反序输出和edit通过；11scripted/8根、prepare1/eval1、verified/双met；原task/material/program/两审0请求cold。正式18观察/17识别结束/0feedback/0study/隔离true/awaiting-compatible-sources，完整62438424…1042766字节及922060原前缀保持，原自然记录准确冷恢复。三自有容器清除/历史84ID保持/快照0/Docker关闭；小型D记录无全量副本、无下载，约18.57GiB≥15。残留16测试目录450296字节的删除两次被自动审批拒绝，未绕过。
+
+只读原评审量化prompt227410B/schema297701B、65单元audit228723B、多处源码重复。下一窄修新评审schema重复表达，保留原完整覆盖/固定v2单元/host绑定，不回退漏单元协议、不重评旧任务；随后固定SDK推进真实兼容不同核心待办，失败不预设。见[准确结果](tianwen-native-read-denial-20261003.md)。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/门槛/十日窗口不变；继续有证据的实现，不空转blocked或索用户动作。本条覆盖下方read拒绝尚未交付的当前待办。
+
 2026-10-03可复用DEV原生入口交付，目标active/incomplete。一次未知答案7真实请求/6根/9工具/prepare1/eval0，额外read scripts被guard预dispatch拒绝没有I/O；原ancillary无pending判材料unavailable，原completed无files、程序unverifiable、review inconclusive/双审未尝试。原task/material/program精确0请求cold；两原候选Windows/隔离原六文件通过后逐字工程接纳，不补成功/第二失败/自然效果。薄宿主实际peer解析、原task/native优先保存；旧会话/旧档2P2首红后关闭，最终18相关、最终发行反序+edit控制及两原审0请求cold通过，控制不计自然来源。正式17观察/16识别完成/0feedback/0study、隔离true/awaiting-compatible-sources，完整be721509…及原574d6e…870269字节前缀保持。4容器全清/原84ID/快照0/Docker关闭、小型D记录。下一可信read-denied回执+原冻结/cold，后固定发行/同原功能条件推进真正独立待办，不按报错文字跳过/改旧条件拼组。NO-GO/原门槛/同意/隔离/窗口保持；有具体实现可推进，不索题或空审计。见[准确范围](tianwen-development-native-entry-20261003.md)。
 
 2026-10-03原多文件Task3已实际未知答案前瞻：真实路径编码身份缺陷事前复现/合同/入口固定，原1task/13提供者/8根/10工具/prepare1/eval1、双met，program因同集合捕获顺序与checker声明顺序不兼容unverifiable，功能容器0；封存driver末同顺序断言另控制端失败。原候选完整留存、原结果不变，独立Windows及隔离原五文件/同原入口通过后逐字工程交付。project evaluate最窄权限集合修复2首红→104相关/最终8组282、类型/完整build/实际发行反序fullRuntime控制及0请求cold通过，旧single/研究body/合同摘要/资格不改，审查无剩余P1/P2。正式16观察/15识别完成/0feedback/0study/隔离及awaiting-compatible-sources，完整574d6e…870269字节、原bc1前缀保持；原task/material/program/两审冷恢复准确0模型检查。不能把本轮unverifiable或工程通过补成功对照/第二失败来源/学习效果。3自有容器全清/原84ID/临时快照0，约1.1MB无全量副本。目标active/incomplete、NO-GO及原同意/门槛/窗口保持；下一收敛可复用DEV原生入口后自主不同真实核心任务，不索题或空审计。见[原生与工程准确范围](tianwen-exact-path-native-20261003.md)。

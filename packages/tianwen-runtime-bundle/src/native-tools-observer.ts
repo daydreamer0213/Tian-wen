@@ -5,9 +5,10 @@ import { ToolRuntime, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import * as fsSearch from '@deepseek-ai/dsh-tool-fs-search'
 import * as skill from '@deepseek-ai/dsh-tool-skill'
 import * as pwsh from '@deepseek-ai/dsh-tool-pwsh'
+import * as fs from '@deepseek-ai/dsh-tool-fs'
 
 export interface NativeToolRegistrationProducer {
-  readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh'
+  readonly package: '@deepseek-ai/dsh-tool-fs-search' | '@deepseek-ai/dsh-tool-skill' | '@deepseek-ai/dsh-tool-pwsh' | '@deepseek-ai/dsh-tool-fs'
   readonly version: '0.1.1-rc.2'
   readonly adapter: 'tianwen.file-ancillary.v1'
 }
@@ -37,6 +38,7 @@ const nativeModules: readonly {
   readonly module: Plugin
   readonly producer: NativeToolRegistrationProducer
 }[] = [
+  { module: fs, producer: { package: '@deepseek-ai/dsh-tool-fs', version: '0.1.1-rc.2', adapter: 'tianwen.file-ancillary.v1' } },
   {
     module: fsSearch,
     producer: {
@@ -125,6 +127,7 @@ export class NativeObservedToolRuntime extends ToolRuntime {
       if (matched.length !== 1) return disposer
 
       const candidate = matched[0]!
+      if (candidate.producer.package === '@deepseek-ai/dsh-tool-fs' && definition.name !== 'read') return disposer
       this.nativeRegistrations.set(definition, {
         definition,
         originFiber,

@@ -9,6 +9,8 @@ export type { ConversationExternalCheckPrepared, ConversationExternalCheckFinish
 export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial, parseConversationFileResult, parseConversationFileTrialReceipt, conversationFileTaskInputDigest } from './conversation-files.js'
 export type { ConversationFileEntry, ConversationFileMaterial, ConversationFileResult, ConversationFileTrialOutput, ConversationFileTrialReceipt, ConversationTaskFileInput, ConversationTaskFileUnavailable } from './conversation-files.js'
 export { parseConversationTaskFileAncillary, parseConversationFileAncillaryContext, projectConversationFileAncillaryContext } from './conversation-file-ancillary.js'
+export { parseConversationReadDenialReceipt, verifyConversationReadDenialReceipt } from './conversation-read-denial.js'
+export type { ConversationReadDenialReceipt, ConversationReadDenialProducer, ConversationReadDenialBinding } from './conversation-read-denial.js'
 export type { ConversationAncillaryProducer, ConversationAncillaryPayload, ConversationTaskFileAncillary, ConversationFileAncillaryContext } from './conversation-file-ancillary.js'
 export { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts } from './conversation-file-facts.js'
 export type { CapturedFileFacts } from './conversation-file-facts.js'

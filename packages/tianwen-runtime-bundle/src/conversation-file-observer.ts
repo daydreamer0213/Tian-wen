@@ -1,6 +1,7 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { ToolDispatchExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { ToolDispatchExecution, ToolExecution, ToolExecutionResult, ToolGuard } from '@deepseek-ai/dsh-tools'
+import type { ConversationReadDenialProducer } from '@tianwen/evolution'
 import { defineTool, type ToolDefinition } from '@deepseek-ai/dsh-tools'
 import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, conversationFileCaptureOutputKind, parseConversationFileEntries, parseConversationFileResult, sha256, type CapturedFileFacts, type ConversationFileResult, type ConversationTask, type ConversationTaskFileUnavailable } from '@tianwen/evolution'
 import { isAbsolute } from 'node:path'
@@ -100,6 +101,20 @@ export class TianwenConversationFileObserverService extends Service {
 
   isFactsDefinition(definition: ToolDefinition): boolean { return this.factDefinitions.has(definition) }
 
+  /** Keep the SDK guard, refusal, result and registration disposer unchanged. */
+  guardRead(scope: Context, producer: ConversationReadDenialProducer, guard: ToolGuard): () => void {
+    const admitted = structuredClone(producer)
+    return scope.tools.guard(exec => {
+      const reason = guard(exec)
+      if (typeof reason === 'string' && exec.name === 'read') {
+        const current = this.current(exec)
+        if (current !== undefined && !current.state.revoked && this.authorized(current.state.consentRevision))
+          current.state.native.captureReadDenial(exec, admitted, reason)
+      }
+      return reason
+    })
+  }
+
   private installFacts(agent: Agent): void {
     if (this.config.exposeCapturedFileFacts === false || !isRoot(agent) || this.installations.has(agent)) return
     const service = this
@@ -146,7 +161,7 @@ export class TianwenConversationFileObserverService extends Service {
     return result
   }
 
-  private current(exec: ToolDispatchExecution): { readonly task: ConversationTask, readonly state: CaptureState } | undefined {
+  private current(exec: Readonly<ToolExecution>): { readonly task: ConversationTask, readonly state: CaptureState } | undefined {
     const agent = exec.agent
     if (agent === undefined || !isRoot(agent)) return
     const call = agent.session.events.findLast(event => event.type === 'tool/call' && String(event.data.callId) === String(exec.callId))

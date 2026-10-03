@@ -10,6 +10,7 @@ import {
   type LearningAnalysisStatus,
   type LearningSkillAdmission,
   type ConversationSkillAdmission,
+  type ConversationReadDenialProducer,
 } from '@tianwen/evolution'
 import {
   RESEARCH_SUMMARY_TOOL_NAME,
@@ -68,6 +69,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
+  /** Exact reviewed guard source admissions, required for native read-denial cold verification. */
+  readonly conversationReadDenialSources?: readonly ConversationReadDenialProducer[]
   /** Test/programmatic seam; desktop profiles use learningLoop instead. */
   readonly learningLoopExecutor?: LearningLoopControlledExecutor
   /** Serializable desktop activation for the sole audited explicit-correction protocol. */
@@ -498,7 +501,8 @@ export async function apply(
   ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
     ...(config.exposeCapturedFileFacts === false ? { exposeCapturedFileFacts: false } : {}),
-    ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }) })
+    ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
+    ...(config.conversationReadDenialSources === undefined ? {} : { readDenialSources: config.conversationReadDenialSources }) })
   ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true,
     ...(config.captureExternalCodeArtifacts === true && config.externalCodeCheck !== undefined ? { externalCodeCheck: config.externalCodeCheck } : {}) })
   ctx.plugin(TianwenConversationFeedbackService)
