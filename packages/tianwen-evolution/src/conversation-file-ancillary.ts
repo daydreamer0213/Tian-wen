@@ -2,6 +2,7 @@ import { isAbsolute } from 'node:path'
 import { parseConversationFileEntries, type ConversationFileEntry } from './conversation-files.js'
 import { canonicalJson, sha256 } from './learning-intake.js'
 import { parseConversationReadDenialReceipt } from './conversation-read-denial.js'
+import { parseConversationFileMutationDenialReceipt } from './conversation-file-mutation-denial.js'
 import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type CapturedFileFacts } from './conversation-file-facts.js'
 import type { Sha256Digest } from './ledger.js'
 import {
@@ -28,6 +29,7 @@ export type ConversationAncillaryPayload =
   | { readonly tool: 'pwsh'; readonly nativeReceiptJson: string; readonly nativeValueJson: string }
   | { readonly tool: 'pwsh-denied'; readonly nativeDenialJson: string }
   | { readonly tool: 'read-denied'; readonly nativeDenialJson: string }
+  | { readonly tool: 'file-mutation-denied'; readonly nativeDenialJson: string }
   | { readonly tool: typeof CAPTURED_FILE_FACTS_TOOL; readonly facts: CapturedFileFacts; readonly inputDigest: Sha256Digest }
 
 export interface ConversationTaskFileAncillary {
@@ -200,10 +202,11 @@ function parsePayload(value: unknown): ConversationAncillaryPayload {
     const input = exactObject(value, ['tool', 'nativeDenialJson'])
     return { tool, nativeDenialJson: canonicalObjectJson(input.nativeDenialJson, 'native denial JSON') }
   }
-  if (tool === 'read-denied') {
+  if (tool === 'read-denied' || tool === 'file-mutation-denied') {
     const input = exactObject(value, ['tool', 'nativeDenialJson'])
     const nativeDenialJson = canonicalObjectJson(input.nativeDenialJson, 'native read denial JSON')
-    parseConversationReadDenialReceipt(JSON.parse(nativeDenialJson))
+    if (tool === 'read-denied') parseConversationReadDenialReceipt(JSON.parse(nativeDenialJson))
+    else parseConversationFileMutationDenialReceipt(JSON.parse(nativeDenialJson))
     return { tool, nativeDenialJson }
   }
   if (tool === CAPTURED_FILE_FACTS_TOOL) {
@@ -227,7 +230,7 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
   const producer = parseProducer(input.producer)
   const payload = parsePayload(input.payload)
   const expectedPackage = payload.tool === 'skill' ? '@deepseek-ai/dsh-tool-skill'
-    : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh' : payload.tool === 'read-denied' ? '@deepseek-ai/dsh-tool-fs'
+    : payload.tool === 'pwsh' ? '@deepseek-ai/dsh-tool-pwsh' : payload.tool === 'read-denied' || payload.tool === 'file-mutation-denied' ? '@deepseek-ai/dsh-tool-fs'
       : payload.tool === CAPTURED_FILE_FACTS_TOOL || payload.tool === 'pwsh-denied' ? '@tianwen/runtime-bundle' : '@deepseek-ai/dsh-tool-fs-search'
   if (producer.package !== expectedPackage) throw new TypeError('conversation file ancillary producer does not match its tool')
   if (payload.tool === 'pwsh-denied' && producer.adapter !== 'tianwen.pwsh-denial.v1') throw new TypeError('conversation file denial producer is invalid')
@@ -239,8 +242,8 @@ export function parseConversationTaskFileAncillary(value: unknown): Conversation
     producer, payload,
   }
   if (result.callSeq >= result.resultSeq) throw new TypeError('conversation file ancillary call/result sequence is invalid')
-  if (payload.tool === 'read-denied') {
-    const receipt = parseConversationReadDenialReceipt(JSON.parse(payload.nativeDenialJson))
+  if (payload.tool === 'read-denied' || payload.tool === 'file-mutation-denied') {
+    const receipt = payload.tool === 'read-denied' ? parseConversationReadDenialReceipt(JSON.parse(payload.nativeDenialJson)) : parseConversationFileMutationDenialReceipt(JSON.parse(payload.nativeDenialJson))
     if (receipt.identity.taskId !== result.taskId || receipt.identity.callId !== result.callId
       || receipt.callSeq !== result.callSeq || receipt.resultSeq !== result.resultSeq
       || receipt.argumentsDigest !== result.argumentsDigest || receipt.resultDigest !== result.resultDigest

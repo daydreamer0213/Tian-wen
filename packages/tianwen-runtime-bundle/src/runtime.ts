@@ -71,6 +71,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
   /** Exact reviewed guard source admissions, required for native read-denial cold verification. */
   readonly conversationReadDenialSources?: readonly ConversationReadDenialProducer[]
+  /** Separately admitted original write/edit guards; never grants mutation permission. */
+  readonly conversationFileMutationDenialSources?: readonly ConversationReadDenialProducer[]
   /** Test/programmatic seam; desktop profiles use learningLoop instead. */
   readonly learningLoopExecutor?: LearningLoopControlledExecutor
   /** Serializable desktop activation for the sole audited explicit-correction protocol. */
@@ -502,7 +504,8 @@ export async function apply(
     externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
     ...(config.exposeCapturedFileFacts === false ? { exposeCapturedFileFacts: false } : {}),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
-    ...(config.conversationReadDenialSources === undefined ? {} : { readDenialSources: config.conversationReadDenialSources }) })
+    ...(config.conversationReadDenialSources === undefined ? {} : { readDenialSources: config.conversationReadDenialSources }),
+    ...(config.conversationFileMutationDenialSources === undefined ? {} : { mutationDenialSources: config.conversationFileMutationDenialSources }) })
   ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true,
     ...(config.captureExternalCodeArtifacts === true && config.externalCodeCheck !== undefined ? { externalCodeCheck: config.externalCodeCheck } : {}) })
   ctx.plugin(TianwenConversationFeedbackService)

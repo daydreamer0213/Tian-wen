@@ -28,6 +28,11 @@ export function developmentNativeReadDenialProducer() {
   return { id: 'tianwen.development-native-file-policy.v1', digest: 'sha256:' + createHash('sha256').update(readFileSync(new URL('./development-native-file-policy.mjs', import.meta.url))).digest('hex') }
 }
 
+/** The same reviewed policy, independently admitted for write/edit denials. */
+export function developmentNativeFileMutationDenialProducer() {
+  return developmentNativeReadDenialProducer()
+}
+
 /** Caller mounts the actual Runtime/checker and owns Context shutdown. No learning or activation decisions here. */
 export async function runDevelopmentNativeTask(ctx, config) {
   const { cwd, sessionId, requestText, outputPaths, referencePaths, maxTargetBytes, resultRoot, signal, isPrepared } = config
@@ -74,7 +79,8 @@ export async function runDevelopmentNativeTask(ctx, config) {
         return guard({ name: execution.name, sessionId, parent: execution.parent, callId: execution.callId, rootCallId: execution.rootCallId, arguments: execution.arguments })
       }
       const observer = ctx.tianwenConversationFileObserver
-      if (typeof observer?.guardRead === 'function') observer.guardRead(local, developmentNativeReadDenialProducer(), nativeGuard)
+      if (typeof observer?.guardFiles === 'function') observer.guardFiles(local, developmentNativeFileMutationDenialProducer(), nativeGuard)
+      else if (typeof observer?.guardRead === 'function') observer.guardRead(local, developmentNativeReadDenialProducer(), nativeGuard)
       else local.tools.guard(nativeGuard)
     } })
     signal?.addEventListener('abort', cancel, { once: true }); if (signal?.aborted) cancel()

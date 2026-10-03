@@ -127,7 +127,8 @@ export class NativeObservedToolRuntime extends ToolRuntime {
       if (matched.length !== 1) return disposer
 
       const candidate = matched[0]!
-      if (candidate.producer.package === '@deepseek-ai/dsh-tool-fs' && definition.name !== 'read') return disposer
+      if (candidate.producer.package === '@deepseek-ai/dsh-tool-fs'
+        && definition.name !== 'read' && definition.name !== 'write' && definition.name !== 'edit') return disposer
       this.nativeRegistrations.set(definition, {
         definition,
         originFiber,

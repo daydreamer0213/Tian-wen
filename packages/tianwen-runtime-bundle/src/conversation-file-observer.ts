@@ -103,13 +103,22 @@ export class TianwenConversationFileObserverService extends Service {
 
   /** Keep the SDK guard, refusal, result and registration disposer unchanged. */
   guardRead(scope: Context, producer: ConversationReadDenialProducer, guard: ToolGuard): () => void {
+    return this.guardFileOperations(scope, producer, guard, false)
+  }
+
+  guardFiles(scope: Context, producer: ConversationReadDenialProducer, guard: ToolGuard): () => void {
+    return this.guardFileOperations(scope, producer, guard, true)
+  }
+
+  private guardFileOperations(scope: Context, producer: ConversationReadDenialProducer, guard: ToolGuard, mutations: boolean): () => void {
     const admitted = structuredClone(producer)
     return scope.tools.guard(exec => {
       const reason = guard(exec)
-      if (typeof reason === 'string' && exec.name === 'read') {
+      if (typeof reason === 'string' && (exec.name === 'read' || mutations && (exec.name === 'write' || exec.name === 'edit'))) {
         const current = this.current(exec)
         if (current !== undefined && !current.state.revoked && this.authorized(current.state.consentRevision))
-          current.state.native.captureReadDenial(exec, admitted, reason)
+          if (exec.name === 'read') current.state.native.captureReadDenial(exec, admitted, reason)
+          else current.state.native.captureFileMutationDenial(exec, admitted, reason)
       }
       return reason
     })

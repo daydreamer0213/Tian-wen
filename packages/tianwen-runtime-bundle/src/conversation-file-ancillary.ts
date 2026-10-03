@@ -9,6 +9,7 @@ import { parseConversationTaskFileAncillary, parseConversationSkillAdmission, pa
   projectConversationFileAncillaryContext, sha256, type ConversationSkillAdmission, type ConversationTask,
   CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type ConversationTaskFileAncillary, type ConversationAncillaryPayload, type ConversationAncillaryProducer } from '@tianwen/evolution'
 import { verifyConversationReadDenialReceipt, type ConversationReadDenialProducer } from '@tianwen/evolution'
+import { verifyConversationFileMutationDenialReceipt } from '@tianwen/evolution/file-mutation-denial'
 import { conversationFileCaptureOutputKind } from '@tianwen/evolution'
 import { conversationFilePath } from './conversation-file-material.js'
 import { parseNativeDirectoryReceipt, parseNativePwshDenial, type NativeDirectoryReceipt, type NativePwshDenial } from './native-tool-observation.js'
@@ -19,6 +20,7 @@ export interface ConversationFileAncillaryConfig {
   readonly skillSources?: readonly ConversationSkillAdmission[]
   /** Host-reviewed specific guard source bytes; also required on cold recovery. */
   readonly readDenialSources?: readonly ConversationReadDenialProducer[]
+  readonly mutationDenialSources?: readonly ConversationReadDenialProducer[]
 }
 type Call = Extract<SessionEvent, { type: 'tool/call' }>
 type Result = Extract<SessionEvent, { type: 'tool/result' }>
@@ -177,15 +179,15 @@ export function verifyConversationFileAncillary(task: ConversationTask, cwd: str
   config?: ConversationFileAncillaryConfig): void {
   const records = task.fileAncillary ?? []
   const calls = events.filter((event): event is Call => event.type === 'tool/call' && event.seq >= task.source.startSeq && event.seq <= boundary
-    && (isFileAncillaryTool(event.data.name) || records.some(record => record.payload.tool === 'read-denied' && record.callSeq === event.seq)))
+    && (isFileAncillaryTool(event.data.name) || records.some(record => (record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied') && record.callSeq === event.seq)))
   assert(records.length === calls.length)
   for (const raw of records) {
     const record = parseConversationTaskFileAncillary(raw)
     const call = calls.find(item => item.seq === record.callSeq)
     assert(call !== undefined && record.taskId === task.source.taskId && record.callId === String(call.data.callId)
-      && call.data.name === (record.payload.tool === 'pwsh-denied' ? 'pwsh' : record.payload.tool === 'read-denied' ? 'read' : record.payload.tool)
+      && call.data.name === (record.payload.tool === 'pwsh-denied' ? 'pwsh' : record.payload.tool === 'read-denied' ? 'read' : record.payload.tool === 'file-mutation-denied' ? JSON.parse(record.payload.nativeDenialJson).tool : record.payload.tool)
       && record.argumentsDigest === sha256(JSON.parse(call.data.arguments)))
-    const result = resultFor(events, call, boundary, record.payload.tool === 'pwsh-denied' || record.payload.tool === 'read-denied')
+    const result = resultFor(events, call, boundary, record.payload.tool === 'pwsh-denied' || record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied')
     assert(result.seq === record.resultSeq && sha256(result) === record.resultDigest)
     let value: unknown
     switch (record.payload.tool) {
@@ -227,10 +229,11 @@ export function verifyConversationFileAncillary(task: ConversationTask, cwd: str
           && content[0].text === 'Error: PowerShell command is not certifiable for this local-file task; use read, glob, grep, or tianwen_captured_file_facts.')
         value = denial; break
       }
-      case 'read-denied': {
-        value = verifyConversationReadDenialReceipt(JSON.parse(record.payload.nativeDenialJson), {
+      case 'read-denied':
+      case 'file-mutation-denied': {
+        value = (record.payload.tool === 'read-denied' ? verifyConversationReadDenialReceipt : verifyConversationFileMutationDenialReceipt)(JSON.parse(record.payload.nativeDenialJson), {
           task: { taskId: task.source.taskId, sessionId: task.source.sessionId, turn: task.source.turn, startSeq: task.source.startSeq },
-          boundary, producerAdmissions: config?.readDenialSources ?? [], events,
+          boundary, producerAdmissions: (record.payload.tool === 'read-denied' ? config?.readDenialSources : config?.mutationDenialSources) ?? [], events,
         })
         break
       }
@@ -275,19 +278,28 @@ export class ConversationFileAncillaryCapture {
 
   /** Called only by the public guard wrapper after the actual guard returned its refusal. */
   captureReadDenial(exec: Readonly<ToolExecution>, producer: ConversationReadDenialProducer, reason: string): void {
+    this.captureFileDenial(exec, producer, reason, false)
+  }
+
+  captureFileMutationDenial(exec: Readonly<ToolExecution>, producer: ConversationReadDenialProducer, reason: string): void {
+    this.captureFileDenial(exec, producer, reason, true)
+  }
+
+  private captureFileDenial(exec: Readonly<ToolExecution>, producer: ConversationReadDenialProducer, reason: string, mutation: boolean): void {
     if (this.invalid) return
     try {
-      assert(exec.name === 'read' && exec.agent !== undefined && exec.parent === undefined && exec.callId === exec.rootCallId
+      assert((mutation ? exec.name === 'write' || exec.name === 'edit' : exec.name === 'read') && exec.agent !== undefined && exec.parent === undefined && exec.callId === exec.rootCallId
         && typeof exec.token === 'symbol' && !exec.signal.aborted)
       const call = exec.agent.session.events.findLast(event => event.type === 'tool/call' && String(event.data.callId) === String(exec.callId))
-      const definition = this.ctx.tools.get('read', exec.agent)
+      const definition = this.ctx.tools.get(exec.name, exec.agent)
+      const admissions = mutation ? this.config.mutationDenialSources : this.config.readDenialSources
       const nativeTool = definition === undefined ? undefined : registration(this.ctx, definition)
       assert(call?.type === 'tool/call' && definition !== undefined && nativeTool?.package === '@deepseek-ai/dsh-tool-fs'
-        && call.data.name === 'read' && call.data.turn === this.task.source.turn && call.seq >= this.task.source.startSeq
+        && call.data.name === exec.name && call.data.turn === this.task.source.turn && call.seq >= this.task.source.startSeq
         && String(exec.agent.session.id) === this.task.source.sessionId && !this.pending.has(String(exec.callId))
         && !this.readDenials.has(String(exec.callId))
-        && this.config.readDenialSources?.filter(item => item.id === producer.id).length === 1
-        && this.config.readDenialSources.some(item => sha256(item) === sha256(producer)))
+        && admissions?.filter(item => item.id === producer.id).length === 1
+        && admissions.some(item => sha256(item) === sha256(producer)))
       const argumentsDigest = sha256(exec.arguments)
       assert(sha256(JSON.parse(call.data.arguments)) === argumentsDigest)
       this.readDenials.set(String(exec.callId), { execution: exec, call: structuredClone(call), definition,
@@ -343,8 +355,8 @@ export class ConversationFileAncillaryCapture {
     if (denied !== undefined) {
       try {
         assert(exec.token === denied.execution.token && exec.agent?.session.id === denied.execution.agent?.session.id
-          && exec.name === 'read' && exec.parent === undefined && exec.callId === exec.rootCallId && !exec.signal.aborted
-          && sha256(exec.arguments) === denied.argumentsDigest && this.ctx.tools.get('read', exec.agent) === denied.definition
+          && exec.name === denied.call.data.name && exec.parent === undefined && exec.callId === exec.rootCallId && !exec.signal.aborted
+          && sha256(exec.arguments) === denied.argumentsDigest && this.ctx.tools.get(exec.name, exec.agent) === denied.definition
           && sha256(registration(this.ctx, denied.definition) ?? null) === sha256(denied.nativeTool)
           && denied.result === undefined && Object.isFrozen(exec) && Object.isFrozen(result)
           && result.isError && result.error.info === undefined && result.error.message === denied.reason
@@ -379,22 +391,24 @@ export class ConversationFileAncillaryCapture {
       const denied = this.readDenials.get(String(call.data.callId))
       if (denied !== undefined) {
         assert(denied.result !== undefined && !denied.execution.signal.aborted && sha256(call) === sha256(denied.call)
-          && this.ctx.tools.get('read', agent) === denied.definition
+          && this.ctx.tools.get(call.data.name, agent) === denied.definition
           && sha256(registration(this.ctx, denied.definition) ?? null) === sha256(denied.nativeTool))
         const event = resultFor(events, call, boundary, true)
         assert(sha256(eventProjection(event)) === sha256(finalProjection(denied.result)))
-        const receipt = verifyConversationReadDenialReceipt({ schemaVersion: 'tianwen.native-read-denial.v1',
+        const mutation = call.data.name !== 'read'
+        const receipt = (mutation ? verifyConversationFileMutationDenialReceipt : verifyConversationReadDenialReceipt)({ schemaVersion: mutation ? 'tianwen.native-file-mutation-denial.v1' : 'tianwen.native-read-denial.v1',
+          ...(mutation ? { tool: call.data.name } : {}),
           identity: { taskId: task.source.taskId, sessionId: task.source.sessionId, turn: task.source.turn,
             callId: String(call.data.callId), rootCallId: String(denied.execution.rootCallId) },
           callSeq: call.seq, resultSeq: event.seq, argumentsDigest: denied.argumentsDigest, resultDigest: sha256(event),
           producer: denied.producer, nativeTool: denied.nativeTool, reason: denied.reason, dispatch: 'not-dispatched' }, {
           task: { taskId: task.source.taskId, sessionId: task.source.sessionId, turn: task.source.turn, startSeq: task.source.startSeq },
-          boundary, producerAdmissions: this.config.readDenialSources ?? [], events,
+          boundary, producerAdmissions: (mutation ? this.config.mutationDenialSources : this.config.readDenialSources) ?? [], events,
         })
         records.push(parseConversationTaskFileAncillary({ kind: 'task-file-ancillary-captured', taskId: task.source.taskId,
           callId: String(call.data.callId), callSeq: call.seq, resultSeq: event.seq, argumentsDigest: denied.argumentsDigest,
           resultDigest: sha256(event), valueDigest: sha256(receipt), producer: denied.nativeTool,
-          payload: { tool: 'read-denied', nativeDenialJson: canonicalJson(receipt) } }))
+          payload: { tool: mutation ? 'file-mutation-denied' : 'read-denied', nativeDenialJson: canonicalJson(receipt) } }))
         continue
       }
       const pending = this.pending.get(String(call.data.callId))

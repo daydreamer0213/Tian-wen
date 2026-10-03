@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { resolve, relative, isAbsolute, sep } from 'node:path'
 import { gunzipSync } from 'node:zlib'
-import { loadDevelopmentNativeModules, runDevelopmentNativeTask } from '../../../scripts/development-native-task.mjs'
+import { developmentNativeReadDenialProducer, developmentNativeFileMutationDenialProducer, loadDevelopmentNativeModules, runDevelopmentNativeTask } from '../../../scripts/development-native-task.mjs'
 
 const scenario = process.argv[2], base = process.platform === 'win32' ? 'D:/DevData' : '/tmp'
-assert(['peer', 'original', 'permissions', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native'].includes(scenario))
+assert(['peer', 'original', 'permissions', 'file-guard', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native'].includes(scenario))
 const original = { source: { taskId: 'control-task' }, completion: { status: 'completed', files: { outputPaths: ['second.mjs', 'first.mjs'] } }, externalCheckPrepared: { checkerId: 'control-check' }, externalCheckFinished: { status: 'verified' }, review: { verdict: 'inconclusive' } }
 const native = { header: { id: 'control-session' }, events: [] }, log = [], guards = []
 const resultRoot = mkdtempSync(resolve(base, 'tianwen-native-host-unit-')), cancellation = new AbortController()
@@ -15,6 +15,15 @@ const handle = { agent: { session: native, followup: message => { submitted = me
 const ctx = { on: () => () => log.push('observer-off'), agents: { get: () => undefined, create: async config => { config.setup(local); return handle } }, tianwenConversationObserver: { whenIdle: async () => { if (scenario === 'review-cancel') { setTimeout(() => cancellation.abort(), 10); await new Promise(() => {}) } log.push('observer-idle') } }, tianwenConversationGuidanceLoop: { whenIdle: async () => log.push('guidance-idle') }, tianwenEvolution: { listConversationTasks: () => submitted || scenario === 'prior-session' ? [original] : [] }, sessions: { get: () => scenario === 'live-session' ? native : undefined, flush: async () => { if (scenario === 'flush-error') throw new Error('flush-control-error') } }, sessionPersistence: { list: async () => scenario === 'durable-session' ? [{ id: 'control-session' }] : [], inspect: async () => native } }
 const config = { cwd: resolve('.'), sessionId: 'control-session', requestText: 'ordinary control request', outputPaths: ['first.mjs', 'second.mjs'], referencePaths: ['reference.md'], maxTargetBytes: 20, resultRoot, callConfig: { provider: 'control', model: 'control' }, isPrepared: () => true, signal: cancellation.signal }
 const read = name => JSON.parse(readFileSync(resolve(resultRoot, name + '.json'), 'utf8'))
+let observedGuardCalls = 0
+if (scenario === 'file-guard') ctx.tianwenConversationFileObserver = {
+  guardFiles(scope, producer, guard) {
+    assert.deepEqual(producer, developmentNativeFileMutationDenialProducer())
+    assert.deepEqual(producer, developmentNativeReadDenialProducer())
+    return scope.tools.guard(execution => { observedGuardCalls++;return guard(execution) })
+  },
+  guardRead() { throw new Error('legacy fallback must not replace available file guard') },
+}
 try {
   if (scenario === 'peer') {
     const modules = await loadDevelopmentNativeModules()
@@ -48,11 +57,12 @@ try {
       await assert.rejects(runDevelopmentNativeTask(ctx, config), /fresh native session/)
       assert.deepEqual(read('task'), original); assert.equal(read('cleanup').cancelled, false)
     }
-    if (scenario === 'permissions') {
+    if (scenario === 'permissions' || scenario === 'file-guard') {
       const guard = guards[0], call = { name: 'write', agent: { session: { id: 'control-session' } }, callId: 'c', rootCallId: 'c', arguments: { file_path: 'first.mjs', content: 'x' } }
       assert.equal(guard(call), undefined); assert.equal(typeof guard({ ...call, rootCallId: 'other' }), 'string')
       assert.equal(guard({ ...call, name: 'structured_output', agent: { session: { id: 'reviewer-session' } } }), undefined)
       assert.equal(typeof guard({ ...call, arguments: { file_path: 'reference.md', content: 'x' } }), 'string')
+      if (scenario === 'file-guard') assert.equal(observedGuardCalls, 4)
     }
   }
   console.log(JSON.stringify({ passed: true, scenario, modelRequests: 0 }))

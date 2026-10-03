@@ -5,6 +5,13 @@ import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 
 const action = { tool: 'read', path: 'input.txt', callSeq: 5, resultSeq: 6, status: 'success' }
 const evidence = { schemaVersion: 'tianwen.file-execution-evidence.v2', actions: [action, { ...action, tool: 'edit', callSeq: 7, resultSeq: 8 }], directoryObservations: [] }
+
+it.each(['success', 'error'] as const)('continues rejecting actual %s mutations in v4 chat evidence', status => {
+  const files = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: 'D:/DevData/frozen', outputKind: 'chat', entries: [{ path: 'input.txt', content: 'original' }], outputPaths: [] }
+  const source = { context: [], request: [{ role: 'user', content: [{ type: 'text', text: 'Answer in chat only.' }] }], files,
+    fileExecution: { schemaVersion: 'tianwen.file-execution-evidence.v4', actions: [{ ...action, tool: 'write', status }], directoryObservations: [] } }
+  expect(() => projectClaimEvidence({ source, evaluationMode: 'local-files', conversation: [{ role: 'assistant', content: [{ type: 'text', text: 'answer' }] }], toolEvidence: [] })).toThrow('invalid-judgment')
+})
 it('keeps original read-only v1 text exact and describes v2 as captured actions rather than content truth', () => {
   const legacy = { schemaVersion: 'tianwen.file-execution-evidence.v1', capturedInputsUnchanged: true, toolCalls: ['read'], directoryObservations: [] }
   expect(fileExecutionTexts(parseFileExecutionEvidence(legacy))).toEqual([

@@ -18,6 +18,10 @@
       "types": "./dist/inspection.d.ts",
       "default": "./dist/inspection.js"
     },
+    "./file-mutation-denial": {
+      "types": "./dist/conversation-file-mutation-denial.d.ts",
+      "default": "./dist/conversation-file-mutation-denial.js"
+    },
     "./file-claim-packet": {
       "types": "./dist/conversation-file-claim-packet.d.ts",
       "default": "./dist/conversation-file-claim-packet.js"

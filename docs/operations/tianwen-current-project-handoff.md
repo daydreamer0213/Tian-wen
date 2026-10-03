@@ -1,4 +1,12 @@
 # Tianwen 当前项目权威交接
+## 2026-10-03 文件修改拒绝记录已交付，继续实际核心任务
+
+真实首 write 拒绝造成整档材料失效的缺口已修：新独立 mutation receipt/ancillary、可信 SDK write/edit 注册、单次原 guard、opaque token/producer/原事件及 cold 绑定，新 v4 保留 denied 原因/null 路径，不把 guard 自身检查目标说成无 I/O 或初始内容事实。chat 只允许已认证 denied 修改，真实 success/error 修改仍拒绝；旧 read receipt/v3/指令保持，DEV 薄宿主接线且原 policy 字节不变。
+
+11 组 204 检查、八包类型/完整发行/公开消费及独立审查通过。实际公开 SDK+原 DEV guard 控制 write 超预算、edit old_string absent 后合法操作，各 10 scripted/0自然、程序各一次 verified/两检查 met；external 总体按原规则 inconclusive，不能混写。两独立新进程 cold task/material/两检查 0模型/程序；旧公开 read v3/原指令精确恢复。控制端漏 recheck、误期待总体 met 及清理字段错误分别保存；已完成 write 0 请求收取，未重跑。
+
+正式19观察/18识别完成/0反馈归因/0study/隔离true、完整91f83d10…及原 f4da154 unavailable/unverifiable/inconclusive保持，无关 checker 根 JS 精确不变。两自有容器/receipt清理、84历史ID/快照0/Docker关闭，无整包环境副本。下一固定当前交付环境和共同原功能条件，选择不同真实核心待办前瞻，保留各自原合同/独立期望/首次结果，不造反馈/失败、不补旧来源、不反复blocked或索用户动作。完整目标 active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/十日窗口不变。见[交付与错误归属](tianwen-file-mutation-denial-20261003.md)。本条覆盖下方“下一补write/edit拒绝”的待办。
+
 ## 2026-10-03 完整文件材料无损编码已交付，原写入拒绝记录缺口已定位
 
 2ef2a1b事前固定后，天问唯一未知答案纯codec任务7实际请求/6根、prepare1/eval0；首write22425B被原20KB guard正确拒绝，次17730B成功，但原ancillary只有read拒绝捕获，首write result无pending导致材料失效。原completed/program unverifiable/review inconclusive及候选完整封存，0请求cold精确，不回填成功/功能拒绝来源。独立工程修两UTF16漏洞和12真实类型诊断，原entry不改、隔离一次通过；ID换行误判实测撤回无无据修复。

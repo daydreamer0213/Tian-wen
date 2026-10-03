@@ -79,7 +79,16 @@ interface FileDenialExecutionEvidence {
   readonly directoryObservations: ReadOnlyFileExecutionEvidence['directoryObservations']
 }
 
-export type ConversationFileExecutionEvidence = ReadOnlyFileExecutionEvidence | FileActionExecutionEvidence | FileDenialExecutionEvidence
+interface FileMutationDenialExecutionEvidence {
+  readonly schemaVersion: 'tianwen.file-execution-evidence.v4'
+  readonly actions: readonly (FileActionExecutionEvidence['actions'][number] | {
+    readonly tool: 'read' | 'write' | 'edit'; readonly path: null; readonly callSeq: number; readonly resultSeq: number
+    readonly status: 'denied'; readonly reason: string
+  })[]
+  readonly directoryObservations: ReadOnlyFileExecutionEvidence['directoryObservations']
+}
+
+export type ConversationFileExecutionEvidence = ReadOnlyFileExecutionEvidence | FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence
 
 export function parseFileExecutionEvidence(value: unknown): ConversationFileExecutionEvidence {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid file execution evidence')
@@ -93,19 +102,19 @@ export function parseFileExecutionEvidence(value: unknown): ConversationFileExec
     if (Object.keys(row).sort().join(',') !== 'capturedInputsUnchanged,directoryObservations,schemaVersion,toolCalls'
       || row.capturedInputsUnchanged !== true || !Array.isArray(row.toolCalls)
       || row.toolCalls.some(item => typeof item !== 'string' || item.length === 0 || item.length > 80)) throw new Error('invalid file execution evidence')
-  } else if (row.schemaVersion === 'tianwen.file-execution-evidence.v2' || row.schemaVersion === 'tianwen.file-execution-evidence.v3') {
+  } else if (row.schemaVersion === 'tianwen.file-execution-evidence.v2' || row.schemaVersion === 'tianwen.file-execution-evidence.v3' || row.schemaVersion === 'tianwen.file-execution-evidence.v4') {
     if (Object.keys(row).sort().join(',') !== 'actions,directoryObservations,schemaVersion'
       || !Array.isArray(row.actions) || row.actions.length === 0) throw new Error('invalid file execution evidence')
     let previous = 0
     const results = new Set<number>()
     for (const item of row.actions) {
-      const denied = row.schemaVersion === 'tianwen.file-execution-evidence.v3' && item?.status === 'denied'
+      const denied = (row.schemaVersion === 'tianwen.file-execution-evidence.v3' || row.schemaVersion === 'tianwen.file-execution-evidence.v4') && item?.status === 'denied'
       if (item === null || typeof item !== 'object' || Array.isArray(item)
         || Object.keys(item).sort().join(',') !== (denied ? 'callSeq,path,reason,resultSeq,status,tool' : 'callSeq,path,resultSeq,status,tool')
         || typeof item.tool !== 'string' || item.tool.length === 0 || item.tool.length > 80
         || !Number.isSafeInteger(item.callSeq) || item.callSeq <= previous
         || !Number.isSafeInteger(item.resultSeq) || item.resultSeq <= item.callSeq || results.has(item.resultSeq)
-        || (denied ? item.tool !== 'read' || item.path !== null || typeof item.reason !== 'string'
+        || (denied ? !(row.schemaVersion === 'tianwen.file-execution-evidence.v4' ? ['read', 'write', 'edit'].includes(item.tool) : item.tool === 'read') || item.path !== null || typeof item.reason !== 'string'
           || !item.reason.trim() || item.reason.includes('\0') || Buffer.byteLength(item.reason, 'utf8') > 4096
           || Buffer.from(item.reason, 'utf8').toString('utf8') !== item.reason
           : item.status !== 'success' && item.status !== 'error'
@@ -118,9 +127,9 @@ export function parseFileExecutionEvidence(value: unknown): ConversationFileExec
 }
 
 export function fileExecutionTexts(value: ConversationFileExecutionEvidence): string[] {
-  if (value.schemaVersion === 'tianwen.file-execution-evidence.v2' || value.schemaVersion === 'tianwen.file-execution-evidence.v3') return [
+  if (value.schemaVersion === 'tianwen.file-execution-evidence.v2' || value.schemaVersion === 'tianwen.file-execution-evidence.v3' || value.schemaVersion === 'tianwen.file-execution-evidence.v4') return [
     ...value.actions.map(action => action.status === 'denied'
-      ? `Native read: call seq ${action.callSeq}; denied before dispatch, result seq ${action.resultSeq}. Original refusal: ${action.reason}`
+      ? `Native ${action.tool}: call seq ${action.callSeq}; denied before ${value.schemaVersion === 'tianwen.file-execution-evidence.v4' ? 'original tool body dispatch' : 'dispatch'}, result seq ${action.resultSeq}. Original refusal: ${action.reason}`
       : `Native ${action.tool}${action.path === null ? '' : ` ${JSON.stringify(action.path)}`}: call seq ${action.callSeq}; ${action.status} result seq ${action.resultSeq}.`),
     'These are all native tool calls in this captured task, listed by call sequence. They establish actions and recorded results, not file content truth or effects outside this captured task.',
     ...value.directoryObservations.map(item => `Certified read-only directory command: ${item.command}\nDirectory stdout:\n${item.stdout}`),
@@ -183,7 +192,7 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
   const files = recoverFiles(ctx, saved.meta.cwd, saved.events, task)
   const ancillaryContext = files === undefined ? undefined : projectConversationFileAncillaryContext(task.fileAncillary ?? [], files.entries)
-  const fileExecution = files?.outputKind === 'chat' ? task.fileAncillary?.some(record => record.payload.tool === 'read-denied')
+  const fileExecution = files?.outputKind === 'chat' ? task.fileAncillary?.some(record => record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied')
     ? recoverFileActions(saved.events, task, files) : recoverFileExecution(saved.events, task)
     : files?.outputKind === 'files' && source.fileExecutionProjection === 'native-actions.v1' ? recoverFileActions(saved.events, task, files) : undefined
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
@@ -207,10 +216,10 @@ export async function recoverConversationTaskAnswer(ctx: Context, task: Conversa
   return answer
 }
 
-function recoverFileActions(events: readonly SessionEvent[], task: ConversationTask, files: ConversationFileMaterial): FileActionExecutionEvidence | FileDenialExecutionEvidence {
+function recoverFileActions(events: readonly SessionEvent[], task: ConversationTask, files: ConversationFileMaterial): FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence {
   const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
   const boundary = task.completion!.files!.captureSeq
-  const actions: FileDenialExecutionEvidence['actions'][number][] = []
+  const actions: FileMutationDenialExecutionEvidence['actions'][number][] = []
   for (const call of span) {
     if (call.type !== 'tool/call') continue
     const results = span.filter((event): event is Extract<SessionEvent, { type: 'tool/result' }> => event.type === 'tool/result'
@@ -220,10 +229,10 @@ function recoverFileActions(events: readonly SessionEvent[], task: ConversationT
       || call.seq > boundary || result.seq <= call.seq || result.seq > boundary
       || result.sourceEventSeqs?.length !== 1 || result.sourceEventSeqs[0] !== call.seq
       || result.data.turn !== call.data.turn || result.data.step !== call.data.step) throw new Error('native file action evidence unavailable')
-    const denial = task.fileAncillary?.find(record => record.callSeq === call.seq && record.payload.tool === 'read-denied')
-    if (denial?.payload.tool === 'read-denied') {
+    const denial = task.fileAncillary?.find(record => record.callSeq === call.seq && (record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied'))
+    if (denial?.payload.tool === 'read-denied' || denial?.payload.tool === 'file-mutation-denied') {
       const receipt = JSON.parse(denial.payload.nativeDenialJson) as { reason: string }
-      actions.push({ tool: 'read', path: null, callSeq: call.seq, resultSeq: result.seq, status: 'denied', reason: receipt.reason })
+      actions.push({ tool: call.data.name as 'read' | 'write' | 'edit', path: null, callSeq: call.seq, resultSeq: result.seq, status: 'denied', reason: receipt.reason })
       continue
     }
     const fileTool = ['read', 'write', 'edit', CAPTURED_FILE_FACTS_TOOL].includes(call.data.name)
@@ -237,9 +246,9 @@ function recoverFileActions(events: readonly SessionEvent[], task: ConversationT
     actions.push({ tool: call.data.name, path, callSeq: call.seq, resultSeq: result.seq,
       status: result.data.error === undefined && result.data.message.content[0].isError !== true ? 'success' : 'error' })
   }
-  return parseFileExecutionEvidence({ schemaVersion: actions.some(action => action.status === 'denied')
+  return parseFileExecutionEvidence({ schemaVersion: actions.some(action => action.status === 'denied' && action.tool !== 'read') ? 'tianwen.file-execution-evidence.v4' : actions.some(action => action.status === 'denied')
     ? 'tianwen.file-execution-evidence.v3' : 'tianwen.file-execution-evidence.v2', actions,
-    directoryObservations: recoverFileExecution(events, task).directoryObservations }) as FileActionExecutionEvidence | FileDenialExecutionEvidence
+    directoryObservations: recoverFileExecution(events, task).directoryObservations }) as FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence
 }
 
 function recoverFileExecution(events: readonly SessionEvent[], task: ConversationTask): ReadOnlyFileExecutionEvidence {
@@ -295,7 +304,7 @@ function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly Se
   const calls = span.flatMap(event => {
     if (event.type !== 'tool/call') return []
     // This exclusion is usable only after the entire ancillary set is rebound below.
-    if (task.fileAncillary?.some(record => record.payload.tool === 'read-denied' && record.callSeq === event.seq
+    if (task.fileAncillary?.some(record => (record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied') && record.callSeq === event.seq
       && record.callId === String(event.data.callId))) return []
     if (isFileAncillaryTool(event.data.name) && event.data.name !== CAPTURED_FILE_FACTS_TOOL) return []
     if (event.data.name !== 'read' && event.data.name !== 'write' && event.data.name !== 'edit'
@@ -309,7 +318,7 @@ function recoverFiles(ctx: Context, cwd: string | undefined, events: readonly Se
   try {
     const observer = ctx.get('tianwenConversationFileObserver')
     if (observer === undefined) {
-      if (task.fileAncillary?.some(record => record.payload.tool === 'skill' || record.payload.tool === 'read-denied')) return
+      if (task.fileAncillary?.some(record => record.payload.tool === 'skill' || record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied')) return
       verifyConversationFileAncillary(task, cwd, span, result.captureSeq)
     } else observer.verifyAncillary(task, cwd, span, result.captureSeq)
   } catch { return }
