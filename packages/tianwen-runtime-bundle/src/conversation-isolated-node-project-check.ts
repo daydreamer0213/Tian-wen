@@ -1,5 +1,5 @@
 import { createConversationIsolatedJsonCheck, createConversationStudyIsolatedJsonCheck, createConversationStudyIsolatedJsonCohortCheck,
-  type ConversationIsolatedPythonCheckConfig, type ConversationIsolatedPythonStudyCase } from './conversation-isolated-python-check.js'
+  createGoalTaskIsolatedJsonCheck, type ConversationIsolatedPythonCheckConfig, type ConversationIsolatedPythonStudyCase } from './conversation-isolated-python-check.js'
 
 /** Complete captured project: declared mutable outputs plus frozen read-only references. */
 export type ConversationIsolatedNodeProjectCheckConfig = Omit<ConversationIsolatedPythonCheckConfig, 'targetPath'> & {
@@ -7,12 +7,19 @@ export type ConversationIsolatedNodeProjectCheckConfig = Omit<ConversationIsolat
   readonly outputPaths: readonly string[]
 }
 export type ConversationIsolatedNodeProjectStudyCase = ConversationIsolatedPythonStudyCase & { readonly entryPath: string }
-function fixedEntry(config: ConversationIsolatedNodeProjectCheckConfig) {
+export type GoalTaskIsolatedNodeProjectCheckConfig = ConversationIsolatedNodeProjectCheckConfig & {
+  readonly goalCommand: string
+  readonly requiredCondition: string
+}
+function fixedEntry<T extends ConversationIsolatedNodeProjectCheckConfig>(config: T) {
   const { entryPath, ...rest } = config
   return { ...rest, targetPath: entryPath }
 }
 export function createConversationIsolatedNodeProjectCheck(config: ConversationIsolatedNodeProjectCheckConfig) {
   return createConversationIsolatedJsonCheck(fixedEntry(config), 'node-project')
+}
+export function createGoalTaskIsolatedNodeProjectCheck(config: GoalTaskIsolatedNodeProjectCheckConfig) {
+  return createGoalTaskIsolatedJsonCheck(fixedEntry(config), 'node-project')
 }
 export function createConversationStudyIsolatedNodeProjectCheck(config: ConversationIsolatedNodeProjectCheckConfig & {
   readonly requiredCondition: string; readonly criteria: readonly string[]

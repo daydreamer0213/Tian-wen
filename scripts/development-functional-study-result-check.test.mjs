@@ -11,6 +11,17 @@ test('DEV result host exposes actual Runtime options with the same frozen cwd',(
   assert.equal(typeof options.studyResultCheck.prepareIndependentCases,'function')
   assert.throws(()=>host.createDevelopmentNativeCheckOptions({...f.ordinary(1),cwd:'D:/DevData/another-project'},f.config))
 })
+test('DEV explicitly supplies the original Goal acceptance adapter without changing legacy options or the pinned host',()=>{
+  const f=fixture(),ordinary=f.ordinary(1)
+  const goalContract={...ordinary,goalCommand:'Complete the original project Goal.',requiredCondition:f.requiredCondition}
+  const options=host.createDevelopmentNativeCheckOptions(ordinary,f.config,goalContract)
+  assert.equal(typeof options.goalTaskAcceptance?.prepare,'function')
+  assert.equal(typeof options.goalTaskAcceptance?.methodScope,'function')
+  assert.deepEqual(Object.keys(options).sort(),['externalCodeCheck','goalTaskAcceptance','studyResultCheck'])
+  assert.deepEqual(Object.keys(host.createDevelopmentNativeCheckOptions(ordinary,f.config)).sort(),['externalCodeCheck','studyResultCheck'])
+  assert.throws(()=>host.createDevelopmentNativeCheckOptions(ordinary,f.config,{...goalContract,cwd:'D:/DevData/another-project'}))
+  assert.throws(()=>host.createDevelopmentNativeCheckOptions(ordinary,f.config,{...goalContract,isolated:{workRoot:'D:/caller-override'}}))
+})
 test('DEV resolves original native Goal contracts without manufacturing conversation sources',async()=>{
   const f=fixture()
   const native=n=>{const original=f.source(n);return {sourceKind:'native-goal-task',

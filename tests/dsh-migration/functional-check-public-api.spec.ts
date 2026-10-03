@@ -29,6 +29,23 @@ it('delivers all Node factories through the actual published JS root with bounde
   expect(() => bundled.createConversationIsolatedNodeCheck({ ...config, cases: [{ ...config.cases[0]!, expectedJson: '{"a":1,"a":2}' }] })).toThrow()
 })
 
+it('publishes the native Goal project factory with original command and mandatory-condition validation', async () => {
+  const packageRequire = createRequire(new URL('../../packages/tianwen-runtime-bundle/package.json', import.meta.url))
+  const bundled = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle')).href)
+  const config = { cwd: 'D:/DevData/tianwen-native-goal-project-check-20261003', requestText: 'Implement original modules.',
+    goalCommand: 'Complete original project work.', requiredCondition: 'Preserve the original functional JSON result.',
+    entryPath: 'entry.mjs', outputPaths: ['result.ts'], referencePaths: ['entry.mjs'],
+    cases: [{ id: 'original-case', input: '{}', expectedJson: '{"n":7}', exitCode: 0 }],
+    isolated: { cliPath: 'D:/unused.exe', endpoint: 'unix:///unused', imageRef: 'node@sha256:'+'a'.repeat(64),
+      imageId: 'sha256:'+'a'.repeat(64), workRoot: 'D:/DevData/tianwen-native-goal-project-check-20261003/unused' } }
+  expect(bundled.createGoalTaskIsolatedNodeProjectCheck).toBeTypeOf('function')
+  const check=bundled.createGoalTaskIsolatedNodeProjectCheck(config)
+  expect(check.prepare).toBeTypeOf('function');expect(check.methodScope).toBeTypeOf('function')
+  for(const change of [{goalCommand:''},{goalCommand:' extra whitespace '},{requiredCondition:undefined},{requiredCondition:' '},
+    {cases:[]},{cases:[{...config.cases[0]!,expectedJson:'{"n":1,"n":2}'}]}]) {
+    expect(()=>bundled.createGoalTaskIsolatedNodeProjectCheck({...config,...change})).toThrow()
+  }
+})
 it('keeps compatibility scripts on the exact public ordinary and study factories', () => {
   for (const name of ['createConversationIsolatedPythonCheck', 'createConversationStudyIsolatedPythonCheck',
     'createConversationStudyIsolatedPythonCohortCheck'] as const) {

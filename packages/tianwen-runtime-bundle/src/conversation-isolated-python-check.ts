@@ -7,6 +7,7 @@ import { conversationExternalInputsDigest, parseConversationFileEntries, parseCo
 import { readConversationFile } from './conversation-file-material.js'
 import type { ConversationExternalCodeCheck, ConversationExternalCodePreparation, ConversationExternalCodeCandidate, PreparedConversationExternalCodeCheck } from './conversation-external-check.js'
 import type { ConversationStudyResultCheck, ConversationStudyResultMaterial } from './conversation-study-result-check.js'
+import type { GoalTaskAcceptanceCheck, GoalTaskAcceptancePreparation } from './goal-task-acceptance.js'
 import { parseNativeGoalStudyInput } from './goal-task-study-input.js'
 import { canonicalJsonResult, isolatedPythonPolicy, prepareIsolatedPythonCli, type IsolatedPythonCliConfig } from './isolated-python-cli.js'
 
@@ -151,6 +152,72 @@ export function createConversationIsolatedJsonCheck(config: InternalConfig, engi
       },
     } satisfies PreparedConversationExternalCodeCheck
   } }
+}
+
+/** Original Goal interface over the same frozen functional contract/executor. */
+export function createGoalTaskIsolatedJsonCheck(config: InternalConfig & {
+  readonly goalCommand: string; readonly requiredCondition: string
+}, engine: CheckEngine): GoalTaskAcceptanceCheck {
+  assert(typeof config.goalCommand === 'string' && config.goalCommand.trim() !== '' && config.goalCommand === config.goalCommand.trim())
+  assert(typeof config.requiredCondition === 'string' && config.requiredCondition.trim() !== '')
+  const goalCommand = config.goalCommand, core = createPreparation(config, engine)
+  const applicable = (material: Omit<GoalTaskAcceptancePreparation, 'modelConfigDigest'>) => {
+    material.signal.throwIfAborted()
+    const { goal, task, attempt, source } = material
+    return pathKey(material.cwd) === pathKey(core.cwd) && pathKey(goal.workspaceRoot) === pathKey(core.cwd)
+      && goal.objective === goalCommand && source.type === 'command/run' && source.data.name === 'goal'
+      && source.data.source.kind === 'user' && source.data.args?.trim() === goalCommand
+      && goal.origin !== undefined && goal.origin.commandId === source.data.commandId
+      && goal.origin.commandSeq === source.seq && goal.origin.commandDigest === sha256(source)
+      && task.objective === core.requestText && goal.tasks.some(item => item.id === task.id && sha256(item) === sha256(task))
+      && task.execution !== null && task.execution.sessionId === attempt.childSessionId
+      && attempt.parentSessionId === goal.planner.sessionId && attempt.status === 'running'
+  }
+  return {
+    async methodScope(material) {
+      return applicable(material) ? { family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files' } : undefined
+    },
+    async prepare(material) {
+      if (!applicable(material)) return undefined
+      const { goal, task, attempt } = structuredClone({ goal: material.goal, task: material.task, attempt: material.attempt })
+      const sourceDigest = sha256(material.source), modelConfigDigest = material.modelConfigDigest, originalCwd = material.cwd
+      const requirementsSnapshot = { goal: { id: goal.id, objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+        workspaceRoot: goal.workspaceRoot, origin: goal.origin! }, task,
+        ...(attempt.permissionMode === undefined ? {} : { permissionMode: attempt.permissionMode }) }
+      const prepared = await core.prepare(material.signal)
+      if (prepared?.requiredCondition === undefined) return undefined
+      const files = parseConversationFileMaterial({ schemaVersion: 'tianwen.conversation-file-material.v1', cwd: originalCwd,
+        outputKind: 'files', entries: prepared.inputs, outputPaths: core.targets })
+      const inputsDigest = conversationExternalInputsDigest(files.entries)
+      return {
+        checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
+        inputsDigest, requiredCondition: prepared.requiredCondition, waitsForCancellationCleanup: true,
+        contentReview: { files: structuredClone(files) },
+        async evaluate(candidate) {
+          candidate.signal.throwIfAborted()
+          try {
+            const binding = candidate.preparation
+            if (sha256(candidate.source) !== sourceDigest || sha256(binding.requirementsSnapshot) !== sha256(requirementsSnapshot)
+              || binding.taskDigest !== sha256(task) || binding.modelConfigDigest !== modelConfigDigest
+              || binding.epoch !== attempt.epoch || binding.parentSessionId !== attempt.parentSessionId
+              || binding.childSessionId !== attempt.childSessionId || binding.nativeGoalId !== task.execution!.goalId
+              || binding.permissionFingerprint !== attempt.permissionFingerprint
+              || binding.checkerId !== prepared.checkerId || binding.checkerDigest !== prepared.checkerDigest
+              || binding.contractDigest !== prepared.contractDigest || binding.inputsDigest !== inputsDigest
+              || binding.requiredCondition !== prepared.requiredCondition || sha256(binding.contentReview?.files) !== sha256(files)) {
+              return { status: 'unverifiable', detail: 'Original Goal Task functional check binding differs.' }
+            }
+            const outputs = await Promise.all(files.entries.map(entry => readConversationFile(core.cwd, entry.path)))
+            candidate.signal.throwIfAborted()
+            return await prepared.evaluate({ inputs: structuredClone(files.entries), outputs, outputPaths: files.outputPaths, signal: candidate.signal })
+          } catch {
+            candidate.signal.throwIfAborted()
+            return { status: 'unverifiable', detail: 'Original Goal Task functional check files or environment unavailable.' }
+          }
+        },
+      }
+    },
+  }
 }
 const body = (material: ConversationStudyResultMaterial): ConversationStudyResultMaterial => {
   if ('sourceKind' in material) {

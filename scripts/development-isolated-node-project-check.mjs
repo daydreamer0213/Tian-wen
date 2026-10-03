@@ -9,7 +9,7 @@ const manifest = JSON.parse(readFileSync(packageUrl, 'utf8'))
 const require = createRequire(packageUrl)
 const { parseConversationFileMaterial, parseConversationQualityContract } = await import(pathToFileURL(require.resolve('@tianwen/evolution')).href)
 const { createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck,
-  createConversationStudyIsolatedNodeProjectCohortCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
+  createConversationStudyIsolatedNodeProjectCohortCheck, createGoalTaskIsolatedNodeProjectCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
 
 function withFixedHost(config) {
   assert(config !== null && typeof config === 'object' && !Array.isArray(config))
@@ -18,6 +18,9 @@ function withFixedHost(config) {
 }
 export function createDevelopmentIsolatedNodeProjectCheck(config) {
   return createConversationIsolatedNodeProjectCheck(withFixedHost(config))
+}
+export function createDevelopmentGoalTaskIsolatedNodeProjectCheck(config) {
+  return createGoalTaskIsolatedNodeProjectCheck(withFixedHost(config))
 }
 export function createDevelopmentStudyIsolatedNodeProjectCheck(config) {
   return createConversationStudyIsolatedNodeProjectCheck(withFixedHost(config))
@@ -102,8 +105,10 @@ export function createDevelopmentFunctionalStudyResultCheck(config) {
 }
 
 /** Spread these host-owned options into the actual DEV Runtime before tasks arrive. */
-export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts) {
+export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract) {
   assert.equal(ordinaryContract.cwd, studyContracts.cwd, 'DEV ordinary and study contracts must share the frozen cwd')
   const studyResultCheck = createDevelopmentFunctionalStudyResultCheck(studyContracts)
-  return { externalCodeCheck: createDevelopmentIsolatedNodeProjectCheck(ordinaryContract), studyResultCheck }
+  assert(goalContract === undefined || goalContract.cwd === ordinaryContract.cwd, 'DEV Goal contract must share the frozen cwd')
+  return { externalCodeCheck: createDevelopmentIsolatedNodeProjectCheck(ordinaryContract), studyResultCheck,
+    ...(goalContract === undefined ? {} : { goalTaskAcceptance: createDevelopmentGoalTaskIsolatedNodeProjectCheck(goalContract) }) }
 }

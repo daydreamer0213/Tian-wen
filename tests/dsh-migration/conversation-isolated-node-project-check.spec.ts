@@ -2,10 +2,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createUserMessage } from '@tianwen/dsh-compat'
-import { conversationQualityContract, sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { conversationQualityContract, conversationExternalInputsDigest, sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import type { ConversationExternalCodePreparation } from '../../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
 import type { ConversationStudyResultMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-study-result-check.js'
 import { createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCohortCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-isolated-node-project-check.js'
+import * as projectApi from '../../packages/tianwen-runtime-bundle/src/conversation-isolated-node-project-check.js'
 
 const mock = vi.hoisted(() => ({ prepare: vi.fn(), run: vi.fn() }))
 vi.mock('../../packages/tianwen-runtime-bundle/src/isolated-node-project.js', async original => ({ ...await original<typeof import('../../packages/tianwen-runtime-bundle/src/isolated-node-project.js')>(), prepareIsolatedNodeProject: mock.prepare }))
@@ -27,6 +28,140 @@ function fixture() {
   mock.prepare.mockResolvedValue({ digest: 'executor', run: mock.run }); mock.run.mockResolvedValue({ status: 'completed', stdout: '{"n":7}', stderr: '', exitCode: 0, receiptDigest: 'receipt' })
   return { cwd, config, material, candidate, study, studyCandidate, signal }
 }
+
+function nativeFixture() {
+  const f=fixture(), goalCommand='Complete the real project work represented by this controlled native Goal.'
+  const source={type:'command/run',seq:1,data:{name:'goal',args:goalCommand,commandId:'original-command',source:{kind:'user'}}}
+  const origin={sessionId:'original-root',commandId:'original-command',commandSeq:1,commandDigest:sha256(source)}
+  const task={id:'original-task',objective:f.config.requestText,execution:{sessionId:'child',goalId:'native-goal'},resolution:null}
+  const attempt={epoch:1,parentSessionId:'planner',childSessionId:'child',permissionFingerprint:sha256('permission'),permissionMode:'workspace-write',status:'running',startedAt:'2026-10-03T00:00:00.000Z'}
+  const goal={schemaVersion:'tianwen.long-goal.v3',id:'original-goal',objective:goalCommand,context:null,successCriteria:null,workspaceRoot:f.cwd,
+    origin,tasks:[task],planner:{sessionId:'planner'}}
+  const material={goal,task,attempt,source,cwd:f.cwd,modelConfigDigest:sha256('model'),signal:f.signal}
+  const config={...f.config,goalCommand,requiredCondition:condition}
+  const candidate=(prepared:any)=>{
+    const output=f.candidate()
+    for(const entry of output.outputs) writeFileSync(resolve(f.cwd,entry.path),entry.content)
+    return {source:structuredClone(source),signal:f.signal,events:[],preparation:{epoch:attempt.epoch,parentSessionId:attempt.parentSessionId,childSessionId:attempt.childSessionId,
+      nativeGoalId:task.execution.goalId,permissionFingerprint:attempt.permissionFingerprint,modelConfigDigest:material.modelConfigDigest,taskDigest:sha256(task),
+      checkerId:prepared.checkerId,checkerDigest:prepared.checkerDigest,contractDigest:prepared.contractDigest,inputsDigest:prepared.inputsDigest,requiredCondition:prepared.requiredCondition,
+      contentReview:{protocol:'tianwen.goal-task-content-review.v1',qualityContract:conversationQualityContract(),...structuredClone(prepared.contentReview)},
+      requirementsSnapshot:{goal:{id:goal.id,objective:goal.objective,context:goal.context,successCriteria:goal.successCriteria,workspaceRoot:goal.workspaceRoot,origin},task:structuredClone(task),permissionMode:attempt.permissionMode}}}
+  }
+  return {...f,goalCommand,source,material,config,candidate}
+}
+
+it('provides the original native Goal project adapter and checks actual complete files through the existing isolated executor',async()=>{
+  const f=nativeFixture(),create=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck
+  expect(create).toBeTypeOf('function')
+  const check=create(f.config)
+  expect(await check.methodScope(f.material)).toEqual({family:'code',evaluationMode:'local-files',fileOutputKind:'files'})
+  expect(mock.prepare).not.toHaveBeenCalled()
+  const prepared=await check.prepare(f.material)
+  expect(prepared.waitsForCancellationCleanup).toBe(true)
+  expect(prepared.contentReview.files.entries).toEqual(f.study.files.entries)
+  expect(prepared.inputsDigest).toBe(conversationExternalInputsDigest(f.study.files.entries))
+  expect(await prepared.evaluate(f.candidate(prepared))).toMatchObject({status:'verified'})
+  expect(mock.run).toHaveBeenCalledWith({files:f.study.files.entries.map(entry=>({...entry,content:entry.content??'export const n=7;'})),entryPath:'entry.mjs',input:'{}'},f.signal)
+})
+
+it('preserves the exact original Goal cwd spelling in its content plan while checking the same canonical project',async()=>{
+  const f=nativeFixture()
+  f.material.cwd=f.cwd.replaceAll('\\','/')
+  f.material.goal.workspaceRoot=f.material.cwd
+  const check=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck(f.config)
+  expect(await check.methodScope(f.material)).toBeDefined()
+  const prepared=await check.prepare(f.material)
+  expect(prepared.contentReview.files.cwd).toBe(f.material.cwd)
+})
+
+it.each(['task','command','origin','source-role','cwd','goal-cwd','goal-objective','child','parent','inactive'] as const)(
+  'declines a native Goal %s applicability mismatch before method provision or environment preparation',async change=>{
+    const f=nativeFixture(),material=structuredClone({...f.material,signal:undefined}) as typeof f.material
+    material.signal=f.signal
+    if(change==='task') material.task.objective='A different delegated Task'
+    if(change==='command') material.source.data.args='A different original command'
+    if(change==='origin') material.goal.origin.commandDigest=sha256('wrong command')
+    if(change==='source-role') material.source.data.source.kind='plugin'
+    if(change==='cwd') material.cwd='D:/DevData/another-workspace'
+    if(change==='goal-cwd') material.goal.workspaceRoot='D:/DevData/another-workspace'
+    if(change==='goal-objective') material.goal.objective='A different Goal'
+    if(change==='child') material.attempt.childSessionId='another child'
+    if(change==='parent') material.attempt.parentSessionId='another planner'
+    if(change==='inactive') material.attempt.status='settled'
+    const check=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck(f.config)
+    expect(await check.methodScope(material)).toBeUndefined()
+    expect(await check.prepare(material)).toBeUndefined()
+    expect(mock.prepare).not.toHaveBeenCalled()
+  },
+)
+
+it.each(['source','task','model','epoch','child','parent','native-goal','permission','checker','contract','inputs','condition','files'] as const)(
+  'does not execute a native Goal candidate with changed original %s binding',async change=>{
+    const f=nativeFixture(),check=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck(f.config),prepared=await check.prepare(f.material),output=f.candidate(prepared)
+    if(change==='source') output.source.data.args='Changed original command'
+    if(change==='task') output.preparation.requirementsSnapshot.task.objective='Changed Task'
+    if(change==='model') output.preparation.modelConfigDigest=sha256('other model')
+    if(change==='epoch') output.preparation.epoch++
+    if(change==='child') output.preparation.childSessionId='other child'
+    if(change==='parent') output.preparation.parentSessionId='other planner'
+    if(change==='native-goal') output.preparation.nativeGoalId='other native goal'
+    if(change==='permission') output.preparation.permissionFingerprint=sha256('other permission')
+    if(change==='checker') output.preparation.checkerDigest=sha256('other checker')
+    if(change==='contract') output.preparation.contractDigest=sha256('other contract')
+    if(change==='inputs') output.preparation.inputsDigest=sha256('other original inputs')
+    if(change==='condition') output.preparation.requiredCondition='A weaker condition'
+    if(change==='files') output.preparation.contentReview.files.outputPaths=['first.ts']
+    expect(await prepared.evaluate(output)).toMatchObject({status:'unverifiable'})
+    expect(mock.run).not.toHaveBeenCalled()
+  },
+)
+
+it.each(['readonly','missing','unsupported','json','exit','stderr'] as const)(
+  'classifies a native Goal project %s result through the original check without regrading requirements',async change=>{
+    const f=nativeFixture(),check=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck(f.config),prepared=await check.prepare(f.material),output=f.candidate(prepared)
+    if(change==='readonly') writeFileSync(resolve(f.cwd,'entry.mjs'),'Changed readonly original entry')
+    if(change==='missing') rmSync(resolve(f.cwd,'first.ts'))
+    if(change==='unsupported') mock.run.mockResolvedValue({status:'source-rejected',detail:'Isolated runtime unavailable'})
+    if(change==='json') mock.run.mockResolvedValue({status:'completed',stdout:'{}',stderr:'',exitCode:0,receiptDigest:'receipt'})
+    if(change==='exit') mock.run.mockResolvedValue({status:'completed',stdout:'{"n":7}',stderr:'',exitCode:1,receiptDigest:'receipt'})
+    if(change==='stderr') mock.run.mockResolvedValue({status:'completed',stdout:'{"n":7}',stderr:'error',exitCode:0,receiptDigest:'receipt'})
+    const result=await prepared.evaluate(output)
+    if(['json','exit','stderr'].includes(change)) expect(result).toMatchObject({status:'rejected',failedRequiredConditionDigest:sha256(condition)})
+    else { expect(result.status).toBe('unverifiable');expect(result).not.toHaveProperty('failedRequiredConditionDigest') }
+    if(['readonly','missing'].includes(change)) expect(mock.run).not.toHaveBeenCalled()
+  },
+)
+
+it('freezes native Goal host config and source material independently and propagates original cancellation cleanup',async()=>{
+  const f=nativeFixture(),check=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck(f.config)
+  f.config.goalCommand='Changed caller config';f.config.requiredCondition='Changed caller condition';f.config.cases[0]!.expectedJson='{}'
+  const prepared=await check.prepare(f.material),output=f.candidate(prepared)
+  expect(prepared.requiredCondition).toBe(condition)
+  expect((await prepared.evaluate(output)).status).toBe('verified')
+  const controller=new AbortController();controller.abort(new Error('original cancelled Goal'))
+  await expect(check.methodScope({...f.material,signal:controller.signal})).rejects.toThrow('original cancelled Goal')
+  await expect(check.prepare({...f.material,signal:controller.signal})).rejects.toThrow('original cancelled Goal')
+  await expect(prepared.evaluate({...output,signal:controller.signal})).rejects.toThrow('original cancelled Goal')
+})
+it('waits for the original native Goal isolated executor cleanup before rejecting mid-run cancellation', async () => {
+  const f=nativeFixture(),check=projectApi.createGoalTaskIsolatedNodeProjectCheck(f.config)
+  const prepared=await check.prepare(f.material),controller=new AbortController()
+  let started!:()=>void,release!:()=>void,cleaned=false,settled=false
+  const running=new Promise<void>(resolve=>{started=resolve})
+  const cleanup=new Promise<void>(resolve=>{release=resolve})
+  mock.run.mockImplementation(async(_input,signal)=>{started();await cleanup;cleaned=true;signal.throwIfAborted();throw new Error('unexpected uncancelled runner')})
+  const output=f.candidate(prepared)
+  const pending=prepared!.evaluate({...output,signal:controller.signal})
+  const result=pending.then(()=>{settled=true;return undefined},error=>{settled=true;return error})
+  await running
+  controller.abort(new Error('original mid-run cancellation'))
+  await Promise.resolve()
+  expect(settled).toBe(false);expect(cleaned).toBe(false)
+  release()
+  expect((await result)?.message).toBe('original mid-run cancellation')
+  expect(cleaned).toBe(true);expect(prepared!.waitsForCancellationCleanup).toBe(true)
+})
 it('executes the complete captured multi-output project with a read-only independent entry', async () => {
   const f = fixture(), check = createConversationIsolatedNodeProjectCheck(f.config); f.config.cases[0]!.expectedJson = '{}'
   const prepared = await check.prepare(f.material); expect(prepared).toBeDefined()

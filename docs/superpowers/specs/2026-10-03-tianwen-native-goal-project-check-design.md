@@ -1,0 +1,15 @@
+# 原Goal消费已有隔离项目程序检查
+
+基线4bb357c。继续原三项收口计划第三项，不新增阶段、发布要求或决策窗口。用户已授权自主选择实际待办并持续实现，不再次请求同一执行许可。沿brainstorming分析既有接口，再以writing-plans/TDD实施。
+
+已核实：DEV createDevelopmentNativeCheckOptions只提供externalCodeCheck/studyResultCheck；原Goal支持goalTaskAcceptance但没有已有程序检查器的公开适配工厂。原共享createPreparation可冻结项目图、条件、案例和隔离执行器，已有普通/研究工厂复用，不能为Goal复制执行器或伪造ConversationTask。
+
+选择在原共享程序检查模块增加内部Goal适配、在原Node项目模块公开createGoalTaskIsolatedNodeProjectCheck。配置复用原cwd/requestText（委托Task原要求）/entryPath/outputPaths/referencePaths/cases/隔离设置，另明确goalCommand及必需原requiredCondition；质量合同沿已有默认事前冻结。Goal原命令/Task/工作区不匹配时methodScope和prepare均不适用，方法不提前注入、隔离环境不准备。原命令保持command身份，Goal/Planner要求不冒充用户事实。
+
+prepare在首请求前复用原冻结输入与程序条件，向原Goal owner返回检查器/合同/输入摘要、contentReview完整图和取消清理标识。evaluate核原source/Task/尝试/模型/权限/准备与完整冻结图，读取该图内实际产物，交原共享evaluate；只读参考改写、缺产物、绑定或环境缺失保持unverifiable，明确completed的原条件失败保持rejected及原条件摘要。取消向原执行器传播并等清理，不授予新权限或本机执行生成代码。
+
+DEV宿主增加显式可选Goal合同，复用固定隔离宿主；调用者不提供时原两项options和普通历史行为不变。公开JS与声明可导入；实际Runtime消费该适配而非脚本假成功。研究仍消费明确native原结果，保留同意、方法版本、双审、输入独立和原门槛；适配交付不等于自然采用/收益，main/Daily隔离保持，完整目标active/incomplete。
+
+备选直接包装普通工厂需要伪造Task admission并混淆来源，拒绝；备选新执行器复制合同和清理规则，拒绝。选原共享核心复用，保持原checker合同语义，Goal身份由原preparation/材料另绑定，不把不同Task ID混入功能合同冒充新检查条件。
+
+验证：首红确认公开入口/DEV消费缺失；完整原图、真实source/Task绑定、程序成功/明确条件失败/基础设施故障/取消及原普通/研究兼容控制。使用实际SDK与发行接口核原方法/准备/原结果/source及0重复恢复；mock与实际隔离执行分别记账。所有运行数据D:/DevData，复用依赖与SDK、不下载，D至少15GiB、优先20；不重跑旧自然题或追加结束练习。
