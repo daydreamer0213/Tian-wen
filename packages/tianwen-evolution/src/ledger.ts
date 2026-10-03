@@ -3,7 +3,7 @@ import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, co
 import { conversationFileTaskInputDigest } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
-import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
+import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
 import {
   closeSync,
   existsSync,
@@ -3267,7 +3267,7 @@ export class EvolutionLedger {
     }
     const existingStudy = record.kind === 'study-opened' ? undefined
       : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
-    if (record.kind === 'guidance-rolled-back' && record.reason === 'regression' && record.evidenceInputPolicy !== 'request-content.v1') {
+    if (record.kind === 'guidance-rolled-back' && record.reason === 'regression' && !['request-content.v1','native-goal-task-input.v1'].includes(record.evidenceInputPolicy ?? '')) {
       throw new LedgerIntegrityError('new regression requires request content input policy')
     }
     const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
@@ -3406,7 +3406,7 @@ export class EvolutionLedger {
     const firstProblem = goalTaskResearchProblem(first), secondProblem = goalTaskResearchProblem(second)
     if (!sources.every(compatible) || firstProblem === undefined || secondProblem === undefined
       || firstProblem.category !== secondProblem.category || firstProblem.checkedFailure !== secondProblem.checkedFailure
-      || first.input.inputDigest === second.input.inputDigest || !goalTaskResearchSuccess(counter)) {
+      || sameGoalTaskResearchInput(first,second) || !goalTaskResearchSuccess(counter)) {
       throw new LedgerIntegrityError('native Goal learning requires two distinct compatible original problems and a verified independent counterexample')
     }
     if (firstProblem.checkedFailure) {
@@ -3467,6 +3467,15 @@ export class EvolutionLedger {
       if (record.reason === 'consent-disabled' && consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3') throw new LedgerIntegrityError('enabled natural learning cannot claim disabled consent')
       if (record.reason === 'regression') {
         const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
+        if (record.nativeGoalEvidence !== undefined) {
+          const all = this.listGoalTaskResearchSources()
+          const failures = record.nativeGoalEvidence.map(reference=>all.find(source=>source.sourceId === reference.sourceId && source.inputDigest === reference.inputDigest))
+          if (failures.length < 2 || failures.some(source=>source === undefined || !isGoalTaskGuidanceRegression(source,{
+            ...study,expectedVersion:record.expectedCurrentVersion,activatedAt:full.activatedAt!}))
+            || new Set(failures.map(source=>source?.input.inputIdentityDigest)).size !== failures.length) {
+            throw new LedgerIntegrityError('native Goal regression requires distinct later original failed tasks using the active version')
+          }
+        } else {
         const sourcePolicy = this.#conversationLearning.list().find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
         const identities = failures.map(task => task === undefined ? undefined : record.evidenceInputPolicy === 'request-content.v1'
@@ -3482,6 +3491,7 @@ export class EvolutionLedger {
           || (record.evidenceInputPolicy === 'captured-files.v1' && study.evaluationMode !== 'local-files')
           || identities.some(identity => identity === undefined)
           || new Set(identities).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
+        }
       }
       if (record.reason === 'support-retracted' && this.isConversationGuidanceSupported(study.studyId)) throw new LedgerIntegrityError('support rollback requires actually invalidated source or counterevidence')
     }

@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import { conversationExternalInputsDigest } from '@tianwen/evolution/external-check'
-import { guidanceInputDigest } from '@tianwen/evolution/guidance'
+import { guidanceInputDigest, guidanceFileInputIdentity } from '@tianwen/evolution/guidance'
 import { sha256 } from '@tianwen/evolution/learning-intake'
 import { hasCurrentConversationQuality, type ConversationFileMaterial, type ConversationQualityContract } from '@tianwen/evolution/content-review'
 import type { GoalTaskOutcomeObservation } from '@tianwen/evolution'
@@ -21,7 +21,7 @@ export interface NativeGoalTaskStudyMaterial {
 }
 
 /** Original requirements only: no previous answer, model result, method or synthetic user event. */
-async function recoverSource(ctx: Context, stateRoot: string, outcome: GoalTaskOutcomeObservation) {
+async function recoverSource(ctx: Context, stateRoot: string, outcome: GoalTaskOutcomeObservation, includeInputIdentity = true) {
   const material = await readGoalTaskOutcomeMaterial(ctx, { stateRoot, outcome: outcome.input })
   const b = material.preparation, snapshot = material.requirementsSnapshot, usage = material.methodUsage
   const end = material.events.at(-1)
@@ -58,7 +58,9 @@ async function recoverSource(ctx: Context, stateRoot: string, outcome: GoalTaskO
     behaviorVersion: usage.version, qualityContract: studyMaterial.qualityContract,
     sessionLifecycleFingerprint: material.sessionLifecycleFingerprint,
     assistantMessageIds: material.events.flatMap(event => event.type === 'assistant/message' && isAppendSurfaceEvent(event) ? [String(event.data.message.id)] : []),
-    inputDigest: guidanceInputDigest(prompt, files), materialDigest: sha256(studyMaterial), reviewMaterialDigest: sha256(original), checks: finished.result.checks }
+    inputDigest: guidanceInputDigest(prompt, files),
+    ...(includeInputIdentity ? { inputIdentityDigest: files === undefined ? guidanceInputDigest(prompt) : guidanceFileInputIdentity(prompt,files) } : {}),
+    materialDigest: sha256(studyMaterial), reviewMaterialDigest: sha256(original), checks: finished.result.checks }
   const header = material.events.find(event => event.type === 'request/header' && event.seq === b.headerSeq)
   if (header?.type !== 'request/header' || sha256(header.data.header.config) !== outcome.input.modelConfigDigest) throw new Error('original Goal study model unavailable')
   return { input, studyMaterial, original, callConfig: structuredClone(header.data.header.config), preparation: b }
@@ -66,7 +68,7 @@ async function recoverSource(ctx: Context, stateRoot: string, outcome: GoalTaskO
 
 /** Shared zero-call restoration for the existing research owner and original finish lane. */
 export async function recoverGoalTaskResearchSource(ctx: Context, stateRoot: string, source: GoalTaskResearchSource) {
-  const recovered = await recoverSource(ctx, stateRoot, source.outcome)
+  const recovered = await recoverSource(ctx, stateRoot, source.outcome, source.input.inputIdentityDigest !== undefined)
   if (recovered === undefined || sha256(recovered.input) !== source.inputDigest || sha256(source.input) !== source.inputDigest) {
     throw new Error('native Goal research source differs from its original Task material')
   }
@@ -89,10 +91,10 @@ export async function publishGoalTaskResearchSources(ctx: Context, input: { stat
   }
   for (const outcome of ctx.tianwenEvolution.listGoalTaskOutcomes().filter(item => item.input.goalId === input.goalId)) {
     if (!authorized(outcome.input.consentRevision)) continue
-    const recovered = await recoverSource(ctx, input.stateRoot, outcome)
+    const previous = ctx.tianwenEvolution.listGoalTaskResearchSources().find(item => item.sourceId === outcome.sourceId)
+    const recovered = await recoverSource(ctx, input.stateRoot, outcome, previous === undefined || previous.input.inputIdentityDigest !== undefined)
     input.signal.throwIfAborted()
     if (recovered === undefined || !authorized(outcome.input.consentRevision)) continue
-    const previous = ctx.tianwenEvolution.listGoalTaskResearchSources().find(item => item.sourceId === outcome.sourceId)
     if (previous !== undefined) {
       if (previous.inputDigest !== sha256(recovered.input)) throw new Error('saved original Goal research source changed')
       continue

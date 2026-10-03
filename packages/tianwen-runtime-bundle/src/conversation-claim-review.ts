@@ -110,7 +110,14 @@ export function projectClaimEvidence(material: unknown, projection: 'line-v1' | 
   const fileExecution = () => {
     if (files === undefined || source?.fileExecution === undefined) return
     const execution = parseFileExecutionEvidence(source.fileExecution)
-    if (execution.schemaVersion === 'tianwen.file-execution-evidence.v1' ? files.outputKind !== 'chat'
+    // Goal Tasks retain exact native actions instead of manufacturing the
+    // ordinary task's read-only v1 receipt. Keep the original no-mutation and
+    // unchanged-input requirements when reviewing their file-to-chat result.
+    const nativeChat = material.sourceKind === 'native-goal-task' && files.outputKind === 'chat'
+      && execution.schemaVersion === 'tianwen.file-execution-evidence.v2'
+    if (nativeChat ? sha256(finalEntries) !== sha256(files.entries)
+      || execution.actions.some(action => action.tool === 'write' || action.tool === 'edit')
+      : execution.schemaVersion === 'tianwen.file-execution-evidence.v1' ? files.outputKind !== 'chat'
       : execution.schemaVersion === 'tianwen.file-execution-evidence.v2' ? files.outputKind !== 'files'
         : files.outputKind === 'chat' && execution.actions.some(action => (action.tool === 'write' || action.tool === 'edit')
           && !(execution.schemaVersion === 'tianwen.file-execution-evidence.v4' && action.status === 'denied'))) throw new Error('invalid-judgment')

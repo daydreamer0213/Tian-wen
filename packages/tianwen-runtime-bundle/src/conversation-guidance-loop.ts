@@ -21,7 +21,7 @@ import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@ti
 import { withConversationObservationCancellation } from './conversation-external-check.js'
 import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
 import { SOURCE_EXCLUSION_KEYS, type ConversationSourceExclusion, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
-import { goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
+import { goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
 import { recoverGoalTaskResearchSource, recoverGoalGuidanceSource, type NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -581,7 +581,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     let paired=false,attempted=false,unstudied=false
     for(const first of failed) for(const second of failed) {
       const problem=goalTaskResearchProblem(first)!,other=goalTaskResearchProblem(second)!
-      if(first.sourceId===second.sourceId || first.input.inputDigest===second.input.inputDigest || !compatible(second,first)
+      if(first.sourceId===second.sourceId || sameGoalTaskResearchInput(first,second) || !compatible(second,first)
         || problem.category!==other.category || problem.checkedFailure!==other.checkedFailure
         || problem.checkedFailure && (checkIdentity(second)!==checkIdentity(first) || [first,second].some(source=>source.input.fileInputsDigest!==source.outcome.input.inputsDigest))) continue
       paired=true
@@ -683,11 +683,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
     for (const study of [...studies].reverse()) {
       if (study.activation === undefined || study.rollback !== undefined || study.candidate === undefined
         || guidanceVersion(evolution.getConversationGuidance(scopeKey)) !== guidanceVersion(study.candidate.candidateSnapshot)) continue
+      const candidateVersion = guidanceVersion(study.candidate.candidateSnapshot)
       const disabled = consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3'
       const retracted = !evolution.isConversationGuidanceSupported(study.opened.studyId)
       const sourcePolicy = evolution.listConversationTasks().find(task => task.source.taskId === study.opened.sourceTaskIds[0])?.source.admissionPolicy
       const failures = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
-        && task.source.behaviorVersion === guidanceVersion(study.candidate!.candidateSnapshot) && task.recordedAt > study.activatedAt!
+        && task.source.behaviorVersion === candidateVersion && task.recordedAt > study.activatedAt!
         && conversationTaskModelDigest(task) === study.opened.modelConfigDigest
         && sha256(task.admission?.qualityContract ?? null) === sha256(study.opened.qualityContract ?? null)
         && task.admission?.decision?.evaluationMode === (study.opened.evaluationMode ?? 'text') && task.admission.decision.fileOutputKind === study.opened.fileOutputKind
@@ -695,11 +696,20 @@ export class TianwenConversationGuidanceLoopService extends Service {
         .filter(task => task.source.admissionPolicy === sourcePolicy)
       const identities = failures.map(task => conversationTaskInputDigest(task))
       const distinct = failures.filter((_, index) => identities[index] !== undefined && identities.indexOf(identities[index]) === index)
-      if (!disabled && !retracted && distinct.length < 2) continue
+      const nativeFailures = evolution.listGoalTaskResearchSources().filter(source => isGoalTaskGuidanceRegression(source, {
+        ...study.opened, expectedVersion: candidateVersion, activatedAt: study.activatedAt!,
+      }))
+      const nativeIdentities = nativeFailures.map(source => source.input.inputIdentityDigest)
+      const nativeDistinct = nativeFailures.filter((_, index) => nativeIdentities.indexOf(nativeIdentities[index]) === index)
+      if (!disabled && !retracted && distinct.length < 2 && nativeDistinct.length < 2) continue
       const evidence = distinct.slice(-2)
+      const nativeEvidence = nativeDistinct.slice(-2)
+      const useNative = !disabled && !retracted && distinct.length < 2
       evolution.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
-        expectedCurrentVersion: guidanceVersion(study.candidate.candidateSnapshot), reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : evidence.map(task => task.source.taskId),
-        ...(!disabled && !retracted ? { evidenceInputPolicy: 'request-content.v1' as const,
+        expectedCurrentVersion: candidateVersion, reason: disabled ? 'consent-disabled' : retracted ? 'support-retracted' : 'regression', evidenceTaskIds: disabled || retracted ? [] : useNative ? nativeEvidence.map(source => source.sourceId) : evidence.map(task => task.source.taskId),
+        ...(useNative ? { evidenceInputPolicy: 'native-goal-task-input.v1' as const,
+          nativeGoalEvidence: nativeEvidence.map(source => ({ sourceId: source.sourceId, inputDigest: source.inputDigest })) }
+        : !disabled && !retracted ? { evidenceInputPolicy: 'request-content.v1' as const,
           ...(evidence.some(task => task.review?.verdict !== 'not-met') ? { evidenceFailurePolicy: 'model-or-code-check.v1' as const } : {}) } : {}) })
     }
   }

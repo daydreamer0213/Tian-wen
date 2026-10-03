@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 原Goal后续退化自动回滚已交付，第三项继续
+
+2e5c4c2后，原Ledger/GuidanceLoop明确消费native-goal-task回滚证据，按原两项不同实际输入、启用后原结果、scope/版本/model/QA/族/模式/同意及原失败校验。未来来源固定规范化身份，旧源不补字段，晚发布旧结果不当退化；程序失败复用原功能/内容输入一致要求。普通历史回滚与关闭/支持撤回保持，无新回滚服务或伪造ConversationTask。见[准确交付与下一项](tianwen-native-goal-regression-20261003.md)。
+
+实际发行SDK隔离控制沿原shared accepted裁决启用，另Goal未来2Task真实收到候选版本后自动回滚，新Context同进程0请求精确恢复原Goal实际状态/study/parent方法/ledger。provided可核，execution仍unknown；不把失败Goal当成功complete，不冒称自然采用或新Node进程自动恢复。公开Runtime隔离始终true，控制仅隔离Ledger。files/chat原SDK规范化恢复通过；原chat/v2证据误拒首红定位窄修，全部文件不变/无write/edit保持，普通v2/chat仍拒，不补造只读v1证明。
+
+18个不同文件589项通过、1发行源码类spy跳过：8文件335、4公共/原入账86、5内容/文件兼容123、发行SDK45。完整Evolution/Runtime与两声明通过；独立输入绑定P2首红后关闭，chat窄修复核无新有据P1/P2。0真实提供者/自然收益/用户反馈，无旧自然重评或追加练习。正式1327364B/5af25fcd…只读未变，未正式mount/新自然计数；小D包、正常夹具清理/原5拒删目录不绕过，Docker未启动，D约18.11GiB>=15、未达20偏好。
+
+第三项整体及完整目标active/incomplete，main/Daily NO-GO与原门槛/同意/隔离/停止/十工作日窗口保持，不增标准/计时或整体blocked。下一具体实现已核：DEV createDevelopmentNativeCheckOptions只有externalCodeCheck/studyResultCheck，没有goalTaskAcceptance；把原隔离项目检查合同接入原Goal准备/结果，复用执行器与原要求/产物，不伪造普通任务或复制引擎。再用真实未完成开发任务首次结果核方法/功能/内容/未来效果，不索题、催评价、造失败或同题反复凑资格。本条覆盖下方原生Task回滚仍待做的待办。
+
 ## 2026-10-03 原Goal自动研究消费已交付，进入原第三项
 
 ad9b530后，原GuidanceLoop显式消费native-goal-task及普通来源，原扫描/唤醒/根会话恢复/五案例十臂/双审/程序条件/裁决同步承接；原command保持用户身份，Goal/Planner是独立要求元数据，worker与原程序准备保留来源。原探索增加明确native v3，普通v2身份不变；原案例/提案/接受后恢复和只读packet核对原引用/材料/model/proof，不伪造ConversationTask或用户反馈。DEV原五角色合同匹配消费native冻结要求/图/条件。详见[准确交付与剩余工作](tianwen-goal-task-research-consumer-20261003.md)。

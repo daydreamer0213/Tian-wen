@@ -17,6 +17,8 @@ export interface GoalTaskResearchSourceInput {
   readonly behaviorVersion: ReturnType<typeof sha256>
   readonly qualityContract: ConversationQualityContract
   readonly inputDigest: ReturnType<typeof sha256>
+  /** Prospective canonical input identity; never filled into old saved sources. */
+  readonly inputIdentityDigest?: ReturnType<typeof sha256>
   readonly materialDigest: ReturnType<typeof sha256>
   readonly reviewMaterialDigest: ReturnType<typeof sha256>
   readonly sessionLifecycleFingerprint: ReturnType<typeof sha256>
@@ -32,6 +34,14 @@ export interface GoalTaskResearchSourceRecordedEvent {
   readonly input: GoalTaskResearchSourceInput
 }
 export interface GoalTaskResearchSource extends GoalTaskResearchSourceRecordedEvent { readonly outcome: GoalTaskOutcomeObservation }
+
+/** New sources compare original canonical inputs; old pairs keep their saved policy. */
+export function sameGoalTaskResearchInput(first: GoalTaskResearchSource, second: GoalTaskResearchSource): boolean {
+  if (first.input.inputIdentityDigest !== undefined && second.input.inputIdentityDigest !== undefined) {
+    return first.input.inputIdentityDigest === second.input.inputIdentityDigest
+  }
+  return first.input.inputDigest === second.input.inputDigest
+}
 export interface GoalTaskResearchReference { readonly sourceId: string; readonly inputDigest: ReturnType<typeof sha256> }
 export type GuidanceNativeGoalSources = readonly [GoalTaskResearchReference, GoalTaskResearchReference, GoalTaskResearchReference]
 
@@ -50,7 +60,8 @@ export function parseGoalTaskResearchSourceInput(value: unknown): GoalTaskResear
   if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new TypeError('invalid native Goal research source')
   const row = value as Record<string, unknown>
   const keys = ['sourceKind', 'sourceId', 'outcomeInputDigest', 'scopeKey', 'family', 'evaluationMode', 'behaviorVersion',
-    'qualityContract', 'inputDigest', 'materialDigest', 'reviewMaterialDigest', 'sessionLifecycleFingerprint', 'assistantMessageIds', 'checks', ...(row.evaluationMode === 'local-files' ? ['fileOutputKind', 'fileInputsDigest'] : [])]
+    'qualityContract', 'inputDigest', 'materialDigest', 'reviewMaterialDigest', 'sessionLifecycleFingerprint', 'assistantMessageIds', 'checks',
+    ...(Object.hasOwn(row,'inputIdentityDigest') ? ['inputIdentityDigest'] : []), ...(row.evaluationMode === 'local-files' ? ['fileOutputKind', 'fileInputsDigest'] : [])]
   if (Reflect.ownKeys(row).length !== keys.length || keys.some(key => !Object.hasOwn(row, key))
     || row.sourceKind !== 'native-goal-task' || typeof row.sourceId !== 'string' || !/^goal-task-result:[a-f0-9]{64}$/.test(row.sourceId)
     || typeof row.scopeKey !== 'string' || !/^conversation:sha256:[a-f0-9]{64}$/.test(row.scopeKey)
@@ -59,6 +70,7 @@ export function parseGoalTaskResearchSourceInput(value: unknown): GoalTaskResear
     || !Array.isArray(row.assistantMessageIds) || row.assistantMessageIds.length === 0 || row.assistantMessageIds.length > 128
     || row.assistantMessageIds.some(id => typeof id !== 'string' || id.trim().length === 0) || new Set(row.assistantMessageIds).size !== row.assistantMessageIds.length
     || ['outcomeInputDigest', 'behaviorVersion', 'inputDigest', 'materialDigest', 'reviewMaterialDigest', 'sessionLifecycleFingerprint',
+      ...(Object.hasOwn(row,'inputIdentityDigest') ? ['inputIdentityDigest'] : []),
       ...(row.evaluationMode === 'local-files' ? ['fileInputsDigest'] : [])].some(key => typeof row[key] !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(row[key] as string))) {
     throw new TypeError('invalid native Goal research source identity or scope')
   }
@@ -67,6 +79,39 @@ export function parseGoalTaskResearchSourceInput(value: unknown): GoalTaskResear
   parseConversationQualityReviewChecks(checks, qualityContract)
   if (new Set(checks.map(check => check.proof.sessionId)).size !== 2) throw new TypeError('original Goal research checks are not independent')
   return { ...structuredClone(row), checks, qualityContract } as unknown as GoalTaskResearchSourceInput
+}
+
+export function parseGoalTaskRegressionEvidence(value: unknown, ids: readonly string[]): readonly GoalTaskResearchReference[] {
+  if (!Array.isArray(value) || value.length !== ids.length || ids.length < 2 || ids.length > 64) throw new TypeError('native Goal regression requires distinct later sources')
+  return value.map((item,index)=>{
+    if (item === null || typeof item !== 'object' || Array.isArray(item) || Reflect.ownKeys(item).length !== 2
+      || !Object.hasOwn(item,'sourceId') || !Object.hasOwn(item,'inputDigest') || item.sourceId !== ids[index]
+      || typeof item.sourceId !== 'string' || !/^goal-task-result:[a-f0-9]{64}$/.test(item.sourceId)
+      || typeof item.inputDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(item.inputDigest)) throw new TypeError('native Goal regression reference differs from its original source')
+    return structuredClone(item)
+  })
+}
+
+export interface GoalTaskRegressionScope {
+  readonly scopeKey: string
+  readonly family: ConversationFamily
+  readonly evaluationMode?: string
+  readonly fileOutputKind?: 'files' | 'chat'
+  readonly qualityContract?: ConversationQualityContract
+  readonly consentRevision: number
+  readonly modelConfigDigest: ReturnType<typeof sha256>
+  readonly expectedVersion: ReturnType<typeof sha256>
+  readonly activatedAt: string
+}
+/** Same original rollback threshold; this predicate never authorizes activation. */
+export function isGoalTaskGuidanceRegression(source: GoalTaskResearchSource, scope: GoalTaskRegressionScope): boolean {
+  const input=source.input, problem=goalTaskResearchProblem(source)
+  return input.inputIdentityDigest !== undefined && source.outcome.at > scope.activatedAt && source.at > scope.activatedAt
+    && input.scopeKey === scope.scopeKey && input.behaviorVersion === scope.expectedVersion && input.family === scope.family
+    && input.evaluationMode === (scope.evaluationMode ?? 'text') && input.fileOutputKind === scope.fileOutputKind
+    && source.outcome.input.consentRevision === scope.consentRevision && source.outcome.input.modelConfigDigest === scope.modelConfigDigest
+    && sha256(input.qualityContract) === sha256(scope.qualityContract ?? null) && problem !== undefined
+    && (!problem.checkedFailure || input.fileInputsDigest === source.outcome.input.inputsDigest)
 }
 
 /** The original bounded check-failure branch is kept distinct from a failed semantic review. */

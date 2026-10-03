@@ -3,12 +3,14 @@ import { join, resolve, sep } from 'node:path'
 import { expect, it } from 'vitest'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { conversationQualityContract, parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
-import { guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemptId } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { conversationQualityContract, parseConversationAuditedReviewChecks, conversationReviewConsensus } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { guidanceInputDigest, guidanceFileInputIdentity, guidanceStudyId, guidanceVersion, caseDesignAttemptId } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import type { GoalTaskOutcomeInput } from '../../packages/tianwen-evolution/src/goal-task-outcome.js'
 import type { GoalTaskResearchSourceInput } from '../../packages/tianwen-evolution/src/goal-task-research.js'
+import { isGoalTaskGuidanceRegression, parseGoalTaskResearchSourceInput } from '../../packages/tianwen-evolution/src/goal-task-research.js'
 import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import { prepareConversationLearningExploration, parseConversationLearningExplorationRequest } from '../../packages/tianwen-evolution/src/learning-exploration.js'
+import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 
 const BASE = resolve('D:/DevData/tianwen-dsh-probe/goal-task-research')
 const scopeKey = `conversation:${sha256({ cwd: 'D:/original-Goal' })}`
@@ -20,9 +22,11 @@ const checks = (id: string, met: boolean) => parseConversationAuditedReviewCheck
     units: { 'answer-1': { firstClaim: { quote: 'literal output', kind: 'non-factual', status: 'permitted', sourceIds: [], explanation: 'fixture literal' }, additionalClaims: [] } } },
 })))
 
-function fixture(checkedCode = false) {
+function fixture(checkedCode = false, quarantine = true, aliasedInputs = false) {
   mkdirSync(BASE, { recursive: true }); const root = mkdtempSync(join(BASE, 'ledger-'))
-  const ledger = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  let tick=0
+  const ledger = new EvolutionLedger(root, { guidanceActivationQuarantine: quarantine,
+    clock:()=>new Date(Date.UTC(2026,9,3)+tick++*1000).toISOString() })
   ledger.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
   const files = (index: number | string) => ({ schemaVersion: 'tianwen.conversation-file-material.v1' as const, cwd: 'D:/original-Goal',
     outputKind: 'files' as const, entries: [{ path: 'input.txt', content: 'Original input '+index }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] })
@@ -41,6 +45,7 @@ function fixture(checkedCode = false) {
       ...(checkedCode ? { fileOutputKind: 'files' as const, fileInputsDigest: outcome.inputsDigest } : {}),
       sessionLifecycleFingerprint: sha256('child-lifecycle-'+index), assistantMessageIds: ['answer-'+index],
       qualityContract: conversationQualityContract(), inputDigest: guidanceInputDigest('actual requirements-'+index),
+      ...(aliasedInputs ? { inputIdentityDigest:sha256(index<3?'same canonical input':'separate counter input') } : {}),
       materialDigest: sha256('study material-'+index), reviewMaterialDigest: sha256('original review-'+index), checks: checks('source-'+index, checkedCode || index===3) }
     ledger.recordGoalTaskResearchSource(input)
     return ledger.listGoalTaskResearchSources().find(item => item.sourceId === receipt.sourceId)!
@@ -62,6 +67,15 @@ function fixture(checkedCode = false) {
         inputsDigest:index<3?sources[index]!.input.fileInputsDigest!:conversationExternalInputsDigest(files(item.kind).entries),requiredCondition:'Original condition'})) } : {}) }
   return {root,ledger,sources,attemptBody,body,remove(){if(!resolve(root).startsWith(BASE+sep))throw new Error('cleanup outside owned fixture');rmSync(root,{recursive:true,force:true})}}
 }
+
+it('does not open an original native study from two task identifiers for the same canonical file input',()=>{
+  const f=fixture(true,true,true)
+  try {
+    const bytes=readFileSync(join(f.root,'ledger.jsonl'))
+    expect(()=>f.ledger.recordConversationCaseDesignAttempt({...f.attemptBody,attemptId:caseDesignAttemptId(f.attemptBody as never)} as never)).toThrow(/distinct/)
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
 
 it('consumes explicit native Goal source references in the original attempt and study owner without ConversationTask fabrication',()=>{
   const f=fixture()
@@ -108,6 +122,163 @@ it('retains explicit native Goal identity in one bounded original exploration an
     expect(cold.listConversationGuidanceStudies()).toEqual(f.ledger.listConversationGuidanceStudies())
     expect(cold.recordConversationGuidance(intent)).toEqual({duplicate:true})
     expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+function nativeRegressionScene() {
+  const f=fixture(false,false)
+  const opened={kind:'study-opened' as const,...f.body,studyId:guidanceStudyId(f.body as never)}
+  f.ledger.recordConversationGuidance(opened as never)
+  const candidate={kind:'candidate-recorded' as const,studyId:opened.studyId,candidateSnapshot:{...snapshot,rules:{writing:'Preserve every original constraint.'}},proposalProof:proof('regression-candidate')}
+  f.ledger.recordConversationGuidance(candidate)
+  for(const item of opened.cases) for(const role of ['baseline','candidate'] as const) {
+    const met=role==='candidate'||!['source1','source2'].includes(item.kind)
+    const reviewChecks=checks(item.id+role,met),review=conversationReviewConsensus(reviewChecks)
+    f.ledger.recordConversationGuidance({kind:'arm-recorded',studyId:opened.studyId,caseId:item.id,role,materialDigest:item.materialDigest,
+      behaviorVersion:role==='baseline'?opened.parentVersion:guidanceVersion(candidate.candidateSnapshot),executionProof:proof(item.id+role+'execute'),
+      judgeProof:review.proof!,outputDigest:sha256(item.id+role+'actual output'),verdict:review.verdict,reviewChecks})
+  }
+  const decision=f.ledger.conversationGuidanceDecision(opened.studyId)
+  expect(decision.verdict).toBe('accepted');f.ledger.recordConversationGuidance(decision)
+  const activate=()=>f.ledger.recordConversationGuidance({kind:'guidance-activated',studyId:opened.studyId,expectedParentVersion:opened.parentVersion,decisionDigest:sha256(decision)})
+  const later=(index:number,change:{identity?:string,metadata?:Record<string,unknown>,outcome?:Record<string,unknown>,met?:boolean,legacy?:boolean}={})=>{
+    const old=f.sources[0]!
+    const outcome={...old.outcome.input,goalId:'future-goal',taskId:'future-'+index,childSessionId:'future-child-'+index,...change.outcome}
+    const receipt=f.ledger.recordGoalTaskOutcome(outcome as GoalTaskOutcomeInput)
+    const input={...old.input,sourceId:receipt.sourceId,outcomeInputDigest:sha256(outcome),behaviorVersion:guidanceVersion(candidate.candidateSnapshot),
+      inputDigest:sha256('raw-input-'+index),...(change.legacy?{}:{inputIdentityDigest:sha256(change.identity??'actual-input-'+index)}),
+      materialDigest:sha256('future-material-'+index),reviewMaterialDigest:sha256('future-review-'+index),
+      checks:checks('future-'+index,change.met??false),...change.metadata}
+    const publish=()=>{f.ledger.recordGoalTaskResearchSource(input as GoalTaskResearchSourceInput);return f.ledger.listGoalTaskResearchSources().find(source=>source.sourceId===receipt.sourceId)!}
+    return {publish,outcome:receipt}
+  }
+  const rollback=(evidence:ReturnType<ReturnType<typeof later>['publish']>[])=>({kind:'guidance-rolled-back' as const,studyId:opened.studyId,
+    expectedCurrentVersion:guidanceVersion(candidate.candidateSnapshot),reason:'regression' as const,evidenceTaskIds:evidence.map(source=>source.sourceId),
+    evidenceInputPolicy:'native-goal-task-input.v1' as const,nativeGoalEvidence:evidence.map(source=>({sourceId:source.sourceId,inputDigest:source.inputDigest}))})
+  const service=Object.create(TianwenConversationGuidanceLoopService.prototype)
+  Object.assign(service,{ctx:{tianwenEvolution:f.ledger}})
+  const reconcile=()=>service.rollbackIfNeeded(scopeKey)
+  return {...f,opened,candidate,activate,later,rollback,reconcile}
+}
+
+it('rolls back two distinct later native Goal failures and cold restores the original version without ConversationTask fabrication',()=>{
+  const f=nativeRegressionScene()
+  try {
+    f.activate();const failures=[f.later(4).publish(),f.later(5).publish()]
+    const record=f.rollback(failures)
+    expect(f.ledger.recordConversationGuidance(record as never)).toEqual({duplicate:false})
+    expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(snapshot)
+    expect(f.ledger.listConversationTasks()).toHaveLength(0)
+    const bytes=readFileSync(join(f.root,'ledger.jsonl')),cold=new EvolutionLedger(f.root,{guidanceActivationQuarantine:true})
+    expect(cold.getConversationGuidance(scopeKey)).toEqual(snapshot)
+    expect(cold.recordConversationGuidance(record as never)).toEqual({duplicate:true})
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+it('automatically reconciles native Goal regression using the original owner with no models or root Agent',()=>{
+  const f=nativeRegressionScene()
+  try {
+    f.activate();const first=f.later(4,{identity:'same actual input'}).publish();f.reconcile()
+    expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(f.candidate.candidateSnapshot)
+    f.later(5,{identity:'same actual input'}).publish();f.reconcile()
+    expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(f.candidate.candidateSnapshot)
+    const distinct=f.later(6).publish();f.reconcile()
+    expect(f.ledger.listConversationGuidanceStudies()[0]!.rollback).toEqual(f.rollback([first,distinct]))
+    expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(snapshot)
+  }finally{f.remove()}
+})
+
+it('rejects a late-published pre-activation original outcome as future regression evidence',()=>{
+  const f=nativeRegressionScene()
+  try {
+    const old=f.later(4);f.activate()
+    const sources=[old.publish(),f.later(5).publish()],bytes=readFileSync(join(f.root,'ledger.jsonl'))
+    expect(()=>f.ledger.recordConversationGuidance(f.rollback(sources) as never)).toThrow(/regression/)
+    f.reconcile();expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(f.candidate.candidateSnapshot)
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+it.each(['same-input','legacy-input','success','wrong-version','wrong-scope','wrong-family','wrong-model'] as const)(
+  'does not retract an active method for ineligible native Goal regression evidence: %s', mode => {
+    const f=nativeRegressionScene()
+    try {
+      f.activate()
+      const first=f.later(4,{identity:'first actual input'}).publish()
+      const second=f.later(5, mode==='same-input'?{identity:'first actual input'}:mode==='legacy-input'?{legacy:true}
+        :mode==='success'?{met:true}:mode==='wrong-version'?{metadata:{behaviorVersion:guidanceVersion(snapshot)}}
+        :mode==='wrong-scope'?{metadata:{scopeKey:`conversation:${sha256('another workspace')}`}}
+        :mode==='wrong-family'?{metadata:{family:'code'}}:{outcome:{modelConfigDigest:sha256('another model')}}).publish()
+      const bytes=readFileSync(join(f.root,'ledger.jsonl'))
+      expect(()=>f.ledger.recordConversationGuidance(f.rollback([first,second]) as never)).toThrow(/regression/)
+      f.reconcile()
+      expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(f.candidate.candidateSnapshot)
+      expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+    } finally { f.remove() }
+  },
+)
+
+it('requires exact original native rollback references and an explicit matching input policy, without changing old records',()=>{
+  const f=nativeRegressionScene()
+  try {
+    f.activate();const sources=[f.later(4).publish(),f.later(5).publish()]
+    const record=f.rollback(sources),bytes=readFileSync(join(f.root,'ledger.jsonl'))
+    const {nativeGoalEvidence:_refs,...missingRefs}=record
+    const {evidenceInputPolicy:_policy,...missingPolicy}=record
+    for(const invalid of [missingRefs,missingPolicy,{...record,evidenceInputPolicy:'request-content.v1'},
+      {...record,nativeGoalEvidence:[record.nativeGoalEvidence[0],{...record.nativeGoalEvidence[1],inputDigest:sha256('wrong original source')}]},
+      {...record,nativeGoalEvidence:[record.nativeGoalEvidence[1],record.nativeGoalEvidence[0]]},
+      {...record,evidenceTaskIds:[record.evidenceTaskIds[0],record.evidenceTaskIds[0]]},
+      {...record,evidenceFailurePolicy:'model-or-code-check.v1'}]) expect(()=>f.ledger.recordConversationGuidance(invalid as never)).toThrow()
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  } finally { f.remove() }
+})
+
+it('uses canonical original file identity and retains the bounded original code failure rule and exact rollback scope',()=>{
+  const files={schemaVersion:'tianwen.conversation-file-material.v1' as const,cwd:'D:/original-Goal',outputKind:'files' as const,
+    entries:[{path:'Input.txt',content:'Actual original bytes'},{path:'Second.txt',content:'Second original input'},
+      {path:'Out.txt',content:null},{path:'Other.txt',content:null}],outputPaths:['Out.txt','Other.txt']}
+  const alias={...files,entries:[...files.entries].reverse().map(entry=>({...entry,path:entry.path.toLowerCase()})),outputPaths:['other.txt','out.txt']}
+  expect(guidanceInputDigest('original request',files)).not.toBe(guidanceInputDigest('original request',alias))
+  expect(guidanceFileInputIdentity('original request',files)).toBe(guidanceFileInputIdentity('original request',alias))
+  expect(guidanceFileInputIdentity('different request',alias)).not.toBe(guidanceFileInputIdentity('original request',files))
+  expect(guidanceFileInputIdentity('original request',{...files,entries:files.entries.map((entry,index)=>index===0?{...entry,content:'Changed actual bytes'}:entry)}))
+    .not.toBe(guidanceFileInputIdentity('original request',files))
+  const f=fixture(true)
+  try {
+    const original=f.sources[0]!,source={...original,input:{...original.input,inputIdentityDigest:guidanceFileInputIdentity('original request',files)}}
+    const scope={scopeKey,family:'code' as const,evaluationMode:'local-files',fileOutputKind:'files' as const,
+      qualityContract:conversationQualityContract(),consentRevision:1,modelConfigDigest:sha256('model'),expectedVersion:source.input.behaviorVersion,activatedAt:'2026-10-02T00:00:00.000Z'}
+    expect(isGoalTaskGuidanceRegression(source,scope)).toBe(true)
+    expect(isGoalTaskGuidanceRegression({...source,input:{...source.input,fileInputsDigest:sha256('different checked file inputs')}},scope)).toBe(false)
+    for(const change of [{family:'writing'},{evaluationMode:'text'},{fileOutputKind:'chat'},
+      {consentRevision:2},{modelConfigDigest:sha256('another original model')},{qualityContract:undefined},
+      {activatedAt:source.outcome.at}]) expect(isGoalTaskGuidanceRegression(source,{...scope,...change} as never)).toBe(false)
+    expect(isGoalTaskGuidanceRegression({...source,outcome:{...source.outcome,classification:'unverifiable'}},scope)).toBe(false)
+    expect(isGoalTaskGuidanceRegression({...source,input:{...source.input,checks:checks('inconclusive',true).map(check=>({...check,verdict:'inconclusive',category:null})) as never}},scope)).toBe(false)
+    const bytes=readFileSync(join(f.root,'ledger.jsonl'))
+    expect(parseGoalTaskResearchSourceInput(original.input)).toEqual(original.input)
+    for(const identity of [undefined,'not-a-digest']) expect(()=>parseGoalTaskResearchSourceInput({...original.input,inputIdentityDigest:identity})).toThrow()
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+it.each(['consent-disabled','support-retracted'] as const)('retains original native method withdrawal independently of future failures: %s',reason=>{
+  const f=nativeRegressionScene()
+  try {
+    f.activate()
+    if(reason==='consent-disabled') f.ledger.recordLearningAnalysisConsent({enabled:false,revision:2,policyVersion:'tianwen-auto-analysis.v3'})
+    else {
+      const source=f.sources[0]!
+      f.ledger.recordLearningFeedbackRevision({sessionLifecycleFingerprint:source.input.sessionLifecycleFingerprint,analysisConsentRevision:1,
+        intake:{sessionId:source.outcome.input.childSessionId,messageId:source.input.assistantMessageIds[0]!,feedbackVersion:'engineering-withdrawal-control',
+          rating:'positive',scopeKey,sessionDigest:sha256('original SDK'),evidenceIds:[]}})
+    }
+    f.reconcile()
+    expect(f.ledger.listConversationGuidanceStudies()[0]!.rollback).toMatchObject({reason,evidenceTaskIds:[]})
+    expect(f.ledger.listConversationGuidanceStudies()[0]!.rollback?.nativeGoalEvidence).toBeUndefined()
+    expect(f.ledger.getConversationGuidance(scopeKey)).toEqual(snapshot)
   }finally{f.remove()}
 })
 

@@ -36,6 +36,10 @@ import { readGoalTaskAcceptanceMaterial } from '../../packages/tianwen-runtime-b
 import * as runtimePublic from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { finishGoalTaskContentReviews } from '../../packages/tianwen-runtime-bundle/src/goal-task-content-review.js'
+import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { recoverGoalTaskResearchSource, publishGoalTaskResearchSources } from '../../packages/tianwen-runtime-bundle/src/goal-task-research-source.js'
+import { guidanceVersion, guidanceFileInputIdentity } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import { recoverTextGuidanceStudyReviewPacket } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import {
   listLongGoals,
@@ -140,7 +144,7 @@ class ProfileAdapter extends LlmAdapter {
     private readonly contentVerdict?: 'met' | 'not-met',
     private readonly beforeReview?: (index: number) => void,
     private readonly taskCount = 1,
-    private readonly fileActions?: 'read-success' | 'read-error',
+    private readonly fileActions?: 'read-success' | 'read-error' | 'chat-read',
     private readonly failTaskFinalResponse = false,
     private readonly researchControl = false,
     private readonly researchExploration = false,
@@ -223,7 +227,8 @@ class ProfileAdapter extends LlmAdapter {
       chunks = toolCallResponse('profile-planner-recovery', 'recover_long_goal_task', {})
     } else if (this.fileActions !== undefined && this.taskSessions.has(String(options.sessionId)) && last?.source.kind === 'tool'
       && last.source.callId === 'profile-file-read') {
-      chunks = toolCallResponse('profile-file-edit', 'edit', { file_path: 'first.txt' })
+      chunks = this.fileActions === 'chat-read' ? toolCallResponse('profile-file-complete', 'profile_task', {})
+        : toolCallResponse('profile-file-edit', 'edit', { file_path: 'first.txt' })
     } else if (this.fileActions !== undefined && this.taskSessions.has(String(options.sessionId)) && last?.source.kind === 'tool'
       && last.source.callId === 'profile-file-edit') {
       chunks = toolCallResponse('profile-file-complete', 'profile_task', {})
@@ -297,7 +302,7 @@ async function mountProfile(
     readonly beforeReview?: (index: number) => void
     readonly produceFiles?: (workspace: string) => void
     readonly taskCount?: number
-    readonly fileActions?: 'read-success' | 'read-error'
+    readonly fileActions?: 'read-success' | 'read-error' | 'chat-read'
     readonly failTaskFinalResponse?: boolean
     readonly researchControl?: boolean
     readonly researchExploration?: boolean
@@ -526,6 +531,167 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it.each(['files', 'chat'] as const)('freezes and verifies canonical original file input in actual native Goal source metadata: %s', async outputKind => {
+    const profile = await mountProfile('Complete the native file identity engineering control', {
+      completeTaskThroughTool: true, contentVerdict: 'met',
+      fileActions: outputKind === 'chat' ? 'chat-read' : undefined,
+      produceFiles: outputKind === 'files' ? workspace => writeFileSync(join(workspace, 'Output.txt'), 'literal original file result') : undefined,
+      goalTaskAcceptance: {
+        async methodScope() { return { family: 'writing', evaluationMode: 'local-files', fileOutputKind: outputKind } },
+        async prepare(material) {
+          const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, cwd: material.cwd, outputKind,
+            entries: [{ path: 'Input.txt', content: 'literal original input' }, ...(outputKind === 'files' ? [{ path: 'Output.txt', content: null }] : [])],
+            outputPaths: outputKind === 'files' ? ['Output.txt'] : [] }
+          return { checkerId: 'native-file-identity', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+            inputsDigest: conversationExternalInputsDigest(files.entries), requiredCondition: 'Complete the original controlled native Task.', contentReview: { files },
+            async evaluate() { return { status: 'verified', detail: 'Scripted engineering control, not natural evidence.' } } }
+        },
+      },
+    })
+    try {
+      writeFileSync(join(profile.workspaceRoot, 'Input.txt'), 'literal original input')
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(profile.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(1), { timeout: 10_000 })
+      const source = profile.ctx.tianwenEvolution.listGoalTaskResearchSources()[0]!
+      const requests = profile.adapter.requests.length
+      const recovered = await recoverGoalTaskResearchSource(profile.ctx, profile.stateRoot, source)
+      const files = recovered!.studyMaterial.files!
+      if (outputKind === 'chat') {
+        const original = recovered!.original
+        expect(original.source.fileExecution).toMatchObject({ schemaVersion: 'tianwen.file-execution-evidence.v2',
+          actions: expect.arrayContaining([expect.objectContaining({ tool: 'read', status: 'success' })]) })
+        const changedOutput = { ...original.fileResult!, files: [{ path: 'Input.txt', content: 'Changed after original preparation' }] }
+        const { outputDigest: _oldOutputDigest, ...outputBody } = changedOutput
+        expect(() => projectClaimEvidence({ ...original, fileResult: { ...outputBody, outputDigest: sha256(outputBody) } })).toThrow('invalid-judgment')
+        const execution = original.source.fileExecution!
+        if (execution.schemaVersion !== 'tianwen.file-execution-evidence.v2') throw new Error('native Goal action control must retain original v2')
+        expect(() => projectClaimEvidence({ ...original, source: { ...original.source, fileExecution: { ...execution,
+          actions: execution.actions.map(action => action.tool === 'read' ? { ...action, tool: 'edit' } : action) } } })).toThrow('invalid-judgment')
+        const { sourceKind: _native, ...ordinary } = original
+        expect(() => projectClaimEvidence(ordinary)).toThrow('invalid-judgment')
+      }
+      expect(source.input.inputIdentityDigest).toBe(guidanceFileInputIdentity(recovered!.studyMaterial.prompt, files))
+      const alias = { ...files, entries: [...files.entries].reverse().map(entry => ({ ...entry, path: entry.path.toLowerCase() })),
+        outputPaths: [...files.outputPaths].reverse().map(path => path.toLowerCase()) }
+      expect(source.input.inputIdentityDigest).toBe(guidanceFileInputIdentity(recovered!.studyMaterial.prompt, alias))
+      const changed = { ...source.input, inputIdentityDigest: sha256('changed original input identity') }
+      await expect(recoverGoalTaskResearchSource(profile.ctx, profile.stateRoot, { ...source, input: changed, inputDigest: sha256(changed) })).rejects.toThrow('original Task material')
+      expect(profile.adapter.requests).toHaveLength(requests)
+    } finally { await profile.dispose() }
+  }, 30_000)
+  it('uses the original native method version after controlled activation and automatically rolls back two future Goal failures, with exact zero-request cold restoration', async () => {
+    // This isolated scripted profile tests original runtime plumbing. It does
+    // not grant public Runtime activation or establish natural improvement.
+    const checker = {
+      async methodScope() { return { family: 'writing' as const, evaluationMode: 'text' as const } },
+      async prepare() { return { checkerId: 'native-regression-control', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+        inputsDigest: sha256('inputs'), requiredCondition: 'Original engineering native Task completion.', contentReview: {},
+        async evaluate() { return { status: 'verified' as const, detail: 'Scripted functional control, not natural evidence.' } } } },
+    }
+    const first = await mountProfile('Write the initial native regression engineering control', {
+      completeTaskThroughTool: true, contentVerdict: 'met', taskCount: 3, researchControl: true, goalTaskAcceptance: checker,
+    })
+    let future: Awaited<ReturnType<typeof mountProfile>> | undefined
+    let cold: Awaited<ReturnType<typeof mountProfile>> | undefined
+    try {
+      first.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await first.startGoal(); first.releaseTask()
+      await vi.waitFor(() => expect(first.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(3), { timeout: 10_000 })
+      await first.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      await vi.waitFor(() => expect((listLongGoals(first.stateRoot)[0] as LongGoalRecordV3).planner.phase).toBe('complete'))
+      const study = first.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(study.decision?.verdict).toBe('accepted')
+      expect(study.activation).toBeUndefined()
+      expect(first.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true)
+      // Legacy saved metadata must recover verbatim; no future identity is
+      // invented in the reader and no extra request is spent.
+      const source = first.ctx.tianwenEvolution.listGoalTaskResearchSources()[0]!
+      const { inputIdentityDigest: _identity, ...legacyInput } = source.input
+      const requests = first.adapter.requests.length
+      const legacy = await recoverGoalTaskResearchSource(first.ctx, first.stateRoot, { ...source, input: legacyInput, inputDigest: sha256(legacyInput) })
+      expect(legacy!.input).toEqual(legacyInput)
+      expect(Object.hasOwn(legacy!.input, 'inputIdentityDigest')).toBe(false)
+      expect(first.adapter.requests).toHaveLength(requests)
+      const legacySources = first.ctx.tianwenEvolution.listGoalTaskResearchSources().map(item => {
+        const { inputIdentityDigest: _futureIdentity, ...input } = item.input
+        return { ...item, input, inputDigest: sha256(input) }
+      })
+      const beforeLegacyRead = readFileSync(join(first.evolutionRoot, 'ledger.jsonl'))
+      let republished = 0
+      const legacyContext = Object.create(first.ctx) as Context
+      Object.defineProperty(legacyContext, 'tianwenEvolution', { value: {
+        getLearningAnalysisConsent: () => first.ctx.tianwenEvolution.getLearningAnalysisConsent(),
+        listGoalTaskOutcomes: () => first.ctx.tianwenEvolution.listGoalTaskOutcomes(),
+        listGoalTaskResearchSources: () => legacySources,
+        recordGoalTaskResearchSource: () => { republished++ },
+      } })
+      await publishGoalTaskResearchSources(legacyContext, { stateRoot: first.stateRoot, goalId: source.outcome.input.goalId, signal: AbortSignal.timeout(10_000) })
+      expect(republished).toBe(0)
+      expect(readFileSync(join(first.evolutionRoot, 'ledger.jsonl'))).toEqual(beforeLegacyRead)
+      expect(first.adapter.requests).toHaveLength(requests)
+      await first.dispose(false)
+      const controlled = new EvolutionLedger(first.evolutionRoot, { guidanceActivationQuarantine: false })
+      controlled.recordConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId,
+        expectedParentVersion: study.opened.parentVersion, decisionDigest: sha256(study.decision!) })
+      const candidateVersion = guidanceVersion(study.candidate!.candidateSnapshot)
+      future = await mountProfile('Write the subsequent native regression engineering control', {
+        root: first.root, resumeMain: true, completeTaskThroughTool: true, contentVerdict: 'met', taskCount: 2, researchControl: true, goalTaskAcceptance: checker,
+      })
+      expect(future.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true)
+      expect(guidanceVersion(future.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey))).toBe(candidateVersion)
+      await future.startGoal(); future.releaseTask()
+      await vi.waitFor(() => expect(future!.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(5), { timeout: 10_000 })
+      await future.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const subsequent = future.ctx.tianwenEvolution.listGoalTaskResearchSources().slice(3)
+      expect(new Set(subsequent.map(item => item.input.inputIdentityDigest)).size).toBe(2)
+      expect(subsequent.every(item => item.input.behaviorVersion === candidateVersion)).toBe(true)
+      for (const item of subsequent) {
+        const material = await future.runtimeApi.readGoalTaskOutcomeMaterial(future.ctx, { stateRoot: future.stateRoot, outcome: item.outcome.input })
+        expect(material.methodUsage).toMatchObject({ provision: 'provided', version: candidateVersion, execution: 'unknown' })
+      }
+      const restored = future.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(restored.rollback).toMatchObject({ reason: 'regression', evidenceInputPolicy: 'native-goal-task-input.v1',
+        evidenceTaskIds: subsequent.map(item => item.sourceId), nativeGoalEvidence: subsequent.map(item => ({ sourceId: item.sourceId, inputDigest: item.inputDigest })) })
+      expect(future.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
+      // Failed future Tasks are not successful Goal completion. Restore their
+      // actual original state rather than forcing a complete planner result.
+      await vi.waitFor(() => {
+        for (const item of subsequent) expect(readTianwenTaskAttemptProjection(
+          readLongGoal(first.stateRoot, item.outcome.input.goalId) as LongGoalRecordV3, item.outcome.input.taskId).attempts.at(-1)?.status).toBe('settled')
+      })
+      const studies = future.ctx.tianwenEvolution.listConversationGuidanceStudies()
+      const ledgerBytes = readFileSync(join(first.evolutionRoot, 'ledger.jsonl'))
+      await future.dispose(false)
+      const goals = listLongGoals(first.stateRoot)
+      cold = await mountProfile('Write the subsequent native regression engineering control', {
+        root: first.root, resumeMain: true, contentVerdict: 'met', researchControl: true, goalTaskAcceptance: checker,
+      })
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual(studies)
+      expect(cold.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
+      expect(cold.adapter.requests).toHaveLength(0)
+      expect(listLongGoals(first.stateRoot)).toEqual(goals)
+      expect(readFileSync(join(first.evolutionRoot, 'ledger.jsonl'))).toEqual(ledgerBytes)
+      if (process.env.TIANWEN_NATIVE_GOAL_REGRESSION_RECEIPTS_ROOT !== undefined) {
+        const receiptRoot = resolve(process.env.TIANWEN_NATIVE_GOAL_REGRESSION_RECEIPTS_ROOT)
+        if (!receiptRoot.startsWith(resolve('D:/DevData') + '\\')) throw new Error('native regression receipt must stay under D:/DevData')
+        mkdirSync(receiptRoot, { recursive: true })
+        writeFileSync(join(receiptRoot, 'sdk-native-regression.json'), JSON.stringify({
+          controlled: true, naturalEvidence: false, publishedRuntime: process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1',
+          publicRuntimeQuarantine: true, isolatedLedgerActivationControl: true, actualProviderRequests: 0,
+          scriptedRequests: { initial: first.adapter.requests.length, future: future.adapter.requests.length, cold: cold.adapter.requests.length },
+          originalStudy: { studyId: study.opened.studyId, nativeSources: 3, cases: study.opened.cases.length, formalArms: study.arms.length, verdict: study.decision!.verdict },
+          future: { nativeSources: subsequent.map(item => ({ sourceId: item.sourceId, inputDigest: item.inputDigest,
+            inputIdentityDigest: item.input.inputIdentityDigest, behaviorVersion: item.input.behaviorVersion })),
+            methodProvision: 'provided', methodExecution: 'unknown', rollback: restored.rollback },
+          legacyFormatControl: { originalSdkMaterial: true, futureIdentityNotBackfilled: true, republishedSources: republished, requests: 0 },
+          cold: { newContext: true, sameProcess: true, requests: 0, originalGoalStateExact: true, studyExact: true,
+            ledgerBytesExact: true, restoredParentVersion: guidanceVersion(study.opened.parentSnapshot) },
+        }, null, 2), { flag: 'wx' })
+      }
+    } finally { await cold?.dispose(false); await future?.dispose(false); await first.dispose() }
+  }, 60_000)
   it.each([false, true])('automatically consumes original native Goal sources in the existing research owner and cold restores the exact decision without new requests (exploration=%s)', async researchExploration => {
     const profile = await mountProfile('Write the native Goal research engineering control', {
       completeTaskThroughTool: true, contentVerdict: 'met', taskCount: 3, researchControl: true,
@@ -543,6 +709,7 @@ describe('native Long Goal profile execution', () => {
       const studies = profile.ctx.tianwenEvolution.listConversationGuidanceStudies()
       expect(studies).toHaveLength(1)
       expect(studies[0]!.opened.nativeGoalSources).toHaveLength(3)
+      expect(profile.ctx.tianwenEvolution.listGoalTaskResearchSources().every(source=>typeof source.input.inputIdentityDigest==='string')).toBe(true)
       expect(studies[0]!.arms).toHaveLength(10)
       expect(studies[0]!.decision?.verdict).toBe('accepted')
       expect(studies[0]!.activation).toBeUndefined()

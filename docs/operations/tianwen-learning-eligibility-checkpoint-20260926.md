@@ -1,5 +1,15 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 原Goal退化回滚工程连接完成，第三项自然效果仍待核
+
+2e5c4c2后，原Ledger/Loop回滚显式绑定native来源/摘要/规范化输入，核原启用后结果时间、scope/版本/model/QA/族/模式/同意；晚发布旧结果和输入别名不凑两项退化，程序失败复用原功能/内容输入一致要求。旧源不补字段，普通回滚/历史/关闭/支持撤回保持。见[准确证据及下一项](tianwen-native-goal-regression-20261003.md)。
+
+实际发行SDK工程控制沿原shared accepted裁决隔离启用，另Goal未来两Task提供候选版本后自动原rollback，新Context同进程0请求精确原Goal/study/parent方法/ledger。execution仍unknown，0真实提供者/自然收益/反馈，不将控制启用当自然效果，公开Runtime仍隔离true，不声称新Node进程自动恢复。实际files/chat身份及恢复通过，原chat/v2误拒首红后窄修，保留全部文件不变/无write/edit及普通旧协议边界。
+
+18文件589通过、1发行源码spy跳过，完整Evolution/Runtime及两声明通过；独立输入绑定P2首红修复核关闭，chat修复静态无新增有据P1/P2。正式1327364B/5af25fcd…只读未变，未重新正式mount/新计数；D约18.11GiB>=15、正常夹具清理/原5拒删目录保留，无新容器。完整目标active/incomplete、原第三项IN PROGRESS、main/Daily NO-GO及原资格/门槛/同意/隔离/停止/十工作日窗口不变。
+
+下一直接补已确认DEV Goal检查器接线：原options只有externalCodeCheck/studyResultCheck，没有goalTaskAcceptance，复用隔离程序检查合同/执行器接原准备和结果，再核首次真实项目任务与方法效果。不加阶段/标准/计时，不索题/催评/造失败/重评/追加结束练习，不把单项证据不足机械标整体blocked。
+
 ## 2026-10-03 原Goal研究消费者已交付，自然收益与治理仍分别核实
 
 ad9b530后原GuidanceLoop真实消费明确Goal来源与普通来源，保留原输入独立/同意/方法版本/完整模型/合同/族/模式/程序条件/成功反例/确切消息反馈否决；原试验用户command与Goal/Planner要求分开，文字/文件worker及程序准备保留来源。原案例/提案恢复、接受后恢复和只读packet核原引用/材料/proof；原native探索使用明确v3，普通v2不变，不把预测匹配当因果或收益。详见[准确范围和证据](tianwen-goal-task-research-consumer-20261003.md)。
