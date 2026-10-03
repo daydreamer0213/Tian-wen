@@ -24,8 +24,8 @@
 
 ## 本次步骤
 
-- [ ] 冻结 sources-report.contract.md、独立CLI入口、原要求/标准/参考图；原旧CLI基线缺新增有效诊断，但旧正常/错误输入保持原结果。
-- [ ] 保存独立期望、驱动/hash、首前源commit。持续DEV原public applyDevelopment/JSONL/observed tools/准备gate，保留现有原Task/同意，0模型预检。
-- [ ] 唯一真实首次执行，原程序检查/双审/原SDK归档，不修或重试候选。
-- [ ] 新Node0模型恢复Task/两proof/原图/原账本；回归原CLI兼容+新冻结条件、实际SDK只读状态样本。
-- [ ] 独立审查首代码；更新权威交接，下一第二增量。完整目标仍 active/incomplete。
+- [x] 冻结 learning-source-report.contract.md、独立CLI入口、原要求/标准/参考图；原旧CLI38/41，恰缺三个新增有效显示。
+- [x] 保存独立期望、驱动/hash、首前源commit d1d30e1。原持续DEV/同意/旧Task准确保留，0模型预检。
+- [x] 唯一真实首次执行：11请求，原程序41条件verified；第一内容评审引文分段错误，原inconclusive/invalid-judgment，未运行第二评审。首代码未修、未重试。
+- [x] 新Node0模型恢复原Task/0有效proof/完整5图/header/原账本；41+原4回归、实际SDK只读状态样本通过，原结果不回写。
+- [x] 独立首代码审查与权威交接完成。完整目标仍active/incomplete；第二、第三实际增量未执行。

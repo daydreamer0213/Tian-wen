@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 实际来源报告已交付，原评审引文错误不回写
+
+d1d30e1事前冻结后唯一真实Task程序41条件通过；首代码12133B原样，原评审inconclusive/invalid-judgment、0有效proof。11真实请求=识别2/根8/requirements1；原第一评审将代码引文绑定错误答案分段，原检查正确拒收，未进入grounding。不重试Task、修引文、重评或当问题/成功来源。另41+原4回归通过，0模型冷恢复原Task/完整5图/header/首代码/账本准确；先前原Task不变。见[准确结果及原因](tianwen-live-learning-source-report-20261004.md)。
+
+持续DEV原status只读显示来源2/合格2/问题0/成功候选1，history完成2/程序verified2/评审met1-unavailable1；新报告准确消费，没有当前Session任务/方法效果。反馈/研究0，缺真实适用问题与完整后续学习证据；用户不需要补题或评价。下一既定实际增量：原独立研究结果和启用未完成原因展示，继续真实首次任务，不新增验收/练习、不机械整体blocked。完整目标active/incomplete、main/Daily NO-GO、原门槛/十工作日窗口不变。正式账本原hash只读不变、D约18GiB≥15，24拒删路径不碰；本轮runner收尾见D包最终审计。
+
 ## 2026-10-04 持续 DEV 环境与多合同分派已交付
 
 2c32d57事前冻结后首次真实任务新增纯分派模块：9真实请求(识别1/根6/原双审2)、prepare/evaluate1/1、独立34/34，原Task completed/程序verified/评审met。首代码原样，主代理未修/重试；新Node0请求恢复Task/归档/账本，另原材料/完整3图/双审proof/header准确恢复。原public applyDevelopment持续根 `D:/DevData/tianwen-development-runtime/continuous-project-20261004`，不搬旧Profile/正式账本。见[本轮准确结果与接续](tianwen-persistent-ordinary-contracts-20261004.md)。

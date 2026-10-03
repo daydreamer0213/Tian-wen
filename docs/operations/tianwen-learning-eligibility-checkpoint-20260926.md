@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 来源报告完成，原无效评审不能算学习来源
+
+首次来源报告Task程序verified/独立41条件通过，原评审inconclusive/invalid-judgment、proof=null/有效reviewChecks0；原第一评审引文不在answer-36内，正确拒收。11实际请求=识别2/根8/requirements1，无grounding、重试、重评或补反馈。首代码原样、另41+4回归/0模型冷恢复完整5图/header/原Task/账本准确，见[准确分账](tianwen-live-learning-source-report-20261004.md)。
+
+原持续DEV只读状态来源2/合格2/问题0/成功候选1；本次既不是已确认问题也不是有效成功候选。研究/反馈0，程序通过不证明方法改进。下一原研究/启用事实展示与新的实际首次任务，自行固定合同/独立期望，不索题或机械blocked；完整目标active/incomplete、main/Daily NO-GO、原门槛/十工作日窗口不变。正式账本只读原hash，D约18GiB≥15、24拒删路径不碰。
+
 ## 2026-10-04 持续 DEV 原任务多合同接续
 
 首真实分派Task已完成：9真实请求/独立34条件/原程序verified/双审met，新Node0请求原Task、完整3文件图、proof与账本准确恢复；首代码未改。原applyDevelopment专属持续Profile已建立，原DEV options接数组合同，原学习资格未动。127选中回归及公开DEV自动study错误holdout拒绝采用控制通过；89 scripted不能算自然收益。详见 [持续DEV准确结果](tianwen-persistent-ordinary-contracts-20261004.md)。

@@ -47,6 +47,59 @@ const LIMITS = [
   '本报告只解释保存的状态，不重新判断任务、修改反馈、启动研究或启用方法。',
 ];
 
+// 可选原来源诊断：只投影 currentSession.naturalConversation.guidanceReadiness.diagnostics。
+// 这不是新的学习条件或资格裁决；不合格（缺失/畸形）时不增加诊断，也不影响旧基础报告。
+const DIAGNOSTICS_SCHEMA_VERSION = 'tianwen.source-readiness-diagnostics.v1';
+
+const DIAGNOSTICS_SCOPE = '当前工作区普通会话来源的原检查事实。';
+
+// 严格两个字符串，按原顺序。
+const DIAGNOSTICS_LIMITS = [
+  '成功候选尚未证明与问题来源兼容。',
+  '这里只是普通会话来源的检查事实，不代表原生Goal来源、研究裁决或方法效果。',
+];
+
+// 原扫描次序：这些排除是首个不满足条件，不代表全部问题。
+const SOURCE_EXCLUSION_KEYS = [
+  'consentRevision',
+  'behaviorVersion',
+  'qualityContract',
+  'feedbackTurn',
+  'family',
+  'evaluationMode',
+  'completion',
+  'modelConfiguration',
+  'fileMaterial',
+];
+
+const SOURCE_EXCLUSION_EXPLANATIONS = new Map([
+  ['consentRevision', '同意版本与当前记录不一致。'],
+  ['behaviorVersion', '行为协议版本与当前规则不一致。'],
+  ['qualityContract', '缺少当前适用的质量合同。'],
+  ['feedbackTurn', '本条是反馈回合，不是独立原任务。'],
+  ['family', '任务类别不符合原来源规则。'],
+  ['evaluationMode', '任务检查方式不符合原来源规则。'],
+  ['completion', '原任务尚未正常完成。'],
+  ['modelConfiguration', '原模型配置记录不可用。'],
+  ['fileMaterial', '原文件材料不可恢复或输出类型不一致。'],
+]);
+
+const DIAGNOSTICS_COUNT_KEYS = [
+  'observedTasks',
+  'eligibleTasks',
+  'problemSources',
+  'successfulCandidates',
+];
+
+// 诊断对象恰好这 8 个自身键；exclusions 恰好 9 个自身键。
+const DIAGNOSTICS_KEYS = [
+  'schemaVersion',
+  ...DIAGNOSTICS_COUNT_KEYS,
+  'hasCompatibleProblemPair',
+  'hasUnattemptedProblemPair',
+  'exclusions',
+];
+
 // 声明计数字段：输出时只保留这些键，不复制 scope / 原因 / 元数据。
 const REVIEW_KEYS = ['pending', 'unavailable', 'met', 'notMet', 'inconclusive'];
 const CODE_CHECK_KEYS = ['prepared', 'pending', 'verified', 'rejected', 'unverifiable', 'invalidated'];
@@ -114,6 +167,64 @@ function explainReadiness(state) {
   return READINESS_EXPLANATIONS.get(state) ?? UNKNOWN_READINESS_EXPLANATION;
 }
 
+// 恰好这些自身键：非 null、非数组、键数相等且每个键都存在（与 Runtime 原规则一致）。
+function hasExactOwnKeys(value, keys) {
+  return isPlainObject(value)
+    && Reflect.ownKeys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isSourceCount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * 纯投影：完整复刻 conversation-source-readiness.ts 的原检查规则。
+ * 任何一项不合格都返回 undefined（不展示诊断），不抛错、不修复、不推断。
+ */
+function projectDiagnostics(value) {
+  if (!hasExactOwnKeys(value, DIAGNOSTICS_KEYS)
+    || value.schemaVersion !== DIAGNOSTICS_SCHEMA_VERSION
+    || DIAGNOSTICS_COUNT_KEYS.some((key) => !isSourceCount(value[key]))
+    || typeof value.hasCompatibleProblemPair !== 'boolean'
+    || typeof value.hasUnattemptedProblemPair !== 'boolean'
+    || !hasExactOwnKeys(value.exclusions, SOURCE_EXCLUSION_KEYS)) return undefined;
+
+  const exclusions = value.exclusions;
+  if (SOURCE_EXCLUSION_KEYS.some((key) => !isSourceCount(exclusions[key]))) return undefined;
+
+  const observedTasks = value.observedTasks;
+  const eligibleTasks = value.eligibleTasks;
+  const problemSources = value.problemSources;
+  const successfulCandidates = value.successfulCandidates;
+  const excludedTotal = SOURCE_EXCLUSION_KEYS.reduce((sum, key) => sum + exclusions[key], 0);
+
+  if (eligibleTasks > observedTasks
+    || problemSources + successfulCandidates > eligibleTasks
+    || excludedTotal !== observedTasks - eligibleTasks
+    || (value.hasCompatibleProblemPair && problemSources < 2)
+    || (value.hasUnattemptedProblemPair && !value.hasCompatibleProblemPair)) return undefined;
+
+  return {
+    scope: DIAGNOSTICS_SCOPE,
+    observedTasks,
+    eligibleTasks,
+    problemSources,
+    successfulCandidates,
+    pairs: {
+      compatible: value.hasCompatibleProblemPair,
+      unattempted: value.hasUnattemptedProblemPair,
+    },
+    // 零计数也保留；不复制 schemaVersion/元数据或任意输入文本。
+    exclusions: SOURCE_EXCLUSION_KEYS.map((key) => ({
+      condition: key,
+      count: exclusions[key],
+      explanation: SOURCE_EXCLUSION_EXPLANATIONS.get(key),
+    })),
+    limits: [...DIAGNOSTICS_LIMITS],
+  };
+}
+
 function buildSummary(snapshot) {
   const root = requireObject(snapshot);
 
@@ -139,15 +250,23 @@ function buildSummary(snapshot) {
   const identifiedTasks = requireCount(historyNaturalConversation.identifiedTasks);
   const completed = requireCount(completion.completed);
 
+  const readiness = {
+    state,
+    scope: READINESS_SCOPE,
+    explanation: explainReadiness(state),
+  };
+
+  // analysis-disabled 时与原 SDK 一致不展示该诊断；其他合法 state（含未知）不因诊断改 state/explanation。
+  if (state !== 'analysis-disabled') {
+    const diagnostics = projectDiagnostics(guidanceReadiness.diagnostics);
+    if (diagnostics) readiness.diagnostics = diagnostics;
+  }
+
   return {
     schemaVersion: SCHEMA_VERSION,
     analysis: analysisEnabled ? ANALYSIS_ENABLED_TEXT : ANALYSIS_DISABLED_TEXT,
     activation: quarantined ? ACTIVATION_QUARANTINED_TEXT : ACTIVATION_CLEAR_TEXT,
-    readiness: {
-      state,
-      scope: READINESS_SCOPE,
-      explanation: explainReadiness(state),
-    },
+    readiness,
     history: {
       observedTurns,
       identifiedTasks,
