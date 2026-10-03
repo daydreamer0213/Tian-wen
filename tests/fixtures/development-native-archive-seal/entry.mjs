@@ -18,6 +18,8 @@ assert.deepEqual(verify(s,'another-session',entries),{...pass,sessionMatches:fal
 assert.deepEqual(verify(s,sid,entries.filter(e=>e.path!==names[0])),{...pass,filesMatch:false,complete:false,missing:[names[0]]})
 assert.deepEqual(verify(s,sid,both),{...pass,filesMatch:false,complete:false,added:['failure.json']})
 const changed=entries.map(e=>e.path===names[1]?{...e,content:'same name, other execution'}:e);assert.deepEqual(verify(s,sid,changed),{...pass,filesMatch:false,complete:false,changed:[names[1]]})
+const sameLength=entries.map(e=>e.path===names[2]?{...e,content:new Uint8Array([31,139,0,254])}:e);assert.deepEqual(verify(s,sid,sameLength),{...pass,filesMatch:false,complete:false,changed:[names[2]]})
+const wrongDigest=structuredClone(s);wrongDigest.files[2].digest='sha256:'+'0'.repeat(64);assert.deepEqual(verify(wrongDigest,sid,entries),{...pass,filesMatch:false,complete:false,changed:[names[2]]})
 const combination=[...changed.filter(e=>e.path!==names[0]),{path:'failure.json',content:'extra'}].reverse();assert.deepEqual(verify(s,sid,combination),{...pass,filesMatch:false,complete:false,missing:[names[0]],changed:[names[1]],added:['failure.json']})
 const spaced=' original-native-session ';assert.equal(seal(spaced,entries).sessionId,spaced);assert.equal(verify(seal(spaced,entries),sid,entries).sessionMatches,false)
 for(const badSession of [null,0,'',' \n'])for(const fn of [()=>seal(badSession,entries),()=>verify(s,badSession,entries)])assert.throws(fn,TypeError)
