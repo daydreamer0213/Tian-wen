@@ -25,4 +25,4 @@ Files: `packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts`、`le
 - [x] 检验原 readiness 回归、checked counter、文件材料、状态隐私与同意/取消：5组363项通过。
 - [x] 八包类型、完整发行/声明、独立静态审查无P1/P2；JsonValue接口类型首失败修为类型别名，最终零诊断。
 - [x] 实际发行当前正式档只读查询与真实状态工具相同；模型/程序请求0、ledger字节前后相同；生成物约38KB，无Docker/下载/整档副本。
-- [ ] 更新权威交接/资格检查点、提交并核对远端；目标保持 active/incomplete。
+- [x] 更新权威交接/资格检查点、实现5f11a74已推送；最终审计核对远端，目标保持 active/incomplete。
