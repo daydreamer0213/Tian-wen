@@ -1,4 +1,10 @@
 # Tianwen 当前项目权威交接
+## 2026-10-03 普通检查合同不符的失败收尾已修复
+
+a000b56普通checker回报错误失败摘要或无事前条件时，原Ledger晚拒绝导致没有完成回执。7aff228事前固定后，finish callback内五行复用原验证器预检，错误回报一次unverifiable、无qualified failure；真实存储/历史错误仍catch外拒绝。两首红、定向4项及五组242不同回归、八包类型/实际完整发行声明与独立审查通过；原completed/双审met、正确拒绝/普通诊断拒绝、字节精确cold/零prepare/evaluate重试保持。见[具体缺陷与边界](tianwen-ordinary-check-outcome-20261003.md)。
+
+最终实际发行/真实状态0模型/程序/新自然任务读正式档：19观察18完成、12初筛/1可信问题/5成功初筛/兼容pair false，反馈归因0/study0/隔离true；正式91f83d10…与固定checker根JS准确保持。D小证据、无Docker/下载/整环境副本，约18.58GiB≥15。人为检查器/模型响应仅是工程控制，不算自然来源。下一自主实际开发、原合同与首结果固定，来源/研究/采用/未来效果分别核验，不索题/造失败/重评旧样本或空转blocked。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/门槛/十工作日窗口保持，不重新计时。
+
 ## 2026-10-03 无效对照消耗问题组合的实际缺陷已修复
 
 b19b755 原普通初筛/新attempt 可接受有有效偏好反馈的成功对照，原study-open却拒绝；按问题pair去重会让无效counter提前耗掉研究机会。f2bf47e事前固定后，Runtime复用原latest/active/proof规则，Ledger仅新写入口提前执行原反馈/native-negative拒绝，不写attempt；干净counter随后仍可首次尝试。普通pending不加门槛，checked pending、positive覆盖/失活/无proof及历史replay/旧attempt原含义保持。五组373项、八包类型/完整发行声明与独立审查通过。见[缺陷、准确证据与推进责任](tianwen-counter-feedback-consistency-20261003.md)。

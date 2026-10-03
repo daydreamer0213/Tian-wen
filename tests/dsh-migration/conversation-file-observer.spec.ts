@@ -449,6 +449,68 @@ it('carries an original required-condition failure through native observation an
     expect(cold.adapter.requests).toHaveLength(0)
   } finally { if (cold !== undefined) { await cold.handle.dispose(); await cold.ctx.fiber.dispose() } else { await harness.handle.dispose(); await harness.ctx.fiber.dispose() } }
 })
+it.each(['wrong-condition', 'missing-condition'] as const)('preserves an unverifiable receipt for a %s checker failure and cold-recovers without retry', async scenario => {
+  const requiredCondition = 'Replace input.ts with after.'
+  let preparations = 0, evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    preparations++
+    return { checkerId: 'invalid-condition-mechanism-probe', checkerDigest: sha256('probe'), contractDigest: sha256(requiredCondition),
+      ...(scenario === 'wrong-condition' ? { requiredCondition } : {}), inputs: [{ path: 'input.ts', content: 'before' }],
+      async evaluate() { evaluations++; return { status: 'rejected', detail: 'Incorrect condition binding.',
+        failedRequiredConditionDigest: sha256(scenario === 'wrong-condition' ? 'another required condition' : requiredCondition) } },
+    }
+  } }
+  const harness = await mount([structured({ ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }),
+    toolCallResponse('invalid-condition-write', 'write', { file_path: 'input.ts', content: 'after' }), textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  let cold: Awaited<ReturnType<typeof mount>> | undefined
+  try {
+    harness.handle.agent.followup(direct(requiredCondition))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(preparations).toBe(1); expect(evaluations).toBe(1)
+    expect(task.completion?.status).toBe('completed'); expect(task.review?.verdict).toBe('met')
+    expect(task.externalCheckFinished).toMatchObject({ status: 'unverifiable', preparationDigest: sha256(task.externalCheckPrepared) })
+    expect(task.externalCheckFinished).not.toHaveProperty('failedRequiredConditionDigest')
+    expect(hasRejectedConversationCodeCheck(task)).toBe(false)
+    await new ConversationExternalCodeChecks(harness.ctx, check).finish(task.source.taskId)
+    expect(preparations).toBe(1); expect(evaluations).toBe(1)
+    await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+    const before = readFileSync(join(harness.root, 'evolution', 'ledger.jsonl'))
+    cold = await mount([], true, check, harness.root)
+    await cold.ctx.tianwenConversationObserver.whenIdle()
+    expect(cold.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(task)
+    expect(cold.adapter.requests).toHaveLength(0)
+    expect(preparations).toBe(1); expect(evaluations).toBe(1)
+    expect(readFileSync(join(harness.root, 'evolution', 'ledger.jsonl'))).toEqual(before)
+  } finally { await cold?.handle.dispose(); await cold?.ctx.fiber.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('keeps a real ledger write failure outside the checker outcome fallback', async () => {
+  let evaluations = 0
+  const check: ConversationExternalCodeCheck = { async prepare() { return {
+    checkerId: 'storage-failure-probe', checkerDigest: sha256('probe'), contractDigest: sha256('contract'), inputs: [{ path: 'input.ts', content: 'before' }],
+    async evaluate() { evaluations++; return { status: 'verified', detail: 'Original condition checked.' } },
+  } } }
+  const harness = await mount([structured(externalCode), toolCallResponse('storage-write', 'write', { file_path: 'input.ts', content: 'after' }),
+    textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  const original = harness.ctx.tianwenEvolution.recordConversationLearning.bind(harness.ctx.tianwenEvolution)
+  const write = vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationLearning').mockImplementation(record => {
+    if (record.kind === 'task-external-check-finished') throw new Error('controlled ledger write failure')
+    return original(record)
+  })
+  try {
+    harness.handle.agent.followup(direct('Implement the requested change.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.externalCheckFinished).toBeUndefined(); expect(evaluations).toBe(1)
+    const before = readFileSync(join(harness.root, 'evolution', 'ledger.jsonl'))
+    await expect(new ConversationExternalCodeChecks(harness.ctx, check).finish(task.source.taskId)).rejects.toThrow('controlled ledger write failure')
+    expect(evaluations).toBe(1); expect(readFileSync(join(harness.root, 'evolution', 'ledger.jsonl'))).toEqual(before)
+  } finally { write.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it('prepares an external check before the candidate and records its result separately from model review', async () => {
   let preparedBeforeCandidate = false
   let preparations = 0, evaluations = 0

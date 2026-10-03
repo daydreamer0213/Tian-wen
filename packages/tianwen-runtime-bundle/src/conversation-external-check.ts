@@ -149,6 +149,11 @@ export class ConversationExternalCodeChecks {
           // The check consumes frozen values; a concurrent rewrite of original
           // native evidence must still prevent a conclusive receipt.
           await this.candidate(task, controller.signal)
+          // Validate the host outcome before leaving its failure boundary.
+          // Durable writes below must still propagate storage/history errors.
+          validateConversationExternalCheck({ kind: 'task-external-check-finished', taskId,
+            preparationDigest: sha256(task.externalCheckPrepared), resultDigest: task.completion.resultDigest,
+            fileResultDigest: task.completion.files === undefined ? null : sha256(task.completion.files), ...outcome }, task)
         } catch (error) { outcome = { status: 'unverifiable', detail: this.detail(error) } }
       }
       if (controller.signal.aborted || !this.authorized(task.source.consentRevision)) return
