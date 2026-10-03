@@ -7,6 +7,7 @@ import {mountFeedbackHarness,toolCallResponse,textResponse,ToolRuntime} from '..
 import {auditedEvidenceResponse} from '../../dsh-migration/conversation-audited-response.ts'
 import {createDevelopmentIsolatedNodeProjectCheck} from '../../../scripts/development-isolated-node-project-check.mjs'
 import {runDevelopmentNativeTask,developmentNativeReadDenialProducer} from '../../../scripts/development-native-task.mjs'
+import {verifyDevelopmentNativeArchiveSeal} from '../../../scripts/development-native-archive-seal.mjs'
 import {sha256} from '../../../packages/tianwen-evolution/src/index.ts'
 import {recoverConversationTaskMaterial} from '../../../packages/tianwen-runtime-bundle/src/conversation-task-material.ts'
 import {recoverConversationJudgmentRequest} from '../../../packages/tianwen-runtime-bundle/src/conversation-judgment.ts'
@@ -30,6 +31,13 @@ const {apply}=await import(pathToFileURL(resolve(repo,'packages/tianwen-runtime-
 const producer=createDevelopmentIsolatedNodeProjectCheck({cwd:root,requestText,entryPath:'entry.mjs',outputPaths:['first.mjs','second.mjs'],referencePaths:['entry.mjs'],cases:[{id:'host-control-total',input:'{}',expectedJson:'{"total":3}',exitCode:0}],requiredCondition:'The actual two-module program emits total=3.'})
 let preparations=0,evaluations=0
 let deniedDispatches=0
+const verifyArchive=()=>{
+ const archiveRoot=join(root,'task-run'),names=['attempt-started.json','task.json','root-native.json.gz','result.json','failure.json','cleanup.json']
+ const entries=names.filter(name=>existsSync(join(archiveRoot,name))).map(path=>({path,content:readFileSync(join(archiveRoot,path))}))
+ const seal=JSON.parse(readFileSync(join(archiveRoot,'archive-seal.json')))
+ assert.deepEqual(verifyDevelopmentNativeArchiveSeal(seal,'owned-dev-host-scripted-control',entries),{sessionMatches:true,filesMatch:true,complete:true,missing:[],changed:[],added:[]})
+ return true
+}
 try{
  if(readDenialControl){for(const fiber of [...h.ctx.registry.get(ToolRuntime).fibers])await fiber.dispose();const {NativeObservedToolRuntime}=await import(pathToFileURL(resolve(repo,'packages/tianwen-runtime-bundle',manifest.exports['./native-tools-observer'].default)).href);await h.ctx.plugin(NativeObservedToolRuntime);h.ctx.on('tools/execute',(exec,next)=>{if(exec.name==='read'&&exec.arguments.file_path==='outside-directory')deniedDispatches++;return next()})}
  await h.ctx.plugin((await mod('@deepseek-ai/dsh-fs-local')).default,{cwd:root});await h.ctx.plugin(await mod('@deepseek-ai/dsh-tool-fs'))
@@ -44,7 +52,7 @@ try{
   let recoveredChecks=0
   for(const check of task.review.reviewChecks){const recovered=await recoverConversationJudgmentRequest(h.ctx,check);assert.equal(sha256(recovered.material.original.source),sha256(material));await verifyConversationOriginalReviewCheck(h.ctx,check,recovered.material.original,task.models[0].modelConfigDigest);recoveredChecks++}
   assert.equal(recoveredChecks,2);assert.equal(h.adapter.requests.length,0);assert.equal(preparations,0);assert.equal(evaluations,0);assert.deepEqual(readFileSync(join(root,'evolution/ledger.jsonl')),before)
-  writeFileSync(join(root,'cold-control-result.json'),JSON.stringify({originalTaskExact:true,originalProgramExact:true,...(readDenialControl?{originalMaterialExact:true,readDenialControl:true}:{}),recoveredChecks,scriptedRequests:0,naturalRequests:0,preparations,evaluations,ledgerUnchanged:true},null,2),{flag:'wx'})
+  writeFileSync(join(root,'cold-control-result.json'),JSON.stringify({archiveVerified:verifyArchive(),originalTaskExact:true,originalProgramExact:true,...(readDenialControl?{originalMaterialExact:true,readDenialControl:true}:{}),recoveredChecks,scriptedRequests:0,naturalRequests:0,preparations,evaluations,ledgerUnchanged:true},null,2),{flag:'wx'})
   console.log('original published host task and both reviews cold recovered; zero provider/check rerun')
  }else{
  h.ctx.tianwenEvolution.recordLearningAnalysisConsent({revision:1,enabled:true,policyVersion:'tianwen-auto-analysis.v3'})
@@ -54,7 +62,7 @@ try{
  assert.equal(task.review.verdict,'met');assert.equal(task.review.reviewChecks.length,2);assert.equal(preparations,1);assert.equal(evaluations,1)
  assert.equal(h.ctx.tianwenEvolution.listConversationGuidanceStudies().length,0);assert.equal(h.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined(),true)
  if(readDenialControl){assert.equal(deniedDispatches,0);assert.equal(task.fileAncillary.length,1);assert.equal(task.fileAncillary[0].payload.tool,'read-denied');assert(!task.fileInputs.some(input=>input.path==='outside-directory'));const material=await recoverConversationTaskMaterial(h.ctx,task);assert.equal(material.fileExecution.schemaVersion,'tianwen.file-execution-evidence.v3');assert.equal(material.fileExecution.actions[0].status,'denied');assert.equal(material.fileExecution.actions[0].path,null);writeFileSync(join(root,'recovered-material.json'),JSON.stringify(material,null,2),{flag:'wx'})}
- writeFileSync(join(root,'control-result.json'),JSON.stringify({result,preparations,evaluations,scriptedRequests:h.adapter.requests.length,naturalRequests:0,...(readDenialControl?{readDenialControl:true,deniedDispatches,capturedDenials:task.fileAncillary.length}:{}),originalOutputPaths:task.completion.files.outputPaths,publishedRuntimeUsed:true,studies:0,quarantine:true},null,2),{flag:'wx'})
+ writeFileSync(join(root,'control-result.json'),JSON.stringify({archiveVerified:verifyArchive(),result,preparations,evaluations,scriptedRequests:h.adapter.requests.length,naturalRequests:0,...(readDenialControl?{readDenialControl:true,deniedDispatches,capturedDenials:task.fileAncillary.length}:{}),originalOutputPaths:task.completion.files.outputPaths,publishedRuntimeUsed:true,studies:0,quarantine:true},null,2),{flag:'wx'})
  console.log('published Runtime and original Node-project checker actually consumed reusable host; reversed permissions and edit passed')
  }
 }finally{await h.ctx.fiber.dispose()}

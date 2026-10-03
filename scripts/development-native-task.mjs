@@ -8,6 +8,9 @@ import { createHash } from 'node:crypto'
 import { SessionId, createUserMessage } from '@tianwen/dsh-compat'
 import { observeNativeTaskRequests } from './native-task-request-observer.ts'
 import { withConversationObservationCancellation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.ts'
+import { sealDevelopmentNativeArchive } from './development-native-archive-seal.mjs'
+
+const archiveNames = ['attempt-started.json', 'task.json', 'root-native.json.gz', 'result.json', 'failure.json', 'cleanup.json']
 
 /** Resolve only these two DEV modules through Runtime's existing public peer. */
 export async function loadDevelopmentNativeModules() {
@@ -49,7 +52,7 @@ export async function runDevelopmentNativeTask(ctx, config) {
   assert.equal(ctx.agents.get(id), undefined, 'DEV host requires a fresh native session')
   assert.equal(ctx.sessions.get(id), undefined, 'DEV host requires a fresh native session')
   assert(!(await ctx.sessionPersistence.list(signal)).some(header => String(header.id) === sessionId), 'DEV host requires a fresh native session')
-  for (const name of ['attempt-started.json', 'task.json', 'root-native.json.gz', 'result.json', 'failure.json', 'cleanup.json']) {
+  for (const name of [...archiveNames, 'archive-seal.json', 'archive-seal-failure.json']) {
     assert(!existsSync(resolve(resultRoot, name)), 'existing DEV archive cannot belong to a new attempt')
   }
   mkdirSync(resultRoot, { recursive: true })
@@ -103,6 +106,14 @@ export async function runDevelopmentNativeTask(ctx, config) {
     try { await handle?.dispose() } catch (error) { cleanupError = error.message; failure ??= error }
     observation.dispose()
     save('cleanup', { cancelled: signal?.aborted === true, ...(cleanupError ? { cleanupError } : {}), requests: observation.counts(), contextRetained: true })
+  }
+  try {
+    const entries = archiveNames.filter(name => existsSync(resolve(resultRoot, name))).map(path => ({ path, content: readFileSync(resolve(resultRoot, path)) }))
+    save('archive-seal', sealDevelopmentNativeArchive(sessionId, entries))
+  } catch (error) {
+    try { save('archive-seal-failure', { name: error.name, message: error.message }) }
+    catch (diagnosticError) { failure ??= new AggregateError([error, diagnosticError], 'DEV archive seal and its diagnostic could not be saved') }
+    failure ??= error
   }
   if (failure) throw failure
   return result
