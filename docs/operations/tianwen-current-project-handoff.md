@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 DEV原裁决自动启用入口已交付，进入真实首次任务
+
+f120b80后发行./runtime显式applyDevelopment复用原安装链，将相同策略交Core/Ledger和GuidanceLoop；仅固定D开发根直接子目录/派生路径/原baseURL/真实目录，核公开JSONL配置和locator实际路径，拒已装Evolution的Context。普通apply仍固定隔离true、未声明false覆盖也不能解除；原Ledger裁决/同意/支持/父版本/QA/结果规则不改，无新启用服务/审批文件。见[准确交付与下一真实待办](tianwen-development-activation-20261004.md)。
+
+发行原SDK控制实际研究accepted后由原Loop自动activation（无手写启用），另Goal未来两Task提供原候选版本后自动退化回滚，新Context0请求精确Goal/study/parent/ledger。5不同文件170通过/4跳过（原源码spy及上一轮容器三控制未重复），完整Runtime/两声明/公共边界通过；实际JSONL根错误两反例先红后修，独立复核无新有据P1/P2。真实提供者/自然学习/反馈0，execution unknown，不当自然效果或正式DEV/Daily放行。
+
+原第三项及完整目标active/incomplete、main/Daily NO-GO及原门槛/同意/停止/十工作日窗口保持。下一真实任务已从当前代码核定：学习状态currentSession研究范围只取ConversationTask，原生Goal会话遗漏原研究进度。事前固定原Goal范围/当前历史边界/普通兼容及独立检查后让天问首次修复；已存在Goal功能计数不重复实现。控制端不代写候选、不索题/催评/造失败/重评/追加结束练习或机械整体blocked。
+
+正式1327364B/5af25fcd…只读准确未变、未正式mount；小D包、DEV测试根清理、五历史拒删目录不绕过；Docker未启动/无容器新增、D约18.09GiB>=15、未达20，无安装/下载/全量副本。本条覆盖下方DEV产品启用入口缺失的旧待办；默认及正式环境隔离不改。
+
 ## 2026-10-04 原Goal项目检查已交付，下一接DEV受治理启用
 
 4bb357c后，原共享冻结合同公开createGoalTaskIsolatedNodeProjectCheck，DEV原options显式可选第三goalContract。原命令/委托Task/来源/尝试/模型/权限/完整初始图绑定、原cwd拼写、取消清理保持；无假ConversationTask/新执行器/默认能力。详见[准确交付与剩余项](tianwen-native-goal-project-check-20261003.md)。

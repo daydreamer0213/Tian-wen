@@ -51,6 +51,8 @@ import { TianwenNativeToolObservationService } from './native-tool-observation.j
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
 import * as controlledSessionArchive from './controlled-session-archive.js'
+import { developmentRuntimeConfig, type TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
+export type { TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
 
@@ -491,8 +493,16 @@ export async function apply(
   ctx: Context,
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
+  await applyConfigured(ctx, config, true)
+}
+/** Explicit trusted DEV host opt-in; ordinary apply and installed Profiles stay quarantined. */
+export async function applyDevelopment(ctx: Context, config: TianwenDevelopmentRuntimeConfig): Promise<void> {
+  if (ctx.get('tianwenEvolution') !== undefined) throw new Error('Development Runtime requires a fresh Context without an existing Evolution service')
+  await applyConfigured(ctx, developmentRuntimeConfig(ctx.baseUrl, config, ctx.get('sessionPersistence')), false)
+}
+async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig, guidanceActivationQuarantine: boolean): Promise<void> {
   const evolutionRoot = config.evolutionRoot ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state', 'evolution'))
-  await applyCore(ctx, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }), guidanceActivationQuarantine: true })
+  await applyCore(ctx, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }), guidanceActivationQuarantine })
   ctx.plugin(controlledSessionArchive)
   ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService, config.learningSkillSources === undefined
@@ -515,7 +525,7 @@ export async function apply(
     ...(goalStateRoot === undefined ? {} : { goalStateRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
     ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
-    guidanceActivationQuarantine: true,
+    guidanceActivationQuarantine,
   })
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)

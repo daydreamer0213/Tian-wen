@@ -306,6 +306,8 @@ async function mountProfile(
     readonly failTaskFinalResponse?: boolean
     readonly researchControl?: boolean
     readonly researchExploration?: boolean
+    readonly development?: boolean
+    readonly quarantineOverride?: boolean
   } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -377,8 +379,10 @@ async function mountProfile(
   const runtimeApi = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
     ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)) as typeof runtimePublic
     : runtimePublic
-  const runtimeApply = runtimeApi.apply
-  await runtimeApply(ctx, { stateRoot, sessionsRoot, evolutionRoot, goalTaskAcceptance: options.goalTaskAcceptance })
+  const runtimeConfig = { stateRoot, sessionsRoot, evolutionRoot, goalTaskAcceptance: options.goalTaskAcceptance,
+    ...(options.quarantineOverride === undefined ? {} : { guidanceActivationQuarantine: options.quarantineOverride }) }
+  if (options.development) await runtimeApi.applyDevelopment(ctx, { ...runtimeConfig, developmentRoot: root })
+  else await runtimeApi.apply(ctx, runtimeConfig)
 
   const offAgent = ctx.on('agent/created', ({ agent }) => {
     headers.set(String(agent.session.id), {
@@ -531,6 +535,52 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it('keeps ordinary Runtime activation quarantined even with an undeclared false override',async()=>{
+    const profile=await mountProfile('Ordinary Runtime policy control',{quarantineOverride:false})
+    try{expect(profile.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true);expect(profile.adapter.requests).toHaveLength(0)}finally{await profile.dispose()}
+  })
+  it('automatically activates the original accepted study in the explicit DEV Runtime and rolls back future native failures without a manual activation write', async()=>{
+    const base=resolve('D:/DevData/tianwen-development-runtime');mkdirSync(base,{recursive:true})
+    const root=mkdtempSync(join(base,'native-activation-'))
+    const checker={async methodScope(){return{family:'writing' as const,evaluationMode:'text' as const}},
+      async prepare(){return{checkerId:'dev-native-control',checkerDigest:sha256('checker'),contractDigest:sha256('contract'),inputsDigest:sha256('inputs'),
+        requiredCondition:'Original controlled Task completion.',contentReview:{},
+        async evaluate(){return{status:'verified' as const,detail:'Engineering control, not a natural result.'}}}}}
+    let first:Awaited<ReturnType<typeof mountProfile>>|undefined,future:typeof first,cold:typeof first
+    try{
+      first=await mountProfile('Write the original DEV automatic activation control',{root,development:true,completeTaskThroughTool:true,contentVerdict:'met',taskCount:3,researchControl:true,goalTaskAcceptance:checker})
+      expect(first.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(false)
+      first.ctx.tianwenEvolution.recordLearningAnalysisConsent({enabled:true,revision:1,policyVersion:'tianwen-auto-analysis.v3'})
+      await first.startGoal();first.releaseTask()
+      await vi.waitFor(()=>expect(first!.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeDefined(),{timeout:15_000})
+      await first.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const study=first.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(study.decision?.verdict).toBe('accepted');expect(study.activation!.decisionDigest).toBe(sha256(study.decision!))
+      const version=guidanceVersion(study.candidate!.candidateSnapshot)
+      expect(guidanceVersion(first.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey))).toBe(version)
+      await vi.waitFor(()=>expect((listLongGoals(first!.stateRoot)[0] as LongGoalRecordV3).planner.phase).toBe('complete'))
+      await first.dispose()
+      future=await mountProfile('Write the future DEV automatic activation control',{root,development:true,resumeMain:true,completeTaskThroughTool:true,contentVerdict:'met',taskCount:2,researchControl:true,goalTaskAcceptance:checker})
+      await future.startGoal();future.releaseTask()
+      await vi.waitFor(()=>expect(future!.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('regression'),{timeout:15_000})
+      await future.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const sources=future.ctx.tianwenEvolution.listGoalTaskResearchSources().slice(3)
+      expect(sources).toHaveLength(2);expect(sources.every(source=>source.input.behaviorVersion===version)).toBe(true)
+      for(const source of sources){const material=await future.runtimeApi.readGoalTaskOutcomeMaterial(future.ctx,{stateRoot:future.stateRoot,outcome:source.outcome.input});expect(material.methodUsage).toMatchObject({provision:'provided',version,execution:'unknown'})}
+      await vi.waitFor(()=>{for(const source of sources)expect(readTianwenTaskAttemptProjection(readLongGoal(future!.stateRoot,source.outcome.input.goalId) as LongGoalRecordV3,source.outcome.input.taskId).attempts.at(-1)?.status).toBe('settled')})
+      const studies=future.ctx.tianwenEvolution.listConversationGuidanceStudies(),goals=listLongGoals(future.stateRoot),ledger=readFileSync(join(future.evolutionRoot,'ledger.jsonl'))
+      await future.dispose()
+      cold=await mountProfile('Write the future DEV automatic activation control',{root,development:true,resumeMain:true,contentVerdict:'met',researchControl:true,goalTaskAcceptance:checker})
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual(studies)
+      expect(cold.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(study.opened.parentSnapshot)
+      expect(cold.adapter.requests).toHaveLength(0);expect(listLongGoals(cold.stateRoot)).toEqual(goals);expect(readFileSync(join(cold.evolutionRoot,'ledger.jsonl'))).toEqual(ledger)
+      if(process.env.TIANWEN_DEV_ACTIVATION_RECEIPTS_ROOT!==undefined){const packet=resolve(process.env.TIANWEN_DEV_ACTIVATION_RECEIPTS_ROOT);if(!packet.startsWith(resolve('D:/DevData')+'\\'))throw new Error('DEV receipt outside D');mkdirSync(packet,{recursive:true});writeFileSync(join(packet,'sdk-development-activation.json'),JSON.stringify({controlled:true,naturalEvidence:false,actualProviderRequests:0,publishedRuntime:process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED==='1',manualActivationWrites:0,scriptedRequests:{initial:first.adapter.requests.length,future:future.adapter.requests.length,cold:cold.adapter.requests.length},studies,subsequentSources:sources,exactColdGoalAndLedger:true,methodExecution:'unknown',mainDailyUntouched:true},null,2))}
+    }finally{
+      for(const profile of [cold,future,first])if(profile!==undefined)await profile.dispose()
+      const target=resolve(root);if(!target.startsWith(base+'\\'))throw new Error('DEV owned profile cleanup escaped');rmSync(target,{recursive:true,force:true})
+    }
+  },45_000)
   it.skipIf(process.env.TIANWEN_NATIVE_GOAL_PROJECT_CHECK_ROOT === undefined).each(['verified', 'rejected', 'readonly'] as const)(
     'consumes the published original Goal project checker through actual isolated execution: %s', async variant => {
       // Scripted native SDK plumbing with the real cached isolated executor.

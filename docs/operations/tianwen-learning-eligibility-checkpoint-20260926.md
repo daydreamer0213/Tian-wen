@@ -1,5 +1,15 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 DEV受治理运行入口交付，真实效果仍待核
+
+f120b80后显式DEV入口复用原Core/Loop同策略及原accepted/shared receipt/同意/支持/QA/结果规则，固定D独立根/原路径/baseURL/真实目录及公开JSONL实际locator；普通apply仍quarantine=true，未声明false覆盖不能解除。正式连续DEV/Daily不属于该允许根，未改变原记录。见[准确交付及下一真实任务](tianwen-development-activation-20261004.md)。
+
+发行原SDK明确脚本控制原Loop自动accepted→activation（手写启用0），未来两Task提供原版本后原退化回滚，新Context0请求精确恢复。5文件170通过/4跳过，完整Runtime/两声明/公共边界通过；实际JSONL装配错误两项先红后修，独立静态复核关闭。真实提供者/自然收益/反馈0，案例语义独立性未证明、method execution unknown；不据此放行正式DEV/Daily或完整目标。
+
+下一从已核真实缺口选首次任务：当前学习状态只按普通Task范围筛研究，原生Goal会话漏研究进度；原功能计数已存在，不重做。事前冻结原范围与独立检查后天问首次执行，控制端不代写/制造失败/索题/催评/重评/追加结束练习。第三项及完整目标active/incomplete，main/Daily NO-GO与原门槛/同意/停止/十工作日窗口不变。
+
+正式1327364B/5af25fcd…只读未变、未正式mount；DEV夹具已清理，五历史拒删目录保留；Docker未启动、新容器0，小D包、D约18.09GiB>=15、未达20。本条覆盖下方DEV启用产品入口尚未接通旧待办，不解除普通/正式环境隔离。
+
 ## 2026-10-04 原生Goal程序检查连接交付，完整目标继续
 
 4bb357c后原Node项目Goal公开适配及DEV可选第三合同交付，复用冻结图/原条件/隔离执行器及取消清理，无伪造普通Task。实际发行SDK三新控制正确/错误/参考改动分别成功/原条件失败/无法核验，成功发布原code/files来源；各一次准备/求值，新Context0请求精确原Goal/结果/source/ledger。见[准确证据及余项](tianwen-native-goal-project-check-20261003.md)。
