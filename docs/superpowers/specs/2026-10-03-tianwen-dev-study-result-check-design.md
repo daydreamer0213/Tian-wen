@@ -1,0 +1,11 @@
+# DEV 原功能合同 resultCheck 注入设计
+
+基线本次quote交付。实际最新native runner apply仅ordinary externalCodeCheck，已有纯合同装配/公开闭合cohort尚未作为Runtime的studyResultCheck注入；原loop在设计前先写attempt，不能待兼容pair到来才暴露未接线、也不能为此改旧停止/去重。Runtime/C/D机制及公开cohort已实现，缺DEV实际消费配置。
+
+增加原DEV fixed-host模块的createDevelopmentFunctionalStudyResultCheck(config)。config为事前冻结单cwd/quality/至少三original原功能合同及独立adjacent/holdout合同，启动时深克隆；没有合同存储/新注册平台/调度器/资格标签。prepareIndependentCases先按原buildDevelopmentFunctionalStudyCases匹配实际已选sources和counter，创建原公开闭合cohort并验证独立材料；成功后仅持有这次不可变cohort，prepare将原case/model/material委托它。未知/重复/漂移/取消拒绝、失败清掉旧cohort，不借上轮合同；原prepared evaluator的完整绑定不改。
+
+此宿主限冻结一个项目cwd，Runtime原scope lane按cwd串行（conversation-guidance-loop.ts schedule），不是多项目注册服务。需检查同scope取消/新模型/替换cohort时旧prepared闭包不能被改写，并通过原host固定isolated，不开放覆盖。先控制未准备/来源反序/模型或原graph漂移/重建及cold配置不变、五角色SDK真实prepare/evaluate；控制不算自然学习。
+
+随后在未来实际DEV入口mount Runtime前注入此resultCheck；从已冻结原manifest提取完整合同，不从答案或检查结果生成cases。独立邻近/留出用尚未执行的真实有用待办及事前独立oracle，先固定后交模型；未齐合同不能运行自然研究，不消费旧pair为绿。不修改正式历史/资格/停止/原同意/隔离/main Daily NO-GO/十工作日窗口。
+
+此实现使既有自动研究可真正收到检查器；仍需自然合格来源、独立裁决、受治理采用、未来实际效果证据，不能把接线/五角色控制当全目标完成。不索用户任务或空转blocked。

@@ -17,8 +17,8 @@ const spawn = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-subagent-
 const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const config = { provider: 'tianwen-probe', model: 'scripted' }
-function input() {
-  const content = Array.from({ length: 62 }, (_, index) => `${String(index).padStart(3, '0')}${'x'.repeat(381)}`).join(''), answer = 'Saved requested output.\n\nReady.'
+function input(override?: { content: string; answer: string }) {
+  const content = override?.content ?? Array.from({ length: 62 }, (_, index) => `${String(index).padStart(3, '0')}${'x'.repeat(381)}`).join(''), answer = override?.answer ?? 'Saved requested output.\n\nReady.'
   const files = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: base, outputKind: 'files',
     entries: [{ path: 'input.txt', content }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
   const task = { context: [], request: [{ role: 'user', content: [{ type: 'text', text: 'Copy input.txt exactly to output.txt.' }] }], files }
@@ -69,6 +69,16 @@ it('uses a bounded complete v2 schema for 65 file answer units, preserving origi
       expect(schema.properties.audit.properties.units.properties['answer-2'].type).toBe('null')
       expect(schema.properties.audit.properties.units.properties['answer-65'].required).toEqual(['firstClaim', 'additionalClaims'])
       expect(schema.properties.evidenceQuotes.items.enum).toBeUndefined()
+      for (const item of evidence.items.filter((item: any) => item.role === 'answer' && item.text.trim() !== '')) {
+        const unitSchema = schema.properties.audit.properties.units.properties[item.id]
+        for (const claimSchema of [unitSchema.properties.firstClaim, unitSchema.properties.additionalClaims.items]) {
+          expect(claimSchema.properties.quote.enum).toBeUndefined()
+          expect(claimSchema.properties.quote.examples).toHaveLength(1)
+          const quote = claimSchema.properties.quote.examples[0]
+          expect(quote.trim()).not.toBe('')
+          expect(item.text.includes(quote)).toBe(true)
+        }
+      }
       expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThan(96_000)
       assertSupportedJsonSchema(schema)
       const auditSchema = schema.properties.audit
@@ -83,6 +93,47 @@ it('uses a bounded complete v2 schema for 65 file answer units, preserving origi
         const value = structuredClone(audits[index]); change(value)
         expect(validateJsonSchemaValue(auditSchema, value)).not.toEqual([])
       }
+    }
+  } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it.each(['unicode', 'budget-fallback'] as const)('keeps %s compact quoting exact without restricting valid substrings', async variant => {
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'compact-quotes-')); roots.push(root)
+  const original = input(variant === 'unicode'
+    ? { content: ('😀'.repeat(16) + '\r\n' + 'x'.repeat(366)).repeat(62), answer: 'Saved requested output.\n\nReady.' }
+    : { content: 'u'.repeat(32_000), answer: 'Saved requested output.\n' + 'line\n'.repeat(40) }).original
+  const evidence = projectClaimEvidence(original, 'file-chunks-v1'), schemas: any[] = []
+  const respond = auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Controlled quote annotations only.', evidenceQuotes: ['Saved requested output.'] })
+  const h = await mountPersistentHarness(root, Array.from({ length: 2 }, () => (request: Parameters<typeof respond>[0]) => {
+    schemas.push(request.tools!.find(tool => tool.name === 'structured_output')!.parameters)
+    return respond(request)
+  }))
+  await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await h.ctx.agents.create({ sessionId: SessionId('compact-quote-control'), meta: { cwd: root }, agentOptions: config })
+  try {
+    const reviewed = await runConversationClaimReview(h.ctx, handle.agent, { label: 'Compact quote control', material: original,
+      evidence: ['Saved requested output.'], signal: new AbortController().signal, callConfig: config })
+    expect(reviewed.verdict).toBe('met'); expect(h.adapter.requests).toHaveLength(2)
+    for (const schema of schemas) {
+      assertSupportedJsonSchema(schema)
+      const units = schema.properties.audit.properties.units
+      expect(units.required).toEqual(evidence.items.filter(item => item.role === 'answer').map(item => item.id))
+      for (const item of evidence.items.filter(item => item.role === 'answer')) {
+        if (item.text.trim() === '') { expect(units.properties[item.id].type).toBe('null'); continue }
+        for (const claim of [units.properties[item.id].properties.firstClaim, units.properties[item.id].properties.additionalClaims.items]) {
+          expect(claim.properties.quote.enum).toBeUndefined()
+          if (variant === 'budget-fallback') expect(claim.properties.quote.examples).toBeUndefined()
+          else {
+            expect(claim.properties.quote.examples).toHaveLength(1)
+            const quote = claim.properties.quote.examples[0]
+            expect(quote.trim()).not.toBe(''); expect(item.text.includes(quote)).toBe(true)
+            expect([...quote].every(character => !/^[\uD800-\uDFFF]$/u.test(character))).toBe(true)
+          }
+        }
+      }
+      if (variant === 'unicode') expect(Buffer.byteLength(JSON.stringify(schema))).toBeLessThanOrEqual(98_304)
+      else expect(Buffer.byteLength(JSON.stringify(schema))).toBeGreaterThan(98_304)
+      expect(validateJsonSchemaValue(schema.properties.audit, reviewed.reviewChecks[0].audit)).toEqual([])
     }
   } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
 })

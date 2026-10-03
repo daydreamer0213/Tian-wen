@@ -289,10 +289,15 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
 }
 
 /** Keep required v2 coverage without repeating quotes and field instructions. */
-function compactFileAuditSchema(evidence: ClaimEvidence): JsonSchemaNode {
-  const claim = object({ quote: string, kind: choices(kinds), status: choices(statuses), sourceIds: array(string), explanation: string })
-  const units = Object.fromEntries(evidence.items.filter(item => item.role === 'answer').map(item => [item.id,
-    item.text.trim() === '' ? { type: 'null' as const } : object({ firstClaim: claim, additionalClaims: array(claim) })]))
+function compactFileAuditSchema(evidence: ClaimEvidence, quoteExamples = false): JsonSchemaNode {
+  const units = Object.fromEntries(evidence.items.filter(item => item.role === 'answer').map(item => {
+    if (item.text.trim() === '') return [item.id, { type: 'null' as const }]
+    const example = quoteExamples ? answerQuoteChoices(item.text).find(value => [...value].length <= 16)
+      ?? [...item.text.slice(item.text.search(/\S/u))].slice(0, 16).join('') : undefined
+    const claim = object({ quote: example === undefined ? string : { ...string, examples: [example] },
+      kind: choices(kinds), status: choices(statuses), sourceIds: array(string), explanation: string })
+    return [item.id, object({ firstClaim: claim, additionalClaims: array(claim) })]
+  }))
   return {
     ...object({ schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]), units: object(units) }),
     description: 'Assess every listed answer ID exactly once. Whitespace-only units are null; every nonblank unit needs firstClaim and any additionalClaims. Copy each quote as an exact non-empty substring of its own answer unit, preserving Markdown, whitespace, punctuation and scope. List only supplied non-answer source IDs. Use supported only for source-facts with authoritative supplied evidence; use permitted for task-compatible non-source-facts. Explain scope, time, certainty, commitment and source authority for each claim. The host still verifies every unit, quote, source ID, digest and verdict.',
@@ -420,6 +425,11 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     schema = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence),
       evidenceQuotes: { ...schema.properties?.evidenceQuotes, type: 'array', items: string },
     } }
+    const hinted = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence, true) } }
+    const bareBytes = Buffer.byteLength(JSON.stringify(schema), 'utf8'), hintedBytes = Buffer.byteLength(JSON.stringify(hinted), 'utf8')
+    // Examples teach literal copying without changing allowed quotes or the
+    // frozen host predicates. Keep the original compact fallback on overflow.
+    if (hintedBytes <= 98_304 && hintedBytes - bareBytes <= 16_384) schema = hinted
   }
   const raw: AuditedCheck[] = []
   for (const focus of ['requirements', 'grounding'] as const) {

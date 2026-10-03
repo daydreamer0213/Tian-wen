@@ -1,4 +1,12 @@
 # Tianwen 当前项目权威交接
+
+## 2026-10-03 未来紧凑评审引用示例已交付，下一接DEV研究宿主
+
+原81fc103 native0请求测量42单位schema45439B无示例，grounding answer-29引文不属本单位；原inconclusive保持。新compact每非空单位准确逐字examples（非enum），仅完整≤98304B/较bare增≤16384B才选取，超限原bare回退；空单位/全部覆盖/host引用、来源、摘要、裁决/原说明与小非文件保持。首红后六组84/八包类型/完整发行声明/独立审查通过；65单位71607→75683B，原checker根JS1c0718e6…精确未变。见[交付与边界](tianwen-compact-audit-quotes-20261003.md)。
+
+实际新发行7scripted/0自然、65单位提示与完整输出/两审met；新进程原task/material/两审0请求cold，旧实际控制也0执行准确恢复，未重生成/改判。正式新发行真实status0模型/程序：20观察19完成/13初筛/1可信问题/5成功初筛/兼容pair false、反馈归因0/study0/隔离true，完整034d966f…及原自然封存保持。无下载/整环境副本/容器执行、Docker关闭/本次临时测试目录0，D≥15GiB，最终容量见运行根final-audit。
+
+下一按[DEV研究宿主设计](../superpowers/specs/2026-10-03-tianwen-dev-study-result-check-design.md)让已有合同装配/公开cohort真正注入未来Runtime studyResultCheck。最近native仅ordinary checker，原attempt设计前持久化；需在pair出现前接好宿主，不更改旧去重/停止。固定原合同及独立尚未执行待办后继续真实开发，自然研究/采用/效果分别核验，不索题/造失败/重评或空转blocked。完整目标active/incomplete、main/Daily NO-GO与原同意/隔离/门槛/十工作日窗口保持、不重新计时；此条覆盖下方引用提示待做的当前待办。
 ## 2026-10-03 DEV原合同研究接线已交付，下一修未来评审引用提示
 
 冻结dddcfbc后，天问一次实际未知答案交付纯合同装配模块：9 forwarded/5根、prepare1/evaluate1、功能verified、review inconclusive/invalid-judgment。原候选/task/material/program先封存，新进程准确cold、0模型/程序重执行；两原合同遗漏以5首红加消费者缺入口1首红后单独工程修复，不回填原结果。DEV新工厂委托原固定host和实际公开cohort，五角色正确/错误原条件控制及相关18项通过，独立审查关闭P2；发行/原checker根JS逐字保持，不重复整包build。见[交付与准确边界](tianwen-dev-study-case-binding-20261003.md)。
