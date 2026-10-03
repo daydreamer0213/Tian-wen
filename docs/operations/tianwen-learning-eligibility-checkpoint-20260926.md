@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 持久准备宿主交付，首自然结果保留
+
+见[准确分账](tianwen-durable-preparation-host-20261004.md)：公共DEV host持久gate当前工程修复83回归/缓存Node57/57/新SDK分派及完整程序控制通过；原首次33实际请求、prepare1/eval0、Task unverifiable/inconclusive，原首代码49/57不回写。主代理修复不记模型学习/方法采用/真实收益；反馈、研究仍0，原隔离保持。
+
+原156越界拒绝超过既有16条证据上限，原日志缺stack；不截断追认。原请求未逐项给出其余四只读参考路径，下一独立实现补执行前文件清单与具体诊断，再选新实际待办。目标active/incomplete、main/Daily NO-GO、原发布门槛和十工作日窗口保持，不追加旧练习、不重试本题、不机械blocked/索题/催评。正式DEV ledger1327364B/5af25fcd…只读未mount不变；十个拒删目录不再重试/绕过，D约18GiB>=15。
+
 ## 2026-10-04 普通检查完整项目图已接通，真实学习目标继续
 
 公开 Node-project 普通 prepare 显式冻结 project 原快照/输出权限，原 finished 的 projectOutputs 绑定真实观察子图与未变参考；原 fileInputs/completion/SDK actions 不扩写未读入口。内容、反馈、研究包及独立输入身份共同消费完整图，初始文件明确host/context而非成功读取；新图先程序后内容、旧时序/协议保持，冷恢复不看后来磁盘。见[准确交付及下一待办](tianwen-ordinary-prepared-project-20261004.md)。

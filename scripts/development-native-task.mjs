@@ -12,6 +12,7 @@ import { sealDevelopmentNativeArchive, verifyDevelopmentNativeArchiveSeal } from
 import { readDevelopmentNativeArchiveEntries } from './development-native-archive-reader.mjs'
 import { summarizeDevelopmentNativeTask } from './development-native-task-result.mjs'
 import { formatDevelopmentNativeArchiveStatus } from './development-native-archive-status.mjs'
+import { isDevelopmentNativePreparationCommitted } from './development-prepared-task-gate.mjs'
 
 const archiveNames = ['attempt-started.json', 'task.json', 'root-native.json.gz', 'result.json', 'failure.json', 'cleanup.json']
 
@@ -113,7 +114,21 @@ export async function runDevelopmentNativeTask(ctx, config) {
   const save = (name, value) => writeFileSync(resolve(resultRoot, name + '.json'), JSON.stringify(value, null, 2), { flag: 'wx' })
   // Exclusive marker prevents this host from retrying or overwriting an earlier attempt.
   save('attempt-started', { sessionId, requestText, outputPaths: expectedPaths, referencePaths: [...referencePaths], callConfig, maxArchiveBytes })
-  const observation = observeNativeTaskRequests(ctx, { rootSessionId: sessionId, requestsAllowed: true, isPrepared })
+  const request = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: requestText }] })
+  const observation = observeNativeTaskRequests(ctx, {
+    rootSessionId: sessionId,
+    requestsAllowed: true,
+    isPrepared: () => isPrepared() === true && isDevelopmentNativePreparationCommitted(
+      ctx.tianwenEvolution.listConversationTasks(sessionId),
+      {
+        sessionId,
+        request,
+        nativeHeader: handle.agent.session.events.filter(event => event?.type === 'request/header').at(-1),
+        outputPaths: expectedPaths,
+        referencePaths: [...referencePaths],
+      },
+    ),
+  })
   let handle, failure, result, archivedTask, taskSaved = false, nativeSaved = false
   const cancel = () => handle?.agent.cancel({ kind: 'user' })
   const archive = async () => {
@@ -142,7 +157,7 @@ export async function runDevelopmentNativeTask(ctx, config) {
     } })
     signal?.addEventListener('abort', cancel, { once: true }); if (signal?.aborted) cancel()
     signal?.throwIfAborted()
-    handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: requestText }] }))
+    handle.agent.followup(request)
     const settle = async () => { await handle.agent.whenIdle(); await ctx.tianwenConversationObserver.whenIdle(); await ctx.tianwenConversationGuidanceLoop.whenIdle() }
     if (signal) await withConversationObservationCancellation(signal, settle)
     else await settle()

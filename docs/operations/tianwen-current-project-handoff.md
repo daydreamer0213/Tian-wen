@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 持久准备宿主已修复，首次原结果不回写
+
+公共DEV宿主现同时核调用方严格true与原Task已保存准备，绑定同一原UserMessage、实际SDK header有效配置、原来源/识别/上下文、原完整图权限；支持正常首/后续根及旧无project协议。83回归、当前固定缓存Node57/57、接入AST、新五SDK分派控制和公开完整程序/另Node0请求冷恢复通过，静态独立审查无新有据P1/P2。具体[原证据与下一待办](tianwen-durable-preparation-host-20261004.md)。
+
+单次真实首次33请求（识别1/根32）、prepare1/evaluate0、文件证据unavailable、原Task程序unverifiable/内容inconclusive；原首代码独立49/57且8正常全拒绝，原归档另Node0请求准确恢复。当前修复是主代理工程工作，不是模型自己学习，未回写/重试/补反馈/研究或采用收益。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/停止/十工作日窗口保持，不增阶段门槛、不机械整体blocked。
+
+原182 call/result中156拒绝超过原16附加证据上限，是封存失败的有据充分条件；缺原异常stack不严称首抛原因已定。原准备前五只读参考仅合同路径明确出现，完整host检查图未把其余四路径告知根模型。下一直接补原执行前文件清单/角色与具体观察诊断，再用新的有用任务，不重跑本题或向用户索题/催评。
+
+正式1327364B/5af25fcd…只读未mount保持。自动审批启动前又拒删本轮native-profile、old-host-control、gate-controls、current-host-functional-control四目录，仅blocked by policy、无具体理由；约3.5MiB保留、未创建zip副本。不重试这四及原六，共十个拒删目录。D约18GiB>=15、未达20；84历史容器不碰、Docker恢复停止以D final-audit为准。本条覆盖下方“持久gate仍待实现”旧入口。
+
 ## 2026-10-04 普通检查完整项目图已接通，真实学习目标继续
 
 公开 Node-project 普通 prepare 显式冻结 project 原快照/输出权限，原 finished 的 projectOutputs 绑定真实观察子图与未变参考；原 fileInputs/completion/SDK actions 不扩写未读入口。内容、反馈、研究包及独立输入身份共同消费完整图，初始文件明确host/context而非成功读取；新图先程序后内容、旧时序/协议保持，冷恢复不看后来磁盘。见[准确交付及下一待办](tianwen-ordinary-prepared-project-20261004.md)。
