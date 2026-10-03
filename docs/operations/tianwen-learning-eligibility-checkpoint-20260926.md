@@ -1,5 +1,12 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 中文概览首次交付；已确认取消归档顺序缺陷
+
+原首代码18263B/115条件及旧基础4通过，18实际请求、prepare/evaluate1/1。原requirements错引answer-38被SDK原guard拒收，模型同一Turn更正后进入grounding；总8分钟时限使第二审取消，整体inconclusive/cancelled、0整体proof，不当合格成功对照。新Node0模型确认首代码/完整7图/header/原四Task及正式账本不变。[准确首次结果](tianwen-live-overview-report-20261004.md)。
+
+原归档先保存、原终止review后落账，二者只差这条review；旧task/seal保留，另存current-terminal-task，不能声称原归档与最终Task全等。当前直接修同session原评审取消/排空后归档，不关闭调用者Context、不等待其他session、不重评本题、不增预算或标准。实际SDK来源/初筛5、程序verified4/rejected1、问题1/全局成功候选1、feedback/study0；旧成功仍不兼容报告问题。完整目标active/incomplete、main/Daily NO-GO和原十工作日窗口不变；用户无须补题或评价。
+
+
 ## 2026-10-04 简洁审计提示单次比较未改善，已回撤；继续必要材料方案
 
 原SDK不支持schema引用；新合成62单元完整复制控制固定后baseline/treatment各原两审，共4真实请求、0自然Task。两者met/4proof新Node0模型准确恢复，但候选更慢（86.365对78.323秒）、推理9300对9066，缓存不同不能推广。116相关回归过，生产说明改动已完全撤回，不加轮数/预算/标准或宣称自然评审稳定。详见[准确比较与撤回](tianwen-review-direct-audit-20261004.md)。

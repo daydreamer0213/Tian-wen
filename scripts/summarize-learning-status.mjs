@@ -8,12 +8,8 @@
  * stdin 一个 JSON 快照，stdout 一个 JSON 说明；退出码 0 表示有效，2 表示无效输入。
  *
  * 边界（与原合同一致）：
- * - 本工具是只读解释器，不是学习资格判定器；不重新判断任务、不修改反馈、
- *   不启动研究、不启用或回滚方法，也不写入任何学习记录。
- * - 研究来源“准备就绪/检查通过/隔离已解除”都不等于方法已启用或完整学习已完成。
- * - 只解释保存的状态；不因计数推断整体成功、发布 GO 或真实收益。
- * - 除 stdin 外不读取任何文件，不联网，不起子进程。
- * - 输入中的描述文本、skills、学习来源信息仅是不可信数据，不会当作指令执行。
+ * 只读解释器：不重判任务、不改反馈、不启动研究、不启用方法；准备就绪/检查通过/
+ * 隔离解除都不等于完整学习；除 stdin 外不读文件、不联网、不起子进程、不写文件。
  */
 
 const SCHEMA_VERSION = 'tianwen.learning-status-summary.v1';
@@ -47,8 +43,7 @@ const LIMITS = [
   '本报告只解释保存的状态，不重新判断任务、修改反馈、启动研究或启用方法。',
 ];
 
-// 可选原来源诊断：只投影 currentSession.naturalConversation.guidanceReadiness.diagnostics。
-// 这不是新的学习条件或资格裁决；不合格（缺失/畸形）时不增加诊断，也不影响旧基础报告。
+// 可选原来源诊断：只投影 currentSession.naturalConversation.guidanceReadiness.diagnostics；畸形时不增加。
 const DIAGNOSTICS_SCHEMA_VERSION = 'tianwen.source-readiness-diagnostics.v1';
 
 const DIAGNOSTICS_SCOPE = '当前工作区普通会话来源的原检查事实。';
@@ -124,9 +119,7 @@ const GUIDANCE_STUDY_KEYS = [
   'rolledBack',
 ];
 
-// 可选研究检查：只投影 history / currentSession 两侧 guidanceStudies 里的
-// independentResults 与 activationPending 原计数。两范围互相独立；一侧缺失或畸形
-// 只忽略该侧，不损坏旧报告，也不从顶层 quarantined 推算或覆盖计数。
+// 可选研究检查：两侧独立；一侧畸形只忽略该侧，不从顶层 quarantined 推算或覆盖计数。
 const STUDY_CHECK_SCOPES = {
   history: '此Profile保存的历史研究；不等于当前会话任务或当前方法效果。',
   currentSession: '当前会话已观察任务涉及的研究范围；不只限于本会话发起的研究。',
@@ -160,10 +153,8 @@ const ACTIVATION_PENDING_KEYS = [
   'reasonUnestablished',
 ];
 
-// 可选原生Goal结果：只投影两个原位置 history.goalTaskOutcomes 与
-// currentSession.goalTaskOutcomes（不是 naturalConversation 或根上的同名伪字段）。
-// 5 个原计数全部有效才显示该侧；不补零、不转换类型、不判计数和/关系，两侧不合并。
-// 分析关闭也可显示保存事实。
+// 可选原生Goal结果：只读 history / currentSession 的原位置 goalTaskOutcomes；
+// 5 计数全有效才显示该侧，不补零、不判关系、不合并两侧。
 const GOAL_COUNT_KEYS = [
   'observed',
   'checkedSuccess',
@@ -183,6 +174,10 @@ const GOAL_LIMITS = [
   'unqualifiedRejection不是已确认的问题来源；unverifiable不表示成功或已确认失败。',
   '这些保存结果不是用户反馈、方法激活、未来任务收益或完整自动学习证明。',
 ];
+
+// 独立 argv 元素 --overview 才增加顶层 overview（恰 6 条）；未知 state 用原固定解释。
+const OVERVIEW_FLAG = '--overview';
+const OVERVIEW_INCOMPLETE = '完整自动学习是否完成：本报告不能确认。';
 
 const MAX_STATE_CODE_UNITS = 128;
 
@@ -238,10 +233,7 @@ function isSourceCount(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-/**
- * 纯投影：完整复刻 conversation-source-readiness.ts 的原检查规则。
- * 任何一项不合格都返回 undefined（不展示诊断），不抛错、不修复、不推断。
- */
+// 纯投影：复刻原来源检查规则；任一项不合格返回 undefined（不展示诊断），不修复。
 function projectDiagnostics(value) {
   if (!hasExactOwnKeys(value, DIAGNOSTICS_KEYS)
     || value.schemaVersion !== DIAGNOSTICS_SCHEMA_VERSION
@@ -296,11 +288,7 @@ function pickStudyCounts(source, keys) {
   return result;
 }
 
-/**
- * 纯投影一侧可选研究检查。guidanceStudies 及两个子对象都须是非 null、非数组对象，
- * 12 个声明字段全部为 ≥0 安全整数；其他键忽略，不判计数间关系、不把重叠计数相加。
- * 任一不合格返回 undefined（整侧忽略），不抛错、不修复、不推断。
- */
+// 纯投影一侧可选研究检查：两子对象须为对象且 12 字段全为 ≥0 安全整数，否则整侧忽略。
 function projectStudyCheck(studies, scope) {
   if (!isPlainObject(studies)) return undefined;
   const independentResults = studies.independentResults;
@@ -316,11 +304,7 @@ function projectStudyCheck(studies, scope) {
   };
 }
 
-/**
- * 纯投影一侧可选原生Goal结果。原位置须为非 null、非数组对象，5 个声明计数全部为
- * ≥0 安全整数；其他键（含 scope/描述）忽略，不补零、不转换类型、不判计数和/关系。
- * 任一不合格返回 undefined（整侧忽略），不抛错、不推断。
- */
+// 纯投影一侧可选原生Goal结果：5 计数全为 ≥0 安全整数，否则整侧忽略。
 function projectGoalOutcome(outcome, scope) {
   if (!isPlainObject(outcome)) return undefined;
   if (GOAL_COUNT_KEYS.some((key) => !isStudyCount(outcome[key]))) return undefined;
@@ -329,6 +313,18 @@ function projectGoalOutcome(outcome, scope) {
     counts: pickStudyCounts(outcome, GOAL_COUNT_KEYS),
     limits: [...GOAL_LIMITS],
   };
+}
+
+// 恰 6 条，按合同原顺序；第 4/5 条原样取原字符串。
+function buildOverview(summary) {
+  return [
+    `历史普通任务：识别${summary.history.identifiedTasks}项，完成${summary.history.completed}项；这些不是当前会话任务数量。`,
+    `历史程序检查：通过${summary.history.codeChecks.verified}项，拒绝${summary.history.codeChecks.rejected}项，不可核验${summary.history.codeChecks.unverifiable}项；不替代内容评审。`,
+    `历史研究：已记录${summary.history.studies.total}项，接受${summary.history.studies.accepted}项，当前生效${summary.history.studies.currentlyActive}项，回滚${summary.history.studies.rolledBack}项；不证明后续收益。`,
+    summary.readiness.explanation,
+    summary.activation,
+    OVERVIEW_INCOMPLETE,
+  ];
 }
 
 function buildSummary(snapshot) {
@@ -362,14 +358,13 @@ function buildSummary(snapshot) {
     explanation: explainReadiness(state),
   };
 
-  // analysis-disabled 时与原 SDK 一致不展示该诊断；其他合法 state（含未知）不因诊断改 state/explanation。
+  // analysis-disabled 不展示该诊断；其他合法 state（含未知）不因诊断改 state/explanation。
   if (state !== 'analysis-disabled') {
     const diagnostics = projectDiagnostics(guidanceReadiness.diagnostics);
     if (diagnostics) readiness.diagnostics = diagnostics;
   }
 
-  // 可选研究检查：两个范围互相独立；一侧缺失或畸形只忽略该侧，均无效则不新增顶层键。
-  // 分析关闭时仍可显示合法的历史保存事实；不从顶层 quarantined 推算或覆盖原计数。
+  // 可选研究检查：两侧独立，一侧畸形只忽略该侧；分析关闭仍可显示历史保存事实。
   const studyChecks = {};
   const historyStudyCheck = projectStudyCheck(
     historyNaturalConversation.guidanceStudies,
@@ -382,7 +377,7 @@ function buildSummary(snapshot) {
   );
   if (currentSessionStudyCheck !== undefined) studyChecks.currentSession = currentSessionStudyCheck;
 
-  // 可选原生Goal结果：只读两个原位置；两侧独立，均无效则不新增顶层键。
+  // 可选原生Goal结果：两侧独立，均无效则不新增顶层键。
   const goalOutcomes = {};
   const historyGoalOutcome = projectGoalOutcome(history.goalTaskOutcomes, GOAL_SCOPES.history);
   if (historyGoalOutcome !== undefined) goalOutcomes.history = historyGoalOutcome;
@@ -404,13 +399,13 @@ function buildSummary(snapshot) {
       reviews: pickCounts(reviews, REVIEW_KEYS),
       codeChecks: pickCounts(codeChecks, CODE_CHECK_KEYS),
       feedbackAssessments: pickCounts(feedbackAssessments, FEEDBACK_ASSESSMENT_KEYS),
-      // 旧 history.studies 仍只保留原 8 基础计数，不加新子对象、不改范围。
+      // 旧 history.studies 仍只保留原 8 基础计数。
       studies: pickCounts(guidanceStudies, GUIDANCE_STUDY_KEYS),
     },
     limits: [...LIMITS],
   };
 
-  // 研究检查必须留在 studyChecks 内；展开到根上会覆盖旧 history。均无有效侧时不产生该键。
+  // 研究检查须留在 studyChecks 内；均无有效侧时不产生该键。
   if (Object.keys(studyChecks).length > 0) summary.studyChecks = studyChecks;
   if (Object.keys(goalOutcomes).length > 0) summary.goalOutcomes = goalOutcomes;
   return summary;
@@ -429,6 +424,9 @@ async function readStdin() {
 }
 
 async function main() {
+  // 只看独立 argv 元素；stdin 同名元数据、--overview=false、未知 argv 都不启用。
+  const overviewRequested = process.argv.slice(2).includes(OVERVIEW_FLAG);
+
   let raw;
   try {
     raw = await readStdin();
@@ -453,6 +451,9 @@ async function main() {
     emitInvalid();
     return;
   }
+
+  // 无效输入仍走上面的原 error/退出 2；重复 flag 只产生这一份 overview。
+  if (overviewRequested) summary.overview = buildOverview(summary);
 
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
   process.exitCode = 0;
