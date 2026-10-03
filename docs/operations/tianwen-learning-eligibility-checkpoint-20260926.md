@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 普通 Goal Task 独立结果已自动入账，资格仍分开
+
+新原生 Goal Task 结果用明确 native-goal-task 事件进入原 Evolution ledger，首实际请求前固定启用v3同意revision，原合同/command/Task/epoch/SDK材料核对后消费；冷挂载仅补保存/幂等，旧任务或事后同意不追认。四类功能结果与反馈/语义/研究/激活严格分开，没有新自然来源或方法效果宣称。等待期间Task漂移的实际P2已先红关闭；真实保存故障停止规划/原结果保留、关闭无迟到写入。详见[本包交付及边界](tianwen-goal-task-outcome-intake-20261003.md)。
+
+完整构建/声明/公共SDK扫描、16文件493项及发行4SDK控制通过，各1/1、9scripted/0真实、新Context同进程0请求/不重评。正式1327364B/5af25fcd…、最近23观察22完成/16初筛/1可信问题/8成功候选/兼容pair false/反馈0/研究0/隔离true不变；原SDK检查器根1c0718e6…保持，Runtime更新f2f5ec98…。
+
+下一实际消费者须恢复完整原材料、独立语义及已用方法身份，不能把入账元数据冒充ConversationTask或旧工具Outcome，研究资格和原门槛不放宽。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/停止/十工作日窗口保持，不新增练习/重评/索题。D约18.20GiB≥15，无下载/新容器；自动审批拒绝删除本轮45,598B故障夹具profile-mtYfRP（blocked by policy），保留并不绕过。此条覆盖下方入账待实现的当前待办。
+
 ## 2026-10-03 Goal Task 事前验收与规划消费已交付
 
 780a91d归档包结束后返回主线。新增默认关闭可信goalTaskAcceptance：当前直接用户/goal创建时固定原command；首真实header/context后、provider前绑定原Task/attempt/Goal/权限/模型/合同/原条件；持久SDK收尾、结果单独保存并由Planner/status/完成通知消费。无合同原行为保持，不硬塞旧Outcome、不创建自然来源或激活权限。见[准确交付及下一主线](tianwen-goal-task-acceptance-20261003.md)。

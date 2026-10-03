@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationCodeCheckIdentity, conversationCheckedFailureSource, conversationExternalInputsDigest, type ConversationCheckedFailureSources } from './conversation-external-check.js'
 import { conversationFileTaskInputDigest } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
+import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
 import {
   closeSync,
   existsSync,
@@ -383,6 +384,7 @@ export interface RecoveryFailedEvent {
 }
 
 export type LedgerEvent =
+  | GoalTaskOutcomeRecordedEvent
   | ConversationLearningEvent
   | { readonly type: 'conversation-guidance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-record.v1', readonly at: string, readonly record: ConversationGuidanceRecord }
   | { readonly type: 'conversation-case-design-attempted', readonly schemaVersion: 'tianwen.conversation-case-design-attempt.v1', readonly at: string, readonly attempt: ConversationCaseDesignAttempt }
@@ -1873,6 +1875,13 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   const type = requireString(value.type, 'event type')
   const at = requireTimestamp(value.at)
+  if (type === 'goal-task-outcome-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'sourceId', 'inputDigest', 'input'])
+    if (value.schemaVersion !== 'tianwen.goal-task-outcome.v1') throw new LedgerIntegrityError('unknown Goal Task outcome schema')
+    const input = parseGoalTaskOutcomeInput(value.input)
+    if (value.sourceId !== goalTaskOutcomeSourceId(input) || value.inputDigest !== sha256(input)) throw new LedgerIntegrityError('Goal Task outcome source identity changed')
+    return { type, schemaVersion: value.schemaVersion, at, sourceId: value.sourceId, inputDigest: sha256(input), input }
+  }
   if (type === 'conversation-learning-recorded') {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
     if (value.schemaVersion !== 'tianwen.conversation-learning.v1') throw new LedgerIntegrityError('unknown conversation learning schema')
@@ -2757,6 +2766,7 @@ type LearningRevisionWrite =
   }
 
 export class EvolutionLedger {
+  readonly #goalTaskOutcomes = new Map<string, GoalTaskOutcomeRecordedEvent>()
   readonly #root: string
   readonly #artifactsRoot: string
   readonly #ledgerPath: string
@@ -2983,6 +2993,20 @@ export class EvolutionLedger {
   #requireConversationConsent(revision: number): void {
     const consent = this.#learningAnalysisConsent
     if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== revision) throw new LedgerIntegrityError('natural analysis requires current scoped v3 consent')
+  }
+  recordGoalTaskOutcome(raw: GoalTaskOutcomeInput): GoalTaskOutcomeReceipt {
+    const input = parseGoalTaskOutcomeInput(raw), sourceId = goalTaskOutcomeSourceId(input), inputDigest = sha256(input)
+    const existing = this.#goalTaskOutcomes.get(sourceId)
+    if (existing !== undefined) {
+      if (existing.inputDigest !== inputDigest) throw new LedgerIntegrityError('Goal Task outcome changed after recording')
+      return { sourceId, classification: goalTaskOutcomeClassification(input), duplicate: true }
+    }
+    this.#requireConversationConsent(input.consentRevision)
+    this.#accept({ type: 'goal-task-outcome-recorded', schemaVersion: 'tianwen.goal-task-outcome.v1', at: this.#now(), sourceId, inputDigest, input })
+    return { sourceId, classification: goalTaskOutcomeClassification(input), duplicate: false }
+  }
+  listGoalTaskOutcomes(): readonly GoalTaskOutcomeObservation[] {
+    return clone([...this.#goalTaskOutcomes.values()].map(event => ({ ...event, classification: goalTaskOutcomeClassification(event.input) })))
   }
   recordConversationFeedback(input: ConversationFeedbackRecord): { readonly duplicate: boolean } {
     const record = parseConversationFeedbackRecord(input)
@@ -7453,6 +7477,11 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'goal-task-outcome-recorded') {
+      this.#requireConversationConsent(event.input.consentRevision)
+      if (this.#goalTaskOutcomes.has(event.sourceId)) throw new LedgerIntegrityError('duplicate Goal Task outcome event')
+      return
+    }
     if (event.type === 'conversation-learning-recorded') {
       this.#conversationLearning.validate(event.record)
       if (event.record.kind === 'task-started') {
@@ -9017,6 +9046,10 @@ export class EvolutionLedger {
 
   #apply(event: LedgerEvent): void {
     this.#events.push(event)
+    if (event.type === 'goal-task-outcome-recorded') {
+      this.#goalTaskOutcomes.set(event.sourceId, event)
+      return
+    }
     if (event.type === 'conversation-learning-recorded') {
       this.#conversationLearning.apply(event.record, event.at)
       return

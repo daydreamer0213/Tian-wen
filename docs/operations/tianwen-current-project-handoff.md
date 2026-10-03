@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 普通 Goal Task 独立结果已自动进入原学习账本
+
+fe41ad4事前验收之后，原 Evolution ledger 增加明确 native-goal-task 来源，原 LongGoal owner 首请求前固定 v3 同意 revision，原 result 保存后自动入账；新 Context 消费已持久结果/幂等，不重评。成功/原条件失败/缺条件关联拒绝/无法核验分开保存，旧准备和事后同意不追认，不伪造工具/ConversationTask/用户评价，不改变原研究资格或授予激活。真实保存错误停止规划，关闭无迟到写入；实际来源等待期间 Task 漂移错误已首红并窄修，复审无新增有据P1/P2。见[准确交付和下一研究材料入口](tianwen-goal-task-outcome-intake-20261003.md)。
+
+完整构建/声明/公共SDK扫描、16文件493项、发行4实际SDK控制通过；控制各1/1、9 scripted/0真实，准确新来源/脱敏状态、新Context同进程0请求，不当自然学习。正式1327364B/5af25fcd…账本、最近23观察22完成/16初筛/1可信问题/8成功候选/兼容pair false/反馈0/研究0/隔离true保持；检查器根1c0718e6…保持，Runtime因本实现更新f2f5ec98…。
+
+下一恢复完整 Goal Task 研究材料并补独立语义/已用方法绑定，再沿原研究/启用/未来效果/回滚核验；来源元数据入账不等于研究已接通，不追加练习、造失败/反馈、重评或索任务。完整目标active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口保持。D约18.20GiB≥15，复用/无下载/新容器；自动审批以blocked by policy拒绝删除本轮45,598B故障夹具profile-mtYfRP，已保留/不重试绕过。此条覆盖下方Task结果入账待实现的当前待办。
+
 ## 2026-10-03 Goal Task 事前验收与规划消费已交付
 
 780a91d归档包结束后返回主线。新增默认关闭可信goalTaskAcceptance：当前直接用户/goal创建时固定原command；首真实header/context后、provider前绑定原Task/attempt/Goal/权限/模型/合同/原条件；持久SDK收尾、结果单独保存并由Planner/status/完成通知消费。无合同原行为保持，不硬塞旧Outcome、不创建自然来源或激活权限。见[准确交付及下一主线](tianwen-goal-task-acceptance-20261003.md)。

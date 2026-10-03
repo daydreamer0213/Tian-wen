@@ -459,3 +459,5 @@ export type {
   LearningExplorationStatus,
 } from './learning-exploration.js'
 export * from './runtime-binding.js'
+export { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification } from './goal-task-outcome.js'
+export type { GoalTaskOutcomeInput, GoalTaskOutcomeReceipt, GoalTaskOutcomeRecordedEvent, GoalTaskOutcomeObservation, GoalTaskOutcomeClassification } from './goal-task-outcome.js'

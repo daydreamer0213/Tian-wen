@@ -25,6 +25,8 @@ export interface GoalTaskAcceptanceBinding {
   readonly contractDigest: ReturnType<typeof sha256>
   readonly inputsDigest: ReturnType<typeof sha256>
   readonly requiredCondition: string
+  /** Only enabled v3 consent observed before the original first Task request. */
+  readonly learningConsentRevision?: number
 }
 
 export type GoalTaskAcceptanceEvent = {
@@ -65,7 +67,9 @@ export function parseGoalTaskAcceptanceEvent(value: unknown): GoalTaskAcceptance
     const b = value.binding
     if (!record(b) || !keys(b, ['epoch', 'parentSessionId', 'childSessionId', 'nativeGoalId', 'permissionFingerprint',
       'goalDigest', 'taskDigest', 'headerSeq', 'preparedSeq', 'prefixDigest', 'modelConfigDigest', 'checkerId', 'checkerDigest',
-      'contractDigest', 'inputsDigest', 'requiredCondition']) || !seq(b.epoch) || b.epoch === 0 || !seq(b.headerSeq) || !seq(b.preparedSeq) || b.preparedSeq < b.headerSeq
+      'contractDigest', 'inputsDigest', 'requiredCondition', ...(Object.hasOwn(b, 'learningConsentRevision') ? ['learningConsentRevision'] : [])])
+      || (Object.hasOwn(b, 'learningConsentRevision') && (!seq(b.learningConsentRevision) || b.learningConsentRevision === 0))
+      || !seq(b.epoch) || b.epoch === 0 || !seq(b.headerSeq) || !seq(b.preparedSeq) || b.preparedSeq < b.headerSeq
       || !['parentSessionId', 'childSessionId', 'nativeGoalId', 'checkerId', 'requiredCondition'].every(key => text(b[key]))
       || !['permissionFingerprint', 'goalDigest', 'taskDigest', 'prefixDigest', 'modelConfigDigest', 'checkerDigest',
         'contractDigest', 'inputsDigest'].every(key => digest(b[key]))) throw new TypeError('Goal Task acceptance binding is invalid')

@@ -23,6 +23,7 @@ import {
   type LearningConsentNoticeBinding,
   type LearningIntakeStatus,
   type LearningSkillAdmission,
+  type GoalTaskOutcomeObservation,
 } from '@tianwen/evolution'
 import {
   RESEARCH_SUMMARY_SCOPE,
@@ -125,6 +126,13 @@ function statusSnapshot(
     revision: status.revision,
     ...(status.recordedAt === undefined ? {} : { recordedAt: status.recordedAt }),
   }
+}
+
+function goalTaskOutcomeStatus(observations: readonly GoalTaskOutcomeObservation[]) {
+  const count = (classification: GoalTaskOutcomeObservation['classification']) => observations.filter(item => item.classification === classification).length
+  return { observed: observations.length, checkedSuccess: count('checked-success'), checkedFailure: count('checked-failure'),
+    unqualifiedRejection: count('unqualified-rejection'), unverifiable: count('unverifiable'),
+    scope: 'Historical native Goal Task independent results, separate from user feedback, semantic review, research eligibility and activation. Current Session counts use the original control Session or executed child Session. These observations do not establish natural learning efficacy.' }
 }
 
 function naturalConversationStatus(tasks: readonly ConversationTask[], feedbackStatuses: readonly LearningIntakeStatus[]) {
@@ -741,6 +749,9 @@ export class TianwenLearningConsentAgentService extends Service {
       : this.ctx.tianwenEvolution.getRunSkillManifest(current.runId)
     const analyses = this.ctx.tianwenEvolution.listLearningAnalyses()
     const conversationTasks = this.ctx.tianwenEvolution.listConversationTasks()
+    const goalOutcomes = this.ctx.tianwenEvolution.listGoalTaskOutcomes()
+    const currentGoalOutcomes = goalOutcomes.filter(item => item.input.origin.sessionId === String(agent.session.id)
+      || item.input.childSessionId === String(agent.session.id))
     const conversationFeedback = [...new Set(conversationTasks.map(task => task.source.sessionId))]
       .flatMap(sessionId => this.ctx.tianwenEvolution.listLearningIntakeStatuses(sessionId))
     const feedbackAssessments = this.ctx.tianwenEvolution.listConversationFeedbackAssessments()
@@ -767,6 +778,7 @@ export class TianwenLearningConsentAgentService extends Service {
       recordedOutcomes: runs.filter(run =>
         this.ctx.tianwenEvolution.getOutcomeIntake(run.runId) !== undefined).length,
       recordedAnalyses: analyses.length,
+      ...(goalOutcomes.length === 0 ? {} : { goalTaskOutcomes: goalTaskOutcomeStatus(goalOutcomes) }),
       naturalConversation: {
         ...naturalConversationStatus(conversationTasks, conversationFeedback),
         feedbackAssessments: conversationFeedbackStatus(feedbackAssessments),
@@ -778,6 +790,7 @@ export class TianwenLearningConsentAgentService extends Service {
       },
     }
     const currentSession = {
+      ...(currentGoalOutcomes.length === 0 ? {} : { goalTaskOutcomes: goalTaskOutcomeStatus(currentGoalOutcomes) }),
       naturalConversation: {
         ...naturalConversationStatus(currentConversationTasks, conversationFeedback),
         guidanceReadiness,

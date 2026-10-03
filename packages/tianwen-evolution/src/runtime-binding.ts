@@ -1,5 +1,6 @@
 import { Service } from '@tianwen/dsh-compat'
 import type { ConversationLearningRecord, ConversationTask } from './conversation-learning.js'
+import type { GoalTaskOutcomeInput, GoalTaskOutcomeReceipt, GoalTaskOutcomeObservation } from './goal-task-outcome.js'
 import type { ConversationGuidanceRecord, ConversationCaseDesignAttempt, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord } from './conversation-guidance.js'
 import type { ConversationFeedbackRecord, ConversationFeedbackAssessment } from './conversation-feedback.js'
 import type {
@@ -555,6 +556,13 @@ export class TianwenEvolutionService extends Service {
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordOutcomeIntake(input))
+  }
+
+  recordGoalTaskOutcome(input: GoalTaskOutcomeInput): GoalTaskOutcomeReceipt {
+    return this.formalWrite(() => this.state().ledger.recordGoalTaskOutcome(input))
+  }
+  listGoalTaskOutcomes(): readonly GoalTaskOutcomeObservation[] {
+    return this.state().ledger.listGoalTaskOutcomes()
   }
 
   recordRunSkillManifest(

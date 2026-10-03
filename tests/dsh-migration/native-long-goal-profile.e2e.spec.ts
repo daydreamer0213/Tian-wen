@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
@@ -28,6 +28,7 @@ import {
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID } from '../../packages/tianwen-runtime-bundle/src/learning-consent-agent.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { GoalTaskAcceptanceChecks } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance.js'
 import {
   listLongGoals,
@@ -430,6 +431,140 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it('propagates actual learning-ledger storage failure and cold consumes only the already-saved result', async () => {
+    if (process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1') return
+    const failures: unknown[] = []
+    const originalFinish = GoalTaskAcceptanceChecks.prototype.finishGoal
+    const finishSpy = vi.spyOn(GoalTaskAcceptanceChecks.prototype, 'finishGoal').mockImplementation(function(id) {
+      const operation = originalFinish.call(this, id); void operation.catch(error => failures.push(error)); return operation
+    })
+    let evaluations = 0, displaced = false
+    const profile = await mountProfile('Produce a result for the learning storage fault control.', { completeTaskThroughTool: true,
+      goalTaskAcceptance: { async prepare() { return { checkerId: 'ledger-control', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Original result.', async evaluate() {
+          evaluations++
+          const source = resolve(profile.evolutionRoot, 'ledger.jsonl'), destination = resolve(profile.evolutionRoot, 'ledger.jsonl-held')
+          if (![source, destination].every(path => path.startsWith(resolve(profile.root) + '\\'))) throw new Error('storage control outside owned fixture')
+          renameSync(source, destination); mkdirSync(source); displaced = true
+          return { status: 'verified', detail: 'Original check finished before the ledger save fault.' }
+        } } } },
+    })
+    const restore = () => {
+      if (!displaced) return
+      const directory = resolve(profile.evolutionRoot, 'ledger.jsonl')
+      if (!directory.startsWith(resolve(profile.root) + '\\')) throw new Error('cleanup outside owned fixture')
+      rmdirSync(directory); renameSync(resolve(profile.evolutionRoot, 'ledger.jsonl-held'), directory); displaced = false
+    }
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-prepared')).toBe(true))
+      profile.releaseTask()
+      await vi.waitFor(() => expect(failures.length).toBeGreaterThan(0))
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      expect(record.tianwenEvents?.find(event => event.type === 'task-acceptance-finished')).toMatchObject({ outcome: { status: 'verified' } })
+      expect(record.planner.planRevision).toBe(1)
+      expect(evaluations).toBe(1)
+      restore()
+      expect(new EvolutionLedger(profile.evolutionRoot).listGoalTaskOutcomes()).toHaveLength(0)
+      await profile.dispose(false)
+      const cold = await mountProfile('Produce a result for the learning storage fault control.', { root: profile.root, resumeMain: true,
+        goalTaskAcceptance: { async prepare() { throw new Error('cold must not prepare'); } } })
+      try {
+        await vi.waitFor(() => expect(cold.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(1))
+        expect(cold.adapter.requests).toHaveLength(0)
+        expect(evaluations).toBe(1)
+      } finally { await cold.dispose(true) }
+    } finally { restore(); await profile.dispose(); finishSpy.mockRestore() }
+  }, 30_000)
+
+  it('does not append a late outcome when the host closes during the original check', async () => {
+    let entered = false, release!: () => void
+    const gate = new Promise<void>(resolveGate => { release = resolveGate })
+    const profile = await mountProfile('Produce a result for the shutdown control.', { completeTaskThroughTool: true,
+      goalTaskAcceptance: { async prepare() { return { checkerId: 'shutdown-control', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Original result.',
+        async evaluate() { entered = true; await gate; return { status: 'verified', detail: 'Late controlled check.' } } } } },
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(entered).toBe(true))
+      await profile.dispose(false)
+      const before = readFileSync(resolve(profile.evolutionRoot, 'ledger.jsonl'), 'utf8')
+      release(); await gate; await Promise.resolve()
+      expect(new EvolutionLedger(profile.evolutionRoot).listGoalTaskOutcomes()).toHaveLength(0)
+      expect(readFileSync(resolve(profile.evolutionRoot, 'ledger.jsonl'), 'utf8')).toBe(before)
+    } finally { release(); await profile.dispose() }
+  }, 30_000)
+  it('does not consume a stale Task snapshot if the durable Task changes while its source is read', async () => {
+    if (process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1') return
+    const failures: unknown[] = []
+    const originalFinish = GoalTaskAcceptanceChecks.prototype.finishGoal
+    const finishSpy = vi.spyOn(GoalTaskAcceptanceChecks.prototype, 'finishGoal').mockImplementation(function(id) {
+      const operation = originalFinish.call(this, id); void operation.catch(error => failures.push(error)); return operation
+    })
+    let originalRecord: string | undefined
+    let recordPath: string | undefined
+    const profile = await mountProfile('Produce a result for a bound-source drift control.', {
+      completeTaskThroughTool: true,
+      goalTaskAcceptance: { async prepare() { return { checkerId: 'drift-control', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Original result remains bound.',
+        async evaluate() { return { status: 'verified', detail: 'controlled result' } } } } },
+    })
+    const actualInspect = profile.ctx.sessionPersistence.inspect.bind(profile.ctx.sessionPersistence)
+    const inspectSpy = vi.spyOn(profile.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
+      const saved = await actualInspect(id)
+      const goal = listLongGoals(profile.stateRoot)[0]
+      if (String(id) === String(profile.main.session.id) && originalRecord === undefined && goal?.schemaVersion === 'tianwen.long-goal.v3'
+        && goal.tianwenEvents?.some(event => event.type === 'task-acceptance-finished')) {
+        recordPath = resolve(profile.stateRoot, 'long-goals', `${goal.id}.json`)
+        if (!recordPath.startsWith(resolve(profile.root) + '\\')) throw new Error('drift control outside owned fixture')
+        originalRecord = readFileSync(recordPath, 'utf8')
+        writeFileSync(recordPath, JSON.stringify({ ...goal, tasks: goal.tasks.map(task => ({ ...task, objective: 'Changed bound Task while awaiting source.' })) }))
+      }
+      return saved
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-prepared')).toBe(true))
+      profile.releaseTask()
+      await vi.waitFor(() => expect(originalRecord).toBeDefined())
+      await vi.waitFor(() => expect(failures.length).toBeGreaterThan(0))
+      expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(0)
+    } finally {
+      inspectSpy.mockRestore()
+      if (recordPath !== undefined && originalRecord !== undefined) writeFileSync(recordPath, originalRecord)
+      await profile.dispose(); finishSpy.mockRestore()
+    }
+  }, 30_000)
+
+  it.each(['enabled-after-preparation', 'revoked-before-result'] as const)('does not retroactively admit a Task outcome: %s', async timing => {
+    const profile = await mountProfile('Produce a consent timing control result.', { completeTaskThroughTool: true,
+      goalTaskAcceptance: { async prepare() { return { checkerId: 'consent-control', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Original result.',
+        async evaluate() { return { status: 'verified', detail: 'controlled result' } } } } },
+    })
+    try {
+      if (timing === 'revoked-before-result') profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-prepared')).toBe(true))
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: timing === 'enabled-after-preparation',
+        revision: timing === 'enabled-after-preparation' ? 1 : 2, policyVersion: 'tianwen-auto-analysis.v3' })
+      profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-finished')).toBe(true))
+      const goal = listLongGoals(profile.stateRoot)[0]!
+      await vi.waitFor(async () => expect(await readLongGoalStatus({ stateRoot: profile.stateRoot, longGoalId: goal.id,
+        dshStatusTarget: { sessionsRoot: profile.sessionsRoot, evolutionRoot: profile.evolutionRoot } })).toMatchObject({ goal: { phase: 'complete' } }))
+      expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(0)
+      await profile.dispose(false)
+      const cold = await mountProfile('Produce a consent timing control result.', { root: profile.root, resumeMain: true,
+        goalTaskAcceptance: { async prepare() { throw new Error('cold must not prepare'); } } })
+      try { expect(cold.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(0); expect(cold.adapter.requests).toHaveLength(0) }
+      finally { await cold.dispose(true) }
+    } finally { await profile.dispose() }
+  }, 30_000)
   it('propagates actual acceptance storage failure before issuing the next planning request', async () => {
     const failures: unknown[] = []
     const originalFinish = GoalTaskAcceptanceChecks.prototype.finishGoal
@@ -517,6 +652,8 @@ describe('native Long Goal profile execution', () => {
       },
     })
     try {
+      // Consent predates the actual first native Task request; not a later rating.
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
       await profile.startGoal()
       await vi.waitFor(() => {
         const record = readLongGoal(profile.stateRoot, listLongGoals(profile.stateRoot)[0]!.id) as LongGoalRecordV3
@@ -541,6 +678,15 @@ describe('native Long Goal profile execution', () => {
       expect(captured).toBeDefined()
       expect(profile.ctx.tianwenEvolution.listConversationTasks(record.tasks[0]!.execution!.sessionId)).toEqual([])
       expect(profile.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      const observations = profile.ctx.tianwenEvolution.listGoalTaskOutcomes()
+      expect(observations).toHaveLength(1)
+      expect(observations[0]).toMatchObject({ input: { source: 'native-goal-task', goalId: record.id,
+        taskId: record.tasks[0]!.id, origin: record.origin, consentRevision: 1, outcome: { status: expected } } })
+      const status = await profile.ctx.tools.execute({ callId: CallId(`goal-learning-status-${randomUUID()}`), name: 'tianwen_learning_status',
+        arguments: {}, agent: profile.main, signal: new AbortController().signal })
+      expect(status).toMatchObject({ isError: false, value: { history: { goalTaskOutcomes: { observed: 1 } }, currentSession: { goalTaskOutcomes: { observed: 1 } } } })
+      expect(JSON.stringify(status.value)).not.toContain(record.tasks[0]!.execution!.sessionId)
+      expect(JSON.stringify(status.value)).not.toContain(record.origin!.commandId)
       const frozen = readLongGoal(profile.stateRoot, record.id)
       await profile.dispose(false)
       const cold = await mountProfile('Produce a result that the pre-existing check rejects.', {
@@ -551,14 +697,16 @@ describe('native Long Goal profile execution', () => {
         expect(readLongGoal(cold.stateRoot, record.id)).toEqual(frozen)
         expect(cold.adapter.requests).toHaveLength(0)
         expect(evaluations).toBe(1)
+        expect(cold.ctx.tianwenEvolution.listGoalTaskOutcomes()).toEqual(observations)
         if (process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT !== undefined) {
           const receiptRoot = resolve(process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT)
           if (!receiptRoot.startsWith(resolve('D:/DevData') + '\\')) throw new Error('receipt must stay under D:/DevData')
           mkdirSync(receiptRoot, { recursive: true })
           writeFileSync(join(receiptRoot, `sdk-${mode}.json`), JSON.stringify({ controlled: true, naturalEvidence: false,
             publishedRuntime: process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1', preparations, evaluations,
-            scriptedRequests: profile.adapter.requests.length, actualProviderRequests: 0, record: frozen,
-            cold: { newContext: true, sameProcess: true, requests: cold.adapter.requests.length, recordExact: true } }, null, 2), { flag: 'wx' })
+            scriptedRequests: profile.adapter.requests.length, actualProviderRequests: 0, record: frozen, goalTaskOutcomes: observations,
+            learningStatus: status.value,
+            cold: { newContext: true, sameProcess: true, requests: cold.adapter.requests.length, recordExact: true, outcomeExact: true } }, null, 2), { flag: 'wx' })
         }
       } finally { await cold.dispose(true) }
     } finally { await profile.dispose() }

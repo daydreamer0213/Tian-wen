@@ -67,6 +67,8 @@ export class GoalTaskAcceptanceChecks {
 
   mount(): () => Promise<void> {
     if (this.check === undefined) return async () => {}
+    // Recover pending consumption of already-persisted results, never rerun a checker.
+    for (const goal of listLongGoals(this.stateRoot)) void this.finishGoal(goal.id).catch(error => this.warn(error))
     const owner = this
     const off = this.ctx.on('llm/stream', async function* (request, next) {
       const agent = request.sessionId === undefined ? undefined : owner.ctx.agents.get(SessionId(String(request.sessionId)))
@@ -125,6 +127,8 @@ export class GoalTaskAcceptanceChecks {
     const signal = AbortSignal.any([stepSignal, this.shutdown.signal])
     const prefixDigest = sha256(agent.session.events)
     const modelConfigDigest = sha256(header.data.header.config)
+    const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
+    const learningConsentRevision = consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3' ? consent.revision : undefined
     const source = await this.source(goal)
     const prepared = await withConversationObservationCancellation(signal, () => this.check!.prepare({
       goal: structuredClone(goal), task: structuredClone(task), attempt: structuredClone(attempt), source: structuredClone(source),
@@ -144,6 +148,7 @@ export class GoalTaskAcceptanceChecks {
       goalDigest: goalDigest(goal), taskDigest: sha256(task), headerSeq: header.seq, preparedSeq: agent.session.events.at(-1)!.seq, prefixDigest, modelConfigDigest,
       checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
       inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition,
+      ...(learningConsentRevision === undefined ? {} : { learningConsentRevision }),
     }
     appendGoalTaskAcceptance({ stateRoot: this.stateRoot, longGoalId: goal.id, expectedRevision: latest.goal.revision,
       taskId: task.id, event: { type: 'task-acceptance-prepared', taskId: task.id, binding } })
@@ -154,9 +159,46 @@ export class GoalTaskAcceptanceChecks {
     if (this.check === undefined) return
     const prior = this.pending.get(longGoalId)
     if (prior !== undefined) return prior
-    const operation = this.finish(longGoalId)
+    const operation = this.finish(longGoalId).then(() => this.consumeOutcomes(longGoalId))
     this.pending.set(longGoalId, operation)
     try { await operation } finally { this.pending.delete(longGoalId) }
+  }
+  private async consumeOutcomes(longGoalId: string): Promise<void> {
+    const goal = this.read(longGoalId)
+    if (goal?.origin === undefined || this.shutdown.signal.aborted) return
+    for (const event of goal.tianwenEvents ?? []) {
+      if (event.type !== 'task-acceptance-prepared') continue
+      const b = event.binding, revision = b.learningConsentRevision
+      if (revision === undefined || !this.authorized(revision)) continue
+      const result = goal.tianwenEvents?.find(item => item.type === 'task-acceptance-finished' && item.taskId === event.taskId && item.epoch === b.epoch)
+      if (result?.type !== 'task-acceptance-finished') continue
+      await this.source(goal)
+      const saved = await this.ctx.sessionPersistence.inspect(SessionId(b.childSessionId))
+      const events = saved.events.filter(item => item.seq <= result.endSeq)
+      const end = events.at(-1), header = events.find(item => item.seq === b.headerSeq)
+      // All async reads precede this synchronous final Goal/Task/attempt check and ledger write.
+      const latest = this.find(b.childSessionId)
+      if (latest === undefined || latest.attempt.epoch !== b.epoch) continue
+      if (sha256(latest.task) !== b.taskDigest || goalDigest(latest.goal) !== b.goalDigest
+        || latest.task.execution?.goalId !== b.nativeGoalId || latest.attempt.permissionFingerprint !== b.permissionFingerprint
+        || sandboxModeFromEvents(events, false) !== latest.attempt.permissionMode || String(saved.meta.parentSession) !== b.parentSessionId
+        || end?.type !== 'turn/end' || end.seq !== result.endSeq || sha256(events) !== result.materialDigest
+        || sha256(events.filter(item => item.seq <= b.preparedSeq)) !== b.prefixDigest
+        || header?.type !== 'request/header' || sha256(header.data.header.config) !== b.modelConfigDigest) {
+        throw new Error('Goal Task outcome original native material changed')
+      }
+      if (this.shutdown.signal.aborted || !this.authorized(revision)) return
+      // Source verification precedes the durable write; storage errors remain in the original Goal lane.
+      this.ctx.tianwenEvolution.recordGoalTaskOutcome({ source: 'native-goal-task', goalId: goal.id, taskId: event.taskId, epoch: b.epoch,
+        origin: structuredClone(goal.origin), parentSessionId: b.parentSessionId, childSessionId: b.childSessionId, nativeGoalId: b.nativeGoalId,
+        preparedSeq: b.preparedSeq, endSeq: result.endSeq, preparationDigest: result.preparationDigest, materialDigest: result.materialDigest,
+        consentRevision: revision, modelConfigDigest: b.modelConfigDigest, checkerId: b.checkerId, checkerDigest: b.checkerDigest,
+        contractDigest: b.contractDigest, inputsDigest: b.inputsDigest, requiredConditionDigest: sha256(b.requiredCondition), outcome: structuredClone(result.outcome) })
+    }
+  }
+  private authorized(revision: number): boolean {
+    const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
+    return consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3' && consent.revision === revision
   }
   private async finish(longGoalId: string): Promise<void> {
     const goal = this.read(longGoalId)
