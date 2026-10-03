@@ -1,8 +1,8 @@
 import { lstat, mkdir, open, readdir, realpath, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
-import { CONVERSATION_FILE_MAX_ENTRY_BYTES, parseConversationFileEntries, type ConversationFileEntry } from '@tianwen/evolution'
-export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial } from '@tianwen/evolution'
-export type { ConversationFileEntry, ConversationFileMaterial } from '@tianwen/evolution'
+import { CONVERSATION_FILE_MAX_ENTRY_BYTES, parseConversationFileEntries, type ConversationFileEntry } from '@tianwen/evolution/content-review'
+export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERSATION_FILE_MAX_COUNT, parseConversationFileEntries, parseConversationFileMaterial } from '@tianwen/evolution/content-review'
+export type { ConversationFileEntry, ConversationFileMaterial } from '@tianwen/evolution/content-review'
 
 function slashPath(value: string): string {
   return value.split(sep).join('/')

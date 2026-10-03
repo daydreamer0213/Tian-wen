@@ -5,7 +5,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, sha256, parseConversationReviewChecks, conversationReviewConsensus, type Sha256Digest, type ConversationJudgmentProof, type ConversationReviewCheck } from '@tianwen/evolution'
+import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, sha256, parseConversationReviewChecks, conversationReviewConsensus, type Sha256Digest, type ConversationJudgmentProof, type ConversationReviewCheck } from '@tianwen/evolution/content-review'
 import { unpackConversationFileClaimPacket } from '@tianwen/evolution/file-claim-packet'
 
 // Full source/final snapshots and the lossless review projection share this

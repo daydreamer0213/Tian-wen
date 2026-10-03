@@ -33,6 +33,10 @@
     "./external-check": {
       "types": "./dist/conversation-external-check.d.ts",
       "default": "./dist/conversation-external-check.js"
+    },
+    "./content-review": {
+      "types": "./dist/content-review-contract.d.ts",
+      "default": "./dist/content-review-contract.js"
     }
   },
   "dependencies": {

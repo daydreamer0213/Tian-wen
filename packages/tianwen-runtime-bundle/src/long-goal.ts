@@ -13,6 +13,8 @@ import { WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import { sha256 } from '@tianwen/evolution/learning-intake'
 import { parseGoalCommandOrigin, parseGoalTaskAcceptanceEvent, type GoalCommandOrigin, type GoalTaskAcceptanceEvent } from './goal-task-acceptance-contract.js'
+import { parseGoalTaskContentReviewEvent, type GoalTaskContentReviewEvent } from './goal-task-acceptance-contract.js'
+import { conversationReviewConsensus } from '@tianwen/evolution/content-review'
 
 import { readGoalStatus } from './status.js'
 import type {
@@ -306,6 +308,11 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
       catch (error) { throw new LongGoalIntegrityError('Goal Task acceptance event is invalid', { cause: error }) }
       continue
     }
+    if (event.type === 'task-content-review-started' || event.type === 'task-content-review-finished') {
+      try { events.push(parseGoalTaskContentReviewEvent(event)) }
+      catch (error) { throw new LongGoalIntegrityError('Goal Task content review event is invalid', { cause: error }) }
+      continue
+    }
     if (event.type === 'attempt-started' && hasExactKeys(event, ['type', 'taskId', 'attempt'])) {
       events.push({ type: 'attempt-started', taskId: event.taskId, attempt: parseTianwenAttempt(event.attempt) })
       continue
@@ -419,6 +426,9 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
 function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): void {
   const preparations = new Map<string, Extract<GoalTaskAcceptanceEvent, { type: 'task-acceptance-prepared' }>>()
   const finished = new Set<string>()
+  const acceptanceResults = new Map<string, Extract<GoalTaskAcceptanceEvent, { type: 'task-acceptance-finished' }>>()
+  const contentStarts = new Map<string, Extract<GoalTaskContentReviewEvent, { type: 'task-content-review-started' }>>()
+  const contentFinished = new Set<string>()
   const projections = new Map<string, {
     attempts: TianwenExecutionAttempt[]
     provisioningFailedEpochs: Set<number>
@@ -463,6 +473,26 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       continue
     }
     const current = projection.attempts.at(-1)
+    if (event.type === 'task-content-review-started' || event.type === 'task-content-review-finished') {
+      const key = `${event.taskId}:${event.epoch}`
+      const prepared = preparations.get(key)
+      const start = contentStarts.get(key)
+      const result = acceptanceResults.get(key)
+      if (current?.epoch !== event.epoch || prepared?.binding.contentReview === undefined || result?.type !== 'task-acceptance-finished') throw new LongGoalIntegrityError('Content review requires its original prepared Task result')
+      if (event.type === 'task-content-review-started') {
+        if (start !== undefined || event.preparationDigest !== sha256(prepared.binding) || event.materialDigest !== result.materialDigest
+          || event.reviewMaterialDigest === null && event.fileResult !== undefined
+          || event.reviewMaterialDigest !== null && (prepared.binding.contentReview.files !== undefined) !== (event.fileResult !== undefined)) throw new LongGoalIntegrityError('Content review must start once from original material')
+        contentStarts.set(key, event)
+      } else if (start?.type !== 'task-content-review-started' || event.startDigest !== sha256(start)
+        || contentFinished.has(key)
+        || event.result.status === 'reviewed' && (start.reviewMaterialDigest === null || event.result.checks.some(check =>
+          [prepared.binding.childSessionId, prepared.binding.parentSessionId, prepared.binding.requirementsSnapshot!.goal.origin.sessionId].includes(check.proof.sessionId)))) {
+        throw new LongGoalIntegrityError('Content review requires its exact start and independent checks once')
+      }
+      if (event.type === 'task-content-review-finished') contentFinished.add(key)
+      continue
+    }
     if (event.type === 'task-acceptance-prepared') {
       const b = event.binding
       const key = `${event.taskId}:${b.epoch}`
@@ -482,6 +512,7 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
         throw new LongGoalIntegrityError('Acceptance result requires its exact preparation once')
       }
       finished.add(key)
+      acceptanceResults.set(key, event)
       continue
     }
     if (event.type === 'attempt-permission-mode-observed') {
@@ -1195,6 +1226,11 @@ export function appendGoalTaskAcceptance(input: TianwenAttemptEventInput & { rea
   return appendTianwenEvent(input, input.event)
 }
 
+export function appendGoalTaskContentReview(input: TianwenAttemptEventInput & { readonly event: GoalTaskContentReviewEvent }): LongGoalRecordV3 {
+  if (input.taskId !== input.event.taskId) throw new LongGoalIntegrityError('Content review Task identity mismatch')
+  return appendTianwenEvent(input, input.event)
+}
+
 export function goalTaskAcceptanceGoalDigest(record: LongGoalRecordV3) {
   return sha256({ id: record.id, objective: record.objective, context: record.context, successCriteria: record.successCriteria, origin: record.origin })
 }
@@ -1206,7 +1242,15 @@ export function readGoalTaskAcceptanceProjection(record: LongGoalRecordV3, taskI
   if (prepared?.type !== 'task-acceptance-prepared') return undefined
   const finished = record.tianwenEvents?.findLast(event => event.type === 'task-acceptance-finished'
     && event.taskId === taskId && event.epoch === prepared.binding.epoch)
+  const content = record.tianwenEvents?.findLast(event => event.type === 'task-content-review-finished' && event.taskId === taskId && event.epoch === prepared.binding.epoch)
+  const contentReview = prepared.binding.contentReview === undefined ? undefined : content?.type !== 'task-content-review-finished'
+    ? { status: 'pending' as const, detail: 'No persisted independent content result.' }
+    : content.result.status === 'unverifiable' ? content.result : (() => {
+      const summary = conversationReviewConsensus(content.result.checks)
+      return { status: summary.verdict, detail: summary.explanation }
+    })()
   return { epoch: prepared.binding.epoch, checkerId: prepared.binding.checkerId, requiredCondition: prepared.binding.requiredCondition,
+    ...(contentReview === undefined ? {} : { contentReview }),
     ...(finished?.type === 'task-acceptance-finished' ? finished.outcome : { status: 'pending' as const, detail: 'No persisted acceptance result.' }) }
 }
 
@@ -1897,7 +1941,9 @@ export function formatLongGoalStatusText(status: ReadLongGoalStatusProjection): 
       ? ''
       : ` (${task.blockedReason.code}: ${task.blockedReason.message})`
     const acceptance = 'acceptance' in task && task.acceptance !== undefined ? ` [acceptance: ${task.acceptance.status}; ${task.acceptance.detail}]` : ''
-    lines.push(`${task.id}: ${task.phase}${current} — ${task.objective}${blocked}${acceptance}`)
+    const content = 'acceptance' in task && task.acceptance?.contentReview !== undefined
+      ? ` [content: ${task.acceptance.contentReview.status}; ${task.acceptance.contentReview.detail}]` : ''
+    lines.push(`${task.id}: ${task.phase}${current} — ${task.objective}${blocked}${acceptance}${content}`)
   }
   return lines.join('\n')
 }

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 Goal Task 内容检查已接入原完成流程
+
+5787926之后，可信prepare首Task请求前可选冻结内容计划/实际原文件；原功能结果入账后在原finish lane自动双审，明确native-goal-task来源、保留command/Planner/工具/回答身份。原Goal一次start/finish、完整声明文件和原动作成败/seq、两原native proof、同意/关闭/绑定复核、0请求冷恢复保持，功能/内容状态分别供Planner/status消费；不伪造ConversationTask或用户评价。详见[准确交付与方法版本下一步](tianwen-goal-task-content-review-20261003.md)。
+
+独立2P2已关闭（旧同意不挡后来Task、文件保留原动作结果），复核无新有据P1/P2。完整发行/两声明/SDK扫描及15文件393项通过，最终发行14实际SDK控制通过、0真实提供者；六双审各prepare/evaluate1/1、两独立proof、新Context同进程0请求，不当自然改善。纯协议导入收窄、主入口SDK表不放宽。正式1327364B/5af25fcd…逐字保持；最近23/22/16/1可信问题/8成功候选/pair false/反馈0/研究0/隔离true，本包未重新正式mount。
+
+下一核对Task确实采用的方法注入/版本并接原研究消费者，随后原研究裁决/治理启用/后续效果与回滚分别核验；内容met不授旧研究资格。完整目标active/incomplete、main/Daily NO-GO、原门槛/同意/隔离/停止/十工作日窗口不变，不索题/催评/造失败/重评旧样本/加练习或机械整体blocked。D约18.18GiB>=15，无下载/新容器；正常新夹具清理。自动审批本包拒删两个无文件内容的启动失败空目录profile-aElUUY/profile-NZN953（blocked by policy，未给具体原因），保留不绕过；旧45,598B拒删/两历史目录保持。本条覆盖下方内容接缝待实现的当前待办。
+
 ## 2026-10-03 Goal Task 原始材料已恢复，原入账实际消费
 
 22da157之后，原准备首请求前保存小型 Goal/Task/权限快照，原SDK日志保持唯一；共用只读材料读取并由原入账消费，异步后同步校验/同意/关闭/保存错误保持。研究读取从既有 ./runtime 公开，给定来源逐字段核对/前后同意/完整512KiB拒绝；旧无快照明确缺失，后续context/resolution变化只返回原快照，外部文件未保存的内容不补造。见[准确交付与下一内容核验接缝](tianwen-goal-task-material-20261003.md)。

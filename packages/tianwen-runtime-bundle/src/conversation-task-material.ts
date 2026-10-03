@@ -2,11 +2,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { isAbsolute, relative, resolve, sep } from 'node:path'
-import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSessionLifecycleFingerprint, parseConversationFileEntries, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution'
+import { CAPTURED_FILE_FACTS_TOOL, conversationFileCaptureOutputKind, learningSessionLifecycleFingerprint, parseConversationFileEntries, sha256, type ConversationFileMaterial, type ConversationFileEntry, type ConversationTask, type ConversationTaskSource, type ConversationQualityContract } from '@tianwen/evolution/content-review'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
-import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution'
+import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution/content-review'
 import { isCreatedFileMissingRead, isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
-import { conversationRequestContentDigest } from '@tianwen/evolution'
+import { conversationRequestContentDigest } from '@tianwen/evolution/content-review'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
   return events.flatMap(event => {
@@ -59,7 +59,7 @@ interface ReadOnlyFileExecutionEvidence {
   readonly directoryObservations: readonly { readonly command: string; readonly stdout: string }[]
 }
 
-interface FileActionExecutionEvidence {
+export interface FileActionExecutionEvidence {
   readonly schemaVersion: 'tianwen.file-execution-evidence.v2'
   readonly actions: readonly {
     readonly tool: string
@@ -70,7 +70,7 @@ interface FileActionExecutionEvidence {
   }[]
   readonly directoryObservations: ReadOnlyFileExecutionEvidence['directoryObservations']
 }
-interface FileDenialExecutionEvidence {
+export interface FileDenialExecutionEvidence {
   readonly schemaVersion: 'tianwen.file-execution-evidence.v3'
   readonly actions: readonly (FileActionExecutionEvidence['actions'][number] | {
     readonly tool: 'read'; readonly path: null; readonly callSeq: number; readonly resultSeq: number
@@ -79,7 +79,7 @@ interface FileDenialExecutionEvidence {
   readonly directoryObservations: ReadOnlyFileExecutionEvidence['directoryObservations']
 }
 
-interface FileMutationDenialExecutionEvidence {
+export interface FileMutationDenialExecutionEvidence {
   readonly schemaVersion: 'tianwen.file-execution-evidence.v4'
   readonly actions: readonly (FileActionExecutionEvidence['actions'][number] | {
     readonly tool: 'read' | 'write' | 'edit'; readonly path: null; readonly callSeq: number; readonly resultSeq: number
@@ -218,7 +218,13 @@ export async function recoverConversationTaskAnswer(ctx: Context, task: Conversa
 
 function recoverFileActions(events: readonly SessionEvent[], task: ConversationTask, files: ConversationFileMaterial): FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence {
   const span = events.filter(event => event.seq >= task.source.startSeq && event.seq <= task.completion!.endSeq)
-  const boundary = task.completion!.files!.captureSeq
+  return projectNativeFileActions(span, task.completion!.files!.captureSeq, files, task.fileAncillary,
+    recoverFileExecution(events, task).directoryObservations)
+}
+
+/** Reuse only with a host-verified original SDK span and capture boundary. No Task identity is invented. */
+export function projectNativeFileActions(span: readonly SessionEvent[], boundary: number, files: ConversationFileMaterial,
+  ancillary: ConversationTask['fileAncillary'] = [], directoryObservations: ReadOnlyFileExecutionEvidence['directoryObservations'] = []): FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence {
   const actions: FileMutationDenialExecutionEvidence['actions'][number][] = []
   for (const call of span) {
     if (call.type !== 'tool/call') continue
@@ -229,7 +235,7 @@ function recoverFileActions(events: readonly SessionEvent[], task: ConversationT
       || call.seq > boundary || result.seq <= call.seq || result.seq > boundary
       || result.sourceEventSeqs?.length !== 1 || result.sourceEventSeqs[0] !== call.seq
       || result.data.turn !== call.data.turn || result.data.step !== call.data.step) throw new Error('native file action evidence unavailable')
-    const denial = task.fileAncillary?.find(record => record.callSeq === call.seq && (record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied'))
+    const denial = ancillary?.find(record => record.callSeq === call.seq && (record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied'))
     if (denial?.payload.tool === 'read-denied' || denial?.payload.tool === 'file-mutation-denied') {
       const receipt = JSON.parse(denial.payload.nativeDenialJson) as { reason: string }
       actions.push({ tool: call.data.name as 'read' | 'write' | 'edit', path: null, callSeq: call.seq, resultSeq: result.seq, status: 'denied', reason: receipt.reason })
@@ -248,7 +254,7 @@ function recoverFileActions(events: readonly SessionEvent[], task: ConversationT
   }
   return parseFileExecutionEvidence({ schemaVersion: actions.some(action => action.status === 'denied' && action.tool !== 'read') ? 'tianwen.file-execution-evidence.v4' : actions.some(action => action.status === 'denied')
     ? 'tianwen.file-execution-evidence.v3' : 'tianwen.file-execution-evidence.v2', actions,
-    directoryObservations: recoverFileExecution(events, task).directoryObservations }) as FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence
+    directoryObservations }) as FileActionExecutionEvidence | FileDenialExecutionEvidence | FileMutationDenialExecutionEvidence
 }
 
 function recoverFileExecution(events: readonly SessionEvent[], task: ConversationTask): ReadOnlyFileExecutionEvidence {

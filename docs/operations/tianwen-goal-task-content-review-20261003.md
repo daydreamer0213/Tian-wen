@@ -1,0 +1,25 @@
+# Goal Task 原结果内容检查：当前交付
+
+基线5787926。本包把原生长期目标的Task结果接入既有内容检查，补的是生产连接，没有新的验收标准、自然评价或自动启用权限。完整自动学习仍未完成，目标保持active，main/Daily完整学习NO-GO、原十个工作日窗口及原停止条件不变。
+
+可信goalTaskAcceptance.prepare可返回contentReview，可包含原ConversationFileMaterial。原LongGoal owner在首Task提供者请求前解析并冻结计划、实际核对原文件字节；保存在原preparation，与原Task/epoch/command/模型/权限/合同一起绑定。没有配置保持原行为，旧准备不补评、事后同意不追认。没有声明文件材料的文件任务不降级成聊天通过。
+
+原功能结果持久保存并进入原Evolution ledger后，原串行finish lane自动执行内容检查；没有第二套账本、运行循环或判断器。明确native-goal-task材料视图保留实际直接用户command与原Goal/Task快照；Planner要求、Goal上下文/标准和工具调用元数据不冒充事实来源，也不创建ConversationTask或SDK用户消息。范围是该Task及适用原Goal约束，不要求一个Task独立完成整个长期目标。功能结果不喂给内容评审，两个状态分别进入Planner/status/状态文字。
+
+聊天内容使用原SDK助手回复与工具结果；文件内容捕获完整声明产物并沿用原初始文件/最终答案划分。原recoverFileActions主体提取projectNativeFileActions，原普通任务仍使用同一函数及原ancillary/directory证据。Goal文件视图保留原调用/唯一对应结果的seq、turn/step、capture边界、路径和success/error；非文件工具原结果仍可作为其适用事实。read/write/edit/facts原body与写后读回内容不作为生成内容的事实来源。成功写入、文件存在或调用本身不证明内容真值；不声明未知外部输入完整或任意外部效果成立。
+
+一次start保存原准备/功能材料/完整评审视图摘要及必要最终文件；既有runConversationClaimReview执行两项隔离原生检查，原引文/完整claim audit/模型配置/native proof校验后保存一次finish。原v3精确同意revision、关闭及原绑定在实际请求前后复核，所有异步读取后的最终同步校验再写。错误记不可核验，真实持久保存错误沿原Goal lane传播。已开始检查不重发；原绑定有效的新Context只恢复并核验原proof，丢失finish记中断不可核验，不重评。后来文件字节不替代start冻结产物。
+
+独立静态审查发现两项P2并关闭：旧Task同意版本不匹配不再退出整个Goal，以免阻断新同意下的后来Task；文件视图补回经过相关验证的动作成败及适用非文件结果。实际两Task准备revision[1,3]控制只保存第二Task检查；实际SDK read成功/失败后edit控制在相同产物下保留不同动作事实。两轮修复复核和最后导入复核无新增有据P1/P2；审查者未执行测试。
+
+发行检查发现新共用模块经Evolution root带入无关模块。原pure ./content-review仅重导出现有协议、常量和类型，共用模块机械改成该子入口；Goal-first/Runtime输入表只增加实际精确consumer与纯协议，不放开Evolution root/index或三个无关模块，主入口SDK包表不变。声明值收窄、工具测试参数表和测试模型cold规划错误已修；不把工程失败计为自然模型失败，不宣称本包全程先测试后实现。
+
+最终完整Runtime/ESM/客户端/两公开声明构建通过，公共SDK扫描无私有导入；14相关文件320项与发行包73项，共15文件393项通过。最终发行实际SDK14控制通过：原四功能分类、六双审/冷恢复控制、撤回、重新同意下后来Task、缺文件和中断。六双审控制原prepare/evaluate各1/1、两独立native proof；met、not-met、两完整文件、成功/失败读取分别可见；新Context同进程0请求恢复，后来文件内容不替代原产物。全部是脚本工程控制、0真实提供者，不是自然学习改善或新Node进程验证；没有全项目全量/Docker验收。
+
+最后历史恢复控制先出现真实首红：已保存结果遇到后来Goal上下文时，恢复仍错误套用了新检查的当前绑定，导致原结果不能恢复。修复仅针对已有精确记录：已入账结果逐字核对原材料后不再入账；已完成内容检查读取原快照、核对原视图摘要及两proof，不发请求。首次入账及新检查仍执行原异步后当前绑定、同意、关闭与保存校验。实际后来上下文、首次Task漂移和保存故障三项控制通过，最后发行六双审包含此历史恢复；独立静态复核无新有据P1/P2，审查者未执行测试。首红及修复后日志均保留。
+
+正式账本仍为1327364B、SHA256 5af25fcd7d6531a58483df8d87fde046dfe8baa7abc6338a496c12a55cce80da。最近确认的正式23观察22完成/16初筛/1可信问题/8成功候选/pair false/反馈0/研究0/隔离true，本包未重新正式挂载，也未产生新的自然来源。Runtime发行随实现更新，旧证据保留。
+
+下一核对原Goal Task实际方法注入与版本来源，在首请求前记录确实采用的版本，由原研究消费者显式消费native-goal-task的功能/内容/方法证据。内容met不直接授予旧Conversation研究资格或方法启用；研究裁决、治理启用、后续任务改善及回滚仍分别核验。不造失败、索题、催用户评价、追加已结束练习、重跑旧样本或扩大成整体blocked。
+
+必要日志与小回执在D:/DevData/tianwen-goal-task-content-review-20261003，复用工作树、依赖、SDK与原文件读取，无下载/整环境复制/新容器。D约18.18GiB>=15，未达20偏好，Docker进程0。正常自有夹具退出清理；自动审批本包以blocked by policy拒绝删除两个启动失败空目录profile-aElUUY/profile-NZN953（文件0B，未给具体原因），已保留且不重试/绕过。旧45,598B拒删目录profile-mtYfRP及两历史目录保持。

@@ -1,5 +1,5 @@
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
-import type { GoalCommandOrigin, GoalTaskAcceptanceEvent } from './goal-task-acceptance-contract.js'
+import type { GoalCommandOrigin, GoalTaskAcceptanceEvent, GoalTaskContentReviewEvent } from './goal-task-acceptance-contract.js'
 
 export interface TaskExecutionBinding {
   readonly goalId: string
@@ -129,6 +129,7 @@ export interface TianwenTerminalDeliveryBoundary {
 
 export type TianwenLongGoalEvent =
   | GoalTaskAcceptanceEvent
+  | GoalTaskContentReviewEvent
   | {
       readonly type: 'attempt-started'
       readonly taskId: string
@@ -254,6 +255,10 @@ export interface LongGoalStatusProjectionV3 extends Omit<LongGoalStatusProjectio
       readonly requiredCondition: string
       readonly status: 'pending' | 'verified' | 'rejected' | 'unverifiable'
       readonly detail: string
+      readonly contentReview?: {
+        readonly status: 'pending' | 'met' | 'not-met' | 'inconclusive' | 'unverifiable'
+        readonly detail: string
+      }
     }
     readonly attempt?: Pick<TianwenExecutionAttempt, 'epoch' | 'status' | 'permissionMode'> & {
       readonly hadPermissionLimit: boolean

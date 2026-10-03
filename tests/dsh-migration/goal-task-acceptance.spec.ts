@@ -2,9 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
-import { appendGoalTaskAcceptance, appendTianwenAttemptStarted, bindGoalFirstLongGoalTask, commitLongGoalPlan, createContinuousLongGoal, readLongGoal } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
+import { appendGoalTaskAcceptance, appendGoalTaskContentReview, appendTianwenAttemptStarted, bindGoalFirstLongGoalTask, commitLongGoalPlan, createContinuousLongGoal, readLongGoal } from '../../packages/tianwen-runtime-bundle/src/long-goal.js'
 import type { LongGoalRecordV3 } from '../../packages/tianwen-runtime-bundle/src/long-goal-contract.js'
-import { parseGoalTaskAcceptanceEvent, type GoalTaskAcceptanceBinding } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance-contract.js'
+import { parseGoalTaskAcceptanceEvent, parseGoalTaskContentReviewEvent, type GoalTaskAcceptanceBinding } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance-contract.js'
 
 const BASE = resolve('D:/DevData/tianwen-dsh-probe/goal-task-acceptance')
 function fixture() {
@@ -36,6 +36,34 @@ function fixture() {
 }
 
 describe('Goal Task acceptance durable boundaries', () => {
+  it('persists content review once under its exact original result and rejects substituted starts or finishes', () => {
+    const f = fixture()
+    try {
+      const binding = { ...f.binding, contentReview: { protocol: 'tianwen.goal-task-content-review.v1' as const },
+        requirementsSnapshot: { goal: { id: f.goal.id, objective: f.goal.objective, context: f.goal.context,
+          successCriteria: f.goal.successCriteria, workspaceRoot: f.goal.workspaceRoot, origin: f.goal.origin! }, task: f.goal.tasks[0]!, permissionMode: 'workspace-write' as const } }
+      let saved = appendGoalTaskAcceptance({ ...f.input, expectedRevision: f.goal.revision, event: { type: 'task-acceptance-prepared', taskId: f.input.taskId, binding } })
+      const start = { type: 'task-content-review-started' as const, taskId: f.input.taskId, epoch: 1,
+        preparationDigest: sha256(binding), materialDigest: sha256('original material'), reviewMaterialDigest: sha256('review view') }
+      expect(() => appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: start })).toThrow()
+      saved = appendGoalTaskAcceptance({ ...f.input, expectedRevision: saved.revision, event: { type: 'task-acceptance-finished', taskId: f.input.taskId,
+        epoch: 1, preparationDigest: sha256(binding), endSeq: 10, materialDigest: start.materialDigest, outcome: { status: 'verified', detail: 'Functional only.' } } })
+      for (const changed of [{ ...start, epoch: 2 }, { ...start, preparationDigest: sha256('other') }, { ...start, materialDigest: sha256('other') }]) {
+        expect(() => appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: changed })).toThrow()
+        expect(readLongGoal(f.root, f.goal.id)).toEqual(saved)
+      }
+      saved = appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: start })
+      expect(() => appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: start })).toThrow()
+      const finish = { type: 'task-content-review-finished' as const, taskId: f.input.taskId, epoch: 1, startDigest: sha256(start),
+        result: { status: 'unverifiable' as const, detail: 'Interrupted, no regrade.' } }
+      expect(() => appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: { ...finish, startDigest: sha256('other start') } })).toThrow()
+      for (const changed of [{ ...start, arbitrary: true }, { ...finish, result: { status: 'reviewed', checks: [] } },
+        { ...finish, result: { ...finish.result, qualifyingStudy: true } }]) expect(() => parseGoalTaskContentReviewEvent(changed)).toThrow()
+      saved = appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: finish })
+      expect(readLongGoal(f.root, f.goal.id)).toEqual(saved)
+      expect(() => appendGoalTaskContentReview({ ...f.input, expectedRevision: saved.revision, event: finish })).toThrow()
+    } finally { f.remove() }
+  })
   it('freezes small original requirements, rejects substituted snapshots and retains legacy exact parsing', () => {
     const f = fixture()
     try {

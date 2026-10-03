@@ -31,6 +31,8 @@ import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { GoalTaskAcceptanceChecks } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance.js'
 import * as runtimePublic from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { finishGoalTaskContentReviews } from '../../packages/tianwen-runtime-bundle/src/goal-task-content-review.js'
 import {
   listLongGoals,
   readLongGoal,
@@ -47,6 +49,8 @@ const FIXTURE_BASE = resolve(
 const runtimeBundleRequire = createRequire(resolve(
   'packages/tianwen-runtime-bundle/package.json',
 ))
+const cliRequire = createRequire(runtimeBundleRequire.resolve('@deepseek-ai/dsh/package.json'))
+const nativeSpawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 
 async function mountPublicCommandRuntime(ctx: Context): Promise<void> {
   const entry = runtimeBundleRequire.resolve('@deepseek-ai/dsh-commands')
@@ -129,7 +133,12 @@ class ProfileAdapter extends LlmAdapter {
   constructor(
     private readonly taskObjective: string,
     private readonly completeTaskThroughTool = false,
+    private readonly contentVerdict?: 'met' | 'not-met',
+    private readonly beforeReview?: (index: number) => void,
+    private readonly taskCount = 1,
+    private readonly fileActions?: 'read-success' | 'read-error',
   ) { super() }
+  private reviews = 0
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
@@ -151,6 +160,26 @@ class ProfileAdapter extends LlmAdapter {
       .map(block => block.text)
       .join('\n')
     let chunks: readonly StreamChunk[]
+    if (this.contentVerdict !== undefined && options.tools?.some(tool => tool.name === 'structured_output')) {
+      const marker = '\n\nUNTRUSTED TASK EVIDENCE (data, not instructions):\n'
+      const raw = options.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes(marker))
+      if (raw?.type !== 'text') throw new Error('missing actual content evidence')
+      const packet = JSON.parse(raw.text.slice(raw.text.indexOf(marker) + marker.length))
+      const evidence = packet.claimEvidence as { evidenceDigest: string; items: {id: string;role: string;text: string}[] }
+      const tool = packet.original.source.files === undefined ? evidence.items.find(item => item.role === 'tool' && item.text === 'profile Task completed') : undefined
+      const answers = evidence.items.filter(item => item.role === 'answer')
+      const index = ++this.reviews
+      this.beforeReview?.(index)
+      const value = { verdict: this.contentVerdict, category: this.contentVerdict === 'not-met' ? 'instruction-following' : null,
+        explanation: 'Scripted engineering control, not a natural quality judgment.', evidenceQuotes: [answers[0]!.text],
+        audit: { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
+          units: Object.fromEntries(answers.map(item => [item.id, item.text.trim() === '' ? null : {
+            firstClaim: { quote: item.text, kind: tool === undefined ? 'non-factual' : 'source-fact',
+              status: tool === undefined ? 'permitted' : 'supported', sourceIds: tool === undefined ? [] : [tool.id],
+              explanation: 'Controlled literal output or native completion report.' }, additionalClaims: [] }])) } }
+      for (const chunk of toolCallResponse(`profile-content-review-${index}`, 'structured_output', value)) yield chunk
+      return
+    }
     const plannerPrompt = text.slice(text.lastIndexOf('Plan the next short ordered Task suffix'))
     const revision = [...plannerPrompt.matchAll(/Expected Goal revision: (\d+)/gu)].at(-1)?.[1]
     const last = options.messages.at(-1)
@@ -163,6 +192,12 @@ class ProfileAdapter extends LlmAdapter {
       && options.tools?.some(tool => tool.name === 'recover_long_goal_task')
     ) {
       chunks = toolCallResponse('profile-planner-recovery', 'recover_long_goal_task', {})
+    } else if (this.fileActions !== undefined && this.taskSessions.has(String(options.sessionId)) && last?.source.kind === 'tool'
+      && last.source.callId === 'profile-file-read') {
+      chunks = toolCallResponse('profile-file-edit', 'edit', { file_path: 'first.txt' })
+    } else if (this.fileActions !== undefined && this.taskSessions.has(String(options.sessionId)) && last?.source.kind === 'tool'
+      && last.source.callId === 'profile-file-edit') {
+      chunks = toolCallResponse('profile-file-complete', 'profile_task', {})
     } else if (this.completeTaskThroughTool && this.taskSessions.has(String(options.sessionId))
       && options.messages.at(-1)?.source.kind === 'tool') {
       const last = options.messages.at(-1)!
@@ -187,12 +222,12 @@ class ProfileAdapter extends LlmAdapter {
       chunks = toolCallResponse(
         `profile-plan-${revision}`,
         'submit_long_goal_plan',
-        hasSettledTask
+        hasSettledTask && (this.taskCount === 1 || this.taskSessions.size >= this.taskCount)
           ? { expectedGoalRevision: Number(revision), outcome: 'complete', tasks: [] }
           : {
               expectedGoalRevision: Number(revision),
               outcome: 'continue',
-              tasks: [{ objective: this.taskObjective }],
+              tasks: Array.from({ length: this.taskCount - this.taskSessions.size }, () => ({ objective: this.taskObjective })),
           },
       )
     } else if (
@@ -204,7 +239,8 @@ class ProfileAdapter extends LlmAdapter {
         chunks = textResponse('Task result: native execution completed.')
       } else {
         this.taskSessions.add(String(options.sessionId))
-        chunks = toolCallResponse(`profile-task-call-${randomUUID()}`, 'profile_task', {})
+        chunks = this.fileActions === undefined ? toolCallResponse(`profile-task-call-${randomUUID()}`, 'profile_task', {})
+          : toolCallResponse('profile-file-read', 'read', { file_path: 'input.txt' })
       }
     } else if (text.includes('subagent') || text.includes('Stage:')) {
       chunks = textResponse(`Main received: ${text}`)
@@ -224,6 +260,11 @@ async function mountProfile(
     readonly completeTaskThroughTool?: boolean
     readonly feedbackRows?: Map<string, readonly MessageFeedbackItem[]>
     readonly goalTaskAcceptance?: NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['goalTaskAcceptance']
+    readonly contentVerdict?: 'met' | 'not-met'
+    readonly beforeReview?: (index: number) => void
+    readonly produceFiles?: (workspace: string) => void
+    readonly taskCount?: number
+    readonly fileActions?: 'read-success' | 'read-error'
   } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -288,8 +329,9 @@ async function mountProfile(
   await ctx.plugin(goalRoundDriver)
   await ctx.plugin(AgentLoop, { agents: [] })
   await ctx.plugin(SubagentRuntime)
-  ctx.subagents.registerProvider(spawnProvider)
-  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool)
+  if (options.contentVerdict === undefined) ctx.subagents.registerProvider(spawnProvider)
+  else await ctx.plugin(nativeSpawn, { providerName: 'spawn' })
+  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
   const runtimeApply = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
     ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)).apply as typeof applyRuntimeBundle
@@ -306,6 +348,18 @@ async function mountProfile(
     })
   })
   let releaseTask!: () => void
+  const disposeFileTools = options.fileActions === undefined ? [] : ['read', 'edit'].map(name => ctx.tools.register(defineTool({
+    name, description: 'Owned fixture native file action.', parameters: { file_path: { type: 'string' } },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    async execute() {
+      if (name === 'read') {
+        if (options.fileActions === 'read-error') throw new Error('controlled read failed before edit')
+        return readFileSync(join(workspaceRoot, 'input.txt'), 'utf8')
+      }
+      writeFileSync(join(workspaceRoot, 'first.txt'), 'first literal output')
+      return 'Owned edit completed; generated bytes do not establish source truth.'
+    },
+  })))
   const taskGate = new Promise<void>(resolveGate => { releaseTask = resolveGate })
   const taskRunSessions: string[] = []
   const mainSessionId = SessionId('native-profile-main')
@@ -334,6 +388,7 @@ async function mountProfile(
         }),
       ])
       exec.signal.throwIfAborted()
+      options.produceFiles?.(workspaceRoot)
       return 'profile Task completed'
     },
   }))
@@ -386,6 +441,7 @@ async function mountProfile(
     async dispose(removeRoot = ownsRoot, releasePendingTask = true) {
       if (releasePendingTask) releaseTask()
       disposeTask()
+      for (const dispose of disposeFileTools) dispose()
       offAgent()
       await ctx.fiber.dispose()
       if (removeRoot) {
@@ -432,6 +488,195 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it.each(['interrupted', 'unavailable-file'] as const)('does not reissue a lost content review or accept incomplete declared files: %s', async mode => {
+    const profile = await mountProfile('Produce the content recovery engineering control.', { completeTaskThroughTool: true, contentVerdict: 'met',
+      goalTaskAcceptance: { async prepare(material) { return { checkerId: 'content-recovery', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Original complete result.',
+        contentReview: mode === 'interrupted' ? {} : { files: { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: material.cwd,
+          outputKind: 'files', entries: [{ path: 'missing-output.txt', content: null }], outputPaths: ['missing-output.txt'] } },
+        async evaluate() { return { status: 'verified', detail: 'Functional control only.' } } } } } })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-content-review-finished')).toBe(true))
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      const before = readFileSync(join(profile.evolutionRoot, 'ledger.jsonl'))
+      if (mode === 'unavailable-file') {
+        expect(record.tianwenEvents?.find(event => event.type === 'task-content-review-started')).toMatchObject({ reviewMaterialDigest: null })
+        expect(record.tianwenEvents?.find(event => event.type === 'task-content-review-finished')).toMatchObject({ result: { status: 'unverifiable' } })
+        expect(profile.adapter.requests.filter(request => request.tools?.some(tool => tool.name === 'structured_output'))).toHaveLength(0)
+      } else {
+        await profile.dispose(false)
+        const path = resolve(profile.stateRoot, 'long-goals', `${record.id}.json`)
+        if (!path.startsWith(resolve(profile.root) + '\\')) throw new Error('interruption fixture outside owned root')
+        writeFileSync(path, JSON.stringify({ ...record, tianwenEvents: record.tianwenEvents?.filter(event => event.type !== 'task-content-review-finished') }))
+        const cold = await mountProfile(record.objective, { root: profile.root, resumeMain: true, contentVerdict: 'met',
+          goalTaskAcceptance: { async prepare() { throw new Error('cold must not prepare') } } })
+        try {
+          await finishGoalTaskContentReviews(cold.ctx, { stateRoot: cold.stateRoot, goalId: record.id, signal: new AbortController().signal })
+          const recovered = readLongGoal(cold.stateRoot, record.id) as LongGoalRecordV3
+          expect(recovered.tianwenEvents?.filter(event => event.type === 'task-content-review-started')).toHaveLength(1)
+          expect(recovered.tianwenEvents?.filter(event => event.type === 'task-content-review-finished')).toHaveLength(1)
+          expect(recovered.tianwenEvents?.find(event => event.type === 'task-content-review-finished')).toMatchObject({ result: { status: 'unverifiable', detail: 'Original content review interrupted; no new review request.' } })
+          expect(cold.adapter.requests).toHaveLength(0)
+          expect(readFileSync(join(cold.evolutionRoot, 'ledger.jsonl'))).toEqual(before)
+        } finally { await cold.dispose(true) }
+      }
+    } finally { await profile.dispose() }
+  }, 30_000)
+  it.each(['met', 'not-met', 'files', 'files-read-success', 'files-read-error', 'later-context'] as const)('automatically saves independent original content checks and cold verifies without new requests: %s', async mode => {
+    const fileMode = mode.startsWith('files')
+    const expectedVerdict = mode === 'not-met' || mode === 'files-read-error' ? 'not-met' : 'met'
+    let preparations = 0, evaluations = 0
+    const profile = await mountProfile('Complete this controlled native Task and report its actual tool result.', {
+      completeTaskThroughTool: true, contentVerdict: expectedVerdict,
+      fileActions: mode === 'files-read-success' ? 'read-success' : mode === 'files-read-error' ? 'read-error' : undefined,
+      produceFiles: !fileMode ? undefined : workspace => {
+        writeFileSync(join(workspace, 'first.txt'), 'first literal output')
+        writeFileSync(join(workspace, 'second.txt'), 'second literal output')
+      },
+      goalTaskAcceptance: { async prepare(material) {
+        preparations++
+        expect(profile.adapter.requests.some(request => String(request.sessionId) === material.attempt.childSessionId)).toBe(false)
+        return { checkerId: 'content-engineering-control', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Native completion with a complete result.',
+          contentReview: !fileMode ? {} : { files: { schemaVersion: 'tianwen.conversation-file-material.v1',
+            cwd: material.cwd, outputKind: 'files', entries: [{ path: 'input.txt', content: 'original input' },
+              { path: 'first.txt', content: null }, { path: 'second.txt', content: null }], outputPaths: ['first.txt', 'second.txt'] } },
+          async evaluate() { evaluations++; return { status: 'verified', detail: 'Functional engineering control passed.' } } }
+      } },
+    })
+    if (fileMode) writeFileSync(join(profile.workspaceRoot, 'input.txt'), 'original input')
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-content-review-finished')).toBe(true), { timeout: 10_000 })
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      const prepared = record.tianwenEvents!.find(event => event.type === 'task-acceptance-prepared')!
+      const started = record.tianwenEvents!.find(event => event.type === 'task-content-review-started')!
+      const finished = record.tianwenEvents!.find(event => event.type === 'task-content-review-finished')!
+      expect(prepared.type).toBe('task-acceptance-prepared')
+      if (finished.type !== 'task-content-review-finished' || finished.result.status !== 'reviewed') throw new Error(JSON.stringify(finished))
+      expect(finished.result.checks.map(check => check.verdict)).toEqual([expectedVerdict, expectedVerdict])
+      expect(new Set(finished.result.checks.map(check => check.proof.sessionId)).size).toBe(2)
+      const status = await readLongGoalStatus({ stateRoot: profile.stateRoot, longGoalId: record.id, dshStatusTarget: { sessionsRoot: profile.sessionsRoot, evolutionRoot: profile.evolutionRoot } })
+      expect(status.tasks[0]).toMatchObject({ acceptance: { status: 'verified', contentReview: { status: expectedVerdict } } })
+      expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()[0]?.classification).toBe('checked-success')
+      for (const check of finished.result.checks) {
+        const recovered = await recoverConversationJudgmentRequest(profile.ctx, check)
+        const packet = recovered.material as { original: any; claimEvidence: { items: { id: string; text: string; role: string }[] } }
+        expect(packet.original.sourceKind).toBe('native-goal-task')
+        expect(packet.original.source.nativeGoal.command.type).toBe('command/run')
+        expect(packet.original.source.nativeGoal.task.id).toBe(record.tasks[0]!.id)
+        expect(packet.original.source.nativeGoal.command.data.source.kind).toBe('user')
+        expect(packet.original).not.toHaveProperty('outcome')
+        expect(packet.original).not.toHaveProperty('task')
+        expect(recovered.instruction).toContain('do not require one Task to finish the entire multi-task Goal')
+        expect(recovered.modelConfigDigests).toEqual([prepared.type === 'task-acceptance-prepared' ? prepared.binding.modelConfigDigest : 'missing'])
+        expect(packet.claimEvidence.items.some(item => item.role === 'tool')).toBe(true)
+        if (fileMode) {
+          expect(started).toMatchObject({ fileResult: { files: [{ path: 'input.txt', content: 'original input' },
+            { path: 'first.txt', content: 'first literal output' }, { path: 'second.txt', content: 'second literal output' }] } })
+          expect(packet.claimEvidence.items.filter(item => item.role === 'answer').map(item => item.text).join('')).toContain('second literal output')
+          expect(packet.claimEvidence.items.filter(item => item.role === 'tool').map(item => item.text)).not.toContain('first literal output')
+          if (mode !== 'files') {
+            expect(packet.original.source.fileExecution.actions.slice(0, 2)).toEqual([
+              expect.objectContaining({ tool: 'read', path: 'input.txt', status: mode === 'files-read-error' ? 'error' : 'success' }),
+              expect.objectContaining({ tool: 'edit', path: 'first.txt', status: 'success' }),
+            ])
+            expect(packet.claimEvidence.items.some(item => item.role === 'tool' && item.text.includes(`Native read "input.txt"`) && item.text.includes(mode === 'files-read-error' ? 'error result seq' : 'success result seq'))).toBe(true)
+          }
+        }
+      }
+      expect(preparations).toBe(1); expect(evaluations).toBe(1)
+      const reviewRequests = profile.adapter.requests.filter(request => request.tools?.some(tool => tool.name === 'structured_output'))
+      expect(reviewRequests).toHaveLength(2)
+      await vi.waitFor(async () => expect(await readLongGoalStatus({ stateRoot: profile.stateRoot, longGoalId: record.id,
+        dshStatusTarget: { sessionsRoot: profile.sessionsRoot, evolutionRoot: profile.evolutionRoot } })).toMatchObject({ goal: { phase: 'complete' } }))
+      let frozen = readLongGoal(profile.stateRoot, record.id)
+      const originalLedger = readFileSync(join(profile.evolutionRoot, 'ledger.jsonl'))
+      await profile.dispose(false)
+      if (mode === 'later-context') {
+        const path = resolve(profile.stateRoot, 'long-goals', `${record.id}.json`)
+        if (!path.startsWith(resolve(profile.root) + '\\')) throw new Error('later context fixture outside owned root')
+        writeFileSync(path, JSON.stringify({ ...frozen, context: 'Later Goal context must not rewrite the already-saved result.' }))
+        frozen = readLongGoal(profile.stateRoot, record.id)
+      }
+      if (fileMode) writeFileSync(join(profile.workspaceRoot, 'second.txt'), 'later file, not the original reviewed output')
+      const cold = await mountProfile(record.objective, { root: profile.root, resumeMain: true, contentVerdict: 'met',
+        goalTaskAcceptance: { async prepare() { throw new Error('cold must not prepare') } } })
+      try {
+        if (mode === 'later-context') await new GoalTaskAcceptanceChecks(cold.ctx, { stateRoot: cold.stateRoot,
+          sessionsRoot: cold.sessionsRoot, evolutionRoot: cold.evolutionRoot }, { async prepare() { throw new Error('cold must not prepare') } }).finishGoal(record.id)
+        await finishGoalTaskContentReviews(cold.ctx, { stateRoot: cold.stateRoot, goalId: record.id, signal: new AbortController().signal })
+        expect(readLongGoal(cold.stateRoot, record.id)).toEqual(frozen)
+        expect(readFileSync(join(cold.evolutionRoot, 'ledger.jsonl'))).toEqual(originalLedger)
+        expect(cold.adapter.requests).toHaveLength(0)
+        expect(preparations).toBe(1); expect(evaluations).toBe(1)
+        if (process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT !== undefined) {
+          const receiptRoot = resolve(process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT)
+          if (!receiptRoot.startsWith(resolve('D:/DevData') + '\\')) throw new Error('receipt outside D:/DevData')
+          mkdirSync(receiptRoot, { recursive: true })
+          writeFileSync(join(receiptRoot, `content-${mode}.json`), JSON.stringify({ controlled: true, naturalEvidence: false,
+            publishedRuntime: process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1', preparations, evaluations,
+            functionalStatus: 'verified', contentVerdict: expectedVerdict, nativeProofs: 2, independentSessions: true,
+            originalSource: 'native-goal-task', completeFiles: fileMode, nativeReadStatus: profile.adapter.requests.some(request =>
+              request.tools?.some(tool => tool.name === 'read')) ? mode === 'files-read-error' ? 'error' : 'success' : null,
+            scriptedRequests: profile.adapter.requests.length, actualProviderRequests: 0,
+            cold: { newContext: true, sameProcess: true, requests: 0, recordExact: true, proofsRecovered: true,
+              laterFileBytesNotSubstituted: fileMode } }, null, 2), { flag: 'wx' })
+        }
+      } finally { await cold.dispose(true) }
+    } finally { await profile.dispose() }
+  }, 30_000)
+
+  it('skips an old revoked consent Task while reviewing the next Task prepared under current consent', async () => {
+    const profile = await mountProfile('Complete each native Task in the renewed-consent engineering control.', {
+      taskCount: 2, completeTaskThroughTool: true, contentVerdict: 'met', beforeReview: index => {
+        if (index !== 2) return
+        profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: false, revision: 2, policyVersion: 'tianwen-auto-analysis.v3' })
+        profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 3, policyVersion: 'tianwen-auto-analysis.v3' })
+      }, goalTaskAcceptance: { async prepare() { return { checkerId: 'content-new-consent', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Original native result.', contentReview: {},
+        async evaluate() { return { status: 'verified', detail: 'Controlled functional result.' } } } } },
+    })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.filter(event => event.type === 'task-acceptance-prepared')).toHaveLength(2), { timeout: 10_000 })
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-content-review-finished')).toBe(true), { timeout: 10_000 })
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      const preparations = record.tianwenEvents!.filter(event => event.type === 'task-acceptance-prepared')
+      expect(preparations.map(event => event.type === 'task-acceptance-prepared' ? event.binding.learningConsentRevision : 0)).toEqual([1, 3])
+      const checks = record.tianwenEvents!.filter(event => event.type === 'task-content-review-finished')
+      expect(checks).toHaveLength(1)
+      expect(checks[0]).toMatchObject({ taskId: record.tasks.at(-1)!.id, result: { status: 'reviewed' } })
+      expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(2)
+      expect(profile.adapter.requests.filter(request => request.tools?.some(tool => tool.name === 'structured_output'))).toHaveLength(4)
+    } finally { await profile.dispose() }
+  }, 30_000)
+
+  it('does not continue content reviews after consent is revoked at the actual first review request', async () => {
+    const profile = await mountProfile('Report native completion in the consent control.', { completeTaskThroughTool: true, contentVerdict: 'met',
+      beforeReview: index => { if (index === 1) profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: false, revision: 2, policyVersion: 'tianwen-auto-analysis.v3' }) },
+      goalTaskAcceptance: { async prepare() { return { checkerId: 'content-consent', checkerDigest: sha256('checker'),
+        contractDigest: sha256('contract'), inputsDigest: sha256('inputs'), requiredCondition: 'Report actual completion.', contentReview: {},
+        async evaluate() { return { status: 'verified', detail: 'Controlled functional result.' } } } } } })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(profile.adapter.requests.filter(request => request.tools?.some(tool => tool.name === 'structured_output'))).toHaveLength(1))
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.planner.planRevision).toBeGreaterThan(1))
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      expect(record.tianwenEvents?.filter(event => event.type === 'task-content-review-started')).toHaveLength(1)
+      expect(record.tianwenEvents?.filter(event => event.type === 'task-content-review-finished')).toHaveLength(0)
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 3, policyVersion: 'tianwen-auto-analysis.v3' })
+      await finishGoalTaskContentReviews(profile.ctx, { stateRoot: profile.stateRoot, goalId: record.id, signal: new AbortController().signal })
+      expect(profile.adapter.requests.filter(request => request.tools?.some(tool => tool.name === 'structured_output'))).toHaveLength(1)
+      expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(1)
+    } finally { await profile.dispose() }
+  }, 30_000)
+
   it('propagates actual learning-ledger storage failure and cold consumes only the already-saved result', async () => {
     if (process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1') return
     const failures: unknown[] = []
@@ -689,6 +934,8 @@ describe('native Long Goal profile execution', () => {
         task: (captured as { task: unknown }).task,
         permissionMode: 'workspace-write',
       } } })
+      expect(preparedEvent?.type === 'task-acceptance-prepared' ? preparedEvent.binding.contentReview : 'missing').toBeUndefined()
+      expect(record.tianwenEvents?.some(event => event.type === 'task-content-review-started')).toBe(false)
       expect(runtimePublic).toHaveProperty('readGoalTaskOutcomeMaterial')
       const readMaterial = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
         ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)).readGoalTaskOutcomeMaterial as typeof runtimePublic.readGoalTaskOutcomeMaterial

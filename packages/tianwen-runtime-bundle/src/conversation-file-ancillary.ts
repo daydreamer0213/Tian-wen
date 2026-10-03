@@ -7,10 +7,10 @@ import { lstat, realpath } from 'node:fs/promises'
 import { canonicalJson } from '@tianwen/evolution/learning-intake'
 import { parseConversationTaskFileAncillary, parseConversationSkillAdmission, parseConversationSkillDefinition,
   projectConversationFileAncillaryContext, sha256, type ConversationSkillAdmission, type ConversationTask,
-  CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type ConversationTaskFileAncillary, type ConversationAncillaryPayload, type ConversationAncillaryProducer } from '@tianwen/evolution'
-import { verifyConversationReadDenialReceipt, type ConversationReadDenialProducer } from '@tianwen/evolution'
+  CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, type ConversationTaskFileAncillary, type ConversationAncillaryPayload, type ConversationAncillaryProducer } from '@tianwen/evolution/content-review'
+import { verifyConversationReadDenialReceipt, type ConversationReadDenialProducer } from '@tianwen/evolution/content-review'
 import { verifyConversationFileMutationDenialReceipt } from '@tianwen/evolution/file-mutation-denial'
-import { conversationFileCaptureOutputKind } from '@tianwen/evolution'
+import { conversationFileCaptureOutputKind } from '@tianwen/evolution/content-review'
 import { conversationFilePath } from './conversation-file-material.js'
 import { parseNativeDirectoryReceipt, parseNativePwshDenial, type NativeDirectoryReceipt, type NativePwshDenial } from './native-tool-observation.js'
 import type { NativeToolRegistrationProducer } from './native-tools-observer.js'

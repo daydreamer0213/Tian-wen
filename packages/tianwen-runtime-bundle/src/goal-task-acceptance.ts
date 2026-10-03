@@ -7,12 +7,14 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { parseConversationExternalCheckOutcome, type ConversationExternalCheckOutcome } from '@tianwen/evolution/external-check'
 import { sha256 } from '@tianwen/evolution/learning-intake'
 import { withConversationObservationCancellation } from './observation-cancellation.js'
-import type { GoalCommandOrigin, GoalTaskAcceptanceBinding } from './goal-task-acceptance-contract.js'
+import { parseGoalTaskContentReviewPlan, type GoalCommandOrigin, type GoalTaskAcceptanceBinding, type GoalTaskContentReviewPlan } from './goal-task-acceptance-contract.js'
 import type { LongGoalRecordV3, LongGoalTaskRecordV2, TianwenExecutionAttempt } from './long-goal-contract.js'
 import { appendGoalTaskAcceptance, goalTaskAcceptanceGoalDigest as goalDigest, listLongGoals, readLongGoal, readTianwenTaskAttemptProjection } from './long-goal.js'
 import { sandboxModeFromEvents } from './permission-attempt.js'
 import { readGoalStatus } from './status.js'
 import { readGoalTaskAcceptanceMaterial } from './goal-task-material.js'
+import { readConversationFile } from './conversation-file-material.js'
+import { finishGoalTaskContentReviews } from './goal-task-content-review.js'
 
 type CommandEvent = Extract<SessionEvent, { type: 'command/run' }>
 export interface GoalTaskAcceptancePreparation {
@@ -32,6 +34,8 @@ export interface PreparedGoalTaskAcceptanceCheck {
   readonly inputsDigest: ReturnType<typeof sha256>
   readonly requiredCondition: string
   readonly waitsForCancellationCleanup?: true
+  /** Fixed before the Task's first request; old Tasks are never retroactively reviewed. */
+  readonly contentReview?: Omit<GoalTaskContentReviewPlan, 'protocol'>
   /** Trusted host checks actual native evidence; generated programs require the existing isolated executor. */
   readonly evaluate: (candidate: {
     readonly preparation: GoalTaskAcceptanceBinding
@@ -136,6 +140,14 @@ export class GoalTaskAcceptanceChecks {
       cwd: goal.workspaceRoot, modelConfigDigest, signal,
     }))
     if (prepared === undefined) return
+    const contentReview = prepared.contentReview === undefined ? undefined : parseGoalTaskContentReviewPlan({
+      protocol: 'tianwen.goal-task-content-review.v1', ...structuredClone(prepared.contentReview),
+    })
+    if (contentReview?.files !== undefined) {
+      if (contentReview.files.cwd !== goal.workspaceRoot) throw new Error('content review files must belong to original Goal workspace')
+      const actual = await Promise.all(contentReview.files.entries.map(entry => readConversationFile(goal.workspaceRoot, entry.path)))
+      if (sha256(actual) !== sha256(contentReview.files.entries)) throw new Error('content review original file bytes differ')
+    }
     signal.throwIfAborted()
     const latest = this.find(String(agent.session.id))
     if (latest === undefined || sha256(latest.task) !== sha256(task) || goalDigest(latest.goal) !== goalDigest(goal)
@@ -150,6 +162,7 @@ export class GoalTaskAcceptanceChecks {
       checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
       inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition,
       ...(learningConsentRevision === undefined ? {} : { learningConsentRevision }),
+      ...(contentReview === undefined ? {} : { contentReview }),
       requirementsSnapshot: {
         goal: { id: goal.id, objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
           workspaceRoot: goal.workspaceRoot, origin: structuredClone(goal.origin!) },
@@ -166,6 +179,7 @@ export class GoalTaskAcceptanceChecks {
     const prior = this.pending.get(longGoalId)
     if (prior !== undefined) return prior
     const operation = this.finish(longGoalId).then(() => this.consumeOutcomes(longGoalId))
+      .then(() => finishGoalTaskContentReviews(this.ctx, { stateRoot: this.stateRoot, goalId: longGoalId, signal: this.shutdown.signal }))
     this.pending.set(longGoalId, operation)
     try { await operation } finally { this.pending.delete(longGoalId) }
   }
@@ -180,6 +194,14 @@ export class GoalTaskAcceptanceChecks {
       if (result?.type !== 'task-acceptance-finished') continue
       const material = await readGoalTaskAcceptanceMaterial(this.ctx, { stateRoot: this.stateRoot,
         goalId: goal.id, taskId: event.taskId, epoch: b.epoch })
+      const existing = this.ctx.tianwenEvolution.listGoalTaskOutcomes().find(item => item.input.goalId === goal.id
+        && item.input.taskId === event.taskId && item.input.epoch === b.epoch)
+      if (existing !== undefined) {
+        if (sha256(existing.input) !== sha256(material.outcomeInput)) throw new Error('Saved Goal Task outcome differs from original native material')
+        if (this.shutdown.signal.aborted || !this.authorized(revision)) return
+        // No new intake: later Goal context does not replace the already-saved original requirements.
+        continue
+      }
       // All async reads precede this synchronous final Goal/Task/attempt check and ledger write.
       const latest = this.find(b.childSessionId)
       if (latest === undefined || latest.attempt.epoch !== b.epoch) continue
