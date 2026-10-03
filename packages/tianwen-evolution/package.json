@@ -18,6 +18,10 @@
       "types": "./dist/inspection.d.ts",
       "default": "./dist/inspection.js"
     },
+    "./file-claim-packet": {
+      "types": "./dist/conversation-file-claim-packet.d.ts",
+      "default": "./dist/conversation-file-claim-packet.js"
+    },
     "./learning-intake": {
       "types": "./dist/learning-intake.d.ts",
       "default": "./dist/learning-intake.js"

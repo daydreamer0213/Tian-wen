@@ -1,5 +1,7 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+2026-10-03最新：完整文件材料无损codec/Runtime恢复已交付，10组64/八包类型/完整build/实际发行及新进程cold通过，140423→71151B仍65单元；控制与工程隔离不补自然来源。原f4da154唯一7真实请求/prepare1/eval0，超预算write被正确guard拒绝后缺记录使材料unavailable，原completed/programunverifiable/reviewinconclusive及0请求cold保持，不回填。正式19观察18识别完成/0feedback/0study、隔离及awaiting-compatible-sources；原62438424…1042766B前缀、现完整91f83d10…保持。唯一工程容器清/原84ID/快照0/Docker关闭，小型D生成物；下一准确write/edit预dispatch拒绝记录后固定发行自主真实核心待办，不索题、造失败、改旧条件或空审计blocked。原NO-GO/门槛/同意/隔离/十日窗口及完整目标active/incomplete保持，见[tianwen-file-review-packet-20261003.md](tianwen-file-review-packet-20261003.md)。
+
 ## 2026-10-03 大型完整文件评审schema窄修已交付，保持原覆盖与裁决
 
 889b791事前设计后，只对完整schema>98304B的claimEvidence v2去重复enum/说明，原v2全部required ID、空null/非空firstClaim、kind/status/闭合结构及原完整材料/指令/host绑定保持；小/非文件不改。65单元工程控制248479B→71607B（-71.18%），SDK结构与host引用/来源反例保持。6组83、八包类型/完整发行及静态审查通过；另补结构断言的2项通过不重复算总数。

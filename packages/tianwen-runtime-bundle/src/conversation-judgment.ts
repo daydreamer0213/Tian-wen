@@ -6,6 +6,7 @@ import { createUserMessage, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, sha256, parseConversationReviewChecks, conversationReviewConsensus, type Sha256Digest, type ConversationJudgmentProof, type ConversationReviewCheck } from '@tianwen/evolution'
+import { unpackConversationFileClaimPacket } from '@tianwen/evolution/file-claim-packet'
 
 // Full source/final snapshots and the lossless review projection share this
 // serialized-material guard. It is not a token quota or total wire-size bound.
@@ -140,9 +141,20 @@ export async function verifyConversationReviewCheck(ctx: Context, check: Convers
 
 /** Recover only an exact, successful one-shot judgment capture for restart
  * validation. It never invokes a model or reconstructs a request. */
-export async function recoverConversationJudgmentRequest(ctx: Context, check: ConversationReviewCheck): Promise<{ readonly instruction: string, readonly material: unknown, readonly modelConfigDigests: readonly string[] }> {
+export async function recoverConversationJudgmentRequest(ctx: Context, check: ConversationReviewCheck): Promise<{ readonly instruction: string, readonly material: unknown, readonly modelConfigDigests: readonly string[], readonly claimMaterialEncoding?: 'tianwen.file-claim-review-packet.v1' }> {
   const { focus: _focus, proof, ...value } = check
-  return recoverConversationStructuredJudgment(ctx, proof, value)
+  // Authenticate the exact saved native request and successful capture before
+  // interpreting references. Consumers still receive the complete old shape.
+  const recovered = await recoverConversationStructuredJudgment(ctx, proof, value)
+  const raw = recovered.material
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw) && Object.hasOwn(raw, 'schemaVersion')) {
+    const version = (raw as Record<string, unknown>).schemaVersion
+    if (typeof version === 'string' && version.startsWith('tianwen.file-claim-review-packet.')) {
+      try { return { ...recovered, material: unpackConversationFileClaimPacket(raw), claimMaterialEncoding: 'tianwen.file-claim-review-packet.v1' } }
+      catch { throw new Error('invalid-judgment') }
+    }
+  }
+  return recovered
 }
 
 export async function recoverConversationStructuredJudgment(ctx: Context, proof: ConversationJudgmentProof, expectedValue: unknown, allowCaptureReminder = false): Promise<{ readonly instruction: string, readonly material: unknown, readonly modelConfigDigests: readonly string[] }> {
