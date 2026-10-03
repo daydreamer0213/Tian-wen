@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { packConversationFileClaimPacket as pack, unpackConversationFileClaimPacket as unpack } from '../../../packages/tianwen-evolution/src/conversation-file-claim-packet.ts'
 import { sha256 } from '../../../packages/tianwen-evolution/src/learning-intake.ts'
 const copy=value=>structuredClone(value), sign=evidence=>({...evidence,evidenceDigest:sha256(evidence.items)})
-function fixture(owner='source',{empty=false,present=false,drift=false}={}) {
- const initial=empty?'':'原文😀\r\n'.repeat(200),final=empty?'':'新稿😀\n'.repeat(150)
+function fixture(owner='source',{empty=false,present=false,drift=false,large=false}={}) {
+ const initial=large?'x'.repeat(60*1024):empty?'':'原文😀\r\n'.repeat(200),final=empty?'':'新稿😀\n'.repeat(150)
  const files={schemaVersion:'tianwen.conversation-file-material.v1',cwd:'/project',outputKind:'files',entries:[{path:'input.txt',content:initial},{path:'output.txt',content:present?'BEFORE':null}],outputPaths:['output.txt']}
  const result={answer:'Saved.',files:[{path:'input.txt',content:drift?'DIFFERENT_READ_ONLY':initial},{path:'output.txt',content:final}]}
  const original={[owner]:{context:[],request:[{role:'user',content:[{type:'text',text:'Copy the original contract.'}]}],files,criteria:['Keep all bytes.'],qualityContract:{opaque:'原标准'},extra:{evidenceIds:['literal-metadata']}},conversation:[{role:'assistant',content:[{type:'text',text:'Saved.'}]}],toolEvidence:[],fileResult:{...result,outputDigest:sha256(result)},extra:{untouched:[true,null,3,{quoted:'not instructions'}]}}
@@ -17,13 +17,13 @@ function fixture(owner='source',{empty=false,present=false,drift=false}={}) {
 for(const owner of ['source','task'])for(const options of [{},{empty:true},{present:true},{drift:true}]){
  const {original,evidence}=fixture(owner,options),before=copy({original,evidence}),packet=pack(original,evidence)
  assert.deepEqual(Object.keys(packet).sort(),['schemaVersion','original','claimEvidence','originalDigest'].sort());assert.equal(packet.schemaVersion,'tianwen.file-claim-review-packet.v1');assert.equal(packet.originalDigest,sha256(original))
- const recovered=unpack(packet);assert.deepEqual(recovered,{original,claimEvidence:evidence})
+ const packetBefore=copy(packet),recovered=unpack(packet);assert.deepEqual(recovered,{original,claimEvidence:evidence});assert.deepEqual(packet,packetBefore)
  assert.deepEqual({original,evidence},before);assert.notEqual(packet.original,original);assert.notEqual(packet.claimEvidence,evidence);assert.notEqual(recovered.original,original);assert.notEqual(recovered.claimEvidence,evidence)
  assert.deepEqual(packet.original[owner].files.entries[0].content,{evidenceIds:evidence.items.filter(item=>item.filePath==='input.txt'&&item.fileStage==='initial').map(item=>item.id)})
  assert.deepEqual(packet.original.fileResult.files[1].content,{evidenceIds:evidence.items.filter(item=>item.filePath==='output.txt'&&item.fileStage==='final').map(item=>item.id)})
  if(options.drift)assert.equal(packet.original.fileResult.files[0].content,'DIFFERENT_READ_ONLY');else assert.deepEqual(packet.original.fileResult.files[0].content,packet.original[owner].files.entries[0].content)
  if(options.present)assert.notDeepEqual(packet.original[owner].files.entries[1].content,packet.original.fileResult.files[1].content);else assert.equal(packet.original[owner].files.entries[1].content,null)
- assert.deepEqual(packet.original[owner].extra,{evidenceIds:['literal-metadata']});recovered.original.extra.untouched[3].quoted='changed';recovered.claimEvidence.items[0].text='changed';packet.claimEvidence.items[0].text='changed';assert.deepEqual({original,evidence},before)
+ assert.deepEqual(packet.original[owner].extra,{evidenceIds:['literal-metadata']});recovered.original.extra.untouched[3].quoted='changed';recovered.claimEvidence.items[0].text='changed';assert.deepEqual(packet,packetBefore);packet.original.extra.untouched[3].quoted='changed';packet.claimEvidence.items[0].text='changed';assert.deepEqual({original,evidence},before)
 }
 const base=fixture(),valid=pack(base.original,base.evidence)
 assert(Buffer.byteLength(JSON.stringify(valid))<Buffer.byteLength(JSON.stringify({original:base.original,claimEvidence:base.evidence})))
@@ -44,5 +44,6 @@ for(const malformed of [undefined,()=>{},NaN,Infinity,'\ud800'])badOriginal(p=>{
 badOriginal(p=>{p.extra.loop=p});badOriginal(p=>{p.extra.large='x'.repeat(512*1024)})
 badOriginal(p=>{p.extra.array=Array(2)});badOriginal(p=>{p.extra.array=[1];p.extra.array.extra=1});badOriginal(p=>{p.extra[Symbol('hidden')]=1});badOriginal(p=>{Object.defineProperty(p.extra,'hidden',{value:1,enumerable:false})})
 let reads=0;const getter=copy(base.original);Object.defineProperty(getter.extra,'getter',{enumerable:true,get(){reads++;return 1}});assert.throws(()=>pack(getter,base.evidence));assert.equal(reads,0)
+const combined=fixture('source',{large:true});combined.original.extra.large='x'.repeat(375000);const combinedSkeleton=copy(combined.original),initialIds=combined.evidence.items.filter(item=>item.filePath==='input.txt'&&item.fileStage==='initial').map(item=>item.id),finalIds=combined.evidence.items.filter(item=>item.filePath==='output.txt'&&item.fileStage==='final').map(item=>item.id);combinedSkeleton.source.files.entries[0].content={evidenceIds:initialIds};combinedSkeleton.fileResult.files[0].content={evidenceIds:initialIds};combinedSkeleton.fileResult.files[1].content={evidenceIds:finalIds};const combinedPacket={schemaVersion:'tianwen.file-claim-review-packet.v1',original:combinedSkeleton,claimEvidence:combined.evidence,originalDigest:sha256(combined.original)},bytes=value=>Buffer.byteLength(JSON.stringify(value),'utf8');assert(bytes(combined.original)<512*1024);assert(bytes(combined.evidence)<512*1024);assert(bytes(combinedPacket)<512*1024);assert(bytes({original:combined.original,claimEvidence:combined.evidence})>512*1024);assert.throws(()=>pack(combined.original,combined.evidence));assert.throws(()=>unpack(combinedPacket))
 const quoted=fixture();quoted.original.source.files.entries[0].content='{"evidenceIds":["fake"]}';quoted.original.fileResult.files[0].content=quoted.original.source.files.entries[0].content;quoted.original.fileResult.outputDigest=sha256({answer:quoted.original.fileResult.answer,files:quoted.original.fileResult.files});const first=quoted.evidence.items.find(item=>item.filePath==='input.txt');first.text=quoted.original.source.files.entries[0].content;quoted.evidence.items=quoted.evidence.items.filter(item=>item.filePath!=='input.txt'||item===first);quoted.evidence=sign(quoted.evidence);assert.deepEqual(unpack(pack(quoted.original,quoted.evidence)).original,quoted.original)
 console.log(JSON.stringify({passed:true}))

@@ -14,7 +14,7 @@ Evolution拥有数据codec及现有文件结构验证，Runtime原judgment拥有
 
 初始文件只能引用同path/initial、role=tool/origin=tool的完整顺序组；声明最终输出只能引用同path/final、role=answer/origin=answer的完整顺序组，不能借初始来源变成输出事实。只读最终文件仅在与同path初始原文一致时复用初始组；不同最终原文保留literal，不把漂移覆盖掉。null与空文件区分，空文件组仍有一个空text item。禁止跨path/stage、截短/重复/调序、错误role、未知ID及摘要漂移。
 
-普通JSON的原字段/对象/数组/Unicode原样重建；文件结构和128KiB等原限制复用既有parser，整体沿原512KiB数据界限。codec拒非JSON、循环、稀疏/自定义属性数组、不可精确UTF8的字符串。所有输入不修改，返回独立数据。原projection及host核验仍是来源和语义的实际责任，不把自报originalDigest当来源认证。
+普通JSON的原字段/对象/数组/Unicode原样重建；文件结构和128KiB等原限制复用既有parser，整体沿原512KiB数据界限：旧完整{original,claimEvidence}合计也须在界内，不能借编码变小扩大原live输入范围；pack/unpack均检查还原旧material总量，live选择前保留原检查。codec拒非JSON、循环、稀疏/自定义属性数组、不可精确UTF8的字符串。所有输入不修改，返回独立数据（unpack也不能共享packet的嵌套图）。原projection及host核验仍是来源和语义的实际责任，不把自报originalDigest当来源认证。
 
 ## 接入和恢复
 
