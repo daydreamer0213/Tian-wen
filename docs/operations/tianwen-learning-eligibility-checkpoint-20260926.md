@@ -1,5 +1,14 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 归档有限工作包已收口，返回完整学习主线
+
+cebab47 继承 bac5397 原 status 合同/入口，唯一实际 Task1080a4eb：6真实/根3、prepare1/evaluate1/0重试，原程序verified/两审met+有效proof/整体met，4712B首稿逐字接纳。11原文件先封存，新进程task/material/program/两proof精确cold0请求执行。只读inspect入口已消费reader/seal/原SDK summary/新formatter；六原记录+seal总字节有界、参数先验证、缺seal/损坏不补档，磁盘task不造SDK身份。3消费者首红后标准30项及实际发行scripted宿主/cold通过，两个真实档读取核对、旧无host seal档准确ENOENT而未补。见[准确交付与主线纠偏](tianwen-native-archive-status-20261003.md)。
+
+正式实际status0请求/执行：23观察22完成/16初筛/1可信问题/8成功候选、兼容pair false；feedback0/study0/隔离true。完整1327364B/5af25fcd…、旧1271265B/721aba16…前缀、四轮41原封存及原oracle/SDK根1c0718e6…保持。reader/status已执行，旧snapshot不能再当未知独立case。归档工作包结束，不追加近似题追失败。
+
+下一核对现有长期目标的实际Task执行与conversation学习观察连接，优先复用Goal/Task绑定，不能盲目放开子任务或把planner文字当用户反馈；只读审查已确认原过滤有意、真实反馈桥仍可用，实际缺原架构既定的每Task事前验收/原用户源合同；下一设计与实施入口已写定见本轮operation链接，先实际SDK控制复现再在原宿主首请求前绑定，不硬塞旧Outcome。原真实来源缺口不扩大成整体blocked，不索题/催评。完整目标active/incomplete、main/Daily完整学习NO-GO及原同意/隔离/资格/去重/停止/十工作日决策期限不变，不加标准/重置窗口。必要D包约0.60MB+6366B回执，原84ID/快照0/Docker停止，D约18.23GiB≥15。本条覆盖下方status尚未交付和22任务的当前待办。
+
+
 ## 2026-10-03 原生归档读取原样交付及当前资格
 
 原bac5397合同/入口及3179cff设计后，b68dafd0唯一未知答案10真实/根5/prepare1/evaluate1/0重试：原程序verified/双原审met/整体met，首稿3568B逐字接纳。11原文件先封存，新进程原task/material/program和两proof准确cold0请求/执行。宿主实际消费reader，启动前总量参数拒绝/64MiB省略值/原取消和失败优先保持；3首红后28标准回归/复审及发行控制与0执行cold通过，不计自然研究或收益。见[交付及下一步](tianwen-native-archive-reader-20261003.md)。

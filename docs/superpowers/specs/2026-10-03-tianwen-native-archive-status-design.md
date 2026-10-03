@@ -10,4 +10,6 @@
 
 工程验证包含成功/取消/不完整/原整体未定、seal缺失或损坏、大小边界、错误signal及session、输入不变和零模型/程序再执行。实际发行控制及新进程cold沿既有SDK恢复/proof校验，再消费只读展示。最终以真实原生档核验完整路径；旧无host seal的归档不补文件或自行声称一致。source原判断仍由SDK，不用漂亮标签替代研究证据。
 
+读取上限按六个原记录与seal文件的实际字节总和计，恰等上限可读；读取前核对文件大小，读取后再核对实际长度，seal超限在JSON解析前拒绝。取消保留原signal.reason，既有封存与SDK账本均不写。无SDK任务时保留原summary的null/false，而不从归档补任务。
+
 原有限归档工作包在此收口，不追加近似小题逼出失败。运行根D:/DevData/tianwen-native-archive-status-20261003，复用依赖/镜像/正式档，保留必要首结果而无全量环境副本；程序容器、快照和自有测试临时根收回、Docker关闭、D≥15GiB。原同意/隔离/门槛/停止/去重/十工作日决策期限保持，目标active/incomplete、main/Daily完整学习NO-GO不变。

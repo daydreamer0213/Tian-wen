@@ -14,6 +14,18 @@ it('original archive reader oracle also runs through the standard test entry', (
   expect(JSON.parse(result.stdout)).toEqual({ passed: true })
 })
 
+it('original archive status oracle also runs through the standard test entry', () => {
+  const result = spawnSync(process.execPath, [resolve('tests/fixtures/development-native-archive-status/entry.mjs')], { cwd: resolve('.'), encoding: 'utf8', timeout: 15000 })
+  expect(result.error).toBeUndefined()
+  expect(result.status).toBe(0)
+  expect(result.stderr).toBe('')
+  expect(JSON.parse(result.stdout)).toEqual({ passed: true })
+})
+
+it('readonly archive inspection controls run through the standard test entry', () => {
+  execFileSync(process.execPath, ['--import', 'tsx', '--test', resolve('tests/dsh-migration/development-native-archive-inspect.spec.mjs')], { cwd: resolve('.'), encoding: 'utf8', timeout: 15000 })
+})
+
 // Native Node hooks must run in Node itself, outside Vitest's module resolver.
 for (const scenario of ['peer', 'original', 'permissions', 'file-guard', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native', 'stale-seal', 'stale-seal-failure', 'seal-write-error', 'seal-prior-error', 'archive-limit-invalid', 'archive-limit', 'archive-limit-prior-error'] as const) {
   it(`actual DEV host: ${scenario}`, () => {

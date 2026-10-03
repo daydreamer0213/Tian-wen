@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { createRequire, registerHooks } from 'node:module'
 import { isAbsolute, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -8,10 +8,48 @@ import { createHash } from 'node:crypto'
 import { SessionId, createUserMessage } from '@tianwen/dsh-compat'
 import { observeNativeTaskRequests } from './native-task-request-observer.ts'
 import { withConversationObservationCancellation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.ts'
-import { sealDevelopmentNativeArchive } from './development-native-archive-seal.mjs'
+import { sealDevelopmentNativeArchive, verifyDevelopmentNativeArchiveSeal } from './development-native-archive-seal.mjs'
 import { readDevelopmentNativeArchiveEntries } from './development-native-archive-reader.mjs'
+import { summarizeDevelopmentNativeTask } from './development-native-task-result.mjs'
+import { formatDevelopmentNativeArchiveStatus } from './development-native-archive-status.mjs'
 
 const archiveNames = ['attempt-started.json', 'task.json', 'root-native.json.gz', 'result.json', 'failure.json', 'cleanup.json']
+
+/** Read original archive bytes separately from the caller's current SDK task. No repairs or execution. */
+export async function inspectDevelopmentNativeTaskArchive(ctx, config) {
+  const { resultRoot, sessionId, outputPaths, signal } = config
+  const maxBytes = config.maxArchiveBytes === undefined ? 64 * 1024 * 1024 : config.maxArchiveBytes
+  if (typeof resultRoot !== 'string' || !isAbsolute(resultRoot)) throw new TypeError('resultRoot must be absolute')
+  if (typeof sessionId !== 'string' || !sessionId.trim()) throw new TypeError('sessionId must be non-blank')
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new TypeError('maxArchiveBytes must be a positive safe integer')
+  // Validate expected paths and the native signal before reading any archive file.
+  summarizeDevelopmentNativeTask(undefined, outputPaths)
+  AbortSignal.prototype.throwIfAborted.call(signal)
+  let remaining = maxBytes
+  const readRecord = (name, optional) => {
+    signal.throwIfAborted()
+    const path = resolve(resultRoot, name)
+    try {
+      // The seal shares the total budget; reject an oversized file before reading/parsing it.
+      if (statSync(path).size > remaining) throw new RangeError('DEV archive exceeds maxArchiveBytes')
+      const bytes = readFileSync(path)
+      signal.throwIfAborted()
+      if (bytes.length > remaining) throw new RangeError('DEV archive exceeds maxArchiveBytes')
+      remaining -= bytes.length
+      return bytes
+    } catch (error) {
+      if (optional && error.code === 'ENOENT') return null
+      throw error
+    }
+  }
+  const entries = await readDevelopmentNativeArchiveEntries(async name => readRecord(name, true), { signal, maxBytes })
+  const seal = JSON.parse(readRecord('archive-seal.json', false).toString('utf8'))
+  const verification = verifyDevelopmentNativeArchiveSeal(seal, sessionId, entries)
+  signal.throwIfAborted()
+  const summary = summarizeDevelopmentNativeTask(ctx.tianwenEvolution.listConversationTasks(sessionId)[0], outputPaths)
+  const status = formatDevelopmentNativeArchiveStatus(verification, summary)
+  return { verification, summary, status }
+}
 
 /** Resolve only these two DEV modules through Runtime's existing public peer. */
 export async function loadDevelopmentNativeModules() {
