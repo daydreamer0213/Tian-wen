@@ -16,13 +16,13 @@
 
 ## Task 1: 完整只读诊断
 
-Files: `packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts`、`learning-consent-agent.ts`；测试 `tests/dsh-migration/conversation-source-readiness-diagnostics.spec.ts`、`learning-consent-agent.spec.ts`。
+Files: `packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts`、`learning-consent-agent.ts`、封闭计数类型/状态投影 `conversation-source-readiness.ts`；测试 `tests/dsh-migration/conversation-source-readiness-diagnostics.spec.ts`、`learning-consent-agent.spec.ts`。
 
-- [ ] 写诊断首红：全部原资格排除与 scoped/eligible/problem/counter 计数、pair 状态、无原始字段。
-- [ ] 确认失败为当前缺失诊断；保存首红日志。
-- [ ] 原 scan 同次计数；默认 readiness 返回原 state；显式 true 返回诊断。
-- [ ] learning status 显式请求并验证/投影有限数字结构；无效诊断丢弃，未知 state unavailable。
-- [ ] 检验原 readiness 回归、checked counter、文件材料、状态隐私与同意/取消。
-- [ ] 产品类型、实际发行、独立静态审查；修复有据重要问题。
-- [ ] 当前正式档只读状态，模型/程序请求0、ledger 字节前后相同；生成物和磁盘审计。
+- [x] 写诊断首红：全部原资格排除与 scoped/eligible/problem/counter 计数、pair 状态、无原始字段。
+- [x] 确认失败为当前缺失诊断；保存首红日志（首次测试导入失败另存，不称行为首红）。
+- [x] 原 scan 同次计数；默认 readiness 返回原 state；显式 true 返回诊断。
+- [x] learning status 显式请求并验证/投影有限数字结构；无效诊断丢弃，未知 state unavailable。
+- [x] 检验原 readiness 回归、checked counter、文件材料、状态隐私与同意/取消：5组363项通过。
+- [x] 八包类型、完整发行/声明、独立静态审查无P1/P2；JsonValue接口类型首失败修为类型别名，最终零诊断。
+- [x] 实际发行当前正式档只读查询与真实状态工具相同；模型/程序请求0、ledger字节前后相同；生成物约38KB，无Docker/下载/整档副本。
 - [ ] 更新权威交接/资格检查点、提交并核对远端；目标保持 active/incomplete。

@@ -861,8 +861,36 @@ describe('Tianwen main-chat learning consent tool', () => {
       expect(result).toMatchObject({ isError: false, value: { currentSession: { naturalConversation: {
         guidanceReadiness: { state: 'awaiting-compatible-sources' },
       } } } })
-      expect(readiness).toHaveBeenCalledWith(`conversation:${sha256({ cwd: null })}`)
+      expect(readiness).toHaveBeenCalledWith(`conversation:${sha256({ cwd: null })}`, true)
       expect(JSON.stringify(result.value)).not.toContain('PRIVATE')
+      expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
+      expect(mounted.adapter.requests).toHaveLength(0)
+
+      const diagnostics = { schemaVersion: 'tianwen.source-readiness-diagnostics.v1', observedTasks: 3, eligibleTasks: 2,
+        problemSources: 1, successfulCandidates: 1, hasCompatibleProblemPair: false, hasUnattemptedProblemPair: false,
+        exclusions: { consentRevision: 0, behaviorVersion: 0, qualityContract: 0, feedbackTurn: 0, family: 0,
+          evaluationMode: 1, completion: 0, modelConfiguration: 0, fileMaterial: 0 } }
+      readiness.mockResolvedValueOnce({ state: 'awaiting-compatible-sources', diagnostics, secret: 'PRIVATE feedback' } as never)
+      const explained = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(explained).toMatchObject({ value: { currentSession: { naturalConversation: {
+        guidanceReadiness: { state: 'awaiting-compatible-sources', diagnostics },
+      } } } })
+      expect(JSON.stringify(explained.value)).not.toContain('PRIVATE')
+
+      for (const malformedDiagnostics of [
+        { ...diagnostics, secret: 'PRIVATE feedback' },
+        { ...diagnostics, observedTasks: Infinity },
+        { ...diagnostics, observedTasks: -1 },
+        { ...diagnostics, exclusions: { ...diagnostics.exclusions, secret: 'PRIVATE path' } },
+        { ...diagnostics, exclusions: { ...diagnostics.exclusions, evaluationMode: 0 } },
+        { ...diagnostics, hasCompatibleProblemPair: true },
+        { ...diagnostics, successfulCandidates: 2 },
+      ]) {
+        readiness.mockResolvedValueOnce({ state: 'awaiting-compatible-sources', diagnostics: malformedDiagnostics, secret: 'PRIVATE' } as never)
+        const safe = await executeLearningStatus(mounted.ctx, main.agent)
+        expect((safe.value as any).currentSession.naturalConversation.guidanceReadiness).toEqual({ state: 'awaiting-compatible-sources' })
+        expect(JSON.stringify(safe.value)).not.toContain('PRIVATE')
+      }
       expect(readFileSync(ledgerPath, 'utf8')).toBe(beforeLedger)
       expect(mounted.adapter.requests).toHaveLength(0)
 

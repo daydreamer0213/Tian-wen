@@ -30,6 +30,7 @@ import {
 } from '@tianwen/runtime'
 import { projectLearningAudit } from './learning-clue-status.js'
 import { inspectLearningSkills } from './learning-skill-reuse.js'
+import { projectConversationSourceReadinessDiagnostics, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
 
 const POLICY_VERSION = 'tianwen-auto-analysis.v3' as const
 const NOTICE_POLICY_VERSIONS = ['tianwen-auto-analysis.v1', 'tianwen-auto-analysis.v2', POLICY_VERSION] as const
@@ -74,7 +75,7 @@ const LEARNING_ANALYSIS_SCOPE = 'Recorded analyses include explicit-feedback ana
 const LEARNING_SOURCES_SCOPE = 'Optional host-reviewed reusable external Skill sources; not feedback or Outcome input and not required for automatic analysis.'
 const GUIDANCE_ACTIVATION_SCOPE = 'When quarantined is true, new conversation-guidance activations are blocked even for accepted studies. Historical activations are not undone by quarantine. Analysis and study evaluation may still run under their own consent and evidence rules. False means only this quarantine is absent; all other activation checks still apply.'
 const GUIDANCE_READINESS_STATES = new Set(['analysis-disabled', 'awaiting-compatible-sources', 'awaiting-counterexample', 'already-studied', 'already-attempted', 'ready-to-schedule'])
-const LEARNING_STATUS_GUIDANCE = 'This bounded snapshot is sufficient to answer learning status, history, and source availability now. Guidance readiness describes only current-workspace evidence selection, not study execution, acceptance, activation or improvement. Tianwen Runtime owns evaluation and activation; the analysis child owns analysis only. Unchanged counts do not prove unchanged evaluation. Use tianwen_learning_continue for a user\'s natural continuation request. Do not use filesystem verification or inspect Profile stores, raw feedback, Session logs, ledger files, runtime bundles, or shared dependencies to expand it. If detail is not exposed, say it is unavailable; explicit user-requested file debugging is a separate task. Counts and consent are not proof that learning has already improved Skills.'
+const LEARNING_STATUS_GUIDANCE = 'This bounded snapshot is sufficient to answer learning status, history, and source availability now. Guidance readiness describes only current-workspace evidence selection, not study execution, acceptance, activation or improvement. Its optional diagnostics count first unmet eligibility gates mutually exclusively; eligible tasks need not be problem sources, and successfulCandidates are initial candidates whose compatibility with a problem pair is separate. Missing diagnostics are unavailable, never zero. Explain these concrete gaps without asking for additional execution permission. Tianwen Runtime owns evaluation and activation; the analysis child owns analysis only. Unchanged counts do not prove unchanged evaluation. Use tianwen_learning_continue for a user\'s natural continuation request. Do not use filesystem verification or inspect Profile stores, raw feedback, Session logs, ledger files, runtime bundles, or shared dependencies to expand it. If detail is not exposed, say it is unavailable; explicit user-requested file debugging is a separate task. Counts and consent are not proof that learning has already improved Skills.'
 const LEARNING_CONTINUE_GUIDANCE = 'Scheduling does not imply evaluation success. Tianwen Runtime owns evaluation and activation; the analysis child owns analysis only.'
 
 declare module '@deepseek-ai/cordis' {
@@ -891,7 +892,7 @@ export class TianwenLearningConsentAgentService extends Service {
     }
   }
 
-  private async guidanceReadiness(agent: Agent, signal?: AbortSignal): Promise<{ readonly state: string }> {
+  private async guidanceReadiness(agent: Agent, signal?: AbortSignal): Promise<{ readonly state: string, readonly diagnostics?: ConversationSourceReadinessDiagnostics }> {
     signal?.throwIfAborted()
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
     if (consent?.enabled !== true || consent.policyVersion !== POLICY_VERSION) return { state: 'analysis-disabled' }
@@ -899,9 +900,11 @@ export class TianwenLearningConsentAgentService extends Service {
       const loop = this.ctx.get('tianwenConversationGuidanceLoop')
       if (loop === undefined) return { state: 'unavailable' }
       const scopeKey = `conversation:${sha256({ cwd: agent.session.header.cwd ?? null })}`
-      const { state } = await loop.readiness(scopeKey)
+      const { state, diagnostics: rawDiagnostics } = await loop.readiness(scopeKey, true)
       signal?.throwIfAborted()
-      return { state: GUIDANCE_READINESS_STATES.has(state) ? state : 'unavailable' }
+      if (!GUIDANCE_READINESS_STATES.has(state)) return { state: 'unavailable' }
+      const diagnostics = state === 'analysis-disabled' ? undefined : projectConversationSourceReadinessDiagnostics(rawDiagnostics)
+      return { state, ...(diagnostics === undefined ? {} : { diagnostics }) }
     } catch {
       signal?.throwIfAborted()
       return { state: 'unavailable' }

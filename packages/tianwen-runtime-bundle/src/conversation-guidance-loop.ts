@@ -20,13 +20,14 @@ import type { ConversationProposalClueMaterial } from './conversation-feedback-a
 import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@tianwen/evolution'
 import { withConversationObservationCancellation } from './conversation-external-check.js'
 import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
+import { SOURCE_EXCLUSION_KEYS, type ConversationSourceExclusion, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationGuidanceLoop: TianwenConversationGuidanceLoopService }
 }
 interface EvidenceGroup { readonly sources: readonly [ConversationTask, ConversationTask], readonly counterexample: ConversationTask, readonly category: ConversationFailure, readonly checkedFailureSources?: ConversationCheckedFailureSources, readonly assessments: readonly (ConversationFeedbackAssessment | undefined)[], readonly proposalClues: readonly { readonly reference: GuidanceProposalClue, readonly material: ConversationProposalClueMaterial }[] }
 type GuidanceReadinessState = 'analysis-disabled' | 'awaiting-compatible-sources' | 'awaiting-counterexample' | 'already-studied' | 'already-attempted' | 'ready-to-schedule'
-type SelectionScan = { readonly state: GuidanceReadinessState, readonly group?: Omit<EvidenceGroup, 'proposalClues'> }
+type SelectionScan = { readonly state: GuidanceReadinessState, readonly diagnostics?: ConversationSourceReadinessDiagnostics, readonly group?: Omit<EvidenceGroup, 'proposalClues'> }
 
 const RAW_FEEDBACK_GUIDANCE = 'When a source has feedbackStandard.originalFeedback, it is exact attributed feedback to an earlier assistant answer. Preserve its speaker, actor, negation, exception and unresolved references; use it to interpret only the attributed continuing preference or supported problem, never every new request in the feedback. The current evaluated task instruction remains authoritative, and feedback is not factual source evidence.'
 
@@ -481,8 +482,9 @@ export class TianwenConversationGuidanceLoopService extends Service {
       finally { this.controllers.delete(controller) }
     }
   }
-  async readiness(scopeKey: string): Promise<{ readonly state: GuidanceReadinessState }> {
-    return { state: (await this.scan(scopeKey)).state }
+  async readiness(scopeKey: string, includeDiagnostics = false): Promise<{ readonly state: GuidanceReadinessState, readonly diagnostics?: ConversationSourceReadinessDiagnostics }> {
+    const { state, diagnostics } = await this.scan(scopeKey)
+    return { state, ...(includeDiagnostics && diagnostics !== undefined ? { diagnostics } : {}) }
   }
   private async select(scopeKey: string): Promise<EvidenceGroup | undefined> {
     const { group } = await this.scan(scopeKey)
@@ -496,20 +498,31 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const consent = evolution.getLearningAnalysisConsent()
     if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3') return { state: 'analysis-disabled' }
     const version = guidanceVersion(evolution.getConversationGuidance(scopeKey))
-    const candidates = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey
-      && task.source.consentRevision === consent.revision && task.source.behaviorVersion === version
-      && hasCurrentConversationQuality(task.admission?.qualityContract)
-      && task.admission?.decision?.feedback == null && effectiveConversationFamily(task) !== null
-      && ['text', 'local-files'].includes(task.admission?.decision?.evaluationMode ?? '') && task.completion?.status === 'completed' && conversationTaskModelDigest(task) !== undefined)
+    const observed = evolution.listConversationTasks().filter(task => task.source.scopeKey === scopeKey)
+    const exclusions = Object.fromEntries(SOURCE_EXCLUSION_KEYS.map(key => [key, 0])) as Record<ConversationSourceExclusion, number>
+    const candidates = observed.filter(task => {
+      // Same gates, order and short-circuiting as the original filter. Count
+      // only its first exclusion, never weaken or re-evaluate qualifications.
+      const exclusion: ConversationSourceExclusion | undefined = task.source.consentRevision !== consent.revision ? 'consentRevision'
+        : task.source.behaviorVersion !== version ? 'behaviorVersion'
+        : !hasCurrentConversationQuality(task.admission?.qualityContract) ? 'qualityContract'
+        : task.admission?.decision?.feedback != null ? 'feedbackTurn'
+        : effectiveConversationFamily(task) === null ? 'family'
+        : !['text', 'local-files'].includes(task.admission?.decision?.evaluationMode ?? '') ? 'evaluationMode'
+        : task.completion?.status !== 'completed' ? 'completion'
+        : conversationTaskModelDigest(task) === undefined ? 'modelConfiguration' : undefined
+      if (exclusion !== undefined) exclusions[exclusion] += 1
+      return exclusion === undefined
+    })
     const materials = new Map<string, ConversationTaskMaterial>()
     const tasks: ConversationTask[] = []
     for (const task of candidates) {
       if (task.admission!.decision!.evaluationMode === 'local-files') {
         try {
           const material = await recoverConversationTaskMaterial(this.ctx, task)
-          if (material.files === undefined || material.files.outputKind !== task.admission!.decision!.fileOutputKind) continue
+          if (material.files === undefined || material.files.outputKind !== task.admission!.decision!.fileOutputKind) { exclusions.fileMaterial += 1; continue }
           materials.set(task.source.taskId, material)
-        } catch { continue }
+        } catch { exclusions.fileMaterial += 1; continue }
       }
       tasks.push(task)
     }
@@ -525,9 +538,14 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const studies = evolution.listConversationGuidanceStudies(scopeKey)
     const attempts = evolution.listConversationCaseDesignAttempts(scopeKey)
     const failed = tasks.filter(task => this.support(task) !== undefined).reverse()
+    const successful = tasks.filter(task => task.review?.verdict === 'met' && task.review.proof !== null
+      && hasSatisfiedConversationCodeCheck(task) && this.support(task) === undefined && !this.negativeFeedback(task))
     let paired = false
     let attempted = false
     let unstudied = false
+    const diagnostics = (): ConversationSourceReadinessDiagnostics => ({ schemaVersion: 'tianwen.source-readiness-diagnostics.v1',
+      observedTasks: observed.length, eligibleTasks: tasks.length, problemSources: failed.length, successfulCandidates: successful.length,
+      hasCompatibleProblemPair: paired, hasUnattemptedProblemPair: unstudied, exclusions })
     for (const first of failed) {
       const checked = this.support(first)!.checkedFailure !== undefined
       const seconds = failed.filter(task => task.source.taskId !== first.source.taskId && inputIdentity(task) !== inputIdentity(first) && compatible(task, first)
@@ -541,17 +559,16 @@ export class TianwenConversationGuidanceLoopService extends Service {
         if (studies.some(study => sources.every(task => study.opened.sourceTaskIds.includes(task.source.taskId)))) continue
         if (attempts.some(attempt => sources.every(task => attempt.sourceTaskIds.includes(task.source.taskId)))) { attempted = true; continue }
         unstudied = true
-        const counterexample = tasks.find(task => task.review?.verdict === 'met' && task.review.proof !== null && hasSatisfiedConversationCodeCheck(task) && this.support(task) === undefined && !this.negativeFeedback(task)
-          && (!checked || this.checkedCounter(task, first))
+        const counterexample = successful.find(task => (!checked || this.checkedCounter(task, first))
           && compatible(task, first) && conversationTaskModelDigest(task) === conversationTaskModelDigest(first) && effectiveConversationFamily(task) === effectiveConversationFamily(first))
         if (counterexample !== undefined) {
           const category = this.support(first)!.category
-          return { state: 'ready-to-schedule', group: { sources, counterexample, category, assessments: sources.map(task => this.support(task)?.assessment),
+          return { state: 'ready-to-schedule', diagnostics: diagnostics(), group: { sources, counterexample, category, assessments: sources.map(task => this.support(task)?.assessment),
             ...(checked ? { checkedFailureSources: [this.support(second)!.checkedFailure!, this.support(first)!.checkedFailure!] as const } : {}) } }
         }
       }
     }
-    return { state: unstudied ? 'awaiting-counterexample' : attempted ? 'already-attempted' : paired ? 'already-studied' : 'awaiting-compatible-sources' }
+    return { state: unstudied ? 'awaiting-counterexample' : attempted ? 'already-attempted' : paired ? 'already-studied' : 'awaiting-compatible-sources', diagnostics: diagnostics() }
   }
   private rollbackIfNeeded(scopeKey: string): void {
     const evolution = this.ctx.tianwenEvolution
