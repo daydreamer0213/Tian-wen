@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 DEV 研究检查宿主实际消费已交付
+
+新单项目 resultCheck/双检查选项启动冻结原合同，复用原 SDK/Evolution 验证并提前原只读内容/保留路径/TS别名规则；未知/失败/取消清旧、generation及旧prepared绑定保持。三组44+实际发行Runtime1检查通过、独立审查两P2关闭，无新资格/裁决/注册平台；SDK/固定checker根1c0718e6…准确未变。见[交付与边界](tianwen-dev-study-result-host-20261003.md)。
+
+实际控制89scripted/0真实模型/0自然来源，3普通程序执行、五角色先准备/十臂独立结果；留出双met但功能rejected，独立不满足、未采用。cold task/study/完整ledger0请求精确，prepare/eval不增；不能作为自然研究或收益。正式新进程实际status0模型/程序：20观察19完成/13初筛/1可信问题/5成功初筛/兼容pair false，反馈归因0/study0/隔离true，完整034d966f…1140550字节及原81fc103所有首结果封存保持。
+
+下一实际DEV mount注入双检查工厂，从真实需要的归档完整性/运行容量所有权等待办冻结原合同和尚未执行的独立邻近/留出，接一次未知答案；待办非新验收门槛，不造失败/索题/重评/空转blocked。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/资格/历史/去重/停止/十工作日窗口保持不重置。临时Runtime根/快照0、原84容器ID准确/Docker关闭，无下载或全量副本，D≥15GiB，最终见运行根final-audit。本条覆盖下方研究宿主尚未实际注入的当前待办。
+
 ## 2026-10-03 未来紧凑评审引用示例已交付，下一接DEV研究宿主
 
 原81fc103 native0请求测量42单位schema45439B无示例，grounding answer-29引文不属本单位；原inconclusive保持。新compact每非空单位准确逐字examples（非enum），仅完整≤98304B/较bare增≤16384B才选取，超限原bare回退；空单位/全部覆盖/host引用、来源、摘要、裁决/原说明与小非文件保持。首红后六组84/八包类型/完整发行声明/独立审查通过；65单位71607→75683B，原checker根JS1c0718e6…精确未变。见[交付与边界](tianwen-compact-audit-quotes-20261003.md)。

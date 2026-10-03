@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 DEV 自动研究检查宿主已交付，继续真实开发供给
+
+原 fixed-host 模块新增单项目 resultCheck 及 createDevelopmentNativeCheckOptions 两检查配置，启动冻结/原解析和构造器/只读内容/原保留路径及 TS 别名冲突校验，成功最新 cohort 才发布、失败取消清旧、旧 evaluator 不变；没有配置注册器、新裁决或资格。缺工厂首红后三组最终44，实际发行 Runtime 1项通过；独立审查关闭两P2，无新增有据P1/P2。见[交付与实际调用](tianwen-dev-study-result-host-20261003.md)。SDK/发行/固定 checker 根1c0718e6…逐字保持，没有重复全包构建。
+
+实际发行工程控制89 scripted/0真实模型/0自然来源：普通功能 rejected/rejected/verified 自动研究一次供给/五角色prepare/十臂eval；候选留出双met但功能rejected，状态也报独立不满足、未采用。冷mount task/study/完整ledger精确、0请求、prepare/eval不增加，不是自然收益。正式新进程实际status0模型/程序：20观察19完成/13初筛/1可信问题/5成功初筛/兼容pair false、反馈归因0/study0/隔离true；完整034d966f…1140550字节、原81fc103全部首结果封存准确。
+
+下一后续实际DEV mount默认注入双检查，按确有用途的开发待办冻结完整原合同和尚未执行的独立邻近/留出，再一次未知答案；优先现有归档完整性/运行容量所有权核验，服务续跑和原D盘约束，不新增发布验收条件。成功照实交付，问题才进原研究，不索题/造失败/重评或空转blocked。目标active/incomplete、main/Daily NO-GO及原同意/隔离/资格/停止/去重/十工作日窗口不变、不重新计时。自有临时Runtime根/快照0、原84容器ID准确/Docker关闭，无下载/全量副本，D≥15GiB，最终见运行根final-audit。本条覆盖下方研究宿主待接的当前待办。
+
 ## 2026-10-03 未来紧凑评审引用示例已交付，下一接DEV研究宿主
 
 原81fc103 native0请求测量42单位schema45439B无示例，grounding answer-29引文不属本单位；原inconclusive保持。新compact每非空单位准确逐字examples（非enum），仅完整≤98304B/较bare增≤16384B才选取，超限原bare回退；空单位/全部覆盖/host引用、来源、摘要、裁决/原说明与小非文件保持。首红后六组84/八包类型/完整发行声明/独立审查通过；65单位71607→75683B，原checker根JS1c0718e6…精确未变。见[交付与边界](tianwen-compact-audit-quotes-20261003.md)。
