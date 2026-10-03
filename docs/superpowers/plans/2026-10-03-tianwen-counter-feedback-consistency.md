@@ -23,4 +23,4 @@ Files: `packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts`、`pa
 - [x] 验证positive覆盖/撤回/未证实反馈、原pending规则及late-write冲突。
 - [x] 相关回归373项、八包类型、完整发行声明与独立静态审查。
 - [x] 正式零请求恢复/状态、ledger/checker原字节与磁盘/小证据核对，更新权威交接。
-- [ ] 提交并核对远端；完成不等于完整学习目标完成。
+- [x] d797938提交推送并核对远端/干净工作区；完成不等于完整学习目标完成。
