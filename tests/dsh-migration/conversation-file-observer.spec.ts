@@ -1232,7 +1232,6 @@ it('rejects an out-of-root capture without blocking the approved native write', 
   const target = join(outside, 'outside.md')
   const harness = await mount([structured(admission), toolCallResponse('outside-write', 'write', { file_path: target, content: 'ordinary work completed' }),
     textResponse('saved'), ...reviewPair()])
-  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
   try {
     harness.handle.agent.followup(direct('Write the requested outside file.'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
@@ -1240,8 +1239,11 @@ it('rejects an out-of-root capture without blocking the approved native write', 
     expect(readFileSync(target, 'utf8')).toBe('ordinary work completed')
     expect(task.fileUnavailable?.reason).toBe('unsafe-path')
     expect(task.completion?.files).toBeUndefined()
-    expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', expect.stringMatching(/escapes root/i))
-  } finally { warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+    expect(harness.ctx.logger.buffer.map(message => message.args)).toContainEqual([
+      'Conversation file observation failed: %s', expect.stringMatching(/escapes root/i),
+      { kind: 'tianwen.file-observation-diagnostic.v1', taskId: task.source.taskId, sessionId: task.source.sessionId, phase: 'capture' },
+    ])
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('keeps missing output and unavailable capture ineligible without blocking ordinary work', async () => {
@@ -1258,7 +1260,6 @@ it('keeps missing output and unavailable capture ineligible without blocking ord
 
   const unavailable = await mount([structured(admission), toolCallResponse('large-write', 'write', { file_path: 'large.md', content: 'actual result' }), textResponse('saved'), ...reviewPair()])
   writeFileSync(join(unavailable.root, 'large.md'), 'x'.repeat(98305))
-  const warning = vi.spyOn(unavailable.ctx.logger, 'warn').mockImplementation(() => undefined)
   try {
     unavailable.handle.agent.followup(direct('Replace large.md.'))
     await unavailable.handle.agent.whenIdle(); await unavailable.ctx.tianwenConversationObserver.whenIdle()
@@ -1266,8 +1267,11 @@ it('keeps missing output and unavailable capture ineligible without blocking ord
     expect(readFileSync(join(unavailable.root, 'large.md'), 'utf8')).toBe('actual result')
     expect(task.fileUnavailable?.reason).toBe('material-unavailable')
     expect(task.completion?.files).toBeUndefined()
-    expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', expect.stringMatching(/too large/i))
-  } finally { warning.mockRestore(); await unavailable.handle.dispose(); await unavailable.ctx.fiber.dispose() }
+    expect(unavailable.ctx.logger.buffer.map(message => message.args)).toContainEqual([
+      'Conversation file observation failed: %s', expect.stringMatching(/too large/i),
+      { kind: 'tianwen.file-observation-diagnostic.v1', taskId: task.source.taskId, sessionId: task.source.sessionId, phase: 'capture' },
+    ])
+  } finally { await unavailable.handle.dispose(); await unavailable.ctx.fiber.dispose() }
 })
 
 it('does not launch a source-blind review after an oversized read-to-chat file', async () => {
@@ -1371,7 +1375,6 @@ it('records ordinary completion when a successful write disappears before final 
     }
     return decision
   })
-  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
   try {
     harness.handle.agent.followup(direct('Rewrite input.md.'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
@@ -1380,8 +1383,11 @@ it('records ordinary completion when a successful write disappears before final 
     expect(task.completion?.status).toBe('completed')
     expect(task.completion?.files).toBeUndefined()
     expect(task.fileUnavailable?.reason).toBe('material-unavailable')
-    expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', expect.stringMatching(/missing an output/i))
-  } finally { off(); warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+    expect(harness.ctx.logger.buffer.map(message => message.args)).toContainEqual([
+      'Conversation file observation failed: %s', expect.stringMatching(/missing an output/i),
+      { kind: 'tianwen.file-observation-diagnostic.v1', taskId: task.source.taskId, sessionId: task.source.sessionId, phase: 'freeze' },
+    ])
+  } finally { off(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('contains a durable capture append failure without changing the allowed write', async () => {
@@ -1392,7 +1398,6 @@ it('contains a durable capture append failure without changing the allowed write
     if (record.kind === 'task-file-input-captured') throw new Error('simulated durable capture failure')
     return original(record)
   })
-  const warning = vi.spyOn(harness.ctx.logger, 'warn').mockImplementation(() => undefined)
   try {
     harness.handle.agent.followup(direct('Rewrite input.md.'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
@@ -1401,8 +1406,11 @@ it('contains a durable capture append failure without changing the allowed write
     expect(task.fileUnavailable?.reason).toBe('material-unavailable')
     expect(task.completion?.status).toBe('completed')
     expect(task.completion?.files).toBeUndefined()
-    expect(warning).toHaveBeenCalledWith('Conversation file observation failed: %s', 'simulated durable capture failure')
-  } finally { append.mockRestore(); warning.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+    expect(harness.ctx.logger.buffer.map(message => message.args)).toContainEqual([
+      'Conversation file observation failed: %s', 'simulated durable capture failure',
+      { kind: 'tianwen.file-observation-diagnostic.v1', taskId: task.source.taskId, sessionId: task.source.sessionId, phase: 'capture' },
+    ])
+  } finally { append.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it('never binds an interrupted turn even when its native write already ran', async () => {

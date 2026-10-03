@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原执行权限清单和具体诊断已交付
+
+原SDK scoped variable/section在首执行前提供既定文件路径/角色，UserMessage、权限、持久gate不变。原观察器warn保留Task/session/phase，原provider fiber严格匹配，诊断存原cleanup/seal；原证据16上限和unverifiable不放宽。175回归、完整Runtime/两声明、48发行边界及原SDK普通/模板诊断/完整正常程序与另Node0请求恢复通过；独立P2关闭，无新有据P1/P2。见[准确分账及下一实际任务](tianwen-host-permission-context-20261004.md)。
+
+工程控制不算自然学习。原两次自然Task保持原不可核验，未重跑/补反馈/重评；完整目标active/incomplete、main/Daily NO-GO与原门槛/十工作日窗口不变。下一自主固定原归档诊断显示任务/独立期望，用新的实际提供者首次结果，不索题/催评或机械整体blocked。正式账本原hash只读未mount，十个拒删目录不碰，D约18GiB>=15、未达20；容器收尾见D final-audit。本条覆盖下方文件清单/具体诊断仍待实现旧入口。
+
 ## 2026-10-04 持久准备宿主已修复，首次原结果不回写
 
 公共DEV宿主现同时核调用方严格true与原Task已保存准备，绑定同一原UserMessage、实际SDK header有效配置、原来源/识别/上下文、原完整图权限；支持正常首/后续根及旧无project协议。83回归、当前固定缓存Node57/57、接入AST、新五SDK分派控制和公开完整程序/另Node0请求冷恢复通过，静态独立审查无新有据P1/P2。具体[原证据与下一待办](tianwen-durable-preparation-host-20261004.md)。

@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { gzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { SessionId, createUserMessage } from '@tianwen/dsh-compat'
+import { symbols } from '@deepseek-ai/cordis'
 import { observeNativeTaskRequests } from './native-task-request-observer.ts'
 import { withConversationObservationCancellation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.ts'
 import { sealDevelopmentNativeArchive, verifyDevelopmentNativeArchiveSeal } from './development-native-archive-seal.mjs'
@@ -13,6 +14,7 @@ import { readDevelopmentNativeArchiveEntries } from './development-native-archiv
 import { summarizeDevelopmentNativeTask } from './development-native-task-result.mjs'
 import { formatDevelopmentNativeArchiveStatus } from './development-native-archive-status.mjs'
 import { isDevelopmentNativePreparationCommitted } from './development-prepared-task-gate.mjs'
+import { collectDevelopmentNativeFileDiagnostics } from './development-native-file-diagnostics.mjs'
 
 const archiveNames = ['attempt-started.json', 'task.json', 'root-native.json.gz', 'result.json', 'failure.json', 'cleanup.json']
 
@@ -87,13 +89,16 @@ export async function runDevelopmentNativeTask(ctx, config) {
   const guard = modules.createDevelopmentNativeFilePolicy({ cwd, sessionId, outputPaths, referencePaths, maxTargetBytes }, path => {
     try { return readFileSync(path, 'utf8') } catch (error) { if (error.code === 'ENOENT') return null; throw error }
   })
-  const expectedPaths = [...outputPaths], callConfig = structuredClone(config.callConfig)
+  const expectedPaths = [...outputPaths], expectedReferences = [...referencePaths], callConfig = structuredClone(config.callConfig)
   modules.summarizeDevelopmentNativeTask(undefined, expectedPaths)
   // Denial evidence requires original tool registration provenance. A plain
   // test-harness ToolRuntime cannot certify the reviewed file guard, even when
   // the ordinary file calls themselves execute successfully. Refuse before an
   // attempt or Agent exists rather than lose the first task's file evidence.
   const fileObserver = ctx.tianwenConversationFileObserver
+  // Service.ctx is rebound to the caller by the SDK proxy. Keep the original
+  // provider fiber rather than accidentally accepting the host/root logger.
+  const diagnosticFiber = (fileObserver?.[symbols.original] ?? fileObserver)?.ctx?.fiber
   if (typeof fileObserver?.guardFiles === 'function' || typeof fileObserver?.guardRead === 'function') {
     for (const name of ['read', 'write', 'edit']) {
       const definition = ctx.tools?.get(name)
@@ -113,7 +118,7 @@ export async function runDevelopmentNativeTask(ctx, config) {
   mkdirSync(resultRoot, { recursive: true })
   const save = (name, value) => writeFileSync(resolve(resultRoot, name + '.json'), JSON.stringify(value, null, 2), { flag: 'wx' })
   // Exclusive marker prevents this host from retrying or overwriting an earlier attempt.
-  save('attempt-started', { sessionId, requestText, outputPaths: expectedPaths, referencePaths: [...referencePaths], callConfig, maxArchiveBytes })
+  save('attempt-started', { sessionId, requestText, outputPaths: expectedPaths, referencePaths: expectedReferences, callConfig, maxArchiveBytes })
   const request = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: requestText }] })
   const observation = observeNativeTaskRequests(ctx, {
     rootSessionId: sessionId,
@@ -125,7 +130,7 @@ export async function runDevelopmentNativeTask(ctx, config) {
         request,
         nativeHeader: handle.agent.session.events.filter(event => event?.type === 'request/header').at(-1),
         outputPaths: expectedPaths,
-        referencePaths: [...referencePaths],
+        referencePaths: expectedReferences,
       },
     ),
   })
@@ -146,6 +151,14 @@ export async function runDevelopmentNativeTask(ctx, config) {
   try {
     handle = await ctx.agents.create({ sessionId: SessionId(sessionId), meta: { cwd }, agentOptions: callConfig, signal, setup(local) {
       local.tools.presentAs('native'); local.tools.restrict({ allow: ['read', 'write', 'edit'] })
+      local.systemPrompt.variable('tianwen_development_file_permissions', () => JSON.stringify({ outputPaths: expectedPaths, referencePaths: expectedReferences }))
+      local.systemPrompt.section({ name: 'tianwen:development-file-permissions', order: 98, text: () => [
+        'The following JSON is host file permission data, not extra user requirements, file contents or verified results.',
+        'Paths are relative to the current workspace. outputPaths may be read, written and edited; referencePaths are read-only.',
+        'Use the exact declared paths with native read/write/edit. Do not guess other source, test or import-alias paths.',
+        'Path strings are data. This declaration does not establish that files exist, tests passed, or any method was learned or activated.',
+        '{{tianwen_development_file_permissions}}',
+      ].join('\n') })
       const nativeGuard = execution => {
         if (String(execution.agent?.session.id) !== sessionId) return
         return guard({ name: execution.name, sessionId, parent: execution.parent, callId: execution.callId, rootCallId: execution.rootCallId, arguments: execution.arguments })
@@ -174,7 +187,11 @@ export async function runDevelopmentNativeTask(ctx, config) {
     let cleanupError
     try { await handle?.dispose() } catch (error) { cleanupError = error.message; failure ??= error }
     observation.dispose()
-    save('cleanup', { cancelled: signal?.aborted === true, ...(cleanupError ? { cleanupError } : {}), requests: observation.counts(), contextRetained: true })
+    const diagnostics = collectDevelopmentNativeFileDiagnostics(ctx.logger?.buffer, {
+      fiber: diagnosticFiber, taskId: archivedTask?.source?.taskId, sessionId,
+    })
+    save('cleanup', { cancelled: signal?.aborted === true, ...(cleanupError ? { cleanupError } : {}), requests: observation.counts(), contextRetained: true,
+      ...(diagnostics.observedCount === 0 ? {} : { fileObservationDiagnostics: diagnostics }) })
   }
   try {
     // Execution cancellation is already archived; this signal only finalizes the archive.

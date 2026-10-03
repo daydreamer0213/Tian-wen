@@ -11,7 +11,9 @@ const original = { source: { taskId: 'control-task' }, completion: { status: 'co
 const native = { header: { id: 'control-session' }, events: [] }, log = [], guards = []
 const resultRoot = mkdtempSync(resolve(base, 'tianwen-native-host-unit-')), cancellation = new AbortController()
 let submitted
-const local = { tools: { presentAs: value => log.push(value), restrict: () => {}, guard: fn => guards.push(fn) } }
+const sections = []
+const variables = new Map()
+const local = { systemPrompt: { variable: (name, provider) => { variables.set(name, provider);return () => {} }, section: value => { sections.push(value);return () => {} } }, tools: { presentAs: value => log.push(value), restrict: () => {}, guard: fn => guards.push(fn) } }
 const handle = { agent: { session: native, followup: message => { submitted = message }, cancel: () => log.push('cancel'), whenIdle: async () => { if (scenario === 'cancel') cancellation.abort(); log.push('root-idle') } }, dispose: async () => { if (scenario === 'seal-write-error' || scenario === 'seal-prior-error') mkdirSync(resolve(resultRoot, 'archive-seal.json')); log.push('dispose') } }
 const ctx = { on: () => () => log.push('observer-off'), agents: { get: () => undefined, create: async config => { config.setup(local); return handle } }, tianwenConversationObserver: { whenIdle: async () => { if (scenario === 'review-cancel') { setTimeout(() => cancellation.abort(), 10); await new Promise(() => {}) } log.push('observer-idle') } }, tianwenConversationGuidanceLoop: { whenIdle: async () => log.push('guidance-idle') }, tianwenEvolution: { listConversationTasks: () => submitted || scenario === 'prior-session' ? [original] : [] }, sessions: { get: () => scenario === 'live-session' ? native : undefined, flush: async () => { if (['flush-error', 'seal-prior-error', 'archive-limit-prior-error'].includes(scenario)) throw new Error('flush-control-error') } }, sessionPersistence: { list: async () => scenario === 'durable-session' ? [{ id: 'control-session' }] : [], inspect: async () => native } }
 const config = { cwd: resolve('.'), sessionId: 'control-session', requestText: 'ordinary control request', outputPaths: ['first.mjs', 'second.mjs'], referencePaths: ['reference.md'], maxTargetBytes: 20, resultRoot, callConfig: { provider: 'control', model: 'control' }, isPrepared: () => true, signal: cancellation.signal }
@@ -95,6 +97,13 @@ try {
       assert.deepEqual(read('task'), original); assert.equal(read('cleanup').cancelled, false)
     }
     if (scenario === 'permissions' || scenario === 'file-guard') {
+      const section = sections.find(value => value.name === 'tianwen:development-file-permissions')
+      assert(section, 'original SDK permission section missing')
+      config.outputPaths.push('late-output.mjs');config.referencePaths.push('late-reference.md')
+      const text = section.text()
+      assert(text.includes('{{tianwen_development_file_permissions}}'))
+      assert.equal(variables.get('tianwen_development_file_permissions')(), JSON.stringify({ outputPaths: ['first.mjs', 'second.mjs'], referencePaths: ['reference.md'] }))
+      assert(text.includes('permission data') && text.includes('read-only'))
       const guard = guards[0], call = { name: 'write', agent: { session: { id: 'control-session' } }, callId: 'c', rootCallId: 'c', arguments: { file_path: 'first.mjs', content: 'x' } }
       assert.equal(guard(call), undefined); assert.equal(typeof guard({ ...call, rootCallId: 'other' }), 'string')
       assert.equal(guard({ ...call, name: 'structured_output', agent: { session: { id: 'reviewer-session' } } }), undefined)

@@ -16,6 +16,7 @@ declare module '@deepseek-ai/cordis' {
 
 interface CaptureState {
   readonly taskId: string
+  readonly sessionId: string
   readonly consentRevision: number
   readonly cwd: string
   readonly outputKind: 'files' | 'chat'
@@ -85,7 +86,7 @@ export class TianwenConversationFileObserverService extends Service {
       const state = this.states.get(task.source.taskId)
       if (state === undefined) return
       try { await this.freeze(task, state, agent) }
-      catch (error) { this.unavailable(state, this.reason(error)); this.warn(error) }
+      catch (error) { this.unavailable(state, this.reason(error)); this.warn(error, state, 'freeze') }
     })
     const offConsent = this.ctx.on('tianwen/learning-consent-changed', () => {
       for (const state of this.states.values()) {
@@ -185,7 +186,7 @@ export class TianwenConversationFileObserverService extends Service {
     if (task === undefined || outputKind === undefined || cwd === undefined) return
     let state = this.states.get(task.source.taskId)
     if (state === undefined) {
-      state = { taskId: task.source.taskId, consentRevision: task.source.consentRevision, cwd, outputKind,
+      state = { taskId: task.source.taskId, sessionId: task.source.sessionId, consentRevision: task.source.consentRevision, cwd, outputKind,
         captures: new Map(), outputPaths: new Map(), successfulReads: new Set(), missingReads: new Map(), unavailable: false, revoked: false,
         native: new ConversationFileAncillaryCapture(this.ctx, task, cwd, this.config) }
       this.states.set(task.source.taskId, state)
@@ -207,7 +208,7 @@ export class TianwenConversationFileObserverService extends Service {
       return next()
     }
     try { await state.native.prepare(exec) }
-    catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error) }
+    catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error, state, 'prepare') }
     if (isFileAncillaryTool(exec.name) && exec.name !== CAPTURED_FILE_FACTS_TOOL) return state.native.execute(exec, next)
     const supported = exec.name === 'read' || exec.name === 'write' || exec.name === 'edit' || exec.name === CAPTURED_FILE_FACTS_TOOL
     if (!supported || exec.parent !== undefined || String(exec.rootCallId) !== String(exec.callId)
@@ -231,7 +232,7 @@ export class TianwenConversationFileObserverService extends Service {
       }
       await capture
     } catch (error) {
-      this.unavailable(state, this.reason(error)); this.warn(error)
+      this.unavailable(state, this.reason(error)); this.warn(error, state, 'capture')
     }
     const result = await state.native.execute(exec, next)
     if (result.isError) {
@@ -311,7 +312,7 @@ export class TianwenConversationFileObserverService extends Service {
     if (state.unavailable || state.revoked) return
     state.unavailable = true; delete state.final
     try { this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-file-evidence-unavailable', taskId: state.taskId, reason }) }
-    catch (error) { this.warn(error) }
+    catch (error) { this.warn(error, state, 'unavailable-record') }
   }
 
   private reason(error: unknown): ConversationTaskFileUnavailable['reason'] {
@@ -319,7 +320,12 @@ export class TianwenConversationFileObserverService extends Service {
     return 'material-unavailable'
   }
 
-  private warn(error: unknown): void {
-    this.ctx.logger.warn('Conversation file observation failed: %s', error instanceof Error ? error.message : String(error))
+  private warn(error: unknown, state: Pick<CaptureState, 'taskId' | 'sessionId'>, phase: 'prepare' | 'capture' | 'freeze' | 'unavailable-record'): void {
+    const logger = this.ctx.logger()
+    // Configure this source logger only; SDK exporter-specific levels still win.
+    // Its original bounded buffer otherwise excludes warnings at default level 1.
+    logger.level = 2
+    logger.warn('Conversation file observation failed: %s', error instanceof Error ? error.message : String(error),
+      Object.freeze({ kind: 'tianwen.file-observation-diagnostic.v1', taskId: state.taskId, sessionId: state.sessionId, phase }))
   }
 }

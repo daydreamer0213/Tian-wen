@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 原执行权限清单和具体诊断已交付
+
+原SDK scoped variable/section在首执行前提供既定文件路径/角色，UserMessage、权限、持久gate不变。原观察器warn保留Task/session/phase，原provider fiber严格匹配，诊断存原cleanup/seal；原证据16上限和unverifiable不放宽。175回归、完整Runtime/两声明、48发行边界及原SDK普通/模板诊断/完整正常程序与另Node0请求恢复通过；独立P2关闭，无新有据P1/P2。见[准确分账及下一实际任务](tianwen-host-permission-context-20261004.md)。
+
+工程控制不算自然学习。原两次自然Task保持原不可核验，未重跑/补反馈/重评；完整目标active/incomplete、main/Daily NO-GO与原门槛/十工作日窗口不变。下一自主固定原归档诊断显示任务/独立期望，用新的实际提供者首次结果，不索题/催评或机械整体blocked。正式账本原hash只读未mount，十个拒删目录不碰，D约18GiB>=15、未达20；容器收尾见D final-audit。本条覆盖下方文件清单/具体诊断仍待实现旧入口。
+
 ## 2026-10-04 持久准备宿主交付，首自然结果保留
 
 见[准确分账](tianwen-durable-preparation-host-20261004.md)：公共DEV host持久gate当前工程修复83回归/缓存Node57/57/新SDK分派及完整程序控制通过；原首次33实际请求、prepare1/eval0、Task unverifiable/inconclusive，原首代码49/57不回写。主代理修复不记模型学习/方法采用/真实收益；反馈、研究仍0，原隔离保持。
