@@ -1,5 +1,7 @@
 export const name = 'tianwen-runtime-bundle'
 export function apply(): void {}
+export type { GoalTaskAcceptanceCheck, GoalTaskAcceptancePreparation, PreparedGoalTaskAcceptanceCheck } from './goal-task-acceptance.js'
+export type { GoalCommandOrigin, GoalTaskAcceptanceBinding, GoalTaskAcceptanceEvent } from './goal-task-acceptance-contract.js'
 export {
   createConversationIsolatedPythonCheck,
   createConversationStudyIsolatedPythonCheck,

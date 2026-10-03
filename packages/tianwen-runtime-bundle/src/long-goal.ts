@@ -11,6 +11,8 @@ import {
 import { isAbsolute, join, resolve } from 'node:path'
 import { WIDER_MODES } from '@deepseek-ai/dsh-sandbox'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
+import { sha256 } from '@tianwen/evolution/learning-intake'
+import { parseGoalCommandOrigin, parseGoalTaskAcceptanceEvent, type GoalCommandOrigin, type GoalTaskAcceptanceEvent } from './goal-task-acceptance-contract.js'
 
 import { readGoalStatus } from './status.js'
 import type {
@@ -299,6 +301,11 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
     if (!isRecord(event) || !isNonEmptyString(event.taskId) || !taskIds.has(event.taskId)) {
       throw new LongGoalIntegrityError('Tianwen Long Goal event Task is invalid')
     }
+    if (event.type === 'task-acceptance-prepared' || event.type === 'task-acceptance-finished') {
+      try { events.push(parseGoalTaskAcceptanceEvent(event)) }
+      catch (error) { throw new LongGoalIntegrityError('Goal Task acceptance event is invalid', { cause: error }) }
+      continue
+    }
     if (event.type === 'attempt-started' && hasExactKeys(event, ['type', 'taskId', 'attempt'])) {
       events.push({ type: 'attempt-started', taskId: event.taskId, attempt: parseTianwenAttempt(event.attempt) })
       continue
@@ -410,6 +417,8 @@ function parseTianwenEvents(value: unknown, tasks: readonly LongGoalTaskRecordV2
 }
 
 function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): void {
+  const preparations = new Map<string, Extract<GoalTaskAcceptanceEvent, { type: 'task-acceptance-prepared' }>>()
+  const finished = new Set<string>()
   const projections = new Map<string, {
     attempts: TianwenExecutionAttempt[]
     provisioningFailedEpochs: Set<number>
@@ -454,6 +463,27 @@ function validateTianwenEventHistory(events: readonly TianwenLongGoalEvent[]): v
       continue
     }
     const current = projection.attempts.at(-1)
+    if (event.type === 'task-acceptance-prepared') {
+      const b = event.binding
+      const key = `${event.taskId}:${b.epoch}`
+      if (current?.status !== 'running' || current.epoch !== b.epoch || current.parentSessionId !== b.parentSessionId
+        || current.childSessionId !== b.childSessionId || current.permissionFingerprint !== b.permissionFingerprint
+        || preparations.has(key)) throw new LongGoalIntegrityError('Acceptance preparation requires the exact running attempt once')
+      preparations.set(key, event)
+      continue
+    }
+    if (event.type === 'task-acceptance-finished') {
+      const key = `${event.taskId}:${event.epoch}`
+      const prepared = preparations.get(key)
+      if (current?.epoch !== event.epoch || prepared === undefined || finished.has(key)
+        || event.preparationDigest !== sha256(prepared.binding) || event.endSeq <= prepared.binding.preparedSeq
+        || event.outcome.status === 'rejected' && event.outcome.failedRequiredConditionDigest !== undefined
+          && event.outcome.failedRequiredConditionDigest !== sha256(prepared.binding.requiredCondition)) {
+        throw new LongGoalIntegrityError('Acceptance result requires its exact preparation once')
+      }
+      finished.add(key)
+      continue
+    }
     if (event.type === 'attempt-permission-mode-observed') {
       if (
         current === undefined
@@ -588,7 +618,7 @@ function tianwenTaskAttemptProjection(
         parentSessionId: event.parentSessionId,
         mainInboxBoundarySeq: event.mainInboxBoundarySeq,
       }
-    } else {
+    } else if (event.type === 'terminal-delivery-observed') {
       projection.terminalDelivery = event.delivery
     }
   }
@@ -613,6 +643,7 @@ function parseGoalFirstLongGoalFields(
     'workspaceRoot', 'maxTaskRounds', 'planner', 'guidance', 'createdAt', 'updatedAt', 'tasks',
     ...(hasControl ? ['control'] : []),
     ...(hasControl && isRecord(value) && Object.hasOwn(value, 'tianwenEvents') ? ['tianwenEvents'] : []),
+    ...(hasControl && isRecord(value) && Object.hasOwn(value, 'origin') ? ['origin'] : []),
   ]
   if (
     !isRecord(value) ||
@@ -690,6 +721,14 @@ function parseLongGoalV3(value: unknown): LongGoalRecordV3 {
   const events = Object.hasOwn(value, 'tianwenEvents')
     ? parseTianwenEvents(value.tianwenEvents, fields.tasks)
     : undefined
+  let origin: GoalCommandOrigin | undefined
+  if (Object.hasOwn(value, 'origin')) {
+    try { origin = parseGoalCommandOrigin(value.origin, controlSessionId) }
+    catch (error) { throw new LongGoalIntegrityError('Goal command origin is invalid', { cause: error }) }
+  }
+  if (events?.some(event => event.type === 'task-acceptance-prepared') && origin === undefined) {
+    throw new LongGoalIntegrityError('Goal Task acceptance requires original command provenance')
+  }
   if (controlSessionId === fields.planner.sessionId) {
     throw new LongGoalIntegrityError('Continuous Goal control Session must differ from planner Session')
   }
@@ -701,6 +740,7 @@ function parseLongGoalV3(value: unknown): LongGoalRecordV3 {
     ...fields,
     control: { sessionId: value.control.sessionId, autoProgress: value.control.autoProgress },
     ...(events === undefined ? {} : { tianwenEvents: events }),
+    ...(origin === undefined ? {} : { origin }),
   }
 }
 
@@ -959,6 +999,7 @@ export function createContinuousLongGoal(input: {
   readonly workspaceRoot: string
   readonly agentPreset: string
   readonly controlSessionId: string
+  readonly origin?: GoalCommandOrigin
 }, dependencies: {
   readonly goalSuffix?: () => string
   readonly plannerSessionId?: () => string
@@ -1000,6 +1041,7 @@ export function createContinuousLongGoal(input: {
     },
     guidance: [],
     control: { sessionId: input.controlSessionId, autoProgress: 'running' },
+    ...(input.origin === undefined ? {} : { origin: parseGoalCommandOrigin(input.origin, input.controlSessionId) }),
     createdAt: now,
     updatedAt: now,
     tasks: [],
@@ -1134,6 +1176,36 @@ function appendTianwenEvent(input: TianwenAttemptEventInput, event: TianwenLongG
   })
   replaceRecordAtomically(recordPath(input.stateRoot, input.longGoalId), updated)
   return updated
+}
+
+export function appendGoalTaskAcceptance(input: TianwenAttemptEventInput & { readonly event: GoalTaskAcceptanceEvent }): LongGoalRecordV3 {
+  if (input.taskId !== input.event.taskId) throw new LongGoalIntegrityError('Acceptance Task identity mismatch')
+  if (input.event.type === 'task-acceptance-prepared') {
+    const record = readContinuousLongGoal(input.stateRoot, input.longGoalId)
+    assertExpectedRevision(record, input.expectedRevision)
+    const task = record.tasks.find(item => item.id === input.taskId)
+    const b = input.event.binding
+    if (task?.execution?.goalId !== b.nativeGoalId || task.execution.sessionId !== b.childSessionId
+      || sha256(task) !== b.taskDigest || goalTaskAcceptanceGoalDigest(record) !== b.goalDigest) {
+      throw new LongGoalIntegrityError('Acceptance preparation must bind the original Goal and Task execution')
+    }
+  }
+  return appendTianwenEvent(input, input.event)
+}
+
+export function goalTaskAcceptanceGoalDigest(record: LongGoalRecordV3) {
+  return sha256({ id: record.id, objective: record.objective, context: record.context, successCriteria: record.successCriteria, origin: record.origin })
+}
+
+export function readGoalTaskAcceptanceProjection(record: LongGoalRecordV3, taskId: string) {
+  const attempt = readTianwenTaskAttemptProjection(record, taskId).attempts.at(-1)
+  const prepared = record.tianwenEvents?.findLast(event => event.type === 'task-acceptance-prepared'
+    && event.taskId === taskId && event.binding.epoch === attempt?.epoch)
+  if (prepared?.type !== 'task-acceptance-prepared') return undefined
+  const finished = record.tianwenEvents?.findLast(event => event.type === 'task-acceptance-finished'
+    && event.taskId === taskId && event.epoch === prepared.binding.epoch)
+  return { epoch: prepared.binding.epoch, checkerId: prepared.binding.checkerId, requiredCondition: prepared.binding.requiredCondition,
+    ...(finished?.type === 'task-acceptance-finished' ? finished.outcome : { status: 'pending' as const, detail: 'No persisted acceptance result.' }) }
 }
 
 export function appendTianwenAttemptStarted(input: TianwenAttemptEventInput & {
@@ -1720,8 +1792,10 @@ export async function readLongGoalStatus(input: {
       const attempts = record.schemaVersion === 'tianwen.long-goal.v3'
         ? readTianwenTaskAttemptProjection(record, task.id).attempts : []
       const current = attempts.at(-1)
-      return current === undefined ? projected : {
-        ...projected,
+      const acceptance = record.schemaVersion === 'tianwen.long-goal.v3' ? readGoalTaskAcceptanceProjection(record, task.id) : undefined
+      const withAcceptance = { ...projected, ...(acceptance === undefined ? {} : { acceptance }) }
+      return current === undefined ? withAcceptance : {
+        ...withAcceptance,
         attempt: {
           epoch: current.epoch, status: current.status,
           ...(current.permissionMode === undefined ? {} : { permissionMode: current.permissionMode }),
@@ -1820,7 +1894,8 @@ export function formatLongGoalStatusText(status: ReadLongGoalStatusProjection): 
     const blocked = task.blockedReason === undefined
       ? ''
       : ` (${task.blockedReason.code}: ${task.blockedReason.message})`
-    lines.push(`${task.id}: ${task.phase}${current} — ${task.objective}${blocked}`)
+    const acceptance = 'acceptance' in task && task.acceptance !== undefined ? ` [acceptance: ${task.acceptance.status}; ${task.acceptance.detail}]` : ''
+    lines.push(`${task.id}: ${task.phase}${current} — ${task.objective}${blocked}${acceptance}`)
   }
   return lines.join('\n')
 }

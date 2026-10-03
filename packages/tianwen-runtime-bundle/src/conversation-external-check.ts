@@ -5,6 +5,8 @@ import { SessionId, isAppendSurfaceEvent, type UserMessage } from '@deepseek-ai/
 import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, sha256, supportsConversationCodeCheck, validateConversationExternalCheck,
   type ConversationExternalCheckOutcome, type ConversationFileEntry, type ConversationTask } from '@tianwen/evolution'
 import { conversationContext, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
+import { withConversationObservationCancellation } from './observation-cancellation.js'
+export { withConversationObservationCancellation } from './observation-cancellation.js'
 
 export interface ConversationExternalCodePreparation {
   readonly task: ConversationTask
@@ -37,24 +39,6 @@ export interface PreparedConversationExternalCodeCheck {
 export interface ConversationExternalCodeCheck {
   /** Undefined means the original request has no applicable trusted check. */
   readonly prepare: (material: ConversationExternalCodePreparation) => Promise<PreparedConversationExternalCodeCheck | undefined>
-}
-
-export async function withConversationObservationCancellation<T>(signal: AbortSignal, start: () => Promise<T>, waitsForCleanup = false): Promise<T> {
-  signal.throwIfAborted()
-  if (waitsForCleanup) {
-    const result = await start()
-    signal.throwIfAborted()
-    return result
-  }
-  let remove = () => {}
-  const cancelled = new Promise<never>((_resolve, reject) => {
-    const abort = () => reject(new Error('external check cancelled'))
-    signal.addEventListener('abort', abort, { once: true })
-    remove = () => signal.removeEventListener('abort', abort)
-    if (signal.aborted) abort()
-  })
-  try { return await Promise.race([Promise.resolve().then(() => { signal.throwIfAborted(); return start() }), cancelled]) }
-  finally { remove() }
 }
 
 /** Owned by the ordinary observer, with no separate Agent loop or result store. */

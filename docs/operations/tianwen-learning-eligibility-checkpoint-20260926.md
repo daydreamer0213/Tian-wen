@@ -1,5 +1,16 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 Goal Task 事前验收与规划消费已交付
+
+780a91d归档包结束后返回主线。新增默认关闭可信goalTaskAcceptance：当前直接用户/goal创建时固定原command；首真实header/context后、provider前绑定原Task/attempt/Goal/权限/模型/合同/原条件；持久SDK收尾、结果单独保存并由Planner/status/完成通知消费。无合同原行为保持，不硬塞旧Outcome、不创建自然来源或激活权限。见[准确交付及下一主线](tianwen-goal-task-acceptance-20261003.md)。
+
+实际首红及独立3P2关闭、复审无新有据P1/P2；完整构建/公开声明/导入检查通过。11文件356项回归通过；新增实际保存故障项及同文件最新10项通过。发行4SDK控制各1/1、9 scripted/0真实，覆盖通过/不通过/错条件/检查器不可用，Planner读到原状态；新Context同进程准确cold0请求/不重评。真实保存错误向原lane传播、无新的规划请求。仅工程，不算自然学习或新Node进程验收。
+
+正式1327364B/5af25fcd…账本未变；最近确认23观察22完成/16初筛/1可信问题/8成功候选、兼容pair false、反馈0/研究0/隔离true。SDK检查器根1c0718e6…保持，运行Runtime按本次产品实现变为db1a4d01…，旧版本/封存事实保留。下一接可信Goal独立结果生产者和实际学习消费者，先查输入/owner/来源资格，不伪造ConversationTask、放开任意子Agent、追加归档练习、造失败、重评旧题、索题/催评或空转blocked；再分别核实研究/方法/启用/未来效果与回滚。
+
+目标active/incomplete、main/Daily完整学习NO-GO及原同意/隔离/资格/停止/十工作日决策窗口保持，不加门槛/重新计时。新增D记录约35KB，依赖/工作树复用、无下载/整环境/容器，自有夹具清理、Docker停止，D约18.22GiB≥15、未达20偏好，旧删除拒绝不绕过。本条覆盖下方Goal验收尚待实现的当前待办。
+
+
 ## 2026-10-03 归档有限工作包已收口，返回完整学习主线
 
 cebab47 继承 bac5397 原 status 合同/入口，唯一实际 Task1080a4eb：6真实/根3、prepare1/evaluate1/0重试，原程序verified/两审met+有效proof/整体met，4712B首稿逐字接纳。11原文件先封存，新进程task/material/program/两proof精确cold0请求执行。只读inspect入口已消费reader/seal/原SDK summary/新formatter；六原记录+seal总字节有界、参数先验证、缺seal/损坏不补档，磁盘task不造SDK身份。3消费者首红后标准30项及实际发行scripted宿主/cold通过，两个真实档读取核对、旧无host seal档准确ENOENT而未补。见[准确交付与主线纠偏](tianwen-native-archive-status-20261003.md)。

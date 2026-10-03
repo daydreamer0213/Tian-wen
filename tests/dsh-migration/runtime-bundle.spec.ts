@@ -61,6 +61,7 @@ const serverPeerDependencies = {
   '@deepseek-ai/dsh-skill': '0.1.1-rc.2',
   '@deepseek-ai/dsh-subagent': '0.1.1-rc.2',
   '@deepseek-ai/dsh-system-prompt': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-tool-fs': '0.1.1-rc.2',
   '@deepseek-ai/dsh-tool-fs-search': '0.1.1-rc.2',
   '@deepseek-ai/dsh-tool-pwsh': '0.1.1-rc.2',
   '@deepseek-ai/dsh-tools': '0.1.1-rc.2',
@@ -97,6 +98,10 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/conversation-task-material.ts',
     'src/conversation-observer.ts',
     'src/conversation-external-check.ts',
+    'src/observation-cancellation.ts',
+    'src/goal-task-acceptance.ts',
+    'src/goal-task-acceptance-contract.ts',
+    'src/conversation-source-readiness.ts',
     'src/conversation-study-result-check.ts',
     'src/conversation-guidance-loop.ts',
     'src/conversation-feedback-assessment.ts',
@@ -160,6 +165,8 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/conversation-learning.js',
       '../tianwen-evolution/dist/conversation-feedback.js',
       '../tianwen-evolution/dist/conversation-files.js',
+      '../tianwen-evolution/dist/conversation-read-denial.js',
+      '../tianwen-evolution/dist/conversation-file-mutation-denial.js',
       '../tianwen-evolution/dist/conversation-file-facts.js',
       '../tianwen-evolution/dist/conversation-guidance.js',
       '../tianwen-evolution/dist/conversation-external-check.js',
@@ -196,6 +203,7 @@ function isAllowedCliInput(input: string): boolean {
   return path === 'src/cli.ts' || path === 'src/create.ts' ||
     path === 'src/goal-first.ts' ||
     path === 'src/long-goal.ts' || path === 'src/long-goal-run.ts' ||
+    path === 'src/goal-task-acceptance-contract.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
     path === 'src/portable-profile.ts' ||
     path === 'src/controlled-lifecycle.ts' ||
@@ -219,6 +227,9 @@ function isAllowedCreateRunnerInput(input: string): boolean {
 function isAllowedGoalFirstRunnerInput(input: string): boolean {
   const path = posix.normalize(input.replaceAll('\\', '/'))
   return [
+    'src/goal-task-acceptance.ts',
+    'src/goal-task-acceptance-contract.ts',
+    'src/observation-cancellation.ts',
     'src/continuous-goal-agent.ts',
     'src/continuous-goal-feedback.ts',
     'src/continuous-goal-service.ts',
@@ -874,6 +885,7 @@ describe('@tianwen/runtime-bundle', () => {
     expect([...source.matchAll(/from\s+["']([^"']+)["']/gu)].map(match => match[1]).sort())
       .toEqual([
         '@deepseek-ai/dsh-scope',
+        '@deepseek-ai/dsh-tool-fs',
         '@deepseek-ai/dsh-tool-fs-search',
         '@deepseek-ai/dsh-tool-pwsh',
         '@deepseek-ai/dsh-tool-skill',

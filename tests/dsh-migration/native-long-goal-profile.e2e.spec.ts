@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
@@ -12,6 +12,7 @@ import { LlmAdapter } from '@deepseek-ai/dsh-llm'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime, { SubagentError, type SubagentProvider } from '@deepseek-ai/dsh-subagent'
 import { sandboxDenialMarker } from '@deepseek-ai/dsh-sandbox'
+import type { MessageFeedbackItem, MessageFeedbackListRequest } from '@deepseek-ai/dsh-message-feedback'
 import {
   Context,
   CallId,
@@ -26,6 +27,8 @@ import {
 } from '@tianwen/dsh-compat'
 import { apply as applyRuntimeBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID } from '../../packages/tianwen-runtime-bundle/src/learning-consent-agent.js'
+import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { GoalTaskAcceptanceChecks } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance.js'
 import {
   listLongGoals,
   readLongGoal,
@@ -217,6 +220,8 @@ async function mountProfile(
     readonly root?: string
     readonly resumeMain?: boolean
     readonly completeTaskThroughTool?: boolean
+    readonly feedbackRows?: Map<string, readonly MessageFeedbackItem[]>
+    readonly goalTaskAcceptance?: NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['goalTaskAcceptance']
   } = {},
 ) {
   mkdirSync(FIXTURE_BASE, { recursive: true })
@@ -233,6 +238,11 @@ async function mountProfile(
   ctx.provide('sessionProjections', projectionRegistry())
   ctx.provide('sandboxPolicy', sandboxPolicy())
   ctx.provide('approval', {})
+  if (options.feedbackRows !== undefined) ctx.provide('messageFeedback', {
+    async list(request: MessageFeedbackListRequest) {
+      return { ok: true as const, value: { items: structuredClone(options.feedbackRows!.get(String(request.sessionId)) ?? []) } }
+    },
+  })
   ctx.provide('connection', { rpc: { handle: () => undefined } })
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ provider: 'tianwen-profile', model: 'scripted' }),
@@ -279,7 +289,10 @@ async function mountProfile(
   ctx.subagents.registerProvider(spawnProvider)
   const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
-  await applyRuntimeBundle(ctx, { stateRoot, sessionsRoot, evolutionRoot })
+  const runtimeApply = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
+    ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)).apply as typeof applyRuntimeBundle
+    : applyRuntimeBundle
+  await runtimeApply(ctx, { stateRoot, sessionsRoot, evolutionRoot, goalTaskAcceptance: options.goalTaskAcceptance })
 
   const offAgent = ctx.on('agent/created', ({ agent }) => {
     headers.set(String(agent.session.id), {
@@ -373,7 +386,11 @@ async function mountProfile(
       disposeTask()
       offAgent()
       await ctx.fiber.dispose()
-      if (removeRoot) rmSync(root, { recursive: true, force: true })
+      if (removeRoot) {
+        const target = resolve(root)
+        if (!target.startsWith(`${FIXTURE_BASE}\\`) && !target.startsWith(`${FIXTURE_BASE}/`)) throw new Error('fixture cleanup target outside owned base')
+        rmSync(target, { recursive: true, force: true })
+      }
     },
   }
 }
@@ -413,6 +430,184 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it('propagates actual acceptance storage failure before issuing the next planning request', async () => {
+    const failures: unknown[] = []
+    const originalFinish = GoalTaskAcceptanceChecks.prototype.finishGoal
+    const spy = vi.spyOn(GoalTaskAcceptanceChecks.prototype, 'finishGoal').mockImplementation(function(id) {
+      const operation = originalFinish.call(this, id)
+      void operation.catch(error => failures.push(error))
+      return operation
+    })
+    let displaced = false
+    let evaluations = 0
+    const profile = await mountProfile('Produce the storage-failure connection control result.', {
+      completeTaskThroughTool: true,
+      goalTaskAcceptance: { async prepare() { return {
+        checkerId: 'storage-control-check', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+        inputsDigest: sha256('inputs'), requiredCondition: 'Original result must be durably recorded.',
+        async evaluate() {
+          evaluations++
+          const source = resolve(profile.stateRoot, 'long-goals')
+          const destination = resolve(profile.stateRoot, 'long-goals-unavailable')
+          const boundary = resolve(profile.root) + '\\'
+          if (![source, destination].every(path => path.startsWith(boundary))) throw new Error('storage control outside owned fixture')
+          renameSync(source, destination)
+          displaced = true
+          return { status: 'verified', detail: 'Controlled checker finished before storage failure.' }
+        },
+      } } },
+    })
+    try {
+      await profile.startGoal()
+      await vi.waitFor(() => {
+        const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+        expect(record?.tianwenEvents?.some(event => event.type === 'task-acceptance-prepared')).toBe(true)
+      })
+      const planningMessages = () => profile.adapter.requests.flatMap(request => request.messages).filter(message => message.role === 'user'
+        && message.content.some(block => block.type === 'text' && block.text.includes('Plan the next short ordered Task suffix')))
+      const originalPlanning = new Set(planningMessages().map(message => sha256(message)))
+      profile.releaseTask()
+      await vi.waitFor(() => expect(failures.length).toBeGreaterThan(0), { timeout: 5_000 })
+      expect(evaluations).toBe(1)
+      expect(planningMessages().filter(message => !originalPlanning.has(sha256(message)))).toHaveLength(0)
+      renameSync(resolve(profile.stateRoot, 'long-goals-unavailable'), resolve(profile.stateRoot, 'long-goals'))
+      displaced = false
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      expect(record.planner.planRevision).toBe(1)
+      expect(record.tianwenEvents?.some(event => event.type === 'task-acceptance-finished')).toBe(false)
+    } finally {
+      if (displaced) renameSync(resolve(profile.stateRoot, 'long-goals-unavailable'), resolve(profile.stateRoot, 'long-goals'))
+      await profile.dispose(); spy.mockRestore()
+    }
+  }, 30_000)
+
+  it.each(['verified', 'rejected', 'wrong-condition', 'unavailable'] as const)('freezes trusted acceptance before the first Task provider request and keeps completion separate: %s', async mode => {
+    const expected = mode === 'verified' || mode === 'rejected' ? mode : 'unverifiable'
+    const requiredToken = mode === 'verified' ? 'profile Task completed' : 'original-required-field'
+    const condition = `The produced result must contain ${requiredToken}.`
+    let preparations = 0
+    let evaluations = 0
+    let captured: unknown
+    const profile = await mountProfile('Produce a result that the pre-existing check rejects.', {
+      completeTaskThroughTool: true,
+      goalTaskAcceptance: {
+        async prepare(material) {
+          preparations++
+          captured = structuredClone({ ...material, signal: undefined })
+          expect(material.source.type).toBe('command/run')
+          expect(material.source.data.source.kind).toBe('user')
+          expect(material.source.data.args?.trim()).toBe(material.goal.objective)
+          expect(profile.adapter.requests.some(request => String(request.sessionId) === material.attempt.childSessionId)).toBe(false)
+          return {
+            checkerId: 'existing-project-assertion', checkerDigest: sha256('assertion-v1'),
+            contractDigest: sha256(condition), inputsDigest: sha256('original inputs'),
+            requiredCondition: condition,
+            async evaluate(candidate) {
+              evaluations++
+              expect(candidate.events.some(event => event.type === 'tool/result')).toBe(true)
+              if (mode === 'unavailable') throw new Error('existing checker unavailable')
+              const actualToolResults = candidate.events.filter(event => event.type === 'tool/result')
+              return JSON.stringify(actualToolResults).includes(requiredToken)
+                ? { status: 'verified', detail: 'Original required token present in actual tool evidence.' }
+                : { status: 'rejected', detail: 'Original required token absent in actual tool evidence.',
+                    failedRequiredConditionDigest: sha256(mode === 'wrong-condition' ? 'another condition' : condition) }
+            },
+          }
+        },
+      },
+    })
+    try {
+      await profile.startGoal()
+      await vi.waitFor(() => {
+        const record = readLongGoal(profile.stateRoot, listLongGoals(profile.stateRoot)[0]!.id) as LongGoalRecordV3
+        const child = record.tasks[0]?.execution === null || record.tasks[0]?.execution === undefined ? undefined : profile.ctx.agents.get(SessionId(record.tasks[0].execution.sessionId))
+        expect(preparations, JSON.stringify({ origin: record.origin, events: child?.session.events.map(event => ({ type: event.type, seq: event.seq })) })).toBe(1)
+      }, { timeout: 5_000 })
+      profile.releaseTask()
+      await vi.waitFor(() => {
+        const record = readLongGoal(profile.stateRoot, listLongGoals(profile.stateRoot)[0]!.id) as LongGoalRecordV3
+        const child = profile.ctx.agents.get(SessionId(record.tasks[0]!.execution!.sessionId))
+        expect(evaluations, JSON.stringify({ record, liveGoal: child === undefined ? undefined : profile.ctx.goals.get(child), events: child?.session.events.map(event => event.type) })).toBe(1)
+      }, { timeout: 5_000 })
+      await vi.waitFor(() => {
+        const record = readLongGoal(profile.stateRoot, listLongGoals(profile.stateRoot)[0]!.id) as LongGoalRecordV3
+        expect(record.tianwenEvents?.find(event => event.type === 'task-acceptance-finished')).toMatchObject({ outcome: { status: expected } })
+      })
+      const record = readLongGoal(profile.stateRoot, listLongGoals(profile.stateRoot)[0]!.id) as LongGoalRecordV3
+      expect(record.origin).toBeDefined()
+      expect(record.tianwenEvents?.filter(event => event.type === 'task-acceptance-prepared')).toHaveLength(1)
+      await vi.waitFor(async () => expect(await readLongGoalStatus({ stateRoot: profile.stateRoot, longGoalId: record.id, dshStatusTarget: { sessionsRoot: profile.sessionsRoot, evolutionRoot: profile.evolutionRoot } })).toMatchObject({ goal: { phase: 'complete' }, tasks: [expect.objectContaining({ acceptance: expect.objectContaining({ status: expected }) })] }))
+      expect(profile.adapter.requests.some(request => allText(request).includes('Started Task facts:') && allText(request).includes(`"status":"${expected}"`))).toBe(true)
+      expect(captured).toBeDefined()
+      expect(profile.ctx.tianwenEvolution.listConversationTasks(record.tasks[0]!.execution!.sessionId)).toEqual([])
+      expect(profile.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      const frozen = readLongGoal(profile.stateRoot, record.id)
+      await profile.dispose(false)
+      const cold = await mountProfile('Produce a result that the pre-existing check rejects.', {
+        root: profile.root, resumeMain: true, completeTaskThroughTool: true,
+        goalTaskAcceptance: { async prepare() { throw new Error('cold must not prepare'); } },
+      })
+      try {
+        expect(readLongGoal(cold.stateRoot, record.id)).toEqual(frozen)
+        expect(cold.adapter.requests).toHaveLength(0)
+        expect(evaluations).toBe(1)
+        if (process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT !== undefined) {
+          const receiptRoot = resolve(process.env.TIANWEN_GOAL_ACCEPTANCE_RECEIPTS_ROOT)
+          if (!receiptRoot.startsWith(resolve('D:/DevData') + '\\')) throw new Error('receipt must stay under D:/DevData')
+          mkdirSync(receiptRoot, { recursive: true })
+          writeFileSync(join(receiptRoot, `sdk-${mode}.json`), JSON.stringify({ controlled: true, naturalEvidence: false,
+            publishedRuntime: process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1', preparations, evaluations,
+            scriptedRequests: profile.adapter.requests.length, actualProviderRequests: 0, record: frozen,
+            cold: { newContext: true, sameProcess: true, requests: cold.adapter.requests.length, recordExact: true } }, null, 2), { flag: 'wx' })
+        }
+      } finally { await cold.dispose(true) }
+    } finally { await profile.dispose() }
+  }, 30_000)
+
+  it('separates native Goal completion from missing acceptance and preserves child feedback', async () => {
+    const rows = new Map<string, readonly MessageFeedbackItem[]>()
+    const profile = await mountProfile('Produce the task acceptance connection control result.', { completeTaskThroughTool: true, feedbackRows: rows })
+    try {
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal()
+      await vi.waitFor(() => {
+        const execution = listLongGoals(profile.stateRoot)[0]?.tasks[0]?.execution
+        expect(execution).toBeDefined(); expect(execution).not.toBeNull()
+      }, { timeout: 10000 })
+      const record = listLongGoals(profile.stateRoot)[0]!
+      if (record.schemaVersion !== 'tianwen.long-goal.v3') throw new Error('expected continuous Goal')
+      const childId = record.tasks[0]!.execution!.sessionId
+      const child = profile.ctx.agents.get(SessionId(childId))!
+      expect(child.session.header.parentSession).toBe(record.planner.sessionId)
+      profile.releaseTask()
+      await vi.waitFor(async () => {
+        const status = await readLongGoalStatus({ stateRoot: profile.stateRoot, longGoalId: record.id,
+          dshStatusTarget: { sessionsRoot: profile.sessionsRoot, evolutionRoot: profile.evolutionRoot } })
+        expect(status.goal.phase).toBe('complete')
+      }, { timeout: 10000 })
+      await profile.ctx.tianwenConversationObserver.whenIdle()
+      expect(profile.ctx.tianwenEvolution.listConversationTasks(childId)).toEqual([])
+      expect(profile.ctx.tianwenEvolution.getRunBindingBySessionId(childId)).toBeUndefined()
+      expect(profile.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      const saved = await profile.ctx.sessionPersistence.inspect(SessionId(childId))
+      const answer = saved.events.findLast(event => event.type === 'assistant/message')
+      if (answer?.type !== 'assistant/message') throw new Error('missing actual child answer')
+      rows.set(childId, [{ messageId: answer.data.message.id, rating: 'positive', version: 'acceptance-control-1' as MessageFeedbackItem['version'], createdAt: Date.now(), updatedAt: Date.now() }])
+      await profile.ctx.tianwenMessageFeedbackBridge.reconcileSession(childId)
+      expect(profile.ctx.tianwenEvolution.getLearningIntakeStatus(childId, String(answer.data.message.id))).toMatchObject({ feedbackVersion: 'acceptance-control-1', decision: 'no-case' })
+      const output = process.env.TIANWEN_GOAL_ACCEPTANCE_CONTROL_ROOT
+      if (output !== undefined) {
+        if (!output.startsWith('D:/DevData/')) throw new Error('control receipt must use D:/DevData')
+        mkdirSync(output, { recursive: true })
+        writeFileSync(join(output, 'original-sdk-control.json'), JSON.stringify({ nativeGoalCompleted: true, taskExecutedOnce: profile.taskRuns() === 1,
+          noConversationTaskFromChild: true, noAutomaticRunAcceptance: true, explicitChildFeedback: 'no-case', naturalEvidence: false,
+          goalId: record.id, taskId: record.tasks[0]!.id, childSessionId: childId, parentSessionId: record.planner.sessionId,
+          sourceCommand: profile.main.session.events.find(event => event.type === 'command/run'), scriptedRequests: profile.adapter.requests.length,
+          providerRequests: 0, studies: 0 }, null, 2), { flag: 'wx' })
+      }
+    } finally { await profile.dispose() }
+  }, 30000)
+
   it('keeps Planner and Task work behind one normal main Session with public native lineage', async () => {
     const profile = await mountProfile()
     try {

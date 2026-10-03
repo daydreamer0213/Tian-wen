@@ -29,6 +29,10 @@
     "./learning-intake": {
       "types": "./dist/learning-intake.d.ts",
       "default": "./dist/learning-intake.js"
+    },
+    "./external-check": {
+      "types": "./dist/conversation-external-check.d.ts",
+      "default": "./dist/conversation-external-check.js"
     }
   },
   "dependencies": {

@@ -94,6 +94,7 @@ import {
 } from './learning-clue-status.js'
 import { readGoalStatus } from './status.js'
 import { NativeLongGoalChild } from './native-long-goal-child.js'
+import { currentGoalCommandOrigin, GoalTaskAcceptanceChecks, type GoalTaskAcceptanceCheck } from './goal-task-acceptance.js'
 import {
   permissionLimitedEvidence,
   permissionSnapshot,
@@ -181,6 +182,8 @@ export interface TianwenLongGoalHostConfig {
   readonly stateRoot?: string
   readonly sessionsRoot?: string
   readonly evolutionRoot?: string
+  /** Trusted, default-off pre-answer Task acceptance. Does not grant learning source eligibility. */
+  readonly goalTaskAcceptance?: GoalTaskAcceptanceCheck
 }
 
 export interface TianwenLongGoalHostDependencies {
@@ -2196,6 +2199,8 @@ export function mountTianwenLongGoalHost(
       ...(config === undefined ? {} : { config }),
     })
     const host = injected as HostContext
+    const taskAcceptance = new GoalTaskAcceptanceChecks(injected, roots, config?.goalTaskAcceptance)
+    injected.effect(() => taskAcceptance.mount())
     const nativeChild = new NativeLongGoalChild(injected)
     const nativeSetups = new Map<string, AgentSetup>()
     const disposeNativeSetup = injected.subagents.registerContinuableSetup(childCtx => {
@@ -2450,12 +2455,17 @@ export function mountTianwenLongGoalHost(
       readStatus: readLongGoalStatus,
       appendGuidance: appendLongGoalGuidance,
       abandonBlockedTask: abandonBlockedLongGoalTask,
-      runPlannerTurn: ({ record, reason }) => runLongGoalPlannerTurn({
+      runPlannerTurn: async ({ record, reason }) => {
+        await taskAcceptance.finishGoal(record.id)
+        const latest = config?.goalTaskAcceptance === undefined ? record : readLongGoal(roots.stateRoot, record.id)
+        if (latest.schemaVersion === 'tianwen.long-goal.v1') throw new LongGoalIntegrityError('Planner requires Goal-first record')
+        return runLongGoalPlannerTurn({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
-        record,
+        record: latest,
         reason,
-      }, plannerDependencies),
+        }, plannerDependencies)
+      },
       runTask: async input => {
         const result = await runCurrentWebTask({
           roots,
@@ -2492,7 +2502,11 @@ export function mountTianwenLongGoalHost(
     }
     const continuousServiceDependencies: ContinuousGoalServiceDependencies = {
       ...serviceDependencies,
-      createContinuousRecord: createContinuousLongGoal,
+      createContinuousRecord: input => {
+        const origin = config?.goalTaskAcceptance === undefined ? undefined
+          : currentGoalCommandOrigin(injected.agents.get(SessionId(input.controlSessionId)), input.objective)
+        return createContinuousLongGoal({ ...input, ...(origin === undefined ? {} : { origin }) })
+      },
       setMode: setContinuousGoalMode,
       appendGuidanceOnly: appendContinuousGoalGuidance,
       redirect: redirectContinuousGoal,
@@ -2563,12 +2577,16 @@ export function mountTianwenLongGoalHost(
       flushSession: async agent => injected.sessions.flush(agent.session),
       getGoal: agent => injected.goals.get(agent),
       reportProgress: async input => { await reportLongGoalProgress(injected, input) },
-      recordTerminalAttempt: input => recordContinuousGoalTerminalAttempt({
+      recordTerminalAttempt: async input => {
+        const recorded = await recordContinuousGoalTerminalAttempt({
         stateRoot: roots.stateRoot,
         ...input,
       }, {
         inspectSession: sessionId => host.sessionPersistence.inspect(SessionId(sessionId)),
-      }),
+        })
+        if (recorded !== false) await taskAcceptance.finishGoal(input.longGoalId)
+        return recorded
+      },
       deliver: intent => deliverContinuousGoalSettlement(intent, {
         stateRoot: roots.stateRoot,
         getAgent: sessionId => injected.agents.get(SessionId(sessionId)),

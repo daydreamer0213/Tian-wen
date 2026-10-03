@@ -33,3 +33,13 @@ conversation observer 在准入、模型、终止和恢复均只接 root/direct-
 先交付事前绑定与原结果分离的实际宿主连接：首红、相关回归、独立审查、一个新受控生命周期及准确冷恢复。随后以本来有用的真实开发待办前瞻，一次未知结果，成功/失败照实记，不为追失败追加近似题。阶段交付后立即收口，不不断扩配套维护。
 
 仅用D:必要小型记录，复用依赖/Profile/镜像，D≥15GiB、偏好20GiB；不全量复制环境、不重开结束三公开练习。完整目标active/incomplete、原来源资格/同意/隔离/停止/十工作日决策期限及main/Daily完整学习NO-GO不变，不缩目标、不新增门槛、不承诺未证实的完成日期。
+
+## 已据实际 SDK 时序确定的最小接口
+
+`TianwenLongGoalHostConfig.goalTaskAcceptance` 是默认关闭的可信程序装配口。已有 `createContinuousRecord` 在正在执行的直接用户 `/goal` 创建时冻结原 command/run 的 session、command ID、seq 和摘要；原参数保留在 SDK 持久会话。没有当前实际命令的旧/程序 Goal 不回填来源，不用 task.objective 冒充原用户文本。
+
+`llm/stream` 时首个 Agent-loop header/context 已由 SDK 保存；宿主在 provider dispatch 前调用 prepare，并在原 LongGoal v3 可选 tianwenEvents 中原子保存 task-acceptance-prepared。原 Goal/Task、当前 attempt/parent/child/nativeGoal/权限、header/preparedSeq/prefix、真实生效模型和可信检查器/原条件/输入均绑定；模型不能提供检查器。已有答复、旧请求、不匹配 lineage、准备过程中状态改变均不能事后准备。
+
+终止后使用既有持久 Goal/session，不能依赖仍在线的子 Agent。实际控制证明 continuable child 完成后可从 live agents 释放。若仍在线先等 idle/flush，再取完整 terminal Turn；评估后复读原材料与来源。原结果存入 task-acceptance-finished，错误条件摘要或检查器故障为 unverifiable，保存/历史错误仍沿原 lane 报错，不能吞掉后继续规划。结果不写入旧 dsh-tool-result、不创建 Evolution 自然来源/研究/方法。
+
+既有 runPlannerTurn 在新规划前等待验收并重读 revision；只读 status、Planner Started Task facts 和原完成通知显示持久验收。执行完成与检查通过分别呈现。缺合同原行为保持；冷恢复不重新 prepare/evaluate，已保存结果按原值读。当前受控验证的冷恢复是同进程新 Context，不能称为新 Node 进程或自然效果。
