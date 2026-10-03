@@ -20,6 +20,6 @@
 
 正式账本仍为1327364B、SHA256 5af25fcd7d6531a58483df8d87fde046dfe8baa7abc6338a496c12a55cce80da。最近确认的正式23观察22完成/16初筛/1可信问题/8成功候选/pair false/反馈0/研究0/隔离true，本包未重新正式挂载，也未产生新的自然来源。Runtime发行随实现更新，旧证据保留。
 
-下一核对原Goal Task实际方法注入与版本来源，在首请求前记录确实采用的版本，由原研究消费者显式消费native-goal-task的功能/内容/方法证据。内容met不直接授予旧Conversation研究资格或方法启用；研究裁决、治理启用、后续任务改善及回滚仍分别核验。不造失败、索题、催用户评价、追加已结束练习、重跑旧样本或扩大成整体blocked。
+下一核对原Goal Task实际方法提供与版本来源，在首请求前记录可证实的版本及适用范围，不把提供或读取直接当采用，由原研究消费者显式消费native-goal-task的功能/内容/方法证据。内容met不直接授予旧Conversation研究资格或方法启用；研究裁决、治理启用、后续任务改善及回滚仍分别核验。不造失败、索题、催用户评价、追加已结束练习、重跑旧样本或扩大成整体blocked。已核对消费者只扫描ConversationTask、原普通根任务才注入方法、Runtime默认隔离强制开启三个实际缺口，后续固定执行[三项收口计划](../superpowers/plans/2026-10-03-tianwen-learning-product-closure-plan.md)，不增加原标准。
 
 必要日志与小回执在D:/DevData/tianwen-goal-task-content-review-20261003，复用工作树、依赖、SDK与原文件读取，无下载/整环境复制/新容器。D约18.18GiB>=15，未达20偏好，Docker进程0。正常自有夹具退出清理；自动审批本包以blocked by policy拒绝删除两个启动失败空目录profile-aElUUY/profile-NZN953（文件0B，未给具体原因），已保留且不重试/绕过。旧45,598B拒删目录profile-mtYfRP及两历史目录保持。
