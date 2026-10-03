@@ -29,3 +29,7 @@
 - [x] 唯一真实首次执行：11请求，原程序41条件verified；第一内容评审引文分段错误，原inconclusive/invalid-judgment，未运行第二评审。首代码未修、未重试。
 - [x] 新Node0模型恢复原Task/0有效proof/完整5图/header/原账本；41+原4回归、实际SDK只读状态样本通过，原结果不回写。
 - [x] 独立首代码审查与权威交接完成。完整目标仍active/incomplete；第二、第三实际增量未执行。
+
+## 第二实际增量事前合同
+
+`tests/fixtures/learning-study-report.contract.md` 固定现有两个原范围的12保存计数/4解释。缺失或畸形可选部分逐范围忽略，未列元数据忽略，不新增计数间关系判定；旧基础/来源诊断/20KB与原退出不变。35独立条件已经预先固定，旧首代码25/35，10新增合法显示缺失。复用原Node入口、原持续Profile、同一固定executor workRoot与共享必须条件；这35个控制不是35个自然来源。唯一第二Task答案前记录原首代码、原两Task、原Runtime/账本/hash，结果无论成功或失败都保存，不能重试凑结果。
