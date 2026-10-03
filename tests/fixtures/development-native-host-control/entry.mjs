@@ -6,14 +6,14 @@ import { developmentNativeReadDenialProducer, developmentNativeFileMutationDenia
 import { verifyDevelopmentNativeArchiveSeal } from '../../../scripts/development-native-archive-seal.mjs'
 
 const scenario = process.argv[2], base = process.platform === 'win32' ? 'D:/DevData' : '/tmp'
-assert(['peer', 'original', 'permissions', 'file-guard', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native', 'stale-seal', 'stale-seal-failure', 'seal-write-error', 'seal-prior-error'].includes(scenario))
+assert(['peer', 'original', 'permissions', 'file-guard', 'flush-error', 'cancel', 'review-cancel', 'prior-session', 'rerun', 'durable-session', 'live-session', 'stale-task', 'stale-native', 'stale-seal', 'stale-seal-failure', 'seal-write-error', 'seal-prior-error', 'archive-limit-invalid', 'archive-limit', 'archive-limit-prior-error'].includes(scenario))
 const original = { source: { taskId: 'control-task' }, completion: { status: 'completed', files: { outputPaths: ['second.mjs', 'first.mjs'] } }, externalCheckPrepared: { checkerId: 'control-check' }, externalCheckFinished: { status: 'verified' }, review: { verdict: 'inconclusive' } }
 const native = { header: { id: 'control-session' }, events: [] }, log = [], guards = []
 const resultRoot = mkdtempSync(resolve(base, 'tianwen-native-host-unit-')), cancellation = new AbortController()
 let submitted
 const local = { tools: { presentAs: value => log.push(value), restrict: () => {}, guard: fn => guards.push(fn) } }
 const handle = { agent: { session: native, followup: message => { submitted = message }, cancel: () => log.push('cancel'), whenIdle: async () => { if (scenario === 'cancel') cancellation.abort(); log.push('root-idle') } }, dispose: async () => { if (scenario === 'seal-write-error' || scenario === 'seal-prior-error') mkdirSync(resolve(resultRoot, 'archive-seal.json')); log.push('dispose') } }
-const ctx = { on: () => () => log.push('observer-off'), agents: { get: () => undefined, create: async config => { config.setup(local); return handle } }, tianwenConversationObserver: { whenIdle: async () => { if (scenario === 'review-cancel') { setTimeout(() => cancellation.abort(), 10); await new Promise(() => {}) } log.push('observer-idle') } }, tianwenConversationGuidanceLoop: { whenIdle: async () => log.push('guidance-idle') }, tianwenEvolution: { listConversationTasks: () => submitted || scenario === 'prior-session' ? [original] : [] }, sessions: { get: () => scenario === 'live-session' ? native : undefined, flush: async () => { if (scenario === 'flush-error' || scenario === 'seal-prior-error') throw new Error('flush-control-error') } }, sessionPersistence: { list: async () => scenario === 'durable-session' ? [{ id: 'control-session' }] : [], inspect: async () => native } }
+const ctx = { on: () => () => log.push('observer-off'), agents: { get: () => undefined, create: async config => { config.setup(local); return handle } }, tianwenConversationObserver: { whenIdle: async () => { if (scenario === 'review-cancel') { setTimeout(() => cancellation.abort(), 10); await new Promise(() => {}) } log.push('observer-idle') } }, tianwenConversationGuidanceLoop: { whenIdle: async () => log.push('guidance-idle') }, tianwenEvolution: { listConversationTasks: () => submitted || scenario === 'prior-session' ? [original] : [] }, sessions: { get: () => scenario === 'live-session' ? native : undefined, flush: async () => { if (['flush-error', 'seal-prior-error', 'archive-limit-prior-error'].includes(scenario)) throw new Error('flush-control-error') } }, sessionPersistence: { list: async () => scenario === 'durable-session' ? [{ id: 'control-session' }] : [], inspect: async () => native } }
 const config = { cwd: resolve('.'), sessionId: 'control-session', requestText: 'ordinary control request', outputPaths: ['first.mjs', 'second.mjs'], referencePaths: ['reference.md'], maxTargetBytes: 20, resultRoot, callConfig: { provider: 'control', model: 'control' }, isPrepared: () => true, signal: cancellation.signal }
 const read = name => JSON.parse(readFileSync(resolve(resultRoot, name + '.json'), 'utf8'))
 const assertSeal = complete => {
@@ -32,7 +32,20 @@ if (scenario === 'file-guard') ctx.tianwenConversationFileObserver = {
   guardRead() { throw new Error('legacy fallback must not replace available file guard') },
 }
 try {
-  if (scenario === 'peer') {
+  if (scenario === 'archive-limit-invalid') {
+    for (const maxArchiveBytes of [0, null, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      await assert.rejects(runDevelopmentNativeTask(ctx, { ...config, maxArchiveBytes }), TypeError)
+      assert.equal(submitted, undefined); assert.equal(existsSync(resolve(resultRoot, 'attempt-started.json')), false)
+    }
+  } else if (scenario === 'archive-limit' || scenario === 'archive-limit-prior-error') {
+    await assert.rejects(runDevelopmentNativeTask(ctx, { ...config, maxArchiveBytes: 1 }), scenario === 'archive-limit' ? /maxBytes/ : /flush-control-error/)
+    assert.deepEqual(read('task'), original); assert.equal(read('cleanup').contextRetained, true)
+    assert.equal(existsSync(resolve(resultRoot, 'archive-seal.json')), false)
+    assert.equal(read('archive-seal-failure').name, 'RangeError')
+    if (scenario === 'archive-limit-prior-error') assert.equal(read('failure').message, 'flush-control-error')
+    else assert.equal(read('result').summary.reviewVerdict, 'inconclusive')
+    assert(log.includes('dispose')); assert(log.includes('observer-off'))
+  } else if (scenario === 'peer') {
     const modules = await loadDevelopmentNativeModules()
     assert.equal(typeof modules.createDevelopmentNativeFilePolicy, 'function'); assert.equal(typeof modules.summarizeDevelopmentNativeTask, 'function')
     assert.throws(() => modules.createDevelopmentNativeFilePolicy({ cwd: resolve(base), sessionId: 'root', outputPaths: ['bad\ud800.mjs'], referencePaths: [], maxTargetBytes: 20 }, () => null))

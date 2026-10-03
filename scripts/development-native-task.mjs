@@ -9,6 +9,7 @@ import { SessionId, createUserMessage } from '@tianwen/dsh-compat'
 import { observeNativeTaskRequests } from './native-task-request-observer.ts'
 import { withConversationObservationCancellation } from '../packages/tianwen-runtime-bundle/src/conversation-external-check.ts'
 import { sealDevelopmentNativeArchive } from './development-native-archive-seal.mjs'
+import { readDevelopmentNativeArchiveEntries } from './development-native-archive-reader.mjs'
 
 const archiveNames = ['attempt-started.json', 'task.json', 'root-native.json.gz', 'result.json', 'failure.json', 'cleanup.json']
 
@@ -39,6 +40,8 @@ export function developmentNativeFileMutationDenialProducer() {
 /** Caller mounts the actual Runtime/checker and owns Context shutdown. No learning or activation decisions here. */
 export async function runDevelopmentNativeTask(ctx, config) {
   const { cwd, sessionId, requestText, outputPaths, referencePaths, maxTargetBytes, resultRoot, signal, isPrepared } = config
+  const maxArchiveBytes = config.maxArchiveBytes === undefined ? 64 * 1024 * 1024 : config.maxArchiveBytes
+  if (!Number.isSafeInteger(maxArchiveBytes) || maxArchiveBytes <= 0) throw new TypeError('maxArchiveBytes must be a positive safe integer')
   assert(isAbsolute(resultRoot)); assert(typeof requestText === 'string' && requestText.trim())
   assert(typeof isPrepared === 'function'); signal?.throwIfAborted()
   const modules = await loadDevelopmentNativeModules()
@@ -58,7 +61,7 @@ export async function runDevelopmentNativeTask(ctx, config) {
   mkdirSync(resultRoot, { recursive: true })
   const save = (name, value) => writeFileSync(resolve(resultRoot, name + '.json'), JSON.stringify(value, null, 2), { flag: 'wx' })
   // Exclusive marker prevents this host from retrying or overwriting an earlier attempt.
-  save('attempt-started', { sessionId, requestText, outputPaths: expectedPaths, referencePaths: [...referencePaths], callConfig })
+  save('attempt-started', { sessionId, requestText, outputPaths: expectedPaths, referencePaths: [...referencePaths], callConfig, maxArchiveBytes })
   const observation = observeNativeTaskRequests(ctx, { rootSessionId: sessionId, requestsAllowed: true, isPrepared })
   let handle, failure, result, archivedTask, taskSaved = false, nativeSaved = false
   const cancel = () => handle?.agent.cancel({ kind: 'user' })
@@ -108,7 +111,11 @@ export async function runDevelopmentNativeTask(ctx, config) {
     save('cleanup', { cancelled: signal?.aborted === true, ...(cleanupError ? { cleanupError } : {}), requests: observation.counts(), contextRetained: true })
   }
   try {
-    const entries = archiveNames.filter(name => existsSync(resolve(resultRoot, name))).map(path => ({ path, content: readFileSync(resolve(resultRoot, path)) }))
+    // Execution cancellation is already archived; this signal only finalizes the archive.
+    const entries = await readDevelopmentNativeArchiveEntries(async path => {
+      try { return readFileSync(resolve(resultRoot, path)) }
+      catch (error) { if (error.code === 'ENOENT') return null; throw error }
+    }, { signal: new AbortController().signal, maxBytes: maxArchiveBytes })
     save('archive-seal', sealDevelopmentNativeArchive(sessionId, entries))
   } catch (error) {
     try { save('archive-seal-failure', { name: error.name, message: error.message }) }

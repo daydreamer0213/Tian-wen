@@ -5,3 +5,5 @@
 3. 原稿/task/native/program/双审先封存，新进程0模型/程序冷恢复。工程审查发现有据遗漏才追加独立首红修复，原结果不改。
 4. 宿主先写消费者反例并跑首红，再改封存环节为消费reader；maxArchiveBytes启动前校验、finalization独立signal、失败/取消/原结果保留。相关回归、实际发行控制及新进程cold核验，不重复无关全包build。
 5. 正式实际status0请求读当前来源/研究状态，核验旧账本前缀/原封存/SDK，清理自有运行残余，D≥15GiB；更新交接及准确下一入口，commit/push。reader已经执行后不再把它当未执行独立case；完整目标保持active/incomplete和原决策期限。
+
+五步已执行。原b68dafd0一次真实程序verified/双审met及0请求cold、首稿逐字接纳；消费者3首红后28标准入口回归和实际发行宿主/新进程cold、独立复审通过。仅读两个实际归档验证字节，旧三轮30原文件/SDK/账本前缀准确。正式22观察21完成/1可信问题/7成功候选，研究仍0；reader不再当未知案例。见[准确交付与下一入口](../../operations/tianwen-native-archive-reader-20261003.md)，实际提交/推送以本检查点Git记录为准。

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 原生读取原样交付并消费，下一完成状态与续跑核验
+
+3179cff继承bac5397原reader合同/入口，唯一实际任务b68dafd0：10真实/根5、prepare1/evaluate1/0重试，原程序verified/两审met及整体met；3568B首稿逐字接纳，静态无有据P1/P2，11原文件先封存，新进程task/material/program和两proof精确cold0请求/执行。宿主实际await原reader、maxArchiveBytes省略64MiB/启动前校验并记marker，ENOENT null/其他错保留，任务取消后仅归档用独立signal；seal失败不覆盖原失败。3消费者首红后28标准回归/复审通过，发行控制10 scripted/0自然及新进程cold0；两个实际档仅读原字节核验，不计学习。见[准确交付及下一入口](tianwen-native-archive-reader-20261003.md)。
+
+正式实际status0模型/程序：22观察21完成/15初筛/1可信问题/7成功候选，兼容pair false；反馈归因0/study0/隔离true。完整1271265B/721aba16…，旧1210748B/4be50d3b…前缀、三轮30封存文件、原合同/SDK根1c0718e6…准确。reader已是已执行任务，旧snapshot不能再证明它是未知独立case；未来研究须重新装配实际source图及真正未执行的待办。
+
+下一完成原已冻结archive-status与一次完整归档状态展示/续跑核验，工作包收口，不追加近似题追失败。来源不足不整体blocked/索题；目标active/incomplete、main/Daily完整学习NO-GO和原同意/隔离/资格/去重/停止/十工作日决策期限保持，不加标准/重新计时/机械续期。小D包约606KB、共享新增必要回执6380B，无下载/全量副本，原84容器ID准确/快照临时根0/Docker关闭，D约18.24GiB≥15，最终见final-audit。本条覆盖下方reader未交付与21任务的当前待办。
+
 ## 2026-10-03 真实归档任务及消费者已交付，继续有界工作包
 
 bac5397事前固定合同/入口及未执行reader/status真实待办，实际双检查宿主唯一未知答案4b39e748：7真实请求/根4、prepare1/evaluate1/0重试，原功能verified、两项原评审met/proof有效及整体met。首稿与10原结果先封存，新进程task/material/program及两proof准确cold、0请求/prepare/eval，不重评。静态两遗漏2首红后工程窄修，与原稿分存；3纯模块+23宿主/观察回归、原入口工程检查和复审通过。宿主生成原字节seal；新发行控制10 scripted/0自然、一次程序/双met及seal，新进程准确cold0执行，不计研究/采用/收益。见[当前缺口、交付及有界后续](tianwen-native-archive-seal-20261003.md)。
