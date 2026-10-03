@@ -34,6 +34,10 @@
       "types": "./dist/conversation-external-check.d.ts",
       "default": "./dist/conversation-external-check.js"
     },
+    "./guidance": {
+      "types": "./dist/conversation-guidance.d.ts",
+      "default": "./dist/conversation-guidance.js"
+    },
     "./content-review": {
       "types": "./dist/content-review-contract.d.ts",
       "default": "./dist/content-review-contract.js"

@@ -103,6 +103,7 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/goal-task-acceptance-contract.ts',
     'src/goal-task-material.ts',
     'src/goal-task-content-review.ts',
+    'src/goal-task-method.ts',
     'src/conversation-source-readiness.ts',
     'src/conversation-study-result-check.ts',
     'src/conversation-guidance-loop.ts',
@@ -208,6 +209,7 @@ function isAllowedCliInput(input: string): boolean {
     path === 'src/goal-first.ts' ||
     path === 'src/long-goal.ts' || path === 'src/long-goal-run.ts' ||
     path === 'src/goal-task-acceptance-contract.ts' ||
+    path === 'src/goal-task-method.ts' ||
     path === 'src/model.ts' || path === 'src/resume.ts' ||
     path === 'src/portable-profile.ts' ||
     path === 'src/controlled-lifecycle.ts' ||
@@ -235,6 +237,7 @@ function isAllowedGoalFirstRunnerInput(input: string): boolean {
     'src/goal-task-acceptance-contract.ts',
     'src/goal-task-material.ts',
     'src/goal-task-content-review.ts',
+    'src/goal-task-method.ts',
     'src/conversation-file-material.ts',
     'src/conversation-judgment.ts',
     'src/native-tool-observation.ts',

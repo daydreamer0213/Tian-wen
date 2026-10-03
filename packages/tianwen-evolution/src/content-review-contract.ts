@@ -2,7 +2,7 @@
 export { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationReviewChecks, parseConversationAuditedReviewChecks,
   parseConversationQualityContract, conversationReviewConsensus, conversationFileCaptureOutputKind, conversationRequestContentDigest } from './conversation-learning.js'
 export type { ConversationAuditedReviewChecks, ConversationAuditedReviewCheck, ConversationReviewCheck,
-  ConversationJudgmentProof, ConversationQualityContract, ConversationTask, ConversationTaskSource } from './conversation-learning.js'
+  ConversationJudgmentProof, ConversationQualityContract, ConversationTask, ConversationTaskSource, ConversationFamily } from './conversation-learning.js'
 export { CONVERSATION_FILE_MAX_BYTES, CONVERSATION_FILE_MAX_ENTRY_BYTES, CONVERSATION_FILE_MAX_COUNT,
   parseConversationFileMaterial, parseConversationFileEntries } from './conversation-files.js'
 export type { ConversationFileMaterial, ConversationFileTrialOutput, ConversationFileEntry } from './conversation-files.js'

@@ -2,6 +2,7 @@ import { parseConversationExternalCheckOutcome, type ConversationExternalCheckOu
 import { sha256 } from '@tianwen/evolution/learning-intake'
 import type { SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type { LongGoalTaskRecordV2 } from './long-goal-contract.js'
+import { parseGoalTaskMethodBinding, type GoalTaskMethodBinding } from './goal-task-method.js'
 import { parseConversationFileMaterial, parseConversationFileEntries, parseConversationAuditedReviewChecks,
   type ConversationFileMaterial, type ConversationFileTrialOutput, type ConversationAuditedReviewChecks } from '@tianwen/evolution/content-review'
 
@@ -69,6 +70,7 @@ export interface GoalTaskAcceptanceBinding {
   /** Absent on legacy preparations; never reconstruct it from later requirements. */
   readonly requirementsSnapshot?: GoalTaskRequirementsSnapshot
   readonly contentReview?: GoalTaskContentReviewPlan
+  readonly method?: GoalTaskMethodBinding
 }
 
 export type GoalTaskAcceptanceEvent = {
@@ -154,7 +156,8 @@ export function parseGoalTaskAcceptanceEvent(value: unknown): GoalTaskAcceptance
     if (!record(b) || !keys(b, ['epoch', 'parentSessionId', 'childSessionId', 'nativeGoalId', 'permissionFingerprint',
       'goalDigest', 'taskDigest', 'headerSeq', 'preparedSeq', 'prefixDigest', 'modelConfigDigest', 'checkerId', 'checkerDigest',
       'contractDigest', 'inputsDigest', 'requiredCondition', ...(Object.hasOwn(b, 'learningConsentRevision') ? ['learningConsentRevision'] : []),
-      ...(Object.hasOwn(b, 'requirementsSnapshot') ? ['requirementsSnapshot'] : []), ...(Object.hasOwn(b, 'contentReview') ? ['contentReview'] : [])])
+      ...(Object.hasOwn(b, 'requirementsSnapshot') ? ['requirementsSnapshot'] : []), ...(Object.hasOwn(b, 'contentReview') ? ['contentReview'] : []),
+      ...(Object.hasOwn(b, 'method') ? ['method'] : [])])
       || (Object.hasOwn(b, 'requirementsSnapshot') && !validSnapshot(b.requirementsSnapshot, b, value.taskId))
       || (Object.hasOwn(b, 'learningConsentRevision') && (!seq(b.learningConsentRevision) || b.learningConsentRevision === 0))
       || !seq(b.epoch) || b.epoch === 0 || !seq(b.headerSeq) || !seq(b.preparedSeq) || b.preparedSeq < b.headerSeq
@@ -165,6 +168,12 @@ export function parseGoalTaskAcceptanceEvent(value: unknown): GoalTaskAcceptance
       const plan = parseGoalTaskContentReviewPlan(b.contentReview)
       if (!record(b.requirementsSnapshot) || !record(b.requirementsSnapshot.goal)
         || plan.files !== undefined && plan.files.cwd !== b.requirementsSnapshot.goal.workspaceRoot) throw new TypeError('Goal content review requires original requirements and workspace')
+    }
+    if (Object.hasOwn(b, 'method')) {
+      const method = parseGoalTaskMethodBinding(b.method)
+      if (!record(b.requirementsSnapshot) || !record(b.requirementsSnapshot.goal)
+        || method.snapshot.scopeKey !== `conversation:${sha256({ cwd: b.requirementsSnapshot.goal.workspaceRoot })}`
+        || method.messageSeq >= Number(b.headerSeq)) throw new TypeError('Goal Task method requires original workspace and prospective message')
     }
     return structuredClone(value) as unknown as GoalTaskAcceptanceEvent
   }

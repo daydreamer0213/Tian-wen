@@ -2,8 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 // Retain the public command/run event augmentation in standalone declaration graphs.
 import '@deepseek-ai/dsh-commands'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { createUserMessage, isAgentLoopRequest } from '@deepseek-ai/dsh-llm'
+import { SessionId, type SessionEvent, type UserMessage } from '@deepseek-ai/dsh-session'
 import { parseConversationExternalCheckOutcome, type ConversationExternalCheckOutcome } from '@tianwen/evolution/external-check'
 import { sha256 } from '@tianwen/evolution/learning-intake'
 import { withConversationObservationCancellation } from './observation-cancellation.js'
@@ -15,6 +15,9 @@ import { readGoalStatus } from './status.js'
 import { readGoalTaskAcceptanceMaterial } from './goal-task-material.js'
 import { readConversationFile } from './conversation-file-material.js'
 import { finishGoalTaskContentReviews } from './goal-task-content-review.js'
+import { guidanceVersion, parseGuidanceSnapshot } from '@tianwen/evolution/guidance'
+import { GOAL_TASK_METHOD_PLUGIN, goalTaskMethodMessage, goalTaskMethodRule, goalTaskMethodWithdrawal, goalTaskUnboundMethodWithdrawal, parseGoalTaskMethodScope, readGoalTaskMethodUsage,
+  type GoalTaskMethodBinding, type GoalTaskMethodScope } from './goal-task-method.js'
 
 type CommandEvent = Extract<SessionEvent, { type: 'command/run' }>
 export interface GoalTaskAcceptancePreparation {
@@ -45,6 +48,8 @@ export interface PreparedGoalTaskAcceptanceCheck {
   }) => Promise<ConversationExternalCheckOutcome>
 }
 export interface GoalTaskAcceptanceCheck {
+  /** Trusted project applicability only; the method body always comes from the existing governed library. */
+  readonly methodScope?: (material: Omit<GoalTaskAcceptancePreparation, 'modelConfigDigest'>) => Promise<GoalTaskMethodScope | undefined>
   /** Undefined means this Task has no applicable pre-existing project check. */
   readonly prepare: (material: GoalTaskAcceptancePreparation) => Promise<PreparedGoalTaskAcceptanceCheck | undefined>
 }
@@ -65,25 +70,44 @@ export class GoalTaskAcceptanceChecks {
   private readonly states = new Map<string, PreparedGoalTaskAcceptanceCheck>()
   private readonly pending = new Map<string, Promise<void>>()
   private readonly shutdown = new AbortController()
+  private readonly methods = new Map<string, { method: Omit<GoalTaskMethodBinding, 'messageSeq'>;
+    goalDigest: ReturnType<typeof sha256>; taskDigest: ReturnType<typeof sha256>; attemptDigest: ReturnType<typeof sha256> }>()
   constructor(private readonly ctx: Context, private readonly roots: {
     readonly stateRoot: string, readonly sessionsRoot: string, readonly evolutionRoot: string
   }, private readonly check?: GoalTaskAcceptanceCheck) {}
   private get stateRoot(): string { return this.roots.stateRoot }
 
   mount(): () => Promise<void> {
-    if (this.check === undefined) return async () => {}
+    const savedGoals = listLongGoals(this.stateRoot)
+    if (this.check === undefined && !savedGoals.some(goal => goal.schemaVersion === 'tianwen.long-goal.v3'
+      && goal.origin !== undefined && goal.tasks.some(task => task.execution !== null))) return async () => {}
     // Recover pending consumption of already-persisted results, never rerun a checker.
-    for (const goal of listLongGoals(this.stateRoot)) void this.finishGoal(goal.id).catch(error => this.warn(error))
+    for (const goal of savedGoals) void this.finishGoal(goal.id).catch(error => this.warn(error))
     const owner = this
+    const offStep = this.ctx.on('agent/pre-step', async (payload, next) => {
+      const decision = await next()
+      if (decision.kind === 'enter') {
+        try { await owner.provideMethod(payload.agent, decision.messages, payload.signal) }
+        catch (error) { owner.warn(error) }
+      }
+      return decision
+    })
     const off = this.ctx.on('llm/stream', async function* (request, next) {
       const agent = request.sessionId === undefined ? undefined : owner.ctx.agents.get(SessionId(String(request.sessionId)))
       if (agent !== undefined && isAgentLoopRequest(request)) {
-        try { await owner.prepare(agent, request.signal ?? owner.shutdown.signal) }
-        catch (error) { owner.warn(error) }
+        try {
+          await owner.prepare(agent, request.signal ?? owner.shutdown.signal)
+          owner.assertMethodDispatch(agent)
+        } catch (error) {
+          // Do not send an unrecorded or newly unauthorized method after preparation failed.
+          if (owner.methodState(agent) !== undefined || agent.session.events.some(event => event.type === 'user/message'
+            && event.data.source.kind === 'plugin' && event.data.source.plugin === GOAL_TASK_METHOD_PLUGIN)) throw error
+          owner.warn(error)
+        }
       }
       yield* next()
     })
-    return async () => { off(); this.shutdown.abort(); await Promise.allSettled(this.pending.values()); this.states.clear() }
+    return async () => { offStep(); off(); this.shutdown.abort(); await Promise.allSettled(this.pending.values()); this.states.clear(); this.methods.clear() }
   }
 
   private warn(error: unknown): void { this.ctx.logger('tianwen-goal-acceptance').warn('Acceptance unavailable: %s', this.detail(error)) }
@@ -115,6 +139,93 @@ export class GoalTaskAcceptanceChecks {
     return event
   }
 
+  private methodState(agent: Agent) {
+    const found = this.find(String(agent.session.id))
+    if (found === undefined) return
+    const key = `${found.goal.id}:${found.task.id}:${found.attempt.epoch}`
+    const binding = found.goal.tianwenEvents?.find(event => event.type === 'task-acceptance-prepared'
+      && event.taskId === found.task.id && event.binding.epoch === found.attempt.epoch)
+    const pending = this.methods.get(key)
+    const method = binding?.type === 'task-acceptance-prepared' ? binding.binding.method : pending?.method
+    if (method === undefined) return
+    return { found, method, pending, binding: binding?.type === 'task-acceptance-prepared' ? binding.binding : undefined }
+  }
+  private methodIsCurrent(state: NonNullable<ReturnType<GoalTaskAcceptanceChecks['methodState']>>): boolean {
+    if (goalTaskMethodRule(state.method) === undefined) return true
+    const { found, method, binding, pending } = state
+    return this.authorized(method.consentRevision) && !this.shutdown.signal.aborted
+      && guidanceVersion(this.ctx.tianwenEvolution.getConversationGuidance(method.snapshot.scopeKey)) === method.version
+      && goalDigest(found.goal) === (binding?.goalDigest ?? pending?.goalDigest)
+      && sha256(found.task) === (binding?.taskDigest ?? pending?.taskDigest)
+      && (binding === undefined ? sha256(found.attempt) === pending?.attemptDigest
+        : found.attempt.permissionFingerprint === binding.permissionFingerprint)
+  }
+  private methodWithdrawn(agent: Agent, state: NonNullable<ReturnType<GoalTaskAcceptanceChecks['methodState']>>): boolean {
+    const text = goalTaskMethodWithdrawal(state.found.task.id, state.found.attempt.epoch, state.method.version)
+    return agent.session.events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin'
+      && event.data.source.plugin === GOAL_TASK_METHOD_PLUGIN && sha256(event.data.content) === sha256([{ type: 'text', text }]))
+  }
+  private assertMethodDispatch(agent: Agent): void {
+    const state = this.methodState(agent)
+    if (state !== undefined && state.binding === undefined) throw new Error('Goal Task method has no original durable binding')
+    if (state?.binding !== undefined) readGoalTaskMethodUsage(state.binding, agent.session.events)
+    const found = state?.found ?? this.find(String(agent.session.id))
+    if (state === undefined && found !== undefined && agent.session.events.some(event => event.type === 'user/message'
+      && event.data.source.kind === 'plugin' && event.data.source.plugin === GOAL_TASK_METHOD_PLUGIN)
+      && !this.unboundMethodWithdrawn(agent, found.task.id, found.attempt.epoch)) throw new Error('Goal Task method has no original durable binding')
+    if (state !== undefined && !this.methodWithdrawn(agent, state) && !this.methodIsCurrent(state)) {
+      throw new Error('Goal Task method authorization or original binding changed before dispatch')
+    }
+  }
+  private unboundMethodWithdrawn(agent: Agent, taskId: string, epoch: number): boolean {
+    return agent.session.events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin'
+      && event.data.source.plugin === GOAL_TASK_METHOD_PLUGIN && sha256(event.data.content)
+        === sha256([{ type: 'text', text: goalTaskUnboundMethodWithdrawal(taskId, epoch) }]))
+  }
+  private async provideMethod(agent: Agent, messages: UserMessage[], stepSignal: AbortSignal): Promise<void> {
+    const state = this.methodState(agent)
+    if (state !== undefined) {
+      if (this.methodWithdrawn(agent, state)) return
+      let valid = false
+      try { valid = this.methodIsCurrent(state) } catch { /* Unavailable governance never authorizes an old method. */ }
+      if (!valid) messages.push(createUserMessage({ source: { kind: 'plugin', plugin: GOAL_TASK_METHOD_PLUGIN },
+        content: [{ type: 'text', text: goalTaskMethodWithdrawal(state.found.task.id, state.found.attempt.epoch, state.method.version) }] }))
+      return
+    }
+    const found = this.find(String(agent.session.id)), select = this.check?.methodScope
+    if (found !== undefined && agent.session.events.some(event => event.type === 'user/message'
+      && event.data.source.kind === 'plugin' && event.data.source.plugin === GOAL_TASK_METHOD_PLUGIN)) {
+      if (!this.unboundMethodWithdrawn(agent, found.task.id, found.attempt.epoch)) messages.push(createUserMessage({
+        source: { kind: 'plugin', plugin: GOAL_TASK_METHOD_PLUGIN },
+        content: [{ type: 'text', text: goalTaskUnboundMethodWithdrawal(found.task.id, found.attempt.epoch) }] }))
+      return
+    }
+    if (found === undefined || select === undefined || found.attempt.status !== 'running'
+      || agent.session.events.some(event => ['request/header', 'assistant/message', 'tool/call', 'tool/result'].includes(event.type))) return
+    const { goal, task, attempt } = found, consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()
+    if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3') return
+    const signal = AbortSignal.any([stepSignal, this.shutdown.signal]), prefix = sha256(agent.session.events)
+    const source = await this.source(goal)
+    const selection = await withConversationObservationCancellation(signal, () => select({ goal: structuredClone(goal), task: structuredClone(task),
+      attempt: structuredClone(attempt), source: structuredClone(source), cwd: goal.workspaceRoot, signal }))
+    if (selection === undefined) return
+    const scope = parseGoalTaskMethodScope(selection), scopeKey = `conversation:${sha256({ cwd: goal.workspaceRoot })}`
+    this.ctx.tianwenEvolution.retireIncompatibleConversationGuidance(scopeKey)
+    const snapshot = parseGuidanceSnapshot(this.ctx.tianwenEvolution.getConversationGuidance(scopeKey))
+    const latest = this.find(String(agent.session.id))
+    signal.throwIfAborted()
+    if (snapshot.scopeKey !== scopeKey || !this.authorized(consent.revision) || latest === undefined
+      || goalDigest(latest.goal) !== goalDigest(goal) || sha256(latest.task) !== sha256(task) || sha256(latest.attempt) !== sha256(attempt)
+      || prefix !== sha256(agent.session.events) || agent.session.header.cwd !== goal.workspaceRoot
+      || String(agent.session.header.parentSession) !== attempt.parentSessionId) throw new Error('Goal Task method selection changed original binding')
+    const method = { protocol: 'tianwen.goal-task-method.v1' as const, scope, snapshot, version: guidanceVersion(snapshot), consentRevision: consent.revision }
+    const message = createUserMessage({ source: { kind: 'plugin', plugin: GOAL_TASK_METHOD_PLUGIN },
+      content: [{ type: 'text', text: goalTaskMethodMessage(task.id, attempt.epoch, method) }] })
+    this.methods.set(`${goal.id}:${task.id}:${attempt.epoch}`, { method: { ...method, messageId: String(message.id) },
+      goalDigest: goalDigest(goal), taskDigest: sha256(task), attemptDigest: sha256(attempt) })
+    messages.push(message)
+  }
+
   private async prepare(agent: Agent, stepSignal: AbortSignal): Promise<void> {
     if (agent.session.header.parentSession === undefined) return
     const found = this.find(String(agent.session.id))
@@ -139,7 +250,14 @@ export class GoalTaskAcceptanceChecks {
       goal: structuredClone(goal), task: structuredClone(task), attempt: structuredClone(attempt), source: structuredClone(source),
       cwd: goal.workspaceRoot, modelConfigDigest, signal,
     }))
-    if (prepared === undefined) return
+    const selectedMethod = this.methods.get(key)?.method
+    if (prepared === undefined) {
+      if (selectedMethod !== undefined) throw new Error('Goal Task method requires its original project acceptance preparation')
+      return
+    }
+    const methodEvent = selectedMethod === undefined ? undefined : agent.session.events.find(event => event.type === 'user/message'
+      && String(event.data.id) === selectedMethod.messageId)
+    if (selectedMethod !== undefined && (methodEvent?.type !== 'user/message' || methodEvent.seq >= header.seq)) throw new Error('Goal Task method was not provided before its original request')
     const contentReview = prepared.contentReview === undefined ? undefined : parseGoalTaskContentReviewPlan({
       protocol: 'tianwen.goal-task-content-review.v1', ...structuredClone(prepared.contentReview),
     })
@@ -163,14 +281,17 @@ export class GoalTaskAcceptanceChecks {
       inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition,
       ...(learningConsentRevision === undefined ? {} : { learningConsentRevision }),
       ...(contentReview === undefined ? {} : { contentReview }),
+      ...(selectedMethod === undefined ? {} : { method: { ...selectedMethod, messageSeq: methodEvent!.seq } }),
       requirementsSnapshot: {
         goal: { id: goal.id, objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
           workspaceRoot: goal.workspaceRoot, origin: structuredClone(goal.origin!) },
         task: structuredClone(task), ...(attempt.permissionMode === undefined ? {} : { permissionMode: attempt.permissionMode }),
       },
     }
+    readGoalTaskMethodUsage(binding, agent.session.events)
     appendGoalTaskAcceptance({ stateRoot: this.stateRoot, longGoalId: goal.id, expectedRevision: latest.goal.revision,
       taskId: task.id, event: { type: 'task-acceptance-prepared', taskId: task.id, binding } })
+    this.methods.delete(key)
     this.states.set(key, { ...prepared })
   }
 

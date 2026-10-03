@@ -6,6 +6,7 @@ import { sha256 } from '@tianwen/evolution/learning-intake'
 import type { GoalTaskAcceptanceBinding, GoalTaskAcceptanceEvent, GoalTaskRequirementsSnapshot } from './goal-task-acceptance-contract.js'
 import { readLongGoal, readTianwenTaskAttemptProjection } from './long-goal.js'
 import { sandboxModeFromEvents } from './permission-attempt.js'
+import { readGoalTaskMethodUsage } from './goal-task-method.js'
 
 type Finished = Extract<GoalTaskAcceptanceEvent, { type: 'task-acceptance-finished' }>
 export interface GoalTaskOutcomeMaterial {
@@ -17,6 +18,7 @@ export interface GoalTaskOutcomeMaterial {
   readonly result: Finished
   readonly events: readonly SessionEvent[]
   readonly outcomeInput?: GoalTaskOutcomeInput
+  readonly methodUsage?: NonNullable<ReturnType<typeof readGoalTaskMethodUsage>>
 }
 
 /** Original SDK material verifier shared by result intake and the research reader. No model/tool calls. */
@@ -58,7 +60,8 @@ export async function readGoalTaskAcceptanceMaterial(ctx: Context, input: {
     consentRevision: b.learningConsentRevision, modelConfigDigest: b.modelConfigDigest, checkerId: b.checkerId, checkerDigest: b.checkerDigest,
     contractDigest: b.contractDigest, inputsDigest: b.inputsDigest, requiredConditionDigest: sha256(b.requiredCondition), outcome: structuredClone(result.outcome),
   }
-  return structuredClone({ sourceKind: 'native-goal-task', ...(snapshot === undefined ? {} : { requirementsSnapshot: snapshot }),
+  const methodUsage = readGoalTaskMethodUsage(b, events)
+  return structuredClone({ sourceKind: 'native-goal-task', ...(methodUsage === undefined ? {} : { methodUsage }), ...(snapshot === undefined ? {} : { requirementsSnapshot: snapshot }),
     source, preparation: b, result, events, ...(outcomeInput === undefined ? {} : { outcomeInput }) })
 }
 

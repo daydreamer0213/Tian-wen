@@ -30,6 +30,7 @@ import { LEARNING_CONSENT_NOTICE_SOURCE_MESSAGE_ID } from '../../packages/tianwe
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { GoalTaskAcceptanceChecks } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance.js'
+import { readGoalTaskAcceptanceMaterial } from '../../packages/tianwen-runtime-bundle/src/goal-task-material.js'
 import * as runtimePublic from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { finishGoalTaskContentReviews } from '../../packages/tianwen-runtime-bundle/src/goal-task-content-review.js'
@@ -149,12 +150,16 @@ class ProfileAdapter extends LlmAdapter {
         lastText: lastText(request),
       }))))
     }
-    const lastAssistant = options.messages.findLastIndex(message => message.role === 'assistant')
-    const lastCoordinator = options.messages.findLastIndex(message =>
+    // This adapter scripts native completion, not method adoption. An actual
+    // method/withdrawal plugin remains in the captured provider request but
+    // must not hide the tool result from this fixture's control state machine.
+    const decisionMessages = options.messages.filter(message => !(message.source.kind === 'plugin' && message.source.plugin === 'tianwen-goal-task-method'))
+    const lastAssistant = decisionMessages.findLastIndex(message => message.role === 'assistant')
+    const lastCoordinator = decisionMessages.findLastIndex(message =>
       message.role === 'user' && message.source.kind === 'coordinator')
     // A cold followup follows the interrupted turn's tool result; that old result
     // must not make this scripted model ignore the new coordinator request.
-    const turnMessages = options.messages.slice(Math.max(lastAssistant + 1, lastCoordinator))
+    const turnMessages = decisionMessages.slice(Math.max(lastAssistant + 1, lastCoordinator))
     const text = turnMessages.flatMap(message => message.content)
       .filter(block => block.type === 'text')
       .map(block => block.text)
@@ -182,7 +187,7 @@ class ProfileAdapter extends LlmAdapter {
     }
     const plannerPrompt = text.slice(text.lastIndexOf('Plan the next short ordered Task suffix'))
     const revision = [...plannerPrompt.matchAll(/Expected Goal revision: (\d+)/gu)].at(-1)?.[1]
-    const last = options.messages.at(-1)
+    const last = decisionMessages.at(-1)
     if (last?.role === 'user' && last.source.kind === 'user'
       && last.content.some(block => block.type === 'text' && block.text === '继续')
       && options.tools?.some(tool => tool.name === 'goal_control')) {
@@ -199,8 +204,8 @@ class ProfileAdapter extends LlmAdapter {
       && last.source.callId === 'profile-file-edit') {
       chunks = toolCallResponse('profile-file-complete', 'profile_task', {})
     } else if (this.completeTaskThroughTool && this.taskSessions.has(String(options.sessionId))
-      && options.messages.at(-1)?.source.kind === 'tool') {
-      const last = options.messages.at(-1)!
+      && decisionMessages.at(-1)?.source.kind === 'tool') {
+      const last = decisionMessages.at(-1)!
       if (last.source.kind === 'tool' && last.source.callId === 'profile-get-goal') {
         const output = last.content.find(block => block.type === 'tool-result')
         const value = JSON.parse(output?.type === 'tool-result'
@@ -333,9 +338,10 @@ async function mountProfile(
   else await ctx.plugin(nativeSpawn, { providerName: 'spawn' })
   const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
-  const runtimeApply = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
-    ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)).apply as typeof applyRuntimeBundle
-    : applyRuntimeBundle
+  const runtimeApi = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
+    ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)) as typeof runtimePublic
+    : runtimePublic
+  const runtimeApply = runtimeApi.apply
   await runtimeApply(ctx, { stateRoot, sessionsRoot, evolutionRoot, goalTaskAcceptance: options.goalTaskAcceptance })
 
   const offAgent = ctx.on('agent/created', ({ agent }) => {
@@ -411,6 +417,7 @@ async function mountProfile(
     ctx,
     main,
     adapter,
+    runtimeApi,
     stateRoot,
     sessionsRoot,
     evolutionRoot,
@@ -488,6 +495,155 @@ async function expectNativeChild(
 }
 
 describe('native Long Goal profile execution', () => {
+  it('expires an orphan native method after a new Context removes the project check, then continues only the unexecuted Task', async () => {
+    const objective = 'Complete the orphan method recovery control Task'
+    let preparations = 0
+    const first = await mountProfile(objective, { completeTaskThroughTool: true,
+      goalTaskAcceptance: { async methodScope() { return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { preparations++; throw new Error('Controlled preparation failure before provider dispatch.') } } })
+    let cold: Awaited<ReturnType<typeof mountProfile>> | undefined
+    let firstClosed = false
+    try {
+      vi.spyOn(first.ctx.tianwenEvolution, 'getConversationGuidance').mockReturnValue({ schemaVersion: 'tianwen.conversation-guidance.v1',
+        scopeKey: `conversation:${sha256({ cwd: first.workspaceRoot })}`, rules: { writing: 'Orphan method must not apply after recovery.' } })
+      first.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await first.startGoal()
+      await vi.waitFor(() => expect(preparations).toBe(1), { timeout: 5_000 })
+      const record = listLongGoals(first.stateRoot)[0] as LongGoalRecordV3
+      const childId = record.tasks[0]!.execution!.sessionId
+      await first.ctx.agents.get(SessionId(childId))?.whenIdle()
+      const saved = await first.ctx.sessionPersistence.inspect(SessionId(childId))
+      expect(saved.events.some(event => event.type === 'user/message' && event.data.source.kind === 'plugin'
+        && event.data.source.plugin === 'tianwen-goal-task-method')).toBe(true)
+      expect(record.tianwenEvents.some(event => event.type === 'task-acceptance-prepared')).toBe(false)
+      expect(first.adapter.requests.filter(request => String(request.sessionId) === childId)).toHaveLength(0)
+      await first.dispose(false); firstClosed = true
+      cold = await mountProfile(objective, { root: first.root, resumeMain: true, completeTaskThroughTool: true })
+      cold.main.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] }))
+      cold.releaseTask()
+      await vi.waitFor(() => expect(cold!.adapter.requests.some(request => String(request.sessionId) === childId)).toBe(true), { timeout: 10_000 })
+      const resumed = cold.adapter.requests.find(request => String(request.sessionId) === childId)!
+      expect(allText(resumed)).toContain('earlier method messages have no verifiable original binding and no longer apply')
+      await vi.waitFor(() => expect(cold!.taskRuns()).toBe(1), { timeout: 5_000 })
+      expect(preparations).toBe(1)
+      expect(cold.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(0)
+    } finally { if (!firstClosed) await first.dispose(); if (cold !== undefined) await cold.dispose(true) }
+  }, 30_000)
+  it.each(['content', 'source', 'duplicate', 'revoked-before-dispatch'] as const)('rejects altered method messages before dispatch to the actual Task provider: %s', async mode => {
+    let changed = false
+    let childId = ''
+    const profile = await mountProfile('Complete the method message integrity control', {
+      completeTaskThroughTool: true,
+      goalTaskAcceptance: { async methodScope(material) { childId = material.attempt.childSessionId; return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { return { checkerId: 'method-integrity', checkerDigest: sha256('checker'), contractDigest: sha256('contract'), inputsDigest: sha256('inputs'),
+          requiredCondition: 'Complete original Task.', async evaluate() { return { status: 'verified', detail: 'Control only.' } } } } },
+    })
+    const off = profile.ctx.on('agent/pre-step', async (_payload, next) => {
+      const decision = await next()
+      if (decision.kind === 'enter') {
+        const message = decision.messages.find(item => item.source.kind === 'plugin' && item.source.plugin === 'tianwen-goal-task-method')
+        if (message !== undefined && !changed) {
+          changed = true
+          if (mode === 'content') (message as any).content = [{ type: 'text', text: 'Changed method body must not reach the provider.' }]
+          else if (mode === 'source') (message as any).source = { kind: 'user' }
+          else if (mode === 'duplicate') decision.messages.push(structuredClone(message))
+          else profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: false, revision: 2, policyVersion: 'tianwen-auto-analysis.v3' })
+        }
+      }
+      return decision
+    }, { prepend: true })
+    try {
+      vi.spyOn(profile.ctx.tianwenEvolution, 'getConversationGuidance').mockReturnValue({ schemaVersion: 'tianwen.conversation-guidance.v1',
+        scopeKey: `conversation:${sha256({ cwd: profile.workspaceRoot })}`, rules: { writing: 'Original applicable method.' } })
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(changed).toBe(true), { timeout: 5_000 })
+      await profile.ctx.agents.get(SessionId(childId))?.whenIdle()
+      expect(profile.adapter.requests.filter(request => String(request.sessionId) === childId)).toHaveLength(0)
+      expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(0)
+    } finally { off(); await profile.dispose() }
+  })
+  it.each(['consent', 'version', 'scope-removed'] as const)('expires the provided method before the next native request without replacing the Task version: %s', async mode => {
+    let current: any
+    let selections = 0
+    const check = { async methodScope() { selections++; return { family: 'writing' as const, evaluationMode: 'text' as const } },
+      async prepare() { return { checkerId: 'withdrawal-control', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+        inputsDigest: sha256('inputs'), requiredCondition: 'Complete the Task.',
+        async evaluate() { return { status: 'verified' as const, detail: 'Scripted functional result only.' } } } } }
+    const profile = await mountProfile('Complete the method withdrawal control Task', {
+      completeTaskThroughTool: true,
+      produceFiles() {
+        if (mode === 'consent') profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: false, revision: 2, policyVersion: 'tianwen-auto-analysis.v3' })
+        else {
+          if (mode === 'scope-removed') delete (check as any).methodScope
+          current = { ...current, rules: { writing: 'A different future method; never silently apply to this Task.' } }
+        }
+      },
+      goalTaskAcceptance: check,
+    })
+    try {
+      current = { schemaVersion: 'tianwen.conversation-guidance.v1', scopeKey: `conversation:${sha256({ cwd: profile.workspaceRoot })}`,
+        rules: { writing: 'Original governed-library method in this controlled fixture.' } }
+      const original = structuredClone(current)
+      vi.spyOn(profile.ctx.tianwenEvolution, 'getConversationGuidance').mockImplementation(() => current)
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-finished')).toBe(true), { timeout: 10_000 })
+      const record = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
+      const material = await readGoalTaskAcceptanceMaterial(profile.ctx, { stateRoot: profile.stateRoot, goalId: record.id, taskId: record.tasks[0]!.id, epoch: 1 })
+      expect(selections).toBe(1)
+      expect(material.preparation.method!.snapshot).toEqual(original)
+      expect(material.methodUsage).toMatchObject({ provision: 'provided', version: sha256(original), execution: 'unknown', withdrawnAtSeq: expect.any(Number) })
+      const requests = profile.adapter.requests.filter(request => String(request.sessionId) === material.preparation.childSessionId)
+      expect(requests.length).toBeGreaterThan(1)
+      expect(allText(requests[0]!)).not.toContain('no longer applies')
+      expect(requests.slice(1).every(request => allText(request).includes('No evaluated method applies from this step.'))).toBe(true)
+      expect(requests.every(request => !allText(request).includes('A different future method;'))).toBe(true)
+      if (mode === 'consent') expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(0)
+    } finally { await profile.dispose() }
+  })
+  it.each(['none', 'provided', 'unrelated'] as const)('provides the frozen applicable method in the original native Task request and recovers it: %s', async mode => {
+    let selections = 0
+    const profile = await mountProfile('Use the original project method for this writing Task', {
+      completeTaskThroughTool: true,
+      goalTaskAcceptance: {
+        async methodScope() { selections++; return { family: 'writing', evaluationMode: 'text' } },
+        async prepare() { return { checkerId: 'method-control', checkerDigest: sha256('checker'), contractDigest: sha256('contract'),
+          inputsDigest: sha256('inputs'), requiredCondition: 'Complete this Task.',
+          async evaluate() { return { status: 'verified', detail: 'Scripted functional control, not natural benefit.' } } } },
+      },
+    })
+    try {
+      const scopeKey = `conversation:${sha256({ cwd: profile.workspaceRoot })}`
+      const snapshot = { schemaVersion: 'tianwen.conversation-guidance.v1' as const, scopeKey,
+        rules: mode === 'provided' ? { writing: 'Keep the actual user facts and introduce each feature in use order.' }
+          : mode === 'unrelated' ? { code: 'This unrelated code rule must not be provided.' } : {} }
+      const lookup = vi.spyOn(profile.ctx.tianwenEvolution, 'getConversationGuidance').mockReturnValue(snapshot)
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(profile.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(1), { timeout: 10_000 })
+      const outcome = profile.ctx.tianwenEvolution.listGoalTaskOutcomes()[0]!
+      const material = await profile.runtimeApi.readGoalTaskOutcomeMaterial(profile.ctx, { stateRoot: profile.stateRoot, outcome: outcome.input })
+      expect(selections).toBe(1)
+      expect(material.methodUsage).toMatchObject({ provision: mode === 'provided' ? 'provided' : 'not-provided',
+        scopeKey, version: sha256(snapshot), execution: 'unknown' })
+      const binding = material.preparation.method!
+      const message = material.events.find(event => event.seq === binding.messageSeq)
+      expect(message).toMatchObject({ type: 'user/message', data: { id: binding.messageId,
+        source: { kind: 'plugin', plugin: 'tianwen-goal-task-method' } } })
+      expect(binding.messageSeq).toBeLessThan(material.preparation.headerSeq)
+      const first = profile.adapter.requests.find(request => String(request.sessionId) === material.preparation.childSessionId)!
+      expect(first.messages.some(item => item.source.kind === 'plugin' && item.source.plugin === 'tianwen-goal-task-method')).toBe(true)
+      expect(allText(first)).not.toContain('This unrelated code rule must not be provided.')
+      if (mode === 'provided') expect(allText(first)).toContain(snapshot.rules.writing)
+      const before = readFileSync(join(profile.evolutionRoot, 'ledger.jsonl'))
+      const requests = profile.adapter.requests.length
+      lookup.mockImplementation(() => { throw new Error('Historical reader must not read the current method pointer.') })
+      expect(await profile.runtimeApi.readGoalTaskOutcomeMaterial(profile.ctx, { stateRoot: profile.stateRoot, outcome: outcome.input })).toEqual(material)
+      expect(profile.adapter.requests).toHaveLength(requests)
+      expect(readFileSync(join(profile.evolutionRoot, 'ledger.jsonl'))).toEqual(before)
+    } finally { await profile.dispose() }
+  })
   it.each(['interrupted', 'unavailable-file'] as const)('does not reissue a lost content review or accept incomplete declared files: %s', async mode => {
     const profile = await mountProfile('Produce the content recovery engineering control.', { completeTaskThroughTool: true, contentVerdict: 'met',
       goalTaskAcceptance: { async prepare(material) { return { checkerId: 'content-recovery', checkerDigest: sha256('checker'),

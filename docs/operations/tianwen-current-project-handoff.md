@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-03 原Goal Task方法提供、版本与恢复保护已交付
+
+6aa5189之后，原可信检查器可选声明Task适用族/输出模式，原owner首请求前追加既有库精确方法的真实plugin消息，原preparation冻结版本/快照/同意/seq；共用材料reader核对真实正文/插件身份/唯一消息/请求边界，原内容视图保留native-goal-task元数据。未提供、提供和撤销可核对，execution仍unknown，旧缺项不补造，不将提供当采用/收益。详见[交付及原研究下一步](tianwen-goal-task-method-20261003.md)。
+
+撤回/版本/范围配置失效先明确撤销，不在同Task换版本；发送前竞态拒绝请求。孤立消息准备失败后，即使新Context移除整个检查器，仍先撤销无原绑定旧方法再完成未执行Task一次；同进程新Context，不称新Node进程。独立两项P2实际首红后关闭，最后静态复核无新有据P1/P2。15文件333项+发行73项合计16文件406项，最终发行25实际SDK控制通过/11跳过；完整构建/两声明/公共导入通过，0真实提供者/0自然来源，主入口SDK表未放宽。
+
+下一直接接原研究消费者：扫描/唤醒/恢复及Evolution支持校验仍只消费ConversationTask，须明确native-goal-task及原事前合同，不能伪装来源或历史补合同。然后治理启用、后续真实任务效果与回滚分别核实。正式1327364B/5af25fcd…逐字保持，本包未重挂正式status；不冒充新观测。完整目标active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口保持，不加标准/重计时/索题/催评/造失败/重评旧题或机械整体blocked。小D包约0.18MB、D约18.16GiB>=15，无安装下载/新容器；正常夹具清理，历史删除拒绝目录保留不绕过。本条覆盖下方方法记录仍待实现的当前待办。
+
 ## 2026-10-03 Goal Task 内容检查已接入原完成流程
 
 5787926之后，可信prepare首Task请求前可选冻结内容计划/实际原文件；原功能结果入账后在原finish lane自动双审，明确native-goal-task来源、保留command/Planner/工具/回答身份。原Goal一次start/finish、完整声明文件和原动作成败/seq、两原native proof、同意/关闭/绑定复核、0请求冷恢复保持，功能/内容状态分别供Planner/status消费；不伪造ConversationTask或用户评价。详见[准确交付与方法版本下一步](tianwen-goal-task-content-review-20261003.md)。
