@@ -3041,7 +3041,7 @@ export class EvolutionLedger {
     if ([...attempt.sourceTaskIds, attempt.counterexampleTaskId].some(id => !hasCurrentConversationQuality(tasks.find(task => task.source.taskId === id)?.admission?.qualityContract))) {
       throw new LedgerIntegrityError('new case design attempts require the current quality contract')
     }
-    this.#requireCheckedConversationCounterevidence(attempt.counterexampleTaskId)
+    this.#requireNewConversationCounterevidence(attempt.counterexampleTaskId)
     this.#requireDistinctConversationTaskContents(attempt.sourceTaskIds)
     this.#validateConversationCaseDesignAttempt(attempt)
     this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
@@ -3131,9 +3131,20 @@ export class EvolutionLedger {
 
   // New writes only. Shared support validation also owns historical replay,
   // whose original decisions must not acquire a later check requirement.
-  #requireCheckedConversationCounterevidence(taskId: string): void {
-    if (!hasSatisfiedConversationCodeCheck(this.#conversationLearning.list().find(task => task.source.taskId === taskId))) {
+  #requireNewConversationCounterevidence(taskId: string): void {
+    const task = this.#conversationLearning.list().find(task => task.source.taskId === taskId)
+    if (!hasSatisfiedConversationCodeCheck(task)) {
       throw new LedgerIntegrityError('new research counterevidence requires its prepared code check to be verified')
+    }
+    // Enforce the existing study-support rule before an invalid counter can
+    // consume a design pair. Historical replay retains its original checks.
+    const latest = [...this.listConversationFeedbackAssessments(taskId)].reverse().find(item => item.result?.proof != null
+      && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
+      && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
+    if (latest !== undefined && latest.result!.classification !== 'positive'
+      || this.listLearningIntakeStatuses(task!.source.sessionId).some(status => status.state === 'active' && status.rating === 'negative'
+        && status.sessionLifecycleFingerprint === task!.source.sessionLifecycleFingerprint && task!.completion?.assistantMessageIds.includes(status.messageId))) {
+      throw new LedgerIntegrityError('new research counterevidence has contradictory active feedback')
     }
   }
 
@@ -3171,7 +3182,7 @@ export class EvolutionLedger {
         if (generatedFileInputs.has(identity)) throw new LedgerIntegrityError('duplicate generated file input cannot support a new study or activation')
         generatedFileInputs.add(identity)
       }
-      this.#requireCheckedConversationCounterevidence(opened!.counterexampleTaskId)
+      this.#requireNewConversationCounterevidence(opened!.counterexampleTaskId)
       this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }

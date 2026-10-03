@@ -178,8 +178,8 @@ it('preserves model not-met priority on direct checked failure source writes', (
   expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/review|priority/)
   expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/review|priority/)
 })
-it('skips a checked counter with active empty preference and selects the next clean counter', async () => {
-  const f = seeded('verified', true, undefined, true), target = f.tasks[2], messageId = target.completion!.assistantMessageIds[0]!
+it.each([true, false])('skips a counter with active empty preference and selects the next clean counter (checked sources %s)', async checkedSources => {
+  const f = seeded('verified', true, undefined, checkedSources), target = f.tasks[2], messageId = target.completion!.assistantMessageIds[0]!
   f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'preference-v1', rating: 'positive',
     note: 'A controlled preference without new evaluation standards.', scopeKey: target.source.scopeKey,
     sessionDigest: sha256('preference feedback session'), evidenceIds: [target.completion!.resultDigest] },
@@ -192,11 +192,113 @@ it('skips a checked counter with active empty preference and selects the next cl
     admissionDigest: sha256(target.admission), resultDigest: target.completion!.resultDigest, materialDigest: sha256('preference material'), consentRevision: 1 })
   f.ledger.recordConversationFeedback({ kind: 'feedback-assessed', taskId: target.source.taskId, assessmentId, classification: 'preference', category: 'user-preference',
     supplementalCriteria: [], evidenceQuotes: ['controlled preference'], explanation: 'Controlled classification with no supplemental criteria.', proof: proof('preference-assessment'), unavailableReason: null })
-  const clean = task(f.ledger, 4, 'verified', true, { contentIdentity: true, requiredFailure: true }).value
+  const before = readFileSync(join(f.directory, 'ledger.jsonl'))
+  // The old study-open guard already refuses this exact counter. The new
+  // initial/attempt guard must not consume the pair before that rejection.
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/feedback/)
+  expect(await serviceFor(f).readiness(scope, true)).toMatchObject({ state: 'awaiting-counterexample', diagnostics: { successfulCandidates: 0 } })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'))).toEqual(before)
+  vi.restoreAllMocks()
+  const clean = task(f.ledger, 4, 'verified', true, { contentIdentity: true, requiredFailure: checkedSources }).value
   const service = serviceFor(f)
   Object.assign(service, { proposalClues: async () => [] })
   const selected = await (service as unknown as { select(scopeKey: string): Promise<{ counterexample: ConversationTask } | undefined> }).select(scope)
   expect(selected?.counterexample.source.taskId).toBe(clean.source.taskId)
+  const { attemptId: _oldId, ...oldBody } = f.attempt
+  const body = { ...oldBody, counterexampleTaskId: clean.source.taskId }
+  expect(f.ledger.recordConversationCaseDesignAttempt({ ...body, attemptId: caseDesignAttemptId(body) })).toEqual({ duplicate: false })
+})
+
+function controlledCounterFeedback(f: ReturnType<typeof seeded>, classification: 'preference' | 'positive' | 'inconclusive' | 'requirement-change',
+  options: { version?: string, supersedes?: string, oneOff?: boolean, unproven?: boolean } = {}) {
+  const target = f.tasks[2], messageId = target.completion!.assistantMessageIds[0]!, feedbackVersion = options.version ?? 'counter-feedback-v1'
+  f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion, rating: 'positive',
+    note: 'Controlled counter-feedback consumer fixture; not real user feedback.', scopeKey: scope,
+    sessionDigest: sha256(feedbackVersion), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1,
+    ...(options.supersedes === undefined ? {} : { supersedesFeedbackVersion: options.supersedes }) })
+  const status = f.ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
+  const source = { kind: 'native' as const, sessionId: target.source.sessionId, messageId, sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint,
+    feedbackVersion, feedbackFingerprint: status.feedbackFingerprint }
+  const assessmentId = conversationFeedbackAssessmentId({ taskId: target.source.taskId, source })
+  f.ledger.recordConversationFeedback({ kind: 'feedback-assessment-started', taskId: target.source.taskId, assessmentId, source,
+    admissionDigest: sha256(target.admission), resultDigest: target.completion!.resultDigest, materialDigest: sha256('counter material'), consentRevision: 1 })
+  f.ledger.recordConversationFeedback({ kind: 'feedback-assessed', taskId: target.source.taskId, assessmentId, classification,
+    category: classification === 'preference' ? 'user-preference' : null,
+    supplementalCriteria: options.oneOff ? ['Add a title to the next reply.'] : [], evidenceQuotes: ['Controlled feedback'],
+    explanation: 'Controlled feedback consumer classification.', proof: options.unproven ? null : proof('assessment:' + feedbackVersion),
+    unavailableReason: options.unproven ? 'invalid-judgment' : null,
+    ...(options.oneOff ? { scopeReview: { decisions: [{ criterion: 'Add a title to the next reply.', scope: 'one-off' as const,
+      evidenceQuote: 'Controlled feedback' }], proof: proof('scope:' + feedbackVersion) } } : {}) })
+  return assessmentId
+}
+
+it('does not spend a design pair on a one-off preference that the original study-open already rejects', async () => {
+  const f = seeded('verified')
+  controlledCounterFeedback(f, 'preference', { oneOff: true })
+  const before = readFileSync(join(f.directory, 'ledger.jsonl'))
+  expect(await readiness(f)).toEqual({ state: 'awaiting-counterexample' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/feedback/)
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'))).toEqual(before)
+})
+
+it.each(['positive', 'inactive'])('keeps a clean counter after a later %s feedback revision', async resolution => {
+  const f = seeded('verified'), old = controlledCounterFeedback(f, 'preference')
+  expect(await readiness(f)).toEqual({ state: 'awaiting-counterexample' })
+  if (resolution === 'positive') controlledCounterFeedback(f, 'positive', { version: 'counter-feedback-v2', supersedes: 'counter-feedback-v1' })
+  else {
+    const target = f.tasks[2]
+    f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId: target.completion!.assistantMessageIds[0]!,
+      feedbackVersion: 'counter-feedback-v2', rating: 'positive', note: 'Controlled replacement without an assessment.', scopeKey: scope,
+      sessionDigest: sha256('replacement'), evidenceIds: [target.completion!.resultDigest] },
+      sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1, supersedesFeedbackVersion: 'counter-feedback-v1' })
+  }
+  expect(f.ledger.isConversationFeedbackAssessmentActive(old)).toBe(false)
+  expect(await readiness(f)).toEqual({ state: 'ready-to-schedule' })
+  expect(f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toEqual({ duplicate: false })
+})
+
+it.each(['inconclusive', 'requirement-change', 'unproven'] as const)('preserves the original counter rule for %s feedback', async classification => {
+  const f = seeded('verified')
+  controlledCounterFeedback(f, classification === 'unproven' ? 'inconclusive' : classification, { unproven: classification === 'unproven' })
+  expect(await readiness(f)).toEqual({ state: 'ready-to-schedule' })
+  expect(f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toEqual({ duplicate: false })
+})
+
+it('rejects feedback arriving after initial selection before persisting the design attempt', async () => {
+  const f = seeded('verified')
+  expect(await readiness(f)).toEqual({ state: 'ready-to-schedule' })
+  controlledCounterFeedback(f, 'preference')
+  const before = readFileSync(join(f.directory, 'ledger.jsonl'))
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'))).toEqual(before)
+})
+
+it('preserves a historical ordinary attempt accepted before the new early feedback gate', () => {
+  const f = seeded('verified')
+  controlledCounterFeedback(f, 'preference')
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  const path = join(f.directory, 'ledger.jsonl')
+  appendFileSync(path, canonicalJson({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1',
+    at: '2026-10-03T00:00:00.000Z', attempt: f.attempt }) + '\n')
+  const before = readFileSync(path), replay = new EvolutionLedger(f.directory)
+  expect(replay.listConversationCaseDesignAttempts(scope)).toEqual([f.attempt])
+  expect(readFileSync(path)).toEqual(before)
+  expect(replay.recordConversationCaseDesignAttempt(f.attempt)).toEqual({ duplicate: true })
+})
+
+it('does not spend a new ordinary design pair on the original counter native-negative veto', () => {
+  const f = seeded('verified'), target = f.tasks[2]
+  f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId: target.completion!.assistantMessageIds[0]!,
+    feedbackVersion: 'negative-v1', rating: 'negative', note: 'Controlled original veto fixture.', scopeKey: scope,
+    sessionDigest: sha256('negative'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  const before = readFileSync(join(f.directory, 'ledger.jsonl'))
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/feedback/)
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'))).toEqual(before)
 })
 it.each([undefined, 'verified'] as const)('retains successful counterevidence when check state is %s', async state => {
   const f = seeded(state)

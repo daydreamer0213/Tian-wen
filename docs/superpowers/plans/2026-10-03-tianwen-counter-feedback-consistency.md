@@ -15,11 +15,12 @@
 
 ## Task 1: 只修反馈消费者不一致
 
-Files: `packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts`、`packages/tianwen-evolution/src/ledger.ts`、`tests/dsh-migration/conversation-checked-counterevidence.spec.ts`。
+Files: `packages/tianwen-runtime-bundle/src/conversation-guidance-loop.ts`、`packages/tianwen-evolution/src/ledger.ts`、`tests/dsh-migration/conversation-checked-counterevidence.spec.ts`；原 readiness 测试夹具增加空反馈查询方法，不修改产品规则。
 
 - [x] 通过原反馈记录API复现checked诊断误计和ordinary新attempt接受，保存两首红，不把夹具称用户反馈。
-- [ ] 验证study-open已拒绝同counter，冻结原语义；补新attempt拒绝/字节保持/干净counter首次尝试反例。
-- [ ] Runtime复用原active/proof/latest判定；Ledger仅new-write gate提前拒绝原负面counter。
-- [ ] 验证positive覆盖/撤回/未证实反馈、原pending规则及late-write冲突。
-- [ ] 相关回归、八包类型、完整发行声明与独立静态审查。
-- [ ] 正式零请求恢复/状态、ledger/checker原字节与磁盘/小证据核对；更新权威交接，提交并核对远端。
+- [x] 验证study-open已拒绝同counter，冻结原语义；补新attempt拒绝/字节保持/干净counter首次尝试反例。
+- [x] Runtime复用原active/proof/latest判定；Ledger仅new-write gate提前拒绝原负面counter。
+- [x] 验证positive覆盖/撤回/未证实反馈、原pending规则及late-write冲突。
+- [x] 相关回归373项、八包类型、完整发行声明与独立静态审查。
+- [x] 正式零请求恢复/状态、ledger/checker原字节与磁盘/小证据核对，更新权威交接。
+- [ ] 提交并核对远端；完成不等于完整学习目标完成。

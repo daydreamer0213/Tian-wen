@@ -184,8 +184,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
   }
   private checkedCounter(task: ConversationTask, first: ConversationTask): boolean {
     if (!hasSatisfiedConversationCodeCheck(task) || task.externalCheckFinished?.status !== 'verified' || conversationCodeCheckIdentity(task) !== conversationCodeCheckIdentity(first)) return false
-    const evolution = this.ctx.tianwenEvolution, all = evolution.listConversationFeedbackAssessments(task.source.taskId)
+    const all = this.ctx.tianwenEvolution.listConversationFeedbackAssessments(task.source.taskId)
     if (all.some(item => item.result === undefined)) return false
+    return this.counterFeedbackAllowed(task, all)
+  }
+  private counterFeedbackAllowed(task: ConversationTask,
+    all: readonly ConversationFeedbackAssessment[] = this.ctx.tianwenEvolution.listConversationFeedbackAssessments(task.source.taskId)): boolean {
+    const evolution = this.ctx.tianwenEvolution
     const latest = [...all].reverse().find(item => item.result?.proof != null && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId)
       && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
     return latest === undefined || latest.result!.classification === 'positive'
@@ -539,7 +544,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const attempts = evolution.listConversationCaseDesignAttempts(scopeKey)
     const failed = tasks.filter(task => this.support(task) !== undefined).reverse()
     const successful = tasks.filter(task => task.review?.verdict === 'met' && task.review.proof !== null
-      && hasSatisfiedConversationCodeCheck(task) && this.support(task) === undefined && !this.negativeFeedback(task))
+      && hasSatisfiedConversationCodeCheck(task) && this.support(task) === undefined && !this.negativeFeedback(task)
+      && this.counterFeedbackAllowed(task))
     let paired = false
     let attempted = false
     let unstudied = false

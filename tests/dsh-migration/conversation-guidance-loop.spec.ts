@@ -81,6 +81,7 @@ it('reports the existing study-selection gates without starting work or reading 
     listConversationTasks: () => tasks,
     listConversationGuidanceStudies: () => studies,
     listConversationCaseDesignAttempts: () => attempts,
+    listConversationFeedbackAssessments: () => [],
     listLearningIntakeStatuses: () => [],
     recordConversationGuidance: record,
   } } })
