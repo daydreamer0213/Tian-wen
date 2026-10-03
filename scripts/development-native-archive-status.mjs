@@ -1,8 +1,9 @@
 // 原归档事实的易读投影。
 //
-// 纯模块：仅导出 formatDevelopmentNativeArchiveStatus(verification, summary)。
+// 纯模块：仅导出 formatDevelopmentNativeArchiveStatus(verification, summary, options?)。
 // 无 I/O、无依赖、不执行命令、不修改输入、不共享可变返回对象。
 // 分类只呈现既有事实，不制造成功、资格或方法激活标签。
+// 可选 options 只用于投影既有文件观察诊断，绝不读取磁盘或解释其余可选字段。
 
 const VERIFICATION_FIELDS = ['sessionMatches', 'filesMatch', 'complete', 'missing', 'changed', 'added']
 const SUMMARY_FIELDS = [
@@ -36,6 +37,27 @@ const REVIEW_LABELS = new Map([
 const REVIEW_MISSING = '尚未整体评审'
 
 const DISPOSITION = '以上为原归档事实，不代表方法已采用或自动学习已完成。'
+
+// 可选诊断投影：只转述既有观察失败原因，不评估、不修复、不重跑。
+const DIAGNOSTIC_DISPOSITION = '诊断只说明观察失败原因，不改变原任务或学习资格。'
+const DIAGNOSTIC_FIELDS = ['records', 'observedCount', 'truncated']
+const DIAGNOSTIC_RECORD_FIELDS = [
+  'sourceSequence',
+  'sourceTimestamp',
+  'taskId',
+  'sessionId',
+  'phase',
+  'detail',
+  'detailTruncated',
+]
+const MAX_DIAGNOSTIC_RECORDS = 16
+const MAX_DETAIL_CODE_POINTS = 512
+const PHASE_STAGES = new Map([
+  ['prepare', '准备文件观察时'],
+  ['capture', '读取原文件证据时'],
+  ['freeze', '保存最终文件证据时'],
+  ['unavailable-record', '记录证据不可用时'],
+])
 
 function fail(message) {
   throw new TypeError(`formatDevelopmentNativeArchiveStatus: ${message}`)
@@ -71,7 +93,46 @@ function project(value, labels, missingLabel) {
   return value === null ? missingLabel : labels.get(value)
 }
 
-export function formatDevelopmentNativeArchiveStatus(verification, summary) {
+// 仅当诊断与本次 Task/session 完全一致且未截断/未超限地自洽时返回投影，否则整体忽略。
+// 不抛新错误、不修改输入、不回显任何未声明的可选字段。
+function projectFileObservationDiagnostics(options, taskId) {
+  if (!isRecord(options)) return null
+  const { sessionId } = options
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return null
+  if (typeof taskId !== 'string' || taskId.length === 0) return null
+
+  const source = options.fileObservationDiagnostics
+  if (!isRecord(source) || !hasExactFields(source, DIAGNOSTIC_FIELDS)) return null
+
+  const { records, observedCount, truncated } = source
+  if (!Array.isArray(records) || records.length < 1 || records.length > MAX_DIAGNOSTIC_RECORDS) return null
+  if (!Number.isSafeInteger(observedCount) || observedCount < records.length) return null
+  if (typeof truncated !== 'boolean' || truncated !== (observedCount > records.length)) return null
+
+  const items = []
+  let previousSequence = 0
+  for (const record of records) {
+    if (!isRecord(record) || !hasExactFields(record, DIAGNOSTIC_RECORD_FIELDS)) return null
+
+    const phase = record.phase
+    const stage = PHASE_STAGES.get(phase)
+    if (stage === undefined) return null
+
+    const { sourceSequence, sourceTimestamp, detail, detailTruncated } = record
+    if (!Number.isSafeInteger(sourceSequence) || sourceSequence <= previousSequence) return null
+    if (typeof sourceTimestamp !== 'number' || !Number.isFinite(sourceTimestamp) || sourceTimestamp < 0) return null
+    if (record.taskId !== taskId || record.sessionId !== sessionId) return null
+    if (typeof detail !== 'string' || [...detail].length > MAX_DETAIL_CODE_POINTS) return null
+    if (typeof detailTruncated !== 'boolean') return null
+
+    previousSequence = sourceSequence
+    items.push({ stage, detail, detailTruncated })
+  }
+
+  return { items, observedCount, truncated, disposition: DIAGNOSTIC_DISPOSITION }
+}
+
+export function formatDevelopmentNativeArchiveStatus(verification, summary, options) {
   if (!isRecord(verification) || !hasExactFields(verification, VERIFICATION_FIELDS)) {
     fail('verification 必须恰含预期字段')
   }
@@ -119,11 +180,19 @@ export function formatDevelopmentNativeArchiveStatus(verification, summary) {
     archive = '归档字节一致且文件集合完整'
   }
 
-  return {
+  const status = {
     archive,
     completion: project(summary.completionStatus, COMPLETION_LABELS, COMPLETION_MISSING),
     functional: project(summary.functionalStatus, FUNCTIONAL_LABELS, FUNCTIONAL_MISSING),
     review: project(summary.reviewVerdict, REVIEW_LABELS, REVIEW_MISSING),
     disposition: DISPOSITION,
   }
+
+  // 合格诊断只在原归档完整且与本次 Task/session 一致时出现；否则返回对象与旧版完全一致。
+  if (verification.complete === true) {
+    const diagnostics = projectFileObservationDiagnostics(options, summary.taskId)
+    if (diagnostics !== null) status.diagnostics = diagnostics
+  }
+
+  return status
 }

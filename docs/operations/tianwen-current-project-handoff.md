@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 新真实首次任务通过，归档诊断显示已交付
+
+天问按13e4fdb事前冻结合同首次实现诊断显示：11真实请求（识别1/根8/原双审2）、prepare/evaluate1/1，原Task程序verified/评审met，独立38/38、越界拒绝0。首代码7852B和仓库逐字节相同，主代理未改候选或重试。另Node0请求准确恢复原Task/材料/完整4文件图/双审原proof/程序/归档，账本不变。主代理随后把纯显示接原只读inspect，Task/归档不改。见[准确结果与接续](tianwen-first-diagnostic-display-20261004.md)。
+
+显示接线129回归与原SDK普通/模板显示/冷恢复及readonly控制过，连同未变observer84/发行48共6不同文件261项，25未选；完整Runtime/两声明在b27d503通过，之后未改Runtime源。独立无有据P1/P2。feedback/study仍0、默认隔离true；这是真实可核验任务基线，不是学习收益。完整目标active/incomplete、main/Daily NO-GO及原门槛/十工作日窗口保持。
+
+下一复用既有专用D DEV入口和一个持续Profile，按原applyDevelopment/原检查工厂准备后续实际待办，让真实出现的失败/反馈交原学习链，核研究/自动采用/未来效果；不搬当前临时Profile、不索题/催评/造失败/重评旧题或机械整体blocked。正式账本原hash只读未mount。原84容器ID保持、本轮两个runner已removed，Docker收尾见D final-audit。自动审批又启动前拒删14新控制profile/evolution目录（约0.57MiB），无具体理由，无zip副本/重试；原10+新14共24拒删路径不碰，新增清单见D工程包generated-cleanup-plan.json。D约18GiB>=15、未达20。本条覆盖下方新真实诊断任务待执行旧入口。
+
 ## 2026-10-04 原执行权限清单和具体诊断已交付
 
 原SDK scoped variable/section在首执行前提供既定文件路径/角色，UserMessage、权限、持久gate不变。原观察器warn保留Task/session/phase，原provider fiber严格匹配，诊断存原cleanup/seal；原证据16上限和unverifiable不放宽。175回归、完整Runtime/两声明、48发行边界及原SDK普通/模板诊断/完整正常程序与另Node0请求恢复通过；独立P2关闭，无新有据P1/P2。见[准确分账及下一实际任务](tianwen-host-permission-context-20261004.md)。

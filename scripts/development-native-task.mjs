@@ -50,7 +50,17 @@ export async function inspectDevelopmentNativeTaskArchive(ctx, config) {
   const verification = verifyDevelopmentNativeArchiveSeal(seal, sessionId, entries)
   signal.throwIfAborted()
   const summary = summarizeDevelopmentNativeTask(ctx.tianwenEvolution.listConversationTasks(sessionId)[0], outputPaths)
-  const status = formatDevelopmentNativeArchiveStatus(verification, summary)
+  // Display only the already sealed cleanup record. Legacy opaque cleanup
+  // bytes remain inspectable; neither parsing nor display changes SDK truth.
+  let fileObservationDiagnostics
+  if (verification.complete) {
+    const cleanup = entries.find(entry => entry.path === 'cleanup.json')
+    if (cleanup) {
+      try { fileObservationDiagnostics = JSON.parse(Buffer.from(cleanup.content).toString('utf8'))?.fileObservationDiagnostics }
+      catch (error) { if (!(error instanceof SyntaxError)) throw error }
+    }
+  }
+  const status = formatDevelopmentNativeArchiveStatus(verification, summary, { sessionId, fileObservationDiagnostics })
   return { verification, summary, status }
 }
 

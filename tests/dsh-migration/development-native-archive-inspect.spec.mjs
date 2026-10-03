@@ -81,3 +81,27 @@ test('changed bytes, partial sets and missing seals remain separate facts', () =
   await assert.rejects(inspectDevelopmentNativeTaskArchive(f.ctx, f.config), error => error.code === 'ENOENT')
   assert.equal(f.lookups(), lookups); assert.deepEqual(f.snapshot(), before)
 }))
+
+test('displays sealed same-task diagnostics without changing SDK truth or archive bytes', () => fixture(async f => {
+  const diagnostic = { records: [{ sourceSequence: 1, sourceTimestamp: 12345, taskId: f.task.source.taskId,
+    sessionId: f.config.sessionId, phase: 'freeze', detail: 'original concrete failure', detailTruncated: false }], observedCount: 1, truncated: false }
+  const cleanup = f.entries.find(entry => entry.path === 'cleanup.json')
+  cleanup.content = Buffer.from(JSON.stringify({ fileObservationDiagnostics: diagnostic }))
+  writeFileSync(resolve(f.root, cleanup.path), cleanup.content)
+  f.saveSeal(sealDevelopmentNativeArchive(f.config.sessionId, f.entries))
+  const before = f.snapshot(), taskBefore = structuredClone(f.task)
+  const view = await inspectDevelopmentNativeTaskArchive(f.ctx, f.config)
+  assert.deepEqual(view.status.diagnostics, { items: [{ stage: '保存最终文件证据时', detail: 'original concrete failure', detailTruncated: false }],
+    observedCount: 1, truncated: false, disposition: '诊断只说明观察失败原因，不改变原任务或学习资格。' })
+  assert.equal(view.summary.functionalStatus, 'verified')
+  assert.deepEqual(f.task, taskBefore); assert.deepEqual(f.snapshot(), before)
+
+  const foreign = structuredClone(diagnostic); foreign.records[0].taskId = 'other-task'
+  cleanup.content = Buffer.from(JSON.stringify({ fileObservationDiagnostics: foreign }))
+  writeFileSync(resolve(f.root, cleanup.path), cleanup.content); f.saveSeal(sealDevelopmentNativeArchive(f.config.sessionId, f.entries))
+  assert.equal((await inspectDevelopmentNativeTaskArchive(f.ctx, f.config)).status.diagnostics, undefined)
+  writeFileSync(resolve(f.root, cleanup.path), JSON.stringify({ fileObservationDiagnostics: diagnostic }))
+  const changed = await inspectDevelopmentNativeTaskArchive(f.ctx, f.config)
+  assert.equal(changed.verification.complete, false); assert.equal(changed.status.diagnostics, undefined)
+  assert.deepEqual(changed.summary, view.summary); assert.deepEqual(f.task, taskBefore)
+}))

@@ -45,6 +45,7 @@ try{
   assert(diagnostics?.records.some(r=>r.phase==='freeze'&&r.taskId===task.source.taskId&&r.sessionId===sessionId&&r.detail==='conversation file ancillary record exceeds its count limit'),'original concrete observer failure missing from sealed cleanup')
   const inspection=await inspectDevelopmentNativeTaskArchive(h.ctx,{resultRoot:join(root,'task-run'),sessionId,outputPaths:[first,second],signal:new AbortController().signal})
   assert.equal(inspection.verification.complete,true);assert.equal(inspection.summary.functionalStatus,'unverifiable')
+  assert.deepEqual(inspection.status.diagnostics,{items:[{stage:'保存最终文件证据时',detail:'conversation file ancillary record exceeds its count limit',detailTruncated:false}],observedCount:1,truncated:false,disposition:'诊断只说明观察失败原因，不改变原任务或学习资格。'})
   writeFileSync(join(root,'control-result.json'),JSON.stringify({result,diagnostics,inspection,scriptedRequests:h.adapter.requests.length,deniedDispatches,originalMessageUnchanged:true,permissionSectionBeforeDispatch:true,preparations,evaluations,originalEvidenceLimit:16,actualDenials:17,quarantine:h.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined(),studies:h.ctx.tianwenEvolution.listConversationGuidanceStudies().length},null,2),{flag:'wx'})
  }else{
   const ledger=readFileSync(join(root,'evolution/ledger.jsonl')),task=h.ctx.tianwenEvolution.listConversationTasks(sessionId)[0]
