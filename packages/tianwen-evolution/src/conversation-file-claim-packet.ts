@@ -1,7 +1,7 @@
 import { parseConversationFileEntries, parseConversationFileMaterial } from './conversation-files.js'
 import { canonicalJson, sha256 } from './learning-intake.js'
 
-export type ClaimRole = 'user' | 'assistant' | 'tool' | 'answer'
+export type ClaimRole = 'user' | 'assistant' | 'tool' | 'answer' | 'host'
 export type ClaimOrigin = 'context' | 'request' | 'tool' | 'answer'
 export type ClaimStage = 'initial' | 'final'
 export type ClaimToolStatus = 'success' | 'error'
@@ -42,7 +42,7 @@ const PACKET = 'tianwen.file-claim-review-packet.v1'
 const EVIDENCE = 'tianwen.claim-evidence.v2'
 const DIGEST = /^sha256:[a-f0-9]{64}$/
 const ITEM_ID = /^(context|request|tool|answer)-([1-9][0-9]*)$/
-const ROLES = new Set(['user', 'assistant', 'tool', 'answer'])
+const ROLES = new Set(['user', 'assistant', 'tool', 'answer', 'host'])
 const ORIGINS = new Set(['context', 'request', 'tool', 'answer'])
 const ITEM_KEYS = new Set(['id', 'role', 'origin', 'text', 'toolStatus', 'filePath', 'fileStage'])
 const REQUIRED = ['id', 'role', 'origin', 'text']
@@ -138,6 +138,10 @@ function readOriginal(original: unknown): { ownerKey: 'source' | 'task'; materia
   if (!plain(owner)) return fail('review data must be a JSON object')
   const material = parseConversationFileMaterial(owner.files)
   if (material.outputKind !== 'files') return fail('material must use the files output kind')
+  if (owner.hostProject !== undefined && (!plain(owner.hostProject) || !exact(owner.hostProject, ['observedPaths'])
+    || !Array.isArray(owner.hostProject.observedPaths) || owner.hostProject.observedPaths.length === 0
+    || new Set(owner.hostProject.observedPaths).size !== owner.hostProject.observedPaths.length
+    || owner.hostProject.observedPaths.some(path => !material.entries.some(entry => entry.path === path)))) return fail('host project provenance is invalid')
   const result = original.fileResult
   if (!plain(result) || !exact(result, ['answer', 'files', 'outputDigest'])) return fail('fileResult must be exactly answer/files/outputDigest')
   const answer = result.answer
@@ -174,11 +178,13 @@ function readEvidence(value: unknown): Index {
     ids.add(item.id)
     if (Object.hasOwn(raw, 'toolStatus') && item.toolStatus !== 'success' && item.toolStatus !== 'error') return fail('evidence toolStatus is invalid')
     const hasPath = Object.hasOwn(raw, 'filePath'), hasStage = Object.hasOwn(raw, 'fileStage')
+    if (item.role === 'host' && (!hasPath || item.fileStage !== 'initial' || item.origin !== 'context' || Object.hasOwn(raw, 'toolStatus'))) return fail('host file provenance is invalid')
     if (hasPath !== hasStage) return fail('filePath and fileStage must be present together')
     if (hasPath) {
       if (typeof item.filePath !== 'string') return fail('evidence filePath must be a string')
       if (item.fileStage !== 'initial' && item.fileStage !== 'final') return fail('evidence fileStage is invalid')
-      if (item.fileStage === 'initial' ? (item.role !== 'tool' || item.origin !== 'tool') : (item.role !== 'answer' || item.origin !== 'answer')) return fail('file evidence role/origin is invalid')
+      if (item.fileStage === 'initial' ? !(item.role === 'tool' && item.origin === 'tool' || item.role === 'host' && item.origin === 'context' && item.toolStatus === undefined)
+        : (item.role !== 'answer' || item.origin !== 'answer')) return fail('file evidence role/origin is invalid')
       const target = item.fileStage === 'initial' ? initial : final
       const list = target.get(item.filePath)
       if (list === undefined) target.set(item.filePath, [raw as unknown as ConversationFileClaimEvidenceItem]); else list.push(raw as unknown as ConversationFileClaimEvidenceItem)
@@ -219,6 +225,9 @@ function canonicalPacket(original: unknown, evidenceValue: unknown): Conversatio
   const used = new Set<string>()
   info.materialEntries.forEach((entry, i) => {
     if (entry.content === null) return
+    const owner = (original as Record<string, Record<string, unknown>>)[info.ownerKey]!
+    const host = owner.hostProject !== undefined
+    if (index.initial.get(entry.path)?.some(item => host ? item.role !== 'host' : item.role !== 'tool')) return fail('initial file provenance does not match its original material')
     const ids = requireGroup(index.initial, entry.path, entry.content, 'initial')
     ids.forEach(id => used.add(id))
     entries[i]!.content = { evidenceIds: [...ids] }

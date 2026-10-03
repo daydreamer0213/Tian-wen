@@ -3,7 +3,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { conversationCheckedFailureSource, conversationReviewConsensus, guidanceRule, guidanceVersion, parseConversationAuditedReviewChecks, parseConversationFileMaterial, sha256, type ConversationFileResult, type ConversationFileTrialOutput, type ConversationFileTrialReceipt, type ConversationTask, type GuidanceArmRecord, type GuidanceStudy } from '@tianwen/evolution'
 import { recoverConversationJudgmentRequest, recoverConversationStructuredJudgment, recoverConversationTrial } from './conversation-judgment.js'
 import { verifyConversationClaimReviewCheck, verifyConversationOriginalReviewCheck } from './conversation-claim-review.js'
-import { conversationMessages, conversationTaskModelDigest, recoverConversationTaskAnswer, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
+import { conversationMessages, conversationTaskModelDigest, conversationTaskResultFiles, recoverConversationTaskAnswer, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
 import { recoverConversationFileTrial, recoverConversationFileTrialExecution } from './conversation-file-trial.js'
 import type { ConversationFeedbackMaterial } from './conversation-feedback-assessment.js'
 import { recoverConversationCaseDesign, type RecoveredConversationCaseDesign } from './conversation-case-design.js'
@@ -123,7 +123,7 @@ async function recoverOriginalTaskReview(ctx: Context, task: ConversationTask, o
   const fileMode = task.admission!.decision!.evaluationMode === 'local-files'
   const conversation = conversationMessages(span, task.source.materialProjection)
   const answer = conversation.filter(message => message.role === 'assistant').flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join('')
-  const output = !fileMode ? undefined : task.completion?.files === undefined ? undefined : { answer, files: task.completion.files.entries }
+  const output = !fileMode ? undefined : task.completion?.files === undefined ? undefined : { answer, files: conversationTaskResultFiles(task)! }
   if (fileMode && (originalMaterial.files === undefined || output === undefined)) throw new Error('source-unavailable')
   const original = { source: originalMaterial, evaluationMode: fileMode ? 'local-files' : 'text', conversation,
     toolEvidence: fileMode ? [] : span.filter(event => event.type === 'tool/result'),

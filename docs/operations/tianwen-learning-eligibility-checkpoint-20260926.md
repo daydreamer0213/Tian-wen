@@ -1,5 +1,15 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 普通检查完整项目图已接通，真实学习目标继续
+
+公开 Node-project 普通 prepare 显式冻结 project 原快照/输出权限，原 finished 的 projectOutputs 绑定真实观察子图与未变参考；原 fileInputs/completion/SDK actions 不扩写未读入口。内容、反馈、研究包及独立输入身份共同消费完整图，初始文件明确host/context而非成功读取；新图先程序后内容、旧时序/协议保持，冷恢复不看后来磁盘。见[准确交付及下一待办](tianwen-ordinary-prepared-project-20261004.md)。
+
+449相关回归、37发行边界及公开SDK/缓存Node1控制通过；完整Runtime/两声明通过。另发行宿主9 scripted请求/prepare-eval1/1，原反序两输出/edit/未读entry，另Node0请求准确原Task/材料/双审/程序/seal，账本不变。独立P2 host事实来源指令窄修关闭，无新有据P1/P2；0真实提供者/自然收益/反馈/新研究，不回写首次真实状态题，不把程序或scripted met当方法采用。
+
+完整目标active/incomplete、main/Daily NO-GO及原门槛/同意/隔离/停止/十工作日窗口保持，不增阶段/练习或机械blocked。下一可自主待办：通用DEV宿主仅信任isPrepared布尔，原持久准备绑定gate仍只在首任务D驱动，先冻结任务和独立检查后让天问首次修复公共接入；不代写候选、不索题/催评/旧题重试。
+
+正式1327364B/5af25fcd…只读未mount不变。两本轮容器确认删除、84历史IDs不变/Docker恢复停止；小包约0.22MB、D约18GiB>=15，未达20。自动审批拒删本轮published-host-control（仅blocked by policy，无具体原因），18文件199662B留证、未压缩复制/重试/绕过；原五历史拒删继续不碰。本条覆盖下方普通图接缝待实现的旧入口。
+
 ## 2026-10-04 首次真实产品修复交付，原不可核验结果保留
 
 天问按事前冻结合同首次真实修复 Goal 当前会话研究范围漏报；首次代码未被控制端重写。旧发行 history=1/currentSession=0 首红后，原样新增 scope 纯函数及原调用接入，独立14条件缓存Node隔离全过、接入/完整Runtime/两声明通过，3文件82项及发行原状态/启用回滚控制1项通过。详见[准确结果与下一接线](tianwen-first-real-status-task-20261004.md)。

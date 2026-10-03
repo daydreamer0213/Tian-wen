@@ -40,6 +40,17 @@ describe('claim evidence projection', () => {
   })
   const fileMaterial = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', outputKind: 'files', entries: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
   const fileResult = (content: string | null) => { const output = { answer: '', files: [{ path: 'input.txt', content: 'Original fact.' }, { path: 'output.txt', content }] }; return { ...output, outputDigest: sha256(output) } }
+  it('allows an exact frozen file fact to cite host evidence while retaining separate actual actions', () => {
+    const evidence = projectClaimEvidence({ task: { prompt: 'Write the supplied fact.', files: fileMaterial,
+      hostProject: { observedPaths: ['output.txt'] } }, answer: '', fileResult: fileResult('Original fact.') }, 'file-chunks-v1')
+    const host = evidence.items.find(item => item.filePath === 'input.txt' && item.fileStage === 'initial')!
+    expect(host).toMatchObject({ role: 'host', origin: 'context', text: 'Original fact.' })
+    expect(host.toolStatus).toBeUndefined()
+    expect(validateClaimAudit(auditFor(evidence, text => claim(text, 'source-fact', 'supported', [host.id])), evidence, 'met')).toBeDefined()
+    expect(evidence.items.some(item => item.role === 'tool' && item.text === 'Original fact.')).toBe(false)
+    expect(() => projectClaimEvidence({ task: { prompt: 'Write the supplied fact.', files: fileMaterial,
+      hostProject: { observedPaths: ['unknown.txt'] } }, answer: '', fileResult: fileResult('Original fact.') })).toThrow('invalid-judgment')
+  })
   it('never promotes ancillary methods or locations to quotable factual source IDs', () => {
     const task = { request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Write the supplied fact.' }] })],
       context: [], files: fileMaterial, ancillaryContext: { schemaVersion: 'tianwen.file-ancillary-context.v1',

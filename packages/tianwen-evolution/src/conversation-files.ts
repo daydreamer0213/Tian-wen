@@ -2,6 +2,13 @@ import { isAbsolute } from 'node:path'
 import type { ConversationJudgmentProof, ConversationTask } from './conversation-learning.js'
 import { sha256 } from './learning-intake.js'
 import type { Sha256Digest } from './ledger.js'
+import { conversationTaskCheckedProject } from './conversation-external-check.js'
+
+/** Prepared complete graph keeps unread references in input independence. */
+export function conversationTaskFileInputs(task: ConversationTask): readonly ConversationFileEntry[] | undefined {
+  if (task.externalCheckPrepared?.project !== undefined) return conversationTaskCheckedProject(task)?.inputs
+  return task.fileInputs?.map(({ path, content }) => ({ path, content }))
+}
 
 export interface ConversationFileEntry {
   readonly path: string
@@ -18,11 +25,12 @@ export function canonicalConversationFileEntries(inputs: readonly ConversationFi
  * Missing file evidence cannot fall back to request-only independence. */
 export function conversationFileTaskInputDigest(task: ConversationTask, requestDigest = task.source.requestContentDigest ?? task.source.requestDigest): Sha256Digest | undefined {
   const decision = task.admission?.decision, result = task.completion?.files
-  const inputs = task.fileInputs?.map(({ path, content }) => ({ path, content }))
+  const inputs = conversationTaskFileInputs(task)
+  const observed = task.fileInputs?.map(({ path, content }) => ({ path, content }))
   if (decision?.kind !== 'task' || decision.evaluationMode !== 'local-files'
     || task.completion?.status !== 'completed' || task.fileUnavailable !== undefined
     || result === undefined || result.outputKind !== decision.fileOutputKind
-    || inputs === undefined || inputs.length === 0 || result.inputsDigest !== sha256(inputs)) return undefined
+    || inputs === undefined || inputs.length === 0 || observed === undefined || result.inputsDigest !== sha256(observed)) return undefined
   const canonicalInputs = canonicalConversationFileEntries(inputs)
   return sha256({ requestDigest, inputs: canonicalInputs })
 }

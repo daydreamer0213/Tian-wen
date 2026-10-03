@@ -5,7 +5,8 @@ import { EvolutionLedger, isPublicLedgerEvent } from '../../packages/tianwen-evo
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { baselineGuidanceSnapshot, guidanceVersion } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { conversationQualityContract, hasCurrentConversationQuality, parseConversationAuditedReviewChecks, parseConversationLearningRecord, parseConversationQualityContract, conversationReviewConsensus, parseConversationReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
-import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, validateConversationExternalCheck } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
+import { conversationExternalInputsDigest, conversationTaskCheckedProject, parseConversationExternalCheckOutcome, validateConversationExternalCheck } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
+import { conversationFileTaskInputDigest } from '../../packages/tianwen-evolution/src/conversation-files.js'
 
 const roots: string[] = []
 function root() {
@@ -88,6 +89,64 @@ function auditedChecks(verdict: 'met' | 'not-met' | 'inconclusive' = 'met') {
 }
 
 describe('natural conversation task evidence', () => {
+  function preparedProjectSetup(reference = 'entry before') {
+    const state = externalCheckSetup('local-files')
+    const project = { inputs: [{ path: 'input.ts', content: 'before' }, { path: 'entry.mjs', content: reference }], outputPaths: ['input.ts'] }
+    const prepared = { ...state.prepared, inputsDigest: conversationExternalInputsDigest(project.inputs), project }
+    const result = { ...state.result, preparationDigest: sha256(prepared), projectOutputs: [{ path: 'input.ts', content: 'after' }, project.inputs[1]!] }
+    state.ledger.recordConversationLearning(prepared)
+    state.ledger.recordConversationLearning({ kind: 'task-model-observed', taskId: state.source.taskId, headerSeq: 8, modelConfigDigest: prepared.modelConfigDigest })
+    state.ledger.recordConversationLearning(state.capture)
+    state.ledger.recordConversationLearning({ ...finish(state.source.taskId), files: state.files })
+    return { ...state, prepared, result }
+  }
+
+  it('cold-replays full host snapshots while preserving observed inputs and complete-graph independence', () => {
+    const state = preparedProjectSetup()
+    state.ledger.recordConversationLearning(state.result)
+    const task = state.ledger.listConversationTasks()[0]!
+    expect(task.fileInputs).toEqual([state.capture])
+    expect(task.completion?.files).toEqual(state.files)
+    expect(conversationTaskCheckedProject(task)).toEqual({ inputs: state.prepared.project.inputs, outputs: state.result.projectOutputs, outputPaths: ['input.ts'] })
+    expect(new EvolutionLedger(state.directory).listConversationTasks()).toEqual(state.ledger.listConversationTasks())
+    expect(task.review).toBeUndefined()
+    const changed = preparedProjectSetup('different unread entry'); changed.ledger.recordConversationLearning(changed.result)
+    expect(conversationFileTaskInputDigest(changed.ledger.listConversationTasks()[0]!)).not.toBe(conversationFileTaskInputDigest(task))
+  })
+
+  it.each(['absent', 'reference', 'output', 'extra', 'order'] as const)('refuses a conclusive receipt with %s checked project outputs', corruption => {
+    const state = preparedProjectSetup(), result: any = structuredClone(state.result)
+    if (corruption === 'absent') delete result.projectOutputs
+    if (corruption === 'reference') result.projectOutputs[1].content = 'changed entry'
+    if (corruption === 'output') result.projectOutputs[0].content = 'invented after'
+    if (corruption === 'extra') result.projectOutputs.push({ path: 'extra.txt', content: 'extra' })
+    if (corruption === 'order') result.projectOutputs.reverse()
+    expect(() => state.ledger.recordConversationLearning(result)).toThrow()
+    expect(state.ledger.listConversationTasks()[0]!.externalCheckFinished).toBeUndefined()
+  })
+
+  it('keeps unverifiable projects out of complete input identity and rejects outputs attached to unverifiable status', () => {
+    const state = preparedProjectSetup()
+    expect(() => state.ledger.recordConversationLearning({ ...state.result, status: 'unverifiable' })).toThrow()
+    const { projectOutputs: _, ...result } = state.result
+    state.ledger.recordConversationLearning({ ...result, status: 'unverifiable' })
+    expect(conversationTaskCheckedProject(state.ledger.listConversationTasks()[0]!)).toBeUndefined()
+    expect(conversationFileTaskInputDigest(state.ledger.listConversationTasks()[0]!)).toBeUndefined()
+  })
+
+  it.each(['duplicate-output', 'undeclared-output', 'absent-reference', 'wrong-digest', 'extra-field'] as const)('rejects %s prepared project metadata before execution', corruption => {
+    const { prepared } = preparedProjectSetup(), value: any = structuredClone(prepared)
+    if (corruption === 'duplicate-output') value.project.outputPaths.push('input.ts')
+    if (corruption === 'undeclared-output') value.project.outputPaths.push('extra.txt')
+    if (corruption === 'absent-reference') value.project.inputs[1].content = null
+    if (corruption === 'wrong-digest') value.inputsDigest = sha256('different input')
+    if (corruption === 'extra-field') value.project.fakeReads = true
+    expect(() => {
+      const other = externalCheckSetup('local-files')
+      other.ledger.recordConversationLearning(value)
+    }).toThrow()
+  })
+
   it.each(['verified', 'rejected'] as const)('cold-replays a local-file code check %s without changing admission or granting review', status => {
     const { directory, ledger, result, complete } = externalCheckSetup('local-files')
     const admitted = ledger.listConversationTasks()[0]!.admission

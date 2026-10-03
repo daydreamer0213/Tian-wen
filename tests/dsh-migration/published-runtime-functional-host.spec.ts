@@ -53,7 +53,7 @@ it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')(`uses published ${en
   // Ordinary native capture does not promise the host's declaration order.
   const captureCandidates = engine === 'node-project' ? [...candidates].reverse() : candidates
   const script = [toolCallResponse('admit', 'structured_output', { decision: admission }),
-    ...references.map((file, index) => toolCallResponse(`read-reference-${index}`, 'read', { file_path: file.path })),
+    ...references.filter(file => engine !== 'node-project' || file.path !== 'entry.mjs').map((file, index) => toolCallResponse(`read-reference-${index}`, 'read', { file_path: file.path })),
     ...captureCandidates.map((file, index) => toolCallResponse(`read-absent-${index}`, 'read', { file_path: file.path })),
     ...candidates.map((file, index) => toolCallResponse(`write-host-${index}`, 'write', { file_path: file.path, content: file.content })),
     textResponse('saved'), auditedEvidenceResponse(review), auditedEvidenceResponse(review)]
@@ -90,7 +90,12 @@ it.skipIf(process.env.TIANWEN_ISOLATED_DOCKER_TEST !== '1')(`uses published ${en
     expect(tasks).toHaveLength(1)
     const task = tasks[0]!
     expect(task.externalCheckFinished?.status).toBe('verified')
-    if (engine === 'node-project') expect(task.completion?.files?.outputPaths).toEqual([...project.outputPaths].reverse())
+    if (engine === 'node-project') {
+      expect(task.completion?.files?.outputPaths).toEqual([...project.outputPaths].reverse())
+      expect(task.fileInputs?.some(input => input.path === 'entry.mjs')).toBe(false)
+      expect(task.externalCheckPrepared?.project?.inputs.some(input => input.path === 'entry.mjs')).toBe(true)
+      expect(task.externalCheckFinished?.projectOutputs?.some(input => input.path === 'entry.mjs')).toBe(true)
+    }
     expect(task.fileUnavailable).toBeUndefined()
     expect(task.review?.verdict).toBe('met')
     expect(preparations).toBe(1); expect(evaluations).toBe(1)

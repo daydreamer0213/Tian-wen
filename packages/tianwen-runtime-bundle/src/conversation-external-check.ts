@@ -2,8 +2,9 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { LlmCallConfig } from '@deepseek-ai/dsh-llm'
 import { SessionId, isAppendSurfaceEvent, type UserMessage } from '@deepseek-ai/dsh-session'
-import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, sha256, supportsConversationCodeCheck, validateConversationExternalCheck,
-  type ConversationExternalCheckOutcome, type ConversationFileEntry, type ConversationTask } from '@tianwen/evolution'
+import { conversationExternalInputsDigest, parseConversationExternalCheckOutcome, parseConversationPreparedProject, sha256, supportsConversationCodeCheck, validateConversationExternalCheck, validateConversationPreparedProjectObservation,
+  type ConversationExternalCheckOutcome, type ConversationFileEntry, type ConversationTask, type ConversationPreparedProject } from '@tianwen/evolution'
+import { readConversationFile } from './conversation-file-material.js'
 import { conversationContext, recoverConversationTaskMaterial, recoverConversationTaskModel, type ConversationTaskMaterial } from './conversation-task-material.js'
 import { withConversationObservationCancellation } from './observation-cancellation.js'
 export { withConversationObservationCancellation } from './observation-cancellation.js'
@@ -29,6 +30,8 @@ export interface PreparedConversationExternalCodeCheck {
   readonly checkerDigest: ReturnType<typeof sha256>
   readonly contractDigest: ReturnType<typeof sha256>
   readonly inputs: readonly ConversationFileEntry[]
+  /** Explicit complete pre-answer host graph; never native tool observations. */
+  readonly project?: ConversationPreparedProject
   /** Original mandatory condition; evaluator marks only a proved failure of it. */
   readonly requiredCondition?: string
   /** Bounded isolated producers own cleanup and must settle before cancellation leaves the observer. */
@@ -83,10 +86,13 @@ export class ConversationExternalCodeChecks {
       if (prepared === undefined || signal.aborted || !this.authorized(task.source.consentRevision)) return
       if (typeof prepared.evaluate !== 'function' || eventDigest !== sha256(agent.session.events)
         || modelConfigDigest !== sha256(config)) throw new Error('preparation changed native task state')
+      const project = prepared.project === undefined ? undefined : parseConversationPreparedProject(structuredClone(prepared.project))
+      if (project !== undefined && conversationExternalInputsDigest(project.inputs) !== conversationExternalInputsDigest(prepared.inputs)) throw new Error('prepared project input snapshot mismatch')
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-external-check-prepared', taskId: task.source.taskId, preparedSeq,
         requestDigest: task.source.requestDigest, contextDigest: task.source.contextDigest, admissionDigest: sha256(task.admission), modelConfigDigest,
         checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
-        inputsDigest: conversationExternalInputsDigest(prepared.inputs), ...(prepared.requiredCondition === undefined ? {} : { requiredCondition: prepared.requiredCondition }) })
+        inputsDigest: conversationExternalInputsDigest(prepared.inputs), ...(prepared.requiredCondition === undefined ? {} : { requiredCondition: prepared.requiredCondition }),
+        ...(project === undefined ? {} : { project }) })
       this.states.set(task.source.taskId, { evaluate: prepared.evaluate,
         ...(prepared.waitsForCancellationCleanup === true ? { waitsForCancellationCleanup: true } : {}) })
     } catch (error) { this.ctx.logger.warn('External check preparation unavailable: %s', this.detail(error)) }
@@ -97,9 +103,6 @@ export class ConversationExternalCodeChecks {
 
   private async candidate(task: ConversationTask, signal: AbortSignal): Promise<ConversationExternalCodeCandidate> {
     const prepared = task.externalCheckPrepared!, completion = task.completion!
-    validateConversationExternalCheck({ kind: 'task-external-check-finished', taskId: task.source.taskId,
-      preparationDigest: sha256(prepared), resultDigest: completion.resultDigest,
-      fileResultDigest: completion.files === undefined ? null : sha256(completion.files), status: 'verified', detail: 'Binding preflight.' }, task)
     const nativeSession = this.ctx.sessions.get(SessionId(task.source.sessionId))
     if (nativeSession === undefined || !await withConversationObservationCancellation(signal, () => this.ctx.sessions.flush(nativeSession))) {
       throw new Error('external check native task persistence unavailable')
@@ -108,11 +111,26 @@ export class ConversationExternalCodeChecks {
     const model = await recoverConversationTaskModel(this.ctx, task)
     const saved = await this.ctx.sessionPersistence.inspect(SessionId(task.source.sessionId))
     if (material.files === undefined || material.files.outputKind !== 'files' || completion.files === undefined
-      || conversationExternalInputsDigest(material.files.entries) !== prepared.inputsDigest || sha256(model) !== prepared.modelConfigDigest
+      || (prepared.project === undefined && conversationExternalInputsDigest(material.files.entries) !== prepared.inputsDigest) || sha256(model) !== prepared.modelConfigDigest
       || saved.events.some(event => event.seq >= task.source.startSeq && event.seq <= prepared.preparedSeq
         && ['assistant/message', 'tool/call', 'tool/result'].includes(event.type))) throw new Error('external check original task binding unavailable')
-    return { request: material.request, context: material.context, inputs: material.files.entries,
-      outputs: structuredClone(completion.files.entries), outputPaths: [...completion.files.outputPaths], signal }
+    let inputs = material.files.entries, outputs = structuredClone(completion.files.entries)
+    if (prepared.project !== undefined) {
+      validateConversationPreparedProjectObservation(task)
+      inputs = structuredClone(prepared.project.inputs)
+      outputs = await Promise.all(inputs.map(async entry => {
+        if (prepared.project!.outputPaths.includes(entry.path)) return structuredClone(completion.files!.entries.find(output => output.path === entry.path)!)
+        const current = await readConversationFile(material.files!.cwd, entry.path)
+        if (current.content !== entry.content) throw new Error('prepared readonly project reference changed')
+        return current
+      }))
+      signal.throwIfAborted()
+    }
+    validateConversationExternalCheck({ kind: 'task-external-check-finished', taskId: task.source.taskId,
+      preparationDigest: sha256(prepared), resultDigest: completion.resultDigest,
+      fileResultDigest: sha256(completion.files), status: 'verified', detail: 'Binding preflight.',
+      ...(prepared.project === undefined ? {} : { projectOutputs: outputs }) }, task)
+    return { request: material.request, context: material.context, inputs, outputs, outputPaths: [...completion.files.outputPaths], signal }
   }
 
   async finish(taskId: string): Promise<void> {
@@ -124,26 +142,32 @@ export class ConversationExternalCodeChecks {
     const controller = new AbortController(); this.controllers.add(controller)
     try {
       let outcome: ConversationExternalCheckOutcome = { status: 'unverifiable', detail: 'Prepared check state unavailable; no post-answer preparation or rerun.' }
+      let projectOutputs: readonly ConversationFileEntry[] | undefined
       if (evaluator !== undefined) {
         try {
           const material = await this.candidate(task, controller.signal)
+          const candidateDigest = sha256(material)
           if (controller.signal.aborted || !this.authorized(task.source.consentRevision)) return
           outcome = parseConversationExternalCheckOutcome(await withConversationObservationCancellation(controller.signal,
             () => evaluator.evaluate(material), evaluator.waitsForCancellationCleanup === true))
           // The check consumes frozen values; a concurrent rewrite of original
           // native evidence must still prevent a conclusive receipt.
-          await this.candidate(task, controller.signal)
+          const after = await this.candidate(task, controller.signal)
+          if (sha256(after) !== candidateDigest) throw new Error('checked project changed during evaluation')
+          if (task.externalCheckPrepared.project !== undefined && outcome.status !== 'unverifiable') projectOutputs = after.outputs
           // Validate the host outcome before leaving its failure boundary.
           // Durable writes below must still propagate storage/history errors.
           validateConversationExternalCheck({ kind: 'task-external-check-finished', taskId,
             preparationDigest: sha256(task.externalCheckPrepared), resultDigest: task.completion.resultDigest,
-            fileResultDigest: task.completion.files === undefined ? null : sha256(task.completion.files), ...outcome }, task)
-        } catch (error) { outcome = { status: 'unverifiable', detail: this.detail(error) } }
+            fileResultDigest: task.completion.files === undefined ? null : sha256(task.completion.files), ...outcome,
+            ...(projectOutputs === undefined ? {} : { projectOutputs }) }, task)
+        } catch (error) { outcome = { status: 'unverifiable', detail: this.detail(error) }; projectOutputs = undefined }
       }
       if (controller.signal.aborted || !this.authorized(task.source.consentRevision)) return
       this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-external-check-finished', taskId,
         preparationDigest: sha256(task.externalCheckPrepared), resultDigest: task.completion.resultDigest,
-        fileResultDigest: task.completion.files === undefined ? null : sha256(task.completion.files), ...outcome })
+        fileResultDigest: task.completion.files === undefined ? null : sha256(task.completion.files), ...outcome,
+        ...(projectOutputs === undefined ? {} : { projectOutputs }) })
     } finally { this.controllers.delete(controller); this.checking.delete(taskId) }
   }
 }

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationCodeCheckIdentity, conversationCheckedFailureSource, conversationExternalInputsDigest, type ConversationCheckedFailureSources } from './conversation-external-check.js'
-import { conversationFileTaskInputDigest } from './conversation-files.js'
+import { conversationFileTaskInputDigest, conversationTaskFileInputs } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
 import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
@@ -3309,7 +3309,7 @@ export class EvolutionLedger {
         const task = 'sourceTaskId' in item ? tasks.find(task => task.source.taskId === item.sourceTaskId) : undefined
         const check = study.resultChecks.find(check => check.caseId === item.id)
         try {
-          if (task?.fileInputs === undefined || check === undefined || conversationExternalInputsDigest(task.fileInputs.map(({ path, content }) => ({ path, content }))) !== check.inputsDigest) {
+          if (task === undefined || conversationTaskFileInputs(task) === undefined || check === undefined || conversationExternalInputsDigest(conversationTaskFileInputs(task)!) !== check.inputsDigest) {
             throw new Error('unavailable or changed source input')
           }
         } catch { throw new LedgerIntegrityError('study result check requires exact original frozen task inputs') }
@@ -3379,7 +3379,7 @@ export class EvolutionLedger {
     }
     if (new Set(study.sourceTaskIds.map(id => {
       const task = tasks.find(task => task.source.taskId === id)!
-      return study.evaluationMode === 'local-files' ? sha256({ requestDigest: task.source.requestDigest, inputs: task.fileInputs!.map(({ path, content }) => ({ path, content })), outputKind: task.completion!.files!.outputKind, outputPaths: task.completion!.files!.outputPaths }) : task.source.requestDigest
+      return study.evaluationMode === 'local-files' ? sha256({ requestDigest: task.source.requestDigest, inputs: conversationTaskFileInputs(task), outputKind: task.completion!.files!.outputKind, outputPaths: task.completion!.files!.outputPaths }) : task.source.requestDigest
     })).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
   }
 

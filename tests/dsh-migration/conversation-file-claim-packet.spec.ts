@@ -36,3 +36,22 @@ it('does not borrow source IDs for output and returns independent nested graphs'
   wrong.original.fileResult.files[1].content = wrong.original.source.files.entries[0].content
   expect(() => unpack(wrong)).toThrow()
 })
+
+it('losslessly preserves explicit host initial file roles and refuses to recast them as successful tool reads', () => {
+  const f: any = fixture()
+  f.original.source.hostProject = { observedPaths: ['output.txt'] }
+  f.evidence.items[1] = { ...f.evidence.items[1], id: 'context-1', origin: 'context', role: 'host' }
+  f.evidence.evidenceDigest = sha256(f.evidence.items)
+  const packet = pack(f.original, f.evidence)
+  expect(unpack(packet)).toEqual({ original: f.original, claimEvidence: f.evidence })
+  for (const corruption of ['tool-status', 'tool-role', 'missing-marker', 'extra-marker', 'wrong-observed-path']) {
+    const changed = structuredClone(f)
+    if (corruption === 'tool-status') changed.evidence.items[1].toolStatus = 'success'
+    if (corruption === 'tool-role') { changed.evidence.items[1].role = 'tool'; changed.evidence.items[1].origin = 'tool'; changed.evidence.items[1].id = 'tool-1' }
+    if (corruption === 'missing-marker') delete changed.original.source.hostProject
+    if (corruption === 'extra-marker') changed.original.source.hostProject.fakeReads = true
+    if (corruption === 'wrong-observed-path') changed.original.source.hostProject.observedPaths = ['unknown.txt']
+    changed.evidence.evidenceDigest = sha256(changed.evidence.items)
+    expect(() => pack(changed.original, changed.evidence)).toThrow()
+  }
+})

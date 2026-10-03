@@ -144,6 +144,7 @@ export function createConversationIsolatedJsonCheck(config: InternalConfig, engi
     const binding = sha256({ request: material.request, context: material.context }), prepared = await core.prepare(material.signal)
     if (prepared === undefined) return undefined
     return { ...prepared, contractDigest: sha256({ functionalContract: prepared.contractDigest, materialDigest: binding }),
+      ...(engine === 'node-project' ? { project: { inputs: structuredClone(prepared.inputs), outputPaths: [...core.targets] } } : {}),
       async evaluate(candidate) {
         candidate.signal.throwIfAborted()
         try { if (sha256({ request: candidate.request, context: candidate.context }) !== binding) throw new Error('binding mismatch') }

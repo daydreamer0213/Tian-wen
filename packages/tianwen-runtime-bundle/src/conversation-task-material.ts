@@ -7,6 +7,7 @@ import type { ConversationFeedbackMaterial } from './conversation-feedback-asses
 import { projectConversationFileAncillaryContext, type ConversationFileAncillaryContext } from '@tianwen/evolution/content-review'
 import { isCreatedFileMissingRead, isFileAncillaryTool, verifyConversationFileAncillary } from './conversation-file-ancillary.js'
 import { conversationRequestContentDigest } from '@tianwen/evolution/content-review'
+import { conversationTaskCheckedProject } from '@tianwen/evolution/content-review'
 
 export function conversationMessages(events: readonly SessionEvent[], projection?: ConversationTaskSource['materialProjection']) {
   return events.flatMap(event => {
@@ -39,6 +40,8 @@ export interface ConversationTaskMaterial {
   readonly criteria: readonly string[]
   readonly qualityContract?: ConversationQualityContract
   readonly files?: ConversationFileMaterial
+  /** Original complete host snapshot, not a claim of model reads. */
+  readonly hostProject?: { readonly observedPaths: readonly string[] }
   readonly ancillaryContext?: ConversationFileAncillaryContext
   /** Host-verified original-task actions, never carried into a method trial. */
   readonly fileExecution?: ConversationFileExecutionEvidence
@@ -190,15 +193,23 @@ export async function recoverConversationTaskMaterial(ctx: Context, task: Conver
   if (source.requestContentDigest !== undefined && conversationRequestContentDigest(requests) !== source.requestContentDigest) throw new Error('natural task original request content drift')
   const context = conversationContext(saved.events, source.startSeq, source.materialProjection)
   if (sha256(context) !== source.contextDigest) throw new Error('natural task prior context drift')
-  const files = recoverFiles(ctx, saved.meta.cwd, saved.events, task)
+  const observedFiles = recoverFiles(ctx, saved.meta.cwd, saved.events, task)
+  const project = observedFiles === undefined ? undefined : conversationTaskCheckedProject(task)
+  const files = project === undefined ? observedFiles : { ...observedFiles!, entries: project.inputs, outputPaths: project.outputPaths }
   const ancillaryContext = files === undefined ? undefined : projectConversationFileAncillaryContext(task.fileAncillary ?? [], files.entries)
   const fileExecution = files?.outputKind === 'chat' ? task.fileAncillary?.some(record => record.payload.tool === 'read-denied' || record.payload.tool === 'file-mutation-denied')
-    ? recoverFileActions(saved.events, task, files) : recoverFileExecution(saved.events, task)
-    : files?.outputKind === 'files' && source.fileExecutionProjection === 'native-actions.v1' ? recoverFileActions(saved.events, task, files) : undefined
+    ? recoverFileActions(saved.events, task, observedFiles!) : recoverFileExecution(saved.events, task)
+    : files?.outputKind === 'files' && source.fileExecutionProjection === 'native-actions.v1' ? recoverFileActions(saved.events, task, observedFiles!) : undefined
   return { request: requests, context, objective: task.admission.decision.objective, criteria: task.admission.decision.criteria,
     ...(task.admission.qualityContract === undefined ? {} : { qualityContract: task.admission.qualityContract }),
     ...(files === undefined ? {} : { files }), ...(ancillaryContext === undefined ? {} : { ancillaryContext }),
+    ...(project === undefined ? {} : { hostProject: { observedPaths: observedFiles!.entries.map(entry => entry.path) } }),
     ...(fileExecution === undefined ? {} : { fileExecution }) }
+}
+
+/** Complete checked result when explicitly prepared; original observed graph otherwise. */
+export function conversationTaskResultFiles(task: ConversationTask): readonly ConversationFileEntry[] | undefined {
+  return conversationTaskCheckedProject(task)?.outputs ?? task.completion?.files?.entries
 }
 
 /** Recover the original completed answer, bound to the task's frozen native span. */

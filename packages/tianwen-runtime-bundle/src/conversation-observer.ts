@@ -11,7 +11,7 @@ import {
 import { RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME, TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { CONVERSATION_FAMILY_SCHEMA, conversationAdmissionSchema, runConversationJudgment } from './conversation-judgment.js'
 import { ConversationClaimReviewMaterialError, ConversationClaimReviewQuoteError, runConversationClaimReview } from './conversation-claim-review.js'
-import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, recoverConversationTaskMaterial, recoverConversationTaskModel } from './conversation-task-material.js'
+import { conversationContext, conversationEvidenceTexts, conversationMessages as visible, conversationTaskResultFiles, recoverConversationTaskMaterial, recoverConversationTaskModel } from './conversation-task-material.js'
 import { guidanceRule } from '@tianwen/evolution'
 
 const ADMISSION_INSTRUCTION = `Identify what the direct user is asking BEFORE any answer is produced. Return exactly one JSON object with a decision field through structured_output:
@@ -129,8 +129,13 @@ export class TianwenConversationObserverService extends Service {
       const events = structuredClone(session.events.filter(item => item.seq >= task.source.startSeq && item.seq <= event.seq))
       try {
         this.complete(task, events, event)
-        this.track(this.externalChecks.finish(task.source.taskId))
-        this.track(this.review(agent, task.source.taskId, events))
+        if (task.externalCheckPrepared?.project === undefined) {
+          this.track(this.externalChecks.finish(task.source.taskId))
+          this.track(this.review(agent, task.source.taskId, events))
+        } else this.track((async () => {
+          await this.externalChecks.finish(task.source.taskId)
+          await this.review(agent, task.source.taskId, events)
+        })())
       } catch (error) { this.warn(error) }
     })
     const offCreated = this.ctx.on('agent/created', ({ agent }) => this.restore(agent))
@@ -391,7 +396,7 @@ export class TianwenConversationObserverService extends Service {
       const callConfig = await recoverConversationTaskModel(this.ctx, task)
       const conversation = visible(events, task.source.materialProjection)
       const answer = conversation.filter(message => message.role === 'assistant').flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join('')
-      const output = source.files === undefined ? undefined : { answer, files: task.completion!.files!.entries }
+      const output = source.files === undefined ? undefined : { answer, files: conversationTaskResultFiles(task)! }
       const material = { source, evaluationMode: task.admission.decision.evaluationMode, conversation,
         toolEvidence: task.admission.decision.evaluationMode === 'local-files' ? [] : events.filter(event => event.type === 'tool/result'),
         ...(output === undefined ? {} : { fileResult: { ...output, outputDigest: sha256(output) } }) }

@@ -10,7 +10,7 @@ import {
 } from '@tianwen/evolution'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationEvidenceSchema, CONVERSATION_FEEDBACK_SCHEMA, CONVERSATION_FEEDBACK_SCOPE_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, recoverConversationStructuredJudgment, runConversationJudgment } from './conversation-judgment.js'
-import { conversationEvidenceTexts, conversationMessages, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
+import { conversationEvidenceTexts, conversationMessages, conversationTaskResultFiles, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
 import type { ConversationFileTrialOutput } from '@tianwen/evolution'
 
 const ASSESSMENT_INSTRUCTION = `Independently assess user feedback about an exact earlier answer. Do not solve the task, propose guidance, or change the original review or pre-answer criteria. Return exactly {"classification":"attributable-problem|positive|requirement-change|preference|inconclusive","category":null,"supplementalCriteria":[],"explanation":"brief evidence-led explanation","evidenceQuotes":[]} through structured_output.
@@ -205,7 +205,7 @@ export class TianwenConversationFeedbackService extends Service {
       if (!direct.includes(decision.feedback.quote)) throw new Error('natural feedback quote is not in the direct user input')
       feedback = { source, request, quote: decision.feedback.quote }
     }
-    const output = original.files === undefined ? undefined : { answer: answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join(''), files: target.completion.files!.entries }
+    const output = original.files === undefined ? undefined : { answer: answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : [])).join(''), files: conversationTaskResultFiles(target)! }
     return { original, answer, toolEvidence: original.files === undefined ? events.filter(event => event.type === 'tool/result') : [], feedback,
       ...(output === undefined ? {} : { fileResult: { ...output, outputDigest: sha256(output) } }) }
   }

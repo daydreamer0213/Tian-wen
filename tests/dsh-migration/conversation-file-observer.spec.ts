@@ -171,6 +171,86 @@ it('does not install disabled file-facts on an already-created ordinary agent', 
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('checks an unread prepared reference without manufacturing a native read', async () => {
+  const inputs = [{ path: 'input.ts', content: 'before' }, { path: 'entry.mjs', content: 'trusted entry' }]
+  let evaluated = 0
+  const check: ConversationExternalCodeCheck = { async prepare() {
+    return { checkerId: 'prepared-project-control', checkerDigest: sha256('probe'), contractDigest: sha256('original contract'),
+      inputs, project: { inputs, outputPaths: ['input.ts'] }, async evaluate(candidate) {
+        evaluated++
+        expect(candidate.inputs).toEqual(inputs)
+        expect(candidate.outputs).toEqual([{ path: 'input.ts', content: 'after' }, inputs[1]])
+        return { status: 'verified', detail: 'Original bytes only.' }
+      } }
+  } }
+  const harness = await mount([structured({ ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }),
+    toolCallResponse('project-write', 'write', { file_path: 'input.ts', content: 'after' }), textResponse('saved'), ...reviewPair()], true, check)
+  writeFileSync(join(harness.root, 'input.ts'), 'before')
+  writeFileSync(join(harness.root, 'entry.mjs'), 'trusted entry')
+  try {
+    harness.handle.agent.ctx.tools.presentAs('native')
+    harness.handle.agent.ctx.tools.restrict({ allow: ['read', 'write', 'edit'] })
+    harness.handle.agent.followup(direct('Replace input.ts with after; entry.mjs is a readonly checker entry.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.externalCheckFinished?.status).toBe('verified')
+    expect(evaluated).toBe(1)
+    expect(task.fileInputs?.map(input => input.path)).toEqual(['input.ts'])
+    expect(task.completion?.files?.entries).toEqual([{ path: 'input.ts', content: 'after' }])
+    const material = await recoverConversationTaskMaterial(harness.ctx, task)
+    expect(material.files?.entries).toEqual(inputs)
+    expect(material.hostProject).toEqual({ observedPaths: ['input.ts'] })
+    expect(task.review?.verdict, JSON.stringify(task.review)).toBe('met')
+    const audit = await recoverConversationJudgmentRequest(harness.ctx, parseConversationAuditedReviewChecks(task.review!.reviewChecks)[0]!)
+    const original = (audit.material as any).original
+    const evidence = projectClaimEvidence(original, 'file-chunks-v1')
+    expect(evidence.items.filter(item => item.fileStage === 'initial').every(item => item.role === 'host' && item.toolStatus === undefined)).toBe(true)
+    expect(evidence.items.some(item => item.role === 'tool' && item.text.includes('entry.mjs'))).toBe(false)
+    const frozen = structuredClone(material), records = structuredClone(harness.ctx.tianwenEvolution.listConversationTasks())
+    // Later disk state never redefines the sealed original project.
+    unlinkSync(join(harness.root, 'entry.mjs'))
+    const cold = await mount([], false, undefined, harness.root)
+    try {
+      expect(cold.adapter.requests).toHaveLength(0)
+      expect(cold.ctx.tianwenEvolution.listConversationTasks()).toEqual(records)
+      expect(await recoverConversationTaskMaterial(cold.ctx, records[0]!)).toEqual(frozen)
+      await verifyConversationOriginalReviewCheck(cold.ctx, parseConversationAuditedReviewChecks(task.review!.reviewChecks)[0]!, original, task.models![0]!.modelConfigDigest)
+    } finally { await cold.handle.dispose(); await cold.ctx.fiber.dispose() }
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['reference-before', 'reference-during', 'extra-read', 'extra-write', 'missing-output'] as const)('refuses prepared project qualification for %s', scenario => {
+  return (async () => {
+    const inputs = [{ path: 'input.ts', content: 'before' }, { path: 'entry.mjs', content: 'trusted entry' }]
+    let evaluated = 0, harness: Awaited<ReturnType<typeof mount>>
+    const check: ConversationExternalCodeCheck = { async prepare() { return {
+      checkerId: 'prepared-project-control', checkerDigest: sha256('probe'), contractDigest: sha256('contract'), inputs,
+      project: { inputs, outputPaths: ['input.ts'] }, async evaluate() {
+        evaluated++
+        if (scenario === 'reference-during') writeFileSync(join(harness.root, 'entry.mjs'), 'changed')
+        return { status: 'verified', detail: 'Original bytes only.' }
+      },
+    } } }
+    const calls = scenario === 'missing-output' ? [toolCallResponse('project-read', 'read', { file_path: 'input.ts' })]
+      : [toolCallResponse('project-write', 'write', { file_path: 'input.ts', content: 'after' })]
+    if (scenario === 'extra-read') calls.push(toolCallResponse('extra-read', 'read', { file_path: 'extra.txt' }))
+    if (scenario === 'extra-write') calls.push(toolCallResponse('extra-write', 'write', { file_path: 'extra.txt', content: 'extra' }))
+    harness = await mount([structured({ ...externalCode, evaluationMode: 'local-files', fileOutputKind: 'files' }), ...calls,
+      () => { if (scenario === 'reference-before') writeFileSync(join(harness.root, 'entry.mjs'), 'changed'); return textResponse('saved') }, ...reviewPair()], true, check)
+    writeFileSync(join(harness.root, 'input.ts'), 'before'); writeFileSync(join(harness.root, 'entry.mjs'), 'trusted entry'); writeFileSync(join(harness.root, 'extra.txt'), 'extra')
+    try {
+      harness.handle.agent.ctx.tools.presentAs('native'); harness.handle.agent.ctx.tools.restrict({ allow: ['read', 'write', 'edit'] })
+      harness.handle.agent.followup(direct('Replace input.ts with after; entry.mjs is readonly.'))
+      await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+      const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      expect(task.externalCheckFinished?.status).toBe('unverifiable')
+      expect(task.externalCheckFinished?.projectOutputs).toBeUndefined()
+      expect(evaluated).toBe(scenario === 'reference-during' ? 1 : 0)
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })()
+})
+
 it('keeps full file capture and independent result checking when host file-facts exposure is disabled', async () => {
   const check: ConversationExternalCodeCheck = { async prepare() {
     return { checkerId: 'facts-optout-byte-probe', checkerDigest: sha256('probe'), contractDigest: sha256('after'),
