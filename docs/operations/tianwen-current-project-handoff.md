@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 持续 DEV 环境与多合同分派已交付
+
+2c32d57事前冻结后首次真实任务新增纯分派模块：9真实请求(识别1/根6/原双审2)、prepare/evaluate1/1、独立34/34，原Task completed/程序verified/评审met。首代码原样，主代理未修/重试；新Node0请求恢复Task/归档/账本，另原材料/完整3图/双审proof/header准确恢复。原public applyDevelopment持续根 `D:/DevData/tianwen-development-runtime/continuous-project-20261004`，不搬旧Profile/正式账本。见[本轮准确结果与接续](tianwen-persistent-ordinary-contracts-20261004.md)。
+
+控制端仅接既有DEV options数组合同，原单份/Goal/固定host/study保持。127不同选中回归通过，实际公开DEV SDK多合同→原自动研究5case10arm；保留case程序失败时即使quarantine=false、原评审accepted仍不采用，新Context0请求准确恢复。这是89 scripted/0natural工程控制，不能当自然收益；真实环境feedback/study0，成功基线不当然兼容未来不同合同。独立最后无有据P1/P2。
+
+完整目标active/incomplete、main/Daily NO-GO及原门槛/十工作日窗口保持。下一自主选择实际未完成开发工作，事前冻结原要求/独立研究角色图，复用持续Profile/原工厂；真实程序失败沿原支持分支，不造评价/失败、重评旧题或给无关任务套同条件凑资格；成功保留基线。研究/语义/自动采用/未来效果分别核，缺单项证据不机械整体blocked，不索题催评。
+
+正式1327364B/原5af25fcd…只读未mount，24拒删路径不碰；持续Profile约3.27MiB无环境副本，控制随机根清理、84历史容器ID保持、Docker停止见D final-audit；D约18GiB≥15未达20。此条覆盖下方“下一复用持续Profile”待办，原完整目标仍未完成。
+
 ## 2026-10-04 新真实首次任务通过，归档诊断显示已交付
 
 天问按13e4fdb事前冻结合同首次实现诊断显示：11真实请求（识别1/根8/原双审2）、prepare/evaluate1/1，原Task程序verified/评审met，独立38/38、越界拒绝0。首代码7852B和仓库逐字节相同，主代理未改候选或重试。另Node0请求准确恢复原Task/材料/完整4文件图/双审原proof/程序/归档，账本不变。主代理随后把纯显示接原只读inspect，Task/归档不改。见[准确结果与接续](tianwen-first-diagnostic-display-20261004.md)。

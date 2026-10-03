@@ -18,20 +18,20 @@
 
 ## Task 1: 事前冻结分派契约和独立检查
 
-- [ ] 新只读 `tests/fixtures/ordinary-contract-routing.contract.md` 与 `.entry.mjs`。唯一候选输出 `scripts/development-ordinary-task-check.mjs`，无预写实现。
-- [ ] 公共接口 `createDevelopmentOrdinaryTaskCheck(configOrArray, createCheck)`。单份保持兼容；非空数组/不同非空原 requestText/同一非空 cwd；所有合同在调用原工厂前深拷贝；每份调用原工厂一次，原准备器必须存在。
-- [ ] `prepare(material)` 用原工厂的文本投影规则：所有 request messages 的 text 块依序以换行拼接。只准确匹配，不修剪/大小写/模糊/后备。未知任务返回 undefined，不准备其他合同。选中原准备器收到同一 material，原 prepared 返回值/错误/取消不改。
-- [ ] 事前独立正反、输入冻结/后改、返回身份/错误传播期望放 D 小包；基线输出不存在，原功能未实现。commit 冻结源、合同、期望和驱动摘要后仅一次实际 Task。
+- [x] 新只读 `tests/fixtures/ordinary-contract-routing.contract.md` 与 `.entry.mjs`。唯一候选输出 `scripts/development-ordinary-task-check.mjs`，无预写实现。
+- [x] 公共接口 `createDevelopmentOrdinaryTaskCheck(configOrArray, createCheck)`。单份保持兼容；非空数组/不同非空原 requestText/同一非空 cwd；所有合同在调用原工厂前深拷贝；每份调用原工厂一次，原准备器必须存在。
+- [x] `prepare(material)` 用原工厂的文本投影规则：所有 request messages 的 text 块依序以换行拼接。只准确匹配，不修剪/大小写/模糊/后备。未知任务返回 undefined，不准备其他合同。选中原准备器收到同一 material，原 prepared 返回值/错误/取消不改。
+- [x] 事前独立正反、输入冻结/后改、返回身份/错误传播期望放 D 小包；基线输出不存在，原功能未实现。commit 冻结源、合同、期望和驱动摘要后仅一次实际 Task。
 
 ## Task 2: 一个持续的原 DEV 环境首次实现
 
-- [ ] 原 SDK observed tools/JSONL/public `applyDevelopment`，原同意 v3，无隔离覆盖/手写学习事件。首请求前原持久准备 gate 和全部文件角色生效。
-- [ ] 原 Node-project 工厂消费独立期望与完整图；保存首代码/Task/双审/程序/请求/seal，不重试或重评。
-- [ ] 新 Node 0 请求恢复同一原 Task/账本/归档。若失败先保存原结果，工程问题独立处理，不回写。
+- [x] 原 SDK observed tools/JSONL/public `applyDevelopment`，原同意 v3，无隔离覆盖/手写学习事件。首请求前原持久准备 gate 和全部文件角色生效。
+- [x] 原 Node-project 工厂消费独立期望与完整图；保存首代码/Task/双审/程序/请求/seal，不重试或重评。
+- [x] 新 Node 0 请求恢复同一原 Task/账本/归档。若失败先保存原结果，工程问题独立处理，不回写。
 
 ## Task 3: 既有 DEV options 接入、验证与接续
 
-- [ ] 仅在首代码原样通过后，`createDevelopmentNativeCheckOptions` 使用新薄适配器，逐份核与 study cwd 一致；既有单份/Goal 合同保持。
-- [ ] 回归：独立契约 + 原 DEV factory/任务宿主/准备 gate；实际公共 SDK 0 模型的持续环境 mount/reopen 与 Task 冷恢复；必要原隔离功能检查。
-- [ ] 独立审查，不把 mocked/scripted 控制记自然效果。手工接入不记模型自学。
-- [ ] 更新权威交接与停止条件。后续冻结实际待办与研究角色完整输入，复用该 Profile；原自然程序失败可作为支持证据，不需要伪造人类反馈。成功仅留真实基线。
+- [x] 仅在首代码原样通过后，`createDevelopmentNativeCheckOptions` 使用新薄适配器，逐份核与 study cwd 一致；既有单份/Goal 合同保持。
+- [x] 回归：独立契约 + 原 DEV factory/任务宿主/准备 gate；实际公共 SDK 0 模型的持续环境 mount/reopen 与 Task 冷恢复；必要原隔离功能检查。
+- [x] 独立审查，不把 mocked/scripted 控制记自然效果。手工接入不记模型自学。
+- [x] 更新权威交接与停止条件。后续冻结实际待办与研究角色完整输入，复用该 Profile；原自然程序失败可作为支持证据，不需要伪造人类反馈。成功仅留真实基线。

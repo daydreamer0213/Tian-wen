@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 持续 DEV 原任务多合同接续
+
+首真实分派Task已完成：9真实请求/独立34条件/原程序verified/双审met，新Node0请求原Task、完整3文件图、proof与账本准确恢复；首代码未改。原applyDevelopment专属持续Profile已建立，原DEV options接数组合同，原学习资格未动。127选中回归及公开DEV自动study错误holdout拒绝采用控制通过；89 scripted不能算自然收益。详见 [持续DEV准确结果](tianwen-persistent-ordinary-contracts-20261004.md)。
+
+feedback/study0，成功Task不当然构成其他原条件的兼容反例。下一自主实际开发待办和事前独立合同，复用原Profile/工厂；真实程序失败可走原支持分支，原研究/语义/启用/未来效果缺证据如实记录，不造反馈/重评旧题或机械整体blocked。完整目标active/incomplete、main/Daily NO-GO、原门槛/十工作日窗口不变。正式账本只读原hash、24拒删路径不碰，D约18GiB≥15。本条覆盖下方仍待配置持续环境的旧入口。
+
 ## 2026-10-04 新真实首次任务通过，归档诊断显示已交付
 
 天问按13e4fdb事前冻结合同首次实现诊断显示：11真实请求（识别1/根8/原双审2）、prepare/evaluate1/1，原Task程序verified/评审met，独立38/38、越界拒绝0。首代码7852B和仓库逐字节相同，主代理未改候选或重试。另Node0请求准确恢复原Task/材料/完整4文件图/双审原proof/程序/归档，账本不变。主代理随后把纯显示接原只读inspect，Task/归档不改。见[准确结果与接续](tianwen-first-diagnostic-display-20261004.md)。

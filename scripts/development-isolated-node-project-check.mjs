@@ -4,6 +4,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import host from './development-isolated-node-project-host.json' with { type: 'json' }
 import { buildDevelopmentFunctionalStudyCases } from './development-functional-study-cases.mjs'
+import { createDevelopmentOrdinaryTaskCheck } from './development-ordinary-task-check.mjs'
 const packageUrl = new URL('../packages/tianwen-runtime-bundle/package.json', import.meta.url)
 const manifest = JSON.parse(readFileSync(packageUrl, 'utf8'))
 const require = createRequire(packageUrl)
@@ -106,9 +107,11 @@ export function createDevelopmentFunctionalStudyResultCheck(config) {
 
 /** Spread these host-owned options into the actual DEV Runtime before tasks arrive. */
 export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract) {
-  assert.equal(ordinaryContract.cwd, studyContracts.cwd, 'DEV ordinary and study contracts must share the frozen cwd')
+  const ordinaryContracts = Array.isArray(ordinaryContract) ? ordinaryContract : [ordinaryContract]
+  for (const contract of ordinaryContracts)
+    assert.equal(contract?.cwd, studyContracts.cwd, 'DEV ordinary and study contracts must share the frozen cwd')
   const studyResultCheck = createDevelopmentFunctionalStudyResultCheck(studyContracts)
-  assert(goalContract === undefined || goalContract.cwd === ordinaryContract.cwd, 'DEV Goal contract must share the frozen cwd')
-  return { externalCodeCheck: createDevelopmentIsolatedNodeProjectCheck(ordinaryContract), studyResultCheck,
+  assert(goalContract === undefined || goalContract.cwd === studyContracts.cwd, 'DEV Goal contract must share the frozen cwd')
+  return { externalCodeCheck: createDevelopmentOrdinaryTaskCheck(ordinaryContract, createDevelopmentIsolatedNodeProjectCheck), studyResultCheck,
     ...(goalContract === undefined ? {} : { goalTaskAcceptance: createDevelopmentGoalTaskIsolatedNodeProjectCheck(goalContract) }) }
 }

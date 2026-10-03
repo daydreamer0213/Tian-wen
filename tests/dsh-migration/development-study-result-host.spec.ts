@@ -21,21 +21,21 @@ const structured = (value: Record<string, unknown>) => toolCallResponse('structu
 const reviews = (verdict: 'met' | 'not-met') => [1, 2].map(() => auditedEvidenceResponse({ verdict,
   category: verdict === 'met' ? null : 'instruction-following', explanation: 'Explicit engineering script; no natural feedback or real-model verdict.', evidenceQuotes: ['saved'] }))
 
-it.skipIf(process.env.TIANWEN_DEV_STUDY_RESULT_ISOLATED !== '1')('actual published Runtime consumes the DEV host and refuses a wrong original holdout', async () => {
+it.skipIf(process.env.TIANWEN_DEV_STUDY_RESULT_ISOLATED !== '1')('actual published DEV Runtime consumes multiple original contracts and refuses a wrong original holdout', async () => {
   const { createDevelopmentNativeCheckOptions } = await import('../../scripts/development-isolated-node-project-check.mjs')
   const { developmentStudyResultFixture } = await import('../../scripts/test-fixtures/development-study-result-host.mjs')
-  const { apply: applyBundle } = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle/runtime')).href)
-  const roots = resolve(base, 'runtime-roots'); mkdirSync(roots, {recursive:true})
-  const root = mkdtempSync(join(roots, 'controlled-study-')), f = developmentStudyResultFixture(root)
-  const options = createDevelopmentNativeCheckOptions(f.ordinary(1), f.config)
-  const ordinary = [options.externalCodeCheck, ...[2,3].map(n => createDevelopmentNativeCheckOptions(f.ordinary(n),f.config).externalCodeCheck)]
+  const { applyDevelopment: applyBundle } = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle/runtime')).href)
+  const roots = resolve('D:/DevData/tianwen-development-runtime'); mkdirSync(roots, {recursive:true})
+  mkdirSync(base, {recursive:true})
+  const root = mkdtempSync(join(roots, 'controlled-contract-study-')), f = developmentStudyResultFixture(root)
+  const options = createDevelopmentNativeCheckOptions([1,2,3].map(f.ordinary), f.config)
   let ordinaryPrepared=0, ordinaryEvaluated=0, supplied=0, prepared=0, evaluated=0
   const externalCodeCheck: ConversationExternalCodeCheck = { async prepare(material) {
     const text=material.request.flatMap(message=>message.content).filter(block=>block.type==='text').map(block=>block.text).join('\n')
     const index=[1,2,3].find(n=>f.original(n).requestText===text)
     if(index===undefined)return undefined
     ordinaryPrepared++
-    const check=await ordinary[index-1].prepare(material)
+    const check=await options.externalCodeCheck.prepare(material)
     return check===undefined?undefined:{...check,async evaluate(candidate){ordinaryEvaluated++;return check.evaluate(candidate)}}
   } }
   const studyResultCheck: ConversationStudyResultCheck = { async prepareIndependentCases(material) {
@@ -74,18 +74,19 @@ it.skipIf(process.env.TIANWEN_DEV_STUDY_RESULT_ISOLATED !== '1')('actual publish
   async function mount(cold:boolean) {
     const harness=await mountFeedbackHarness(root,cold?[]:script)
     try {
+      harness.ctx.baseUrl=pathToFileURL(root).href
       await harness.ctx.plugin(localFs.default,{cwd:root});await harness.ctx.plugin(Loader)
       await harness.ctx.plugin(presets.default,{default:'files',roots:[{path:presetRoot,trust:'system'}],includeUserRoot:false})
       await harness.ctx.plugin(SubagentRuntime);await harness.ctx.plugin(spawn,{providerName:'spawn'})
       // These are the actual DEV options. Wrappers only count original calls; no alternate checker or rewritten cohort.
-      await applyBundle(harness.ctx,{stateRoot:join(root,'state'),evolutionRoot:join(root,'evolution'),captureExternalCodeArtifacts:true,
+      await applyBundle(harness.ctx,{developmentRoot:root,captureExternalCodeArtifacts:true,
         ...options,externalCodeCheck,studyResultCheck})
       for(let pass=0;pass<8;pass++) {
         await Promise.all([...harness.ctx.registry.values()].flatMap(runtime=>[...runtime.fibers].map(fiber=>fiber.await())))
         if(![...harness.ctx.registry.values()].some(runtime=>[...runtime.fibers].some(fiber=>fiber.inertia)))break
         if(pass===7)throw new Error('Runtime did not settle')
       }
-      expect(harness.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true)
+      expect(harness.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(false)
       if(!cold)harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({revision:1,enabled:true,policyVersion:'tianwen-auto-analysis.v3'})
       return harness
     }catch(error){await harness.ctx.fiber.dispose();throw error}
@@ -115,7 +116,7 @@ it.skipIf(process.env.TIANWEN_DEV_STUDY_RESULT_ISOLATED !== '1')('actual publish
     const status=await ctx.tools.execute({callId:CallId(`dev-host-status-${basename(root)}`),name:'tianwen_learning_status',arguments:{},agent:handle.agent,signal:new AbortController().signal})
     expect(status).toMatchObject({isError:false,value:{currentSession:{naturalConversation:{guidanceStudies:{total:1,accepted:1,currentlyActive:0,
       independentResults:{configuredStudies:1,recordedArms:10,pendingArms:0,verified:7,rejected:3,satisfiedStudies:0},
-      activationPending:{total:1,quarantined:1,independentResultsNotSatisfied:1}}}}}})
+      activationPending:{total:1,quarantined:0,independentResultsNotSatisfied:1}}}}}})
     expect(readFileSync(join(root,'evolution/ledger.jsonl'))).toEqual(ledger);expect(harness.adapter.requests).toHaveLength(requests)
     await handle.dispose();handle=undefined;await ctx.fiber.dispose();harness=undefined
     cold=await mount(true);await cold.ctx.tianwenConversationObserver.whenIdle();await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
@@ -125,7 +126,7 @@ it.skipIf(process.env.TIANWEN_DEV_STUDY_RESULT_ISOLATED !== '1')('actual publish
     writeFileSync(join(base,`${basename(root)}-published.json`),JSON.stringify({controlled:true,naturalSources:0,realModelRequests:0,publishedRuntime:true,
       ordinaryPrepared,ordinaryEvaluated,supplied,prepared,evaluated,scriptedRequests:requests,originalResults:tasks.map(task=>task.externalCheckFinished?.status),
       roleResultStatuses:study.arms.map(arm=>arm.resultCheck?.status),holdoutReview:holdout.verdict,holdoutResult:holdout.resultCheck?.status,
-      activated:false,statusProjectionVerified:true,exactColdTasks:true,exactColdStudy:true,exactColdLedger:true,coldRequests:0},null,2),{flag:'wx'})
+      developmentQuarantine:false,activated:false,statusProjectionVerified:true,exactColdTasks:true,exactColdStudy:true,exactColdLedger:true,coldRequests:0},null,2),{flag:'wx'})
   }finally{
     if(handle)await handle.dispose();if(harness)await harness.ctx.fiber.dispose();if(cold)await cold.ctx.fiber.dispose()
     const realRoot=realpathSync(root),realParent=realpathSync(roots)
