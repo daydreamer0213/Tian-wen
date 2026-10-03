@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 后续评审错误引用已接原SDK捕获前反馈
+
+仅实际紧凑v2评审，原SDK tools/pre-execute精准lineage/随机label/scoped structured_output复用原validateClaimAudit，在引用错误时返回原deny及安全答案ID提示；模型可在原同一Turn更正。原schema/全部合法子串/host严格验证/两审/proof/历史不改，无新消息/外部重试。真实SDK脚本控制先红后绿、99相关单次通过、完整Runtime/两声明构建通过；独立无有据P1/P2。[准确范围与验证](tianwen-native-review-capture-quotes-20261004.md)。
+
+当前public Runtime新Node0模型精确恢复第二首失败Task/代码/完整6图/header/账本和此前Task，不重评；自然任务/研究/反馈未增加。原报告覆盖缺陷仍待下一新实际Task修复，同时实现既定Goal显示，事前另冻结检查。完整目标active/incomplete、main/Daily NO-GO、原门槛/十工作日窗口不改。正式账本原hash只读，D约18GiB≥15、24拒删路径不碰。
+
 ## 2026-10-04 真实程序失败已进入原问题来源，继续修当前接缝
 
 第二新任务事前505ad3d/35条件，唯一首次程序rejected：新增研究对象被展开到根上，覆盖旧history。原首代码15960B不修不重试，25/35与原来源41通过；15真实请求=识别1/根13/requirements1，原评审inconclusive/invalid-judgment，0有效proof。新Node0模型精确原Task/完整6图/header/首代码/账本，原两Task不变。[准确首次失败](tianwen-live-study-report-first-failure-20261004.md)。

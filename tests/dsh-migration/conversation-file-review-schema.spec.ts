@@ -4,8 +4,9 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import { assertSupportedJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
-import { SessionId, mountPersistentHarness } from '@tianwen/dsh-compat'
+import { CallId, SessionId, mountPersistentHarness } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
 import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit, verifyConversationOriginalReviewCheck, verifyConversationClaimReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
@@ -26,6 +27,48 @@ function input(override?: { content: string; answer: string }) {
   const fileResult = { ...output, outputDigest: sha256(output) }
   return { original: { source: task, evaluationMode: 'local-files', conversation: [{ role: 'assistant', content: [{ type: 'text', text: answer }] }], toolEvidence: [], fileResult }, study: { task, answer, fileResult } }
 }
+
+it('returns a wrong-unit quote through the native tool gate before capture and cold-verifies one corrected capture', async () => {
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-capture-quote-')); roots.push(root)
+  const material = input().original, evidence = projectClaimEvidence(material, 'file-chunks-v1')
+  const target = evidence.items.find(item => item.id === 'answer-3')!
+  const substring = target.text.slice(2, 23)
+  const response = auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Controlled capture protocol only.', evidenceQuotes: ['Saved requested output.'] })
+  const changed = (request: Parameters<typeof response>[0], id: string, quote: string) => response(request).map(chunk => {
+    if (chunk.type !== 'block-end' || chunk.block.type !== 'tool-call') return chunk
+    const value = JSON.parse(chunk.block.arguments)
+    value.audit.units[target.id].firstClaim.quote = quote
+    return { ...chunk, block: { ...chunk.block, id: CallId(id), arguments: JSON.stringify(value) } }
+  })
+  const h = await mountPersistentHarness(root, [
+    request => changed(request, 'invalid-unit-quote', 'WRONG_UNIT_FRAGMENT'),
+    request => changed(request, 'corrected-unit-quote', substring),
+    response,
+  ])
+  await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await h.ctx.agents.create({ sessionId: SessionId('file-capture-quote-control'), meta: { cwd: root }, agentOptions: config })
+  try {
+    const reviewed = await runConversationClaimReview(h.ctx, handle.agent, { label: 'Native wrong-unit quote', material,
+      evidence: ['Saved requested output.'], signal: new AbortController().signal, callConfig: config })
+    expect(reviewed.verdict).toBe('met'); expect(h.adapter.requests).toHaveLength(3)
+    const first = await recoverConversationJudgmentRequest(h.ctx, reviewed.reviewChecks[0])
+    expect(reviewed.reviewChecks[0].audit).toMatchObject({ units: { [target.id]: { firstClaim: { quote: substring } } } })
+    expect((first.material as any).original).toEqual(material)
+    const saved = await h.ctx.sessionPersistence.inspect(SessionId(reviewed.reviewChecks[0].proof.sessionId))
+    const calls = saved.events.filter(event => event.type === 'tool/call')
+    const results = saved.events.filter(event => event.type === 'tool/result')
+    expect(calls).toHaveLength(2); expect(results).toHaveLength(2)
+    expect(results[0]).toMatchObject({ data: { message: { content: [{ isError: true }] } } })
+    expect(results[1]).toMatchObject({ data: { message: { content: [{ isError: false }] } } })
+    const starts = saved.events.filter(event => event.type === 'turn/start')
+    expect(starts).toHaveLength(1)
+    const firstHeader = saved.events.find(event => event.type === 'request/header')!
+    expect(saved.events.filter(event => event.type === 'user/message' && isAppendSurfaceEvent(event)
+      && event.data.source.kind === 'user' && event.seq >= starts[0]!.seq)).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'user/message' && isAppendSurfaceEvent(event) && event.seq > firstHeader.seq)).toHaveLength(0)
+    for (const check of reviewed.reviewChecks) await verifyConversationOriginalReviewCheck(h.ctx, check, material, sha256(config))
+  } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
+})
 
 it('uses a bounded complete v2 schema for 65 file answer units, preserving original material and exact cold checks for both purposes', async () => {
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-schema-')); roots.push(root)

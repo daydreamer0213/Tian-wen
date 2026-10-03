@@ -35,3 +35,5 @@
 `tests/fixtures/learning-study-report.contract.md` 固定现有两个原范围的12保存计数/4解释。缺失或畸形可选部分逐范围忽略，未列元数据忽略，不新增计数间关系判定；旧基础/来源诊断/20KB与原退出不变。35独立条件已经预先固定，旧首代码25/35，10新增合法显示缺失。复用原Node入口、原持续Profile、同一固定executor workRoot与共享必须条件；这35个控制不是35个自然来源。唯一第二Task答案前记录原首代码、原两Task、原Runtime/账本/hash，结果无论成功或失败都保存，不能重试凑结果。
 
 第二Task真实首次已结束，程序rejected/25通过10失败，原评审inconclusive/invalid-judgment；新增对象误展开覆盖旧history。原checked-failure已计问题来源1，0反馈/研究；首代码封存且未由控制端修复。下一先针对两次实际大文件评审失去逐单元原文枚举约束做窄工程修复，保留host原验证；第三Task另冻结原生Goal显示及实际覆盖缺陷修复，不能重做第二Task或追认旧评审。
+
+窄工程修复已完成：保留任意合法子串，复用原SDK捕获前gate反馈既有单元引文错误，不增加quote enum/消息/外部重试。99相关检查/完整Runtime两声明通过，当前Runtime0模型冷恢复历史准确。第三实际Task尚未执行，旧程序缺陷仍保留；下一冻结Goal功能和缺陷修复的完整期望。

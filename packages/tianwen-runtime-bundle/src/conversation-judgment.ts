@@ -100,6 +100,8 @@ interface NativeStructuredInput {
   readonly callConfig?: LlmCallConfig
   readonly outputSchema: ObjectJsonSchema
   readonly captureReminder?: boolean
+  /** Internal host validation, before the SDK's scoped capture body runs. */
+  readonly validateCapture?: (value: unknown) => string | undefined
 }
 
 export function runConversationJudgment(ctx: Context, parent: Agent, input: NativeStructuredInput) {
@@ -280,6 +282,16 @@ async function runNativeStructured(ctx: Context, parent: Agent, input: NativeStr
   if (Buffer.byteLength(material, 'utf8') > CONVERSATION_MATERIAL_MAX_BYTES) throw new Error('material-too-large')
   const prompt = [{ type: 'text' as const, text: `${input.instruction}${MATERIAL_DELIMITER}${material}` }]
   const label = `${input.label} ${randomUUID()}`
+  const matchesChild = (agent: Agent) => agent.session.header.origin === 'subagent'
+    && String(agent.session.header.parentSession) === String(parent.session.id)
+    && agent.session.events.some(event => event.type === 'subagent/descriptor'
+      && event.data.mode === 'one-shot' && event.data.label === label)
+  const offCapture = input.validateCapture === undefined ? () => {} : ctx.on('tools/pre-execute', async (exec, next) => {
+    const gate = await next()
+    if (gate.kind !== 'allow' || exec.name !== 'structured_output' || exec.agent === undefined || !matchesChild(exec.agent)) return gate
+    const reason = input.validateCapture!(exec.arguments)
+    return reason === undefined ? gate : { kind: 'deny' as const, reason }
+  }, { prepend: true })
   let reminded = false
   const offReminder = input.captureReminder !== true ? () => {} : ctx.on('agent/turn-stopping', ({ agent, turn }) => {
     if (reminded || input.signal.aborted || agent.session.header.origin !== 'subagent'
@@ -346,5 +358,5 @@ async function runNativeStructured(ctx: Context, parent: Agent, input: NativeStr
       value: result.structured,
       proof: { sessionId: String(run.id), sessionDigest: sha256({ meta: persisted.meta, events: persisted.events }), requestDigest: sha256({ persona, prompt }) },
     }
-  } finally { offReminder(); offConfig(); await run?.dispose() }
+  } finally { offCapture(); offReminder(); offConfig(); await run?.dispose() }
 }

@@ -22,6 +22,11 @@ export class ConversationClaimReviewQuoteError extends Error {
   }
 }
 
+/** Location only; never retain or return the rejected quote/source text. */
+class ConversationClaimReviewUnitQuoteError extends Error {
+  constructor(readonly answerId: string) { super('invalid-judgment') }
+}
+
 /** Host counts only; no source, answer, path or rejected model text. */
 export class ConversationClaimReviewMaterialError extends Error {
   constructor(readonly limit: 'material-bytes' | 'answer-bytes' | 'answer-units', readonly actual: number, readonly maximum: number) {
@@ -245,6 +250,9 @@ export function validateClaimAudit(audit: unknown, evidence: ClaimEvidence, verd
     for (const claim of claims) {
       if (!record(claim)) invalid()
       const checkedClaim = claim as RecordValue
+      if (typeof checkedClaim.quote === 'string' && checkedClaim.quote.length > 0 && !answer.text.includes(checkedClaim.quote)) {
+        throw new ConversationClaimReviewUnitQuoteError(answerId)
+      }
       if (!exactKeys(checkedClaim, ['quote', 'kind', 'status', 'sourceIds', 'explanation'])
         || typeof checkedClaim.quote !== 'string' || checkedClaim.quote.length === 0 || !answer!.text.includes(checkedClaim.quote)
         || !kinds.includes(checkedClaim.kind as never) || !statuses.includes(checkedClaim.status as never)
@@ -369,7 +377,7 @@ function claimReviewInstruction(material: unknown, purpose: 'original-result' | 
   return `${V6_PURPOSE[purpose]}\n\n${common}\n\n${FOCUS[focus]}`
 }
 
-type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema'> & {
+type ClaimReviewInput = Omit<Parameters<typeof runConversationJudgment>[2], 'instruction' | 'outputSchema' | 'validateCapture'> & {
   readonly evidence: readonly string[]
   readonly purpose?: 'original-result' | 'method-study'
   readonly beforeCall?: () => void | Promise<void>
@@ -442,7 +450,9 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
   // This changes only future large complete-file tool requests. Frozen original
   // material, evidence, instructions, v2 required keys and host predicates stay
   // unchanged; historical captures recover their original schema and proof.
+  let compactReview = false
   if (evidence.schemaVersion === 'tianwen.claim-evidence.v2' && Buffer.byteLength(JSON.stringify(schema), 'utf8') > 98_304) {
+    compactReview = true
     schema = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence),
       evidenceQuotes: { ...schema.properties?.evidenceQuotes, type: 'array', items: string },
     } }
@@ -458,7 +468,15 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     await input.beforeCall?.()
     input.signal.throwIfAborted()
     const result = await runConversationJudgment(ctx, parent, { ...input, material, label: `${input.label} ${focus}`,
-      instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema })
+      instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
+      ...(compactReview ? { validateCapture: (value: unknown) => {
+        if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
+        try { validateClaimAudit(value.audit, evidence, value.verdict as 'met' | 'not-met' | 'inconclusive') }
+        catch (error) {
+          if (error instanceof ConversationClaimReviewUnitQuoteError) return `Invalid quote in ${error.answerId}: copy a non-empty exact substring from that answer unit, preserving punctuation and whitespace.`
+        }
+        return undefined
+      } } : {}) })
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
     if (!Array.isArray(result.value.evidenceQuotes)) throw new Error('invalid-judgment')
