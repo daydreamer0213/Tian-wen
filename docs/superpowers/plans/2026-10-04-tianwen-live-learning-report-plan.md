@@ -1,0 +1,31 @@
+# Tianwen 实际学习状态报告实现计划
+
+**Goal:** 在现有只读中文报告中展示原系统的来源排除事实、独立研究检查/启用未完成原因、原生Goal任务结果，让实际进展有可核验的产品说明。
+
+**Architecture:** 复用原 tianwen_learning_status 与既有 summarize-learning-status.mjs；不增加学习决策或新服务。三个实际增量都扩展同一报告产品，共同必须忠实解释原事实、保留旧接口和范围，不把模型评审/程序成功/解除隔离当完整自动学习。输入合同按原 Runtime 字段冻结；天然结果由原程序检查与原双审保存，原 checked-failure 分支可消费真实失败。
+
+**Authority:** 用户授权自主选任务、制定实现细节并持续推进；原完整目标/main-Daily NO-GO/十工作日窗口不变，不再索题催评。三项是已存在报告的实际功能缺口，不是追加已关闭三项公开练习。
+
+## 选择与边界
+
+- 原SDK已有字段（learning-consent-agent.ts / conversation-source-readiness.ts），中文报告未消费；薄适配优于重新研究资格或让模型自行解释历史。
+- 不仅凭计数推断缺哪条兼容条件；范围混合、字段缺失和未知状态保留原不确定。来源诊断只描述普通会话；原Loop可能另消费Goal来源。
+- 每个新要求、独立期望、完整输入图在该Task答案前冻结；后续要求的初始CLI是前一实际首次代码，只在前一结束后冻结，不预造其内容。
+- 同一持续Profile `D:/DevData/tianwen-development-runtime/continuous-project-20261004`；原正式账本只读、旧Task不搬迁/重评，原24拒删路径不碰，D>=15GiB，无依赖/环境副本。
+- 原独立工厂使用同一固定执行配置，原共享条件只适用于本报告增量，不能给无关任务套条件。既有分派Task不当然当反例。
+- 原研究须至少满足原兼容问题对/成功对照和当前模型/QA/图资格。直到真实来源准备齐全，不调用原study提案；在可能触发的一次Task之前冻结全部已有原始图及独立角色，安装原studyResultCheck，不能在提案后改期望。
+- 若均成功，记产品交付与成功基线，不能称自动学习已证明。控制端不修候选、不重跑Task或人造负反馈。失败保存，不为凑失败改变要求或复用旧题。
+
+## 三个实际增量
+
+1. **来源诊断（本次执行）**：可选 readiness.diagnostics 的原schema/四计数/两布尔/九首排除条件，仅原有效事实显示，明确普通会话范围/候选兼容仍未证。无效可选部分忽略，原v1/退出/计数/中文/limits保持。
+2. **研究与启用**：原 history 与 currentSession 的 guidanceStudies 范围分别显示，包含已保存的独立结果和activationPending；可重叠计数不求和，不把pendingArms当仍在运行、不把reasonUnestablished当放行、不把satisfied当语义安全。第二Task完整具体合同/期望在第一真实结果后另冻结。
+3. **原生Goal结果**：按原 current/history 的 goalTaskOutcomes 独立统计，只解释成功/失败/拒绝未合格/不可核验；不冒充用户反馈、研究资格、方法执行或自然收益。第三Task完整具体合同/期望在第二真实结果后另冻结；若已有可兼容两源可能由第三结果满足原调度，先配置冻结研究角色。
+
+## 本次步骤
+
+- [ ] 冻结 sources-report.contract.md、独立CLI入口、原要求/标准/参考图；原旧CLI基线缺新增有效诊断，但旧正常/错误输入保持原结果。
+- [ ] 保存独立期望、驱动/hash、首前源commit。持续DEV原public applyDevelopment/JSONL/observed tools/准备gate，保留现有原Task/同意，0模型预检。
+- [ ] 唯一真实首次执行，原程序检查/双审/原SDK归档，不修或重试候选。
+- [ ] 新Node0模型恢复Task/两proof/原图/原账本；回归原CLI兼容+新冻结条件、实际SDK只读状态样本。
+- [ ] 独立审查首代码；更新权威交接，下一第二增量。完整目标仍 active/incomplete。
