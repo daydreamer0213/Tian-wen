@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-03 大型完整文件评审schema窄修已交付，保持原覆盖与裁决
+
+889b791事前设计后，只对完整schema>98304B的claimEvidence v2去重复enum/说明，原v2全部required ID、空null/非空firstClaim、kind/status/闭合结构及原完整材料/指令/host绑定保持；小/非文件不改。65单元工程控制248479B→71607B（-71.18%），SDK结构与host引用/来源反例保持。6组83、八包类型/完整发行及静态审查通过；另补结构断言的2项通过不重复算总数。
+
+新实际发行Runtime控制7scripted/0自然、真实read/write/read-back/完整23808B输出，65含空单元与原两met；没有功能检查器，不补自然功能或语义结果。独立新Node进程0模型/程序重执行精确恢复task/material/两审与原控制账本。原正式62438424…账本/18观察17识别结束/0feedback/0study/隔离true保持，原自然b7功能verified/review inconclusive不改；不声称已证明后续真实模型不会耗尽。
+
+本次新增容器0、继承三自有清理/原84ID/快照0/Docker关闭，无下载或全量副本。下一固定发行/DEV宿主/检查器，先沿完整材料三份源码重复设计可重验无损表示，再真实不同核心待办前瞻；原合同/独立期望/首结果保持，不拼条件/制造失败/重评旧题。见[范围与证据](tianwen-file-review-schema-20261003.md)。完整目标active/incomplete、main/Daily NO-GO及原同意/隔离/门槛/十日窗口不变，继续独立实现不空转blocked或索用户动作。本条覆盖下方schema尚未修订的当前待办。
+
 ## 2026-10-03 可信read拒绝及实际发行接线已交付，下一缩减真实评审重复schema
 
 一次原自然纯模块任务11真实请求/9根、prepare1/eval1，原功能verified、review inconclusive/proof null。持久首审max-tokens：input140989/output65536/reasoning60588，无有效structured_output，无第二审；不追认为网络问题或原学习成功。三P2以5首红工程修复；可信同步guard/实际fs注册/opaque token/原事件/producer/hash/取消绑定接入ancillary、冻结和cold；v3拒绝动作不创建输入/成功/学习，旧v1/v2指令保持。

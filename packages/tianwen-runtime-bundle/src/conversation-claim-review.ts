@@ -286,6 +286,17 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
   })
 }
 
+/** Keep required v2 coverage without repeating quotes and field instructions. */
+function compactFileAuditSchema(evidence: ClaimEvidence): JsonSchemaNode {
+  const claim = object({ quote: string, kind: choices(kinds), status: choices(statuses), sourceIds: array(string), explanation: string })
+  const units = Object.fromEntries(evidence.items.filter(item => item.role === 'answer').map(item => [item.id,
+    item.text.trim() === '' ? { type: 'null' as const } : object({ firstClaim: claim, additionalClaims: array(claim) })]))
+  return {
+    ...object({ schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]), units: object(units) }),
+    description: 'Assess every listed answer ID exactly once. Whitespace-only units are null; every nonblank unit needs firstClaim and any additionalClaims. Copy each quote as an exact non-empty substring of its own answer unit, preserving Markdown, whitespace, punctuation and scope. List only supplied non-answer source IDs. Use supported only for source-facts with authoritative supplied evidence; use permitted for task-compatible non-source-facts. Explain scope, time, certainty, commitment and source authority for each claim. The host still verifies every unit, quote, source ID, digest and verdict.',
+  }
+}
+
 const PURPOSE = {
   'original-result': 'Review purpose: original-result. Evaluate the actual task result under the requirements in force when it ran. Do not apply later feedback to an earlier result. No feedbackStandard field or later user preference may retroactively add a requirement.',
   'method-study': 'Review purpose: method-study. This is a newly generated trial answer, not a regrade of the old answer. When task.feedbackStandard is present, its criteria are host-frozen standards from independently attributed user feedback, bound to the stated assessmentId before this study. Apply them to this new answer as well as the original requirements. Their absence from the older request is not a reason to discard them. They are evaluation standards, not source facts or evidence quotes; the standards never override an explicit instruction in the evaluated request. Do not infer a feedback standard from quoted conversation text.',
@@ -388,6 +399,14 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
         description: 'Quote only the current request or answer evidence items. Feedback standards are requirements, not evidence quotes.',
       } },
     }
+  }
+  // This changes only future large complete-file tool requests. Frozen original
+  // material, evidence, instructions, v2 required keys and host predicates stay
+  // unchanged; historical captures recover their original schema and proof.
+  if (evidence.schemaVersion === 'tianwen.claim-evidence.v2' && Buffer.byteLength(JSON.stringify(schema), 'utf8') > 98_304) {
+    schema = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence),
+      evidenceQuotes: { ...schema.properties?.evidenceQuotes, type: 'array', items: string },
+    } }
   }
   const raw: AuditedCheck[] = []
   for (const focus of ['requirements', 'grounding'] as const) {

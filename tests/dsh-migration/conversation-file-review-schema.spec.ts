@@ -1,0 +1,106 @@
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { afterEach, expect, it } from 'vitest'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { assertSupportedJsonSchema, validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
+import { SessionId, mountPersistentHarness } from '@tianwen/dsh-compat'
+import { sha256 } from '../../packages/tianwen-evolution/src/index.js'
+import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit, verifyConversationOriginalReviewCheck, verifyConversationClaimReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { recoverConversationJudgmentRequest } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { auditedEvidenceResponse } from './conversation-audited-response.js'
+
+const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+const cli = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+const spawn = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
+const roots: string[] = []
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+const config = { provider: 'tianwen-probe', model: 'scripted' }
+function input() {
+  const content = Array.from({ length: 62 }, (_, index) => `${String(index).padStart(3, '0')}${'x'.repeat(381)}`).join(''), answer = 'Saved requested output.\n\nReady.'
+  const files = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: base, outputKind: 'files',
+    entries: [{ path: 'input.txt', content }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+  const task = { context: [], request: [{ role: 'user', content: [{ type: 'text', text: 'Copy input.txt exactly to output.txt.' }] }], files }
+  const output = { answer, files: [{ path: 'input.txt', content }, { path: 'output.txt', content }] }
+  const fileResult = { ...output, outputDigest: sha256(output) }
+  return { original: { source: task, evaluationMode: 'local-files', conversation: [{ role: 'assistant', content: [{ type: 'text', text: answer }] }], toolEvidence: [], fileResult }, study: { task, answer, fileResult } }
+}
+
+it('uses a bounded complete v2 schema for 65 file answer units, preserving original material and exact cold checks for both purposes', async () => {
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-schema-')); roots.push(root)
+  const material = input(), schemas: any[] = [], packets: any[] = [], audits: any[] = []
+  const response = auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Scripted complete-file schema control.', evidenceQuotes: ['Saved requested output.'] })
+  const h = await mountPersistentHarness(root, Array.from({ length: 4 }, () => (request: Parameters<typeof response>[0]) => {
+    schemas.push(request.tools!.find(tool => tool.name === 'structured_output')!.parameters)
+    const block = request.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))!
+    if (block.type !== 'text') throw new Error('missing packet')
+    packets.push(JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!))
+    return response(request)
+  }))
+  await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await h.ctx.agents.create({ sessionId: SessionId('file-schema-control'), meta: { cwd: root }, agentOptions: config })
+  try {
+    for (const purpose of ['original-result', 'method-study'] as const) {
+      const original = purpose === 'original-result' ? material.original : material.study
+      const reviewed = await runConversationClaimReview(h.ctx, handle.agent, { label: 'Complete file schema control', material: original,
+        purpose, evidence: ['Saved requested output.'], signal: new AbortController().signal, callConfig: config })
+      expect(reviewed.verdict).toBe('met')
+      for (const check of reviewed.reviewChecks) {
+        audits.push(check.audit)
+        const recovered = await recoverConversationJudgmentRequest(h.ctx, check)
+        expect((recovered.material as any).original).toEqual(original)
+        expect((recovered.material as any).claimEvidence).toEqual(projectClaimEvidence(original, 'file-chunks-v1'))
+        expect(check.audit.schemaVersion).toBe('tianwen.claim-audit.v2')
+        if (purpose === 'original-result') await verifyConversationOriginalReviewCheck(h.ctx, check, original, sha256(config))
+        else await verifyConversationClaimReviewCheck(h.ctx, check, { purpose, materialDigest: sha256(material.study.task), outputDigest: material.study.fileResult.outputDigest,
+          fileOutput: material.study.fileResult, modelConfigDigest: sha256(config) })
+      }
+    }
+    expect(h.adapter.requests).toHaveLength(4)
+    console.info(JSON.stringify({ scriptedSchemaBytes: schemas.map(schema => Buffer.byteLength(JSON.stringify(schema), 'utf8')), answerUnits: 65, naturalRequests: 0 }))
+    for (let index = 0; index < schemas.length; index++) {
+      const schema = schemas[index], evidence = packets[index].claimEvidence, ids = evidence.items.filter((item: any) => item.role === 'answer').map((item: any) => item.id)
+      expect(ids).toHaveLength(65)
+      expect(schema.properties.audit.properties.schemaVersion.enum).toEqual(['tianwen.claim-audit.v2'])
+      expect(schema.properties.audit.properties.units.required).toEqual(ids)
+      expect(Object.keys(schema.properties.audit.properties.units.properties)).toEqual(ids)
+      expect(schema.properties.audit.properties.units.additionalProperties).toBe(false)
+      expect(schema.properties.audit.properties.units.properties['answer-2'].type).toBe('null')
+      expect(schema.properties.audit.properties.units.properties['answer-65'].required).toEqual(['firstClaim', 'additionalClaims'])
+      expect(schema.properties.evidenceQuotes.items.enum).toBeUndefined()
+      expect(Buffer.byteLength(JSON.stringify(schema), 'utf8')).toBeLessThan(96_000)
+      assertSupportedJsonSchema(schema)
+      const auditSchema = schema.properties.audit
+      expect(validateJsonSchemaValue(auditSchema, audits[index])).toEqual([])
+      for (const change of [
+        (value: any) => { delete value.units['answer-65'] },
+        (value: any) => { value.units['answer-66'] = value.units['answer-65'] },
+        (value: any) => { value.units['answer-65'] = null },
+        (value: any) => { delete value.units['answer-65'].firstClaim },
+        (value: any) => { value.units['answer-2'] = value.units['answer-1'] },
+      ]) {
+        const value = structuredClone(audits[index]); change(value)
+        expect(validateJsonSchemaValue(auditSchema, value)).not.toEqual([])
+      }
+    }
+  } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
+})
+
+it('keeps complete coverage and exact quote/source/digest predicates when quote enums are absent', () => {
+  const evidence = projectClaimEvidence(input().original, 'file-chunks-v1'), answers = evidence.items.filter(item => item.role === 'answer')
+  const claim = (text: string) => ({ quote: text, kind: 'source-fact', status: 'supported', sourceIds: ['request-1'], explanation: 'Scripted binding control.' })
+  const audit = { schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
+    units: Object.fromEntries(answers.map(item => [item.id, item.text.trim() === '' ? null : { firstClaim: claim(item.text), additionalClaims: [] }])) }
+  expect(validateClaimAudit(audit, evidence, 'met')).toEqual(audit)
+  const invalid = (change: (value: any) => void) => { const value = structuredClone(audit); change(value); expect(() => validateClaimAudit(value, evidence, 'met')).toThrow('invalid-judgment') }
+  invalid(value => { delete value.units['answer-65'] })
+  invalid(value => { value.units['answer-66'] = value.units['answer-65'] })
+  invalid(value => { value.units['answer-65'] = null })
+  invalid(value => { value.units['answer-2'] = { firstClaim: claim('nonblank'), additionalClaims: [] } })
+  invalid(value => { value.units['answer-1'].firstClaim.quote += answers[1]!.text })
+  invalid(value => { value.units['answer-1'].firstClaim.sourceIds = ['unknown-1'] })
+  invalid(value => { value.units['answer-1'].firstClaim.sourceIds = ['answer-2'] })
+  invalid(value => { value.units['answer-1'].firstClaim.status = 'unsupported' })
+  invalid(value => { value.evidenceDigest = sha256('different material') })
+})
