@@ -1,14 +1,15 @@
 import {readFileSync} from 'node:fs'
 import {gunzipSync} from 'node:zlib'
+import {isDeepStrictEqual} from 'node:util'
 import {createDevelopmentGoalTaskCheck} from '../../scripts/development-goal-task-check.mjs'
 const envelope=JSON.parse(readFileSync(0,'utf8'))
 const rows=JSON.parse(gunzipSync(Buffer.from(envelope.payload,'base64'))),results=[]
 for(const row of rows){
  const config=structuredClone(row.config),material=structuredClone(row.material),constructors=[],calls=[],checks=[]
- const marker=new Error('Original owner failure'),snapshot=JSON.stringify(config)
- let exactMaterial=true,thisBinding=true,returnedIdentity=true
+ const marker=new Error('Original owner failure'),snapshot=JSON.stringify(config),originalContracts=structuredClone(Array.isArray(config)?config:[config])
+ let exactMaterial=true,thisBinding=true,returnedIdentity=true,factoryFieldsComplete=true
  const factory=row.invalidFactory?null:contract=>{
-  constructors.push(contract)
+  factoryFieldsComplete&&=isDeepStrictEqual(contract,originalContracts[constructors.length]);constructors.push(contract)
   if(row.factoryThrows)throw marker
   const owner={scope:{token:contract.token},prepared:{checkerId:contract.token}}
   const record=(kind,actual,receiver)=>{calls.push(kind+':'+contract.token);exactMaterial&&=actual===material;thisBinding&&=receiver===owner}
@@ -33,7 +34,7 @@ for(const row of rows){
   if(scope!==undefined)returnedIdentity&&=checks.some(check=>check.scope===scope)
   if(prepared!==undefined)returnedIdentity&&=checks.some(check=>check.prepared===prepared)
   results.push({id:row.id,constructors:constructors.map(c=>c.token),nested:constructors.map(c=>c.nested?.value),calls,
-   scope:scope?.token??null,selected:prepared?.checkerId??null,exactMaterial,thisBinding,returnedIdentity,unchangedAtConstruction,materialUnchanged:JSON.stringify(material)===materialSnapshot})
- }catch(error){results.push({id:row.id,error:error===marker?'original-error':error.name,constructors:constructors.map(c=>c.token),calls,originalError:error===marker||error instanceof TypeError})}
+   scope:scope?.token??null,selected:prepared?.checkerId??null,exactMaterial,thisBinding,returnedIdentity,factoryFieldsComplete,unchangedAtConstruction,materialUnchanged:JSON.stringify(material)===materialSnapshot})
+ }catch(error){results.push({id:row.id,error:error===marker?'original-error':error.name,constructors:constructors.map(c=>c.token),calls,factoryFieldsComplete,originalError:error===marker||error instanceof TypeError})}
 }
 console.log(JSON.stringify(results))
