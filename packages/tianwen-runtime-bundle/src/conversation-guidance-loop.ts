@@ -573,7 +573,9 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const contradictory=(source:GoalTaskResearchSource,counter:boolean)=>goalTaskResearchFeedbackContradicts(source,evolution.listLearningIntakeStatuses(source.outcome.input.childSessionId),counter)
     const failed=eligible.filter(source=>goalTaskResearchProblem(source)!==undefined && !contradictory(source,false)).reverse()
     const successful=eligible.filter(source=>goalTaskResearchSuccess(source) && !contradictory(source,true))
-    const checkIdentity=(source:GoalTaskResearchSource)=>{const b=source.outcome.input;return sha256({checkerId:b.checkerId,checkerDigest:b.checkerDigest,contractDigest:b.contractDigest,requiredConditionDigest:b.requiredConditionDigest})}
+    // Each source keeps its exact Task contract; a shared failure condition
+    // must not require the independent Tasks to have identical input contracts.
+    const checkIdentity=(source:GoalTaskResearchSource)=>{const b=source.outcome.input;return sha256({checkerId:b.checkerId,checkerDigest:b.checkerDigest,requiredConditionDigest:b.requiredConditionDigest})}
     const compatible=(source:GoalTaskResearchSource,first:GoalTaskResearchSource)=>source.input.family===first.input.family
       && source.input.evaluationMode===first.input.evaluationMode && source.input.fileOutputKind===first.input.fileOutputKind
       && sha256(source.input.qualityContract)===sha256(first.input.qualityContract) && source.outcome.input.modelConfigDigest===first.outcome.input.modelConfigDigest

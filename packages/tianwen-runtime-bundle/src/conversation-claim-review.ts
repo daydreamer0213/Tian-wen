@@ -462,12 +462,8 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     // frozen host predicates. Keep the original compact fallback on overflow.
     if (hintedBytes <= 98_304 && hintedBytes - bareBytes <= 16_384) schema = hinted
   }
-  const raw: AuditedCheck[] = []
-  for (const focus of ['requirements', 'grounding'] as const) {
-    input.signal.throwIfAborted()
-    await input.beforeCall?.()
-    input.signal.throwIfAborted()
-    const result = await runConversationJudgment(ctx, parent, { ...input, material, label: `${input.label} ${focus}`,
+  const check = async (focus: 'requirements' | 'grounding', signal: AbortSignal): Promise<AuditedCheck> => {
+    const result = await runConversationJudgment(ctx, parent, { ...input, signal, material, label: `${input.label} ${focus}`,
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
       ...(compactReview ? { validateCapture: (value: unknown) => {
         if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
@@ -486,7 +482,40 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     if (invalidQuoteIndex !== -1) throw new ConversationClaimReviewQuoteError(focus, invalidQuoteIndex)
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
     const { audit: _audit, ...summary } = result.value
-    raw.push({ ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck)
+    return { ...summary, focus, proof: result.proof, audit } as unknown as AuditedCheck
+  }
+  let raw: AuditedCheck[]
+  if (compactReview) {
+    // The two isolated audits share only frozen input, never each other's vote.
+    // Any failed check stops the pair; drain both native child cleanups before returning.
+    const cancellation = new AbortController()
+    const signal = AbortSignal.any([input.signal, cancellation.signal])
+    const pending: Promise<AuditedCheck>[] = []
+    let reviewerError: unknown
+    try {
+      for (const focus of ['requirements', 'grounding'] as const) {
+        signal.throwIfAborted()
+        await input.beforeCall?.()
+        signal.throwIfAborted()
+        const work = check(focus, signal)
+        pending.push(work)
+        void work.catch(error => { reviewerError ??= error; cancellation.abort() })
+      }
+      raw = await Promise.all(pending)
+    } catch (error) {
+      const failure = reviewerError ?? error
+      cancellation.abort()
+      await Promise.allSettled(pending)
+      throw failure
+    }
+  } else {
+    raw = []
+    for (const focus of ['requirements', 'grounding'] as const) {
+      input.signal.throwIfAborted()
+      await input.beforeCall?.()
+      input.signal.throwIfAborted()
+      raw.push(await check(focus, input.signal))
+    }
   }
   const reviewChecks = parseConversationAuditedReviewChecks(raw)
   return { ...conversationReviewConsensus(reviewChecks), reviewChecks }

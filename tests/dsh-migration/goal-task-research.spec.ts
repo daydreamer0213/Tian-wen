@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract, parseConversationAuditedReviewChecks, conversationReviewConsensus } from '../../packages/tianwen-evolution/src/conversation-learning.js'
@@ -11,6 +11,7 @@ import { isGoalTaskGuidanceRegression, parseGoalTaskResearchSourceInput } from '
 import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import { prepareConversationLearningExploration, parseConversationLearningExplorationRequest } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
+import * as goalSources from '../../packages/tianwen-runtime-bundle/src/goal-task-research-source.js'
 
 const BASE = resolve('D:/DevData/tianwen-dsh-probe/goal-task-research')
 const scopeKey = `conversation:${sha256({ cwd: 'D:/original-Goal' })}`
@@ -22,7 +23,11 @@ const checks = (id: string, met: boolean) => parseConversationAuditedReviewCheck
     units: { 'answer-1': { firstClaim: { quote: 'literal output', kind: 'non-factual', status: 'permitted', sourceIds: [], explanation: 'fixture literal' }, additionalClaims: [] } } },
 })))
 
-function fixture(checkedCode = false, quarantine = true, aliasedInputs = false) {
+function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, options: {
+  separateContracts?: boolean
+  changedIndex?: number
+  change?: Partial<Pick<GoalTaskOutcomeInput, 'checkerId' | 'checkerDigest' | 'requiredConditionDigest'>>
+} = {}) {
   mkdirSync(BASE, { recursive: true }); const root = mkdtempSync(join(BASE, 'ledger-'))
   let tick=0
   const ledger = new EvolutionLedger(root, { guidanceActivationQuarantine: quarantine,
@@ -31,13 +36,15 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false) 
   const files = (index: number | string) => ({ schemaVersion: 'tianwen.conversation-file-material.v1' as const, cwd: 'D:/original-Goal',
     outputKind: 'files' as const, entries: [{ path: 'input.txt', content: 'Original input '+index }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] })
   const sources = [1,2,3].map(index => {
+    const change = index === options.changedIndex ? options.change ?? {} : {}
+    const condition = change.requiredConditionDigest ?? sha256('condition')
     const outcome: GoalTaskOutcomeInput = { source: 'native-goal-task', goalId: 'original-goal', taskId: 'task-'+index, epoch: 1,
       origin: { sessionId: 'command', commandId: 'original-command', commandSeq: 1, commandDigest: sha256('command') },
       parentSessionId: 'planner', childSessionId: 'child-'+index, nativeGoalId: 'native-'+index, preparedSeq: 2, endSeq: 8,
       preparationDigest: sha256('prep-'+index), materialDigest: sha256('SDK-'+index), consentRevision: 1, modelConfigDigest: sha256('model'),
-      checkerId: 'original-check', checkerDigest: sha256('check'), contractDigest: sha256('contract'), inputsDigest: checkedCode ? conversationExternalInputsDigest(files(index).entries) : sha256('input-'+index),
-      requiredConditionDigest: sha256('condition'), outcome: checkedCode && index < 3
-        ? { status: 'rejected', detail: 'Controlled original condition failure.', failedRequiredConditionDigest: sha256('condition') }
+      checkerId: 'original-check', checkerDigest: sha256('check'), contractDigest: sha256(options.separateContracts ? 'original contract '+index : 'contract'), inputsDigest: checkedCode ? conversationExternalInputsDigest(files(index).entries) : sha256('input-'+index),
+      ...change, requiredConditionDigest: condition, outcome: checkedCode && index < 3
+        ? { status: 'rejected', detail: 'Controlled original condition failure.', failedRequiredConditionDigest: condition }
         : { status: 'verified', detail: 'functional fixture' } }
     const receipt = ledger.recordGoalTaskOutcome(outcome)
     const input: GoalTaskResearchSourceInput = { sourceKind: 'native-goal-task', sourceId: receipt.sourceId,
@@ -67,6 +74,60 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false) 
         inputsDigest:index<3?sources[index]!.input.fileInputsDigest!:conversationExternalInputsDigest(files(item.kind).entries),requiredCondition:'Original condition'})) } : {}) }
   return {root,ledger,sources,attemptBody,body,remove(){if(!resolve(root).startsWith(BASE+sep))throw new Error('cleanup outside owned fixture');rmSync(root,{recursive:true,force:true})}}
 }
+
+it('groups original Goal program failures by checker and condition while retaining each independent contract',()=>{
+  const f=fixture(true,true,false,{separateContracts:true})
+  try {
+    expect(new Set(f.sources.map(source=>source.outcome.input.contractDigest)).size).toBe(3)
+    expect(new Set(f.sources.map(source=>source.outcome.input.inputsDigest)).size).toBe(3)
+    const attempt={...f.attemptBody,attemptId:caseDesignAttemptId(f.attemptBody as never)}
+    expect(f.ledger.recordConversationCaseDesignAttempt(attempt as never)).toEqual({duplicate:false})
+    const opened={kind:'study-opened',...f.body,studyId:guidanceStudyId(f.body as never)}
+    expect(f.ledger.recordConversationGuidance(opened as never)).toEqual({duplicate:false})
+    expect(f.ledger.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    const bytes=readFileSync(join(f.root,'ledger.jsonl')),cold=new EvolutionLedger(f.root,{guidanceActivationQuarantine:true})
+    expect(cold.listGoalTaskResearchSources()).toEqual(f.sources)
+    expect(cold.listConversationGuidanceStudies()).toEqual(f.ledger.listConversationGuidanceStudies())
+    expect(cold.recordConversationCaseDesignAttempt(attempt as never)).toEqual({duplicate:true})
+    expect(cold.recordConversationGuidance(opened as never)).toEqual({duplicate:true})
+    expect(cold.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+it.each([2,3])('rejects a different original Goal checker or condition on source %s despite separate contracts',index=>{
+  for(const change of [{checkerId:'other-check'},{checkerDigest:sha256('other checker')},{requiredConditionDigest:sha256('other condition')}]) {
+    const f=fixture(true,true,false,{separateContracts:true,changedIndex:index,change})
+    try {
+      const bytes=readFileSync(join(f.root,'ledger.jsonl'))
+      expect(()=>f.ledger.recordConversationCaseDesignAttempt({...f.attemptBody,attemptId:caseDesignAttemptId(f.attemptBody as never)} as never)).toThrow(/same original checker and condition/)
+      expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+    }finally{f.remove()}
+  }
+})
+
+it.each(['same-condition','different-checker','different-condition','different-counter'] as const)(
+  'selects only compatible independent original Goal contracts: %s',async mode=>{
+    const f=fixture(true,true,false,{separateContracts:true,
+      ...(mode==='same-condition'?{}:{changedIndex:mode==='different-counter'?3:2,
+        change:mode==='different-checker'?{checkerDigest:sha256('other checker')}:{requiredConditionDigest:sha256('other condition')}})})
+    // This isolates source selection from the separately tested native restoration.
+    // It supplies no model response and never alters a persisted original source.
+    const recovery=vi.spyOn(goalSources,'recoverGoalTaskResearchSource').mockResolvedValue({} as never)
+    try {
+      const service=Object.create(TianwenConversationGuidanceLoopService.prototype)
+      Object.assign(service,{ctx:{tianwenEvolution:f.ledger},sourceConfig:{goalStateRoot:'controlled-state'}})
+      const bytes=readFileSync(join(f.root,'ledger.jsonl')),selection=await service.scanGoal(scopeKey)
+      expect(selection.state).toBe(mode==='same-condition'?'ready-to-schedule':mode==='different-counter'?'awaiting-counterexample':'awaiting-compatible-sources')
+      expect(recovery).toHaveBeenCalledTimes(3)
+      if(mode==='same-condition') {
+        expect(selection.group.sources.map((source:any)=>source.sourceId).sort()).toEqual(f.sources.slice(0,2).map(source=>source.sourceId).sort())
+        expect(selection.group.counterexample).toEqual(f.sources[2])
+      } else expect(selection.group).toBeUndefined()
+      expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+    }finally{recovery.mockRestore();f.remove()}
+  },
+)
 
 it('does not open an original native study from two task identifiers for the same canonical file input',()=>{
   const f=fixture(true,true,true)

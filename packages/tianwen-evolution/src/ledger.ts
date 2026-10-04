@@ -3412,7 +3412,8 @@ export class EvolutionLedger {
     if (firstProblem.checkedFailure) {
       const checkIdentity = (source: GoalTaskResearchSource) => {
         const b = source.outcome.input
-        return sha256({ checkerId: b.checkerId, checkerDigest: b.checkerDigest, contractDigest: b.contractDigest, requiredConditionDigest: b.requiredConditionDigest })
+        // Original per-Task contracts remain bound by the source/outcome digest.
+        return sha256({ checkerId: b.checkerId, checkerDigest: b.checkerDigest, requiredConditionDigest: b.requiredConditionDigest })
       }
       if (sources.some(source => checkIdentity(source) !== checkIdentity(first) || source.input.fileInputsDigest !== source.outcome.input.inputsDigest)) {
         throw new LedgerIntegrityError('native Goal checked failure requires the same original checker and condition with exact frozen file inputs')

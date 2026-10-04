@@ -65,6 +65,25 @@ it('provides the original native Goal project adapter and checks actual complete
   expect(mock.run).toHaveBeenCalledWith({files:f.study.files.entries.map(entry=>({...entry,content:entry.content??'export const n=7;'})),entryPath:'entry.mjs',input:'{}'},f.signal)
 })
 
+it('prepares different original Goal requirements and preimages with one checker identity and separate exact contracts',async()=>{
+  const f=nativeFixture(),create=(projectApi as any).createGoalTaskIsolatedNodeProjectCheck
+  const first=await create(f.config).prepare(f.material)
+  const requestText=`Update the existing first.ts and implement second.ts. ${condition}`
+  writeFileSync(resolve(f.cwd,'first.ts'),'export const previous=3;')
+  const material=structuredClone({...f.material,signal:undefined})
+  material.signal=f.signal;material.task.id='another-original-task';material.task.objective=requestText
+  material.goal.tasks=[material.task]
+  const second=await create({...f.config,requestText,cases:[{id:'different original expectation',input:'{}',expectedJson:'{"n":8}',exitCode:0}]}).prepare(material)
+  expect(first.checkerId).toBe(second.checkerId)
+  expect(first.checkerDigest).toBe(second.checkerDigest)
+  expect(first.requiredCondition).toBe(second.requiredCondition)
+  expect(first.contractDigest).not.toBe(second.contractDigest)
+  expect(first.inputsDigest).not.toBe(second.inputsDigest)
+  expect(first.contentReview.files.entries.find((entry:any)=>entry.path==='first.ts').content).toBeNull()
+  expect(second.contentReview.files.entries.find((entry:any)=>entry.path==='first.ts').content).toBe('export const previous=3;')
+  expect(mock.run).not.toHaveBeenCalled()
+})
+
 it('preserves the exact original Goal cwd spelling in its content plan while checking the same canonical project',async()=>{
   const f=nativeFixture()
   f.material.cwd=f.cwd.replaceAll('\\','/')

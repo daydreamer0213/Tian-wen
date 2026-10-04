@@ -1,5 +1,14 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 双审并行及原生来源分组修复
+
+原compact完整文件双审并行，意见/材料/原校验/预算保持，组失败取消排空并保留原错误。固定52单元新合成对照4真实请求/0natural，两组met/四proof新Node0模型准确恢复；native实际同时启动但本组无加速（86.392→89.634秒），不追加轮数或宣称自然可靠性/成本改善。
+
+独立核对发现Goal selector/Ledger把逐Task完整contractDigest误混为跨来源身份；不同要求/输入因此不能按原共同条件归类。首红后仅两处改为原checker/condition身份，各Task原合同/摘要/恢复/adapter核验不改；不同检查/条件仍拒绝，旧记录/裁决保持。相关435不同项通过及完整Runtime/两声明构建通过，最终发行SDK收据详见[准确结果与剩余清单](tianwen-review-and-source-family-20261004.md)。
+
+原三项主要工程连接已有交付，当前持续DEV仍5普通Task/程序verified4-rejected1/问题1/旧成功候选1不兼容/feedback-study0；本控制不补来源或效果。继续第三项真实首次工作与原研究/语义/采用/未来效果，用户无须补题评价；不新增报告功能/门槛/重开窗口/机械整体blocked。完整目标active/incomplete、main/Daily NO-GO，D约17.96GiB>=15，原24拒删路径不碰。
+
+
 ## 2026-10-04 同会话取消与最终归档修复完成
 
 原取消结果落盘后才保存，native会话保留到flush完成，再释放自有handle；调用者Context/同意/其他会话不改。原SDK并发A/B控制、161相关回归及最终宿主28通过，完整Runtime/两声明构建通过。独立评审发现的全局等待与真实发行控制发现的过早dispose均窄修，新控制原Task/native/seal完整一致、另Node0请求/0检查准确恢复。首工程失败的缺native/incomplete seal留原样；16scripted/0natural，不算学习收益。详见[取消归档修复和真实缺口](tianwen-cancelled-review-archive-20261004.md)。
