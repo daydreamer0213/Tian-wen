@@ -65,11 +65,11 @@ function readDevelopmentNativeRuntime(config) {
  const {developmentRoot,contractPath,contractDigest}=config
  const root=runtime.resolveDevelopmentRuntimeRoot(developmentRoot)
  const packet=readPinnedDevelopmentJson(contractPath,contractDigest)
- closedDevelopmentData(packet,['schemaVersion','ordinaryContract','studyContracts'],['goalContract'])
+ closedDevelopmentData(packet,['schemaVersion','ordinaryContract','studyContracts'],['goalContract','answerStudyContracts'])
  assert.equal(packet.schemaVersion,'tianwen.development-native-contracts.v1')
  // The mutable task workspace cannot contain the operator's pinned contract.
  outsideDevelopmentWorkspace(contractPath,packet.studyContracts?.cwd)
- const options=createDevelopmentNativeCheckOptions(packet.ordinaryContract,packet.studyContracts,packet.goalContract)
+ const options=createDevelopmentNativeCheckOptions(packet.ordinaryContract,packet.studyContracts,packet.goalContract,packet.answerStudyContracts)
  const producer={id:'tianwen.development-native-file-policy.v1',digest:hash(readFileSync(new URL('./development-native-file-policy.mjs',import.meta.url)))}
  return {contracts:packet.ordinaryContract,options:{developmentRoot:root,captureExternalCodeArtifacts:true,exposeCapturedFileFacts:false,...options,
   conversationReadDenialSources:[producer],conversationFileMutationDenialSources:[producer]}}

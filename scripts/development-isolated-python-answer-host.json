@@ -1,0 +1,8 @@
+{
+  "cliPath": "D:/DevData/docker-desktop/app/resources/bin/docker.exe",
+  "endpoint": "npipe:////./pipe/dockerDesktopLinuxEngine",
+  "imageRef": "python@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+  "imageId": "sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7",
+  "workRoot": "D:/DevData/tianwen-development-answer-checks",
+  "timeoutMs": 20000
+}

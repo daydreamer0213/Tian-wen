@@ -7,6 +7,8 @@ import { afterEach, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { developmentStudyResultFixture } from '../../scripts/test-fixtures/development-study-result-host.mjs'
+import { createUserMessage } from '@tianwen/dsh-compat'
+import { conversationQualityContract, sha256 } from '../../packages/tianwen-evolution/dist/index.js'
 
 const root='D:/DevData/tianwen-standard-dev-runtime-20261004'
 mkdirSync(root,{recursive:true})
@@ -45,6 +47,42 @@ function fixture(cliProfile=false) {
  return {f,packet,profile,path,write,config:write()}
 }
 
+type TestAnswerMaterial={request?:ReturnType<typeof createUserMessage>[],context?:never[],objective?:string,prompt?:string,
+ criteria:string[],qualityContract:ReturnType<typeof conversationQualityContract>,
+ files?:{schemaVersion:'tianwen.conversation-file-material.v1',cwd:string,outputKind:'chat',outputPaths:string[],entries:{path:string,content:string}[]}}
+function answerContracts(cwd:string, chat=false) {
+ const qualityContract=conversationQualityContract(),roles=['source1','source2','counterexample','adjacent','holdout']
+ const originals=roles.slice(0,3).map(label=>({request:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:`Original ${label} requirement.`}]})],
+  context:[],objective:'Report the original state.',criteria:['Preserve the original state.'],qualityContract}))
+ const cases:{caseId:string,requiredCondition:string,verifierSource:string,material:TestAnswerMaterial}[]=roles.map((caseId,index)=>({caseId,requiredCondition:'Preserve the original state.',
+  verifierSource:'import json,sys\np=json.load(sys.stdin)\nprint(json.dumps(p["answer"]=="pending"))',
+  material:{...(index<3?originals[index]!:{prompt:`Independent ${caseId} requirement.`,criteria:['Preserve the original state.'],qualityContract}),
+   ...(chat?{files:{schemaVersion:'tianwen.conversation-file-material.v1',cwd,outputKind:'chat',outputPaths:[],entries:[{path:'record.md',content:caseId}]}}:{})}}))
+ return {modelConfigDigest:sha256('frozen-model'),provideIndependentCases:true,cases}
+}
+
+it.each([false,true])('loads optional frozen answer contracts and supplies exact %s-mode cases without executor preparation',async chat=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract=answerContracts(f.packet.studyContracts.cwd,chat)
+ const packet={...f.packet,answerStudyContracts:contract},options=loadDevelopmentNativeRuntimeOptions(f.write(packet as any))
+ const input={sources:contract.cases.slice(0,2).map(row=>structuredClone(row.material)),counterexample:structuredClone(contract.cases[2]!.material),
+  modelConfigDigest:contract.modelConfigDigest,qualityContract:conversationQualityContract(),...(chat?{cwd:f.packet.studyContracts.cwd}:{}),signal:new AbortController().signal}
+ const expected=structuredClone(Object.fromEntries(contract.cases.slice(3).map(row=>[row.caseId,{prompt:row.material.prompt,criteria:row.material.criteria,
+  ...(chat?{files:{entries:row.material.files!.entries,outputPaths:[]}}:{})}])))
+ contract.cases[3]!.material.criteria[0]='Caller mutation must not change the loaded contract.'
+ expect(await options.answerStudyResultCheck.prepareIndependentCases(input)).toEqual(expected)
+ expect(await options.answerStudyResultCheck.prepareIndependentCases({...input,modelConfigDigest:sha256('other')})).toBeUndefined()
+ input.sources[0]!.objective='Changed original'
+ expect(await options.answerStudyResultCheck.prepareIndependentCases(input)).toBeUndefined()
+})
+
+it('rejects answer execution overrides, unsupported fields and foreign captured workspaces before mounting',async()=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract=answerContracts(f.packet.studyContracts.cwd,true)
+ for(const extra of [{isolated:{}},{plugin:'arbitrary'},{guidanceActivationQuarantine:false}])
+  expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...f.packet,answerStudyContracts:{...contract,...extra}} as any))).toThrow()
+ for(const row of contract.cases)row.material.files!.cwd='D:/DevData/unrelated'
+ expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...f.packet,answerStudyContracts:contract} as any))).toThrow()
+})
+
 it('loads the original factories from an exact raw-byte contract, without IO preparation or executable JSON',async()=>{
  const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture()
  const options=loadDevelopmentNativeRuntimeOptions(f.config)
@@ -53,6 +91,7 @@ it('loads the original factories from an exact raw-byte contract, without IO pre
  expect(options.exposeCapturedFileFacts).toBe(false)
  expect(typeof options.externalCodeCheck.prepare).toBe('function')
  expect(typeof options.studyResultCheck.prepareIndependentCases).toBe('function')
+ expect(options.answerStudyResultCheck).toBeUndefined()
  expect(typeof options.goalTaskAcceptance.prepare).toBe('function')
  expect(await options.externalCodeCheck.prepare({request:[]})).toBeUndefined()
  expect(await options.goalTaskAcceptance.prepare({task:{objective:'unknown'}})).toBeUndefined()
@@ -113,6 +152,7 @@ it('keeps a legitimate ancestor alias when the pinned packet is physically outsi
 
 it.each([false,true])('normal Loader imports DEV without a request under CLI profile=%s',async cliProfile=>{
  const f=fixture(cliProfile),ctx=new Context(),requests:unknown[]=[]
+ if(cliProfile)f.config=f.write({...f.packet,answerStudyContracts:answerContracts(f.packet.studyContracts.cwd,true)} as any)
  try {
   await ctx.plugin(Loader,{baseUrl:pathToFileURL(f.profile).href})
   const id=await ctx.loader.create({name:pluginUrl,config:f.config})
@@ -139,6 +179,9 @@ it.each([false,true])('normal Loader imports DEV without a request under CLI pro
   expect(ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
   expect(typeof ctx.tianwenConversationObserver.config.externalCodeCheck.prepare).toBe('function')
   expect(typeof ctx.tianwenConversationGuidanceLoop.studyResultCheck.prepareIndependentCases).toBe('function')
+  const loop=ctx.get('tianwenConversationGuidanceLoop') as unknown as {answerStudyResultCheck?:{prepareIndependentCases?:unknown}}
+  if(cliProfile)expect(typeof loop.answerStudyResultCheck?.prepareIndependentCases).toBe('function')
+  else expect(loop.answerStudyResultCheck).toBeUndefined()
   expect(requests).toEqual([])
  } finally {await ctx.fiber.dispose()}
 })

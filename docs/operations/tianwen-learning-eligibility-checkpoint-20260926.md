@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 标准答案合同入口不增加学习资格
+
+标准DEV JSON插件可选answerStudyContracts，交原固定Python host及发行工厂，原Loop实际消费；缺省/原不可写数据摘要/同workspace/原隔离守卫保持。29相关通过/1原控制跳过，正常Loader发行装配0请求/0同意/0Task/0研究；完整类型旧13/现6/新增0、独立复核无有据P1/P2。仅补实际宿主消费，不当语义oracle或研究效果。[准确范围和下一责任](tianwen-dev-answer-contract-delivery-20261004.md)。
+
+正式5af25fcd…/持续93d6659a…/原CLI4e2966ca…保持，仍1合格问题、无相容两问题对/R9风险未解，0新自然来源反馈研究采用或未来效果。完整目标active/incomplete、main/Daily NO-GO/原门槛/十工作日窗口不变。NativeGoal静态新模式无有据连接缺陷但组合执行尚缺；已有答案宿主接线收口，下一有限核该未证明组合后按真实原待办冻结完整依据及同一执行版本，不再追加零散维护题凑来源/重评历史/索题或机械整体blocked。D约17.61GiB>=15/测试自清/77保护不碰/Docker未启动。
+
 ## 2026-10-04 事前答案案例供给不改变原资格
 
 复用原预设计路径供给text/filechat固定两题，五项完整合同案例调用前准备，原生精确复制；完整五角色公开工厂精确核原三材料/模型/质量/模式/cwd，冷核原模式与摘要、语义独立unestablished。168相关、新filechat四/旧files-chat七控制、四依赖15构建、实际发行DEV文本热研究1/文本chat冷各1/工厂供给通过；工程scripted不当自然证据，未新增模型judge或默认oracle。[完整失败与范围](tianwen-answer-independent-cases-delivery-20261004.md)。

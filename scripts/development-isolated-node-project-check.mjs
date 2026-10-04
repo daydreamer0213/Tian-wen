@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import host from './development-isolated-node-project-host.json' with { type: 'json' }
+import answerHost from './development-isolated-python-answer-host.json' with { type: 'json' }
 import { buildDevelopmentFunctionalStudyCases } from './development-functional-study-cases.mjs'
 import { createDevelopmentOrdinaryTaskCheck } from './development-ordinary-task-check.mjs'
 import { createDevelopmentGoalTaskCheck } from './development-goal-task-check.mjs'
@@ -11,7 +12,8 @@ const manifest = JSON.parse(readFileSync(packageUrl, 'utf8'))
 const require = createRequire(packageUrl)
 const { parseConversationFileMaterial, parseConversationQualityContract } = await import(pathToFileURL(require.resolve('@tianwen/evolution')).href)
 const { createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck,
-  createConversationStudyIsolatedNodeProjectCohortCheck, createGoalTaskIsolatedNodeProjectCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
+  createConversationStudyIsolatedNodeProjectCohortCheck, createGoalTaskIsolatedNodeProjectCheck,
+  createConversationStudyIsolatedPythonAnswerCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
 
 function withFixedHost(config) {
   assert(config !== null && typeof config === 'object' && !Array.isArray(config))
@@ -108,13 +110,27 @@ export function createDevelopmentFunctionalStudyResultCheck(config) {
 }
 
 /** Spread these host-owned options into the actual DEV Runtime before tasks arrive. */
-export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract) {
+export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract, answerStudyContracts) {
   const ordinaryContracts = Array.isArray(ordinaryContract) ? ordinaryContract : [ordinaryContract]
   for (const contract of ordinaryContracts)
     assert.equal(contract?.cwd, studyContracts.cwd, 'DEV ordinary and study contracts must share the frozen cwd')
   const studyResultCheck = createDevelopmentFunctionalStudyResultCheck(studyContracts)
   if (goalContract !== undefined) for (const contract of Array.isArray(goalContract) ? goalContract : [goalContract])
     assert.equal(contract?.cwd, studyContracts.cwd, 'DEV Goal contract must share the frozen cwd')
+  let answerStudyResultCheck
+  if (answerStudyContracts !== undefined) {
+    assert(answerStudyContracts !== null && typeof answerStudyContracts === 'object' && !Array.isArray(answerStudyContracts))
+    assert(['modelConfigDigest','cases'].every(key => Object.hasOwn(answerStudyContracts,key))
+      && Object.keys(answerStudyContracts).every(key => ['modelConfigDigest','cases','provideIndependentCases'].includes(key)),
+      'DEV answer contracts have missing or unsupported fields; isolated override is not permitted')
+    assert(Array.isArray(answerStudyContracts.cases))
+    for (const entry of answerStudyContracts.cases) if (entry?.material?.files !== undefined)
+      assert.equal(entry.material.files.cwd, studyContracts.cwd, 'DEV answer file contract must share the frozen cwd')
+    // Trusted operator data only; the SDK clones/validates material. Loading
+    // constructs the original factory, never prepares Docker or runs a check.
+    answerStudyResultCheck = createConversationStudyIsolatedPythonAnswerCheck({ ...answerStudyContracts, isolated: structuredClone(answerHost) })
+  }
   return { externalCodeCheck: createDevelopmentOrdinaryTaskCheck(ordinaryContract, createDevelopmentIsolatedNodeProjectCheck), studyResultCheck,
+    ...(answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck }),
     ...(goalContract === undefined ? {} : { goalTaskAcceptance: createDevelopmentGoalTaskCheck(goalContract, createDevelopmentGoalTaskIsolatedNodeProjectCheck) }) }
 }
