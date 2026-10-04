@@ -9,3 +9,5 @@ options是普通对象，仅六个必填字段：profileRoot、cwd、contractPat
 原真实DeepSeek配置、65536预算、0提供方重试、90000ms idle保持。原空agents、JSONL none、文件cwd、spawn provider保持。不新增执行器/宿主/学习循环。仅输出文件可写，独立入口只读。原25命名检查一次全部完成、stdout为冻结JSON、stderr空且exit0；复核和功能分别记账。独立检查不是已验证的语义安全，也不是实际CLI完整任务的替代。
 
 冻结后执行一次原标准Loader/DEV/job，复用已有连续Profile原同意，不创建新工程研究供应；沿用已有未触发供应配置但来源信用0。首次自然结果不修判，必要工程修复另记。研究来源条件由原身份决定，不手工桥接本任务到旧报告问题。原七Task、正式账本、NO-GO、资格/原十工作日窗口、71拒删路径保持。生成物D、不复制环境、≥15GiB。
+
+未知答案前预检纠正：原CLI依赖树不含JSONL模块，存储行name使用现有Runtime依赖别名下原lib/index.js的相对file URL；不调用require或安装依赖。首次冻结提交和纠正提交均先于Task。

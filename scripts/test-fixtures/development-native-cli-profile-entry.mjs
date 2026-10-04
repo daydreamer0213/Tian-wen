@@ -17,7 +17,7 @@ await check('unique-ordered-services',()=>assert.deepEqual(rows().map(row=>row.i
 await check('closed-service-rows',()=>{for(const row of rows())assert.deepEqual(Object.keys(row).sort(),['config','id','name'])})
 await check('original-foundations',()=>{const r=rows();for(let i=0;i<7;i++){assert.equal(r[i].name,'@deepseek-ai/dsh-'+ids[i]);assert.deepEqual(r[i].config,i===5?{agents:[]}:{})}})
 await check('published-observer',()=>assert.deepEqual(rows()[7],{id:ids[7],name:url('../../packages/tianwen-runtime-bundle/dist/native-tools-observer.js'),config:{}}))
-await check('original-jsonl-storage',()=>assert.deepEqual(rows()[8],{id:ids[8],name:'@deepseek-ai/dsh-session-persistence-jsonl',config:{root:base.profileRoot+'/sessions',compression:'none'}}))
+await check('original-jsonl-storage',()=>assert.deepEqual(rows()[8],{id:ids[8],name:url('../../packages/tianwen-runtime-bundle/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js'),config:{root:base.profileRoot+'/sessions',compression:'none'}}))
 await check('original-fs-scope',()=>assert.deepEqual(rows()[9],{id:ids[9],name:'@deepseek-ai/dsh-fs-local',config:{cwd:base.cwd}}))
 await check('original-subagent-provider',()=>assert.deepEqual(rows()[10],{id:ids[10],name:'@deepseek-ai/dsh-subagent-spawn-in-process',config:{providerName:'spawn'}}))
 await check('original-file-tools',()=>assert.deepEqual(rows()[11],{id:ids[11],name:'@deepseek-ai/dsh-tool-fs',config:{}}))
