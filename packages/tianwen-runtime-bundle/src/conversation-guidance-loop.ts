@@ -6,7 +6,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { effectiveConversationFamily, hasCurrentConversationQuality, hasVerifiedContinuingPreference, guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemptId, parseConversationGuidanceRecord, prepareConversationLearningExploration, sha256, type ConversationQualityContract, type ConversationTask, type ConversationFeedbackAssessment, type ConversationFailure, type GuidanceCase, type GuidanceGeneratedCase, type GuidanceProposalClue, type GuidanceStudyBody, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { conversationEvidenceTexts, conversationTaskModelDigest, recoverConversationTaskModel, recoverConversationTaskMaterial, type ConversationTaskMaterial } from './conversation-task-material.js'
-import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial } from './conversation-judgment.js'
+import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, runConversationJudgment, runConversationTrial, recoverConversationTrial } from './conversation-judgment.js'
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
 import { runConversationFileTrial, recoverConversationFileTrial, recoverConversationFileTrialExecution, type RecoverConversationFileTrialInput } from './conversation-file-trial.js'
 import type { ConversationFileTrialExecutionEvidence } from './conversation-file-trial-evidence.js'
@@ -19,7 +19,7 @@ import { listConversationSkillReferences, readConversationSkillReference, type C
 import type { ConversationProposalClueMaterial } from './conversation-feedback-assessment.js'
 import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@tianwen/evolution'
 import { withConversationObservationCancellation } from './conversation-external-check.js'
-import { prepareConversationStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
+import { prepareConversationStudyResultChecks, prepareConversationAnswerStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type ConversationAnswerStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
 import { SOURCE_EXCLUSION_KEYS, type ConversationSourceExclusion, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
 import { goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
 import { recoverGoalTaskResearchSource, recoverGoalGuidanceSource, type NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
@@ -116,11 +116,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
 
   private readonly sourceConfig: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
   private readonly studyResultCheck: ConversationStudyResultCheck | undefined
-  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly studyResultCheck?: ConversationStudyResultCheck } = {}) {
+  private readonly answerStudyResultCheck: ConversationAnswerStudyResultCheck | undefined
+  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly studyResultCheck?: ConversationStudyResultCheck, readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck } = {}) {
     super(ctx, 'tianwenConversationGuidanceLoop')
-    const { studyResultCheck, ...sourceConfig } = config
+    const { studyResultCheck, answerStudyResultCheck, ...sourceConfig } = config
     this.sourceConfig = structuredClone(sourceConfig)
     this.studyResultCheck = studyResultCheck
+    this.answerStudyResultCheck = answerStudyResultCheck
   }
   private sourceEnvironment(): string | undefined {
     const evolutionRoot = this.sourceConfig.evolutionRoot
@@ -378,7 +380,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     this.lanes.set(scopeKey, work)
     return work
   }
-  private async armFileRecovery(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<{ proof: GuidanceArmRecord['executionProof'], input: RecoverConversationFileTrialInput }> {
+  private async recoverArmMaterial(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<ConversationTaskMaterial | { prompt: string, criteria: readonly string[], qualityContract?: ConversationQualityContract, files?: ConversationFileMaterial }> {
     const formal = 'caseId' in arm
     const item = formal ? study.opened.cases.find(item => item.id === arm.caseId)
       : study.opened.cases.find(item => 'sourceTaskId' in item && item.sourceTaskId === study.exploration?.intent.request.sourceTaskId)
@@ -400,7 +402,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
       }
       }
     } else material = { prompt: item.prompt, criteria: item.criteria, ...(item.qualityContract === undefined ? {} : { qualityContract: item.qualityContract }), ...(item.files === undefined ? {} : { files: item.files }) }
-    if (material.files === undefined || material.files.outputKind !== study.opened.fileOutputKind || sha256(material) !== arm.materialDigest) throw new Error('source-unavailable')
+    if (sha256(material) !== arm.materialDigest) throw new Error('source-unavailable')
+    return material
+  }
+  private async armFileRecovery(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<{ proof: GuidanceArmRecord['executionProof'], input: RecoverConversationFileTrialInput }> {
+    const formal = 'caseId' in arm
+    const material = await this.recoverArmMaterial(study, arm)
+    if (material.files === undefined || material.files.outputKind !== study.opened.fileOutputKind) throw new Error('source-unavailable')
     const target: GuidanceFileTrialTarget = formal ? { kind: 'formal', caseId: arm.caseId, role: arm.role }
       : { kind: 'exploration', requestDigest: sha256(study.exploration!.intent.request), arm: arm.arm }
     const retained = study.fileTrials?.find(receipt => sha256(receipt.target) === sha256(target))
@@ -427,6 +435,18 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private async recoverArmFileExecution(study: GuidanceStudy, arm: GuidanceArmRecord | GuidanceExplorationArmRecord): Promise<ConversationFileTrialExecutionEvidence> {
     const { proof, input } = await this.armFileRecovery(study, arm)
     return recoverConversationFileTrialExecution(this.ctx, proof, input)
+  }
+  private async recoverArmAnswer(study: GuidanceStudy, arm: GuidanceArmRecord): Promise<{ answer: string, files: readonly import('@tianwen/evolution').ConversationFileEntry[] }> {
+    if (study.opened.evaluationMode === 'local-files') return this.recoverArmFile(study, arm)
+    const material = await this.recoverArmMaterial(study, arm)
+    const worker = 'request' in material ? { request: material.request, context: material.context } : { prompt: material.prompt,
+      ...('sourceKind' in material ? { sourceKind: material.sourceKind } : {}) }
+    const snapshot = arm.role === 'baseline' ? study.opened.parentSnapshot : study.candidate?.candidateSnapshot
+    if (snapshot === undefined || guidanceVersion(snapshot) !== arm.behaviorVersion) throw new Error('source-unavailable')
+    const guidance = guidanceRule(snapshot, study.opened.family)
+    const recovered = await recoverConversationTrial(this.ctx, arm.executionProof, { outputDigest: arm.outputDigest,
+      materialDigest: sha256(worker), modelConfigDigest: study.opened.modelConfigDigest, ...(guidance === undefined ? {} : { guidance }) })
+    return { answer: recovered.answer, files: [] }
   }
   private recoverAccepted(scopeKey: string): Promise<void> {
     const existing = this.acceptedRecoveries.get(scopeKey)
@@ -544,6 +564,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         for (const arm of [...explorationArms, ...study.arms]) {
           if (arm.reviewChecks === undefined) throw new Error('source-unavailable')
           const fileOutput = study.opened.evaluationMode === 'local-files' ? await this.recoverArmFile(study, arm) : undefined
+          if ('caseId' in arm && study.opened.resultChecks?.some(check => check.inputKind === 'text-material.v1')) await this.recoverArmAnswer(study, arm)
           for (const check of arm.reviewChecks) {
             if (!('audit' in check)) throw new Error('source-unavailable')
             await verifyConversationClaimReviewCheck(this.ctx, check, { purpose: 'method-study', materialDigest: arm.materialDigest,
@@ -875,6 +896,12 @@ export class TianwenConversationGuidanceLoopService extends Service {
           : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }), signal)
         signal.throwIfAborted()
       }
+      if (this.answerStudyResultCheck !== undefined && (!fileMode || fileConfig?.outputKind === 'chat')) {
+        preparedChecks = await prepareConversationAnswerStudyResultChecks(this.answerStudyResultCheck, bodyFor([]), cases.map(item => 'sourceTaskId' in item
+          ? item.kind === 'counterexample' ? counter : sources[item.kind === 'source1' ? 0 : 1]!
+          : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, ...(item.files === undefined ? {} : { files: item.files }) }), signal)
+        assertPreparationCurrent()
+      }
       const fitted: EvidenceGroup['proposalClues'][number][] = []
       for (const clue of group.proposalClues) {
         const candidate = [...fitted, clue]
@@ -1014,10 +1041,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
             materialDigest: item.materialDigest, behaviorVersion: guidanceVersion(snapshot), executionProof: execution.proof, judgeProof: judged.proof, reviewChecks: judged.reviewChecks, outputDigest, verdict: judged.verdict }
           if (preparedChecks !== undefined) {
             const study = evolution.listConversationGuidanceStudies().find(study => study.opened.studyId === opened!.studyId)!
-            const output = await this.recoverArmFile(study, arm)
+            const output = await this.recoverArmAnswer(study, arm)
             await this.assertCurrent(studyOpened, signal)
             const outcome = await evaluateConversationStudyResultCheck(preparedChecks, item.id, output, signal)
-            await this.recoverArmFile(study, arm)
+            await this.recoverArmAnswer(study, arm)
             await this.assertCurrent(studyOpened, signal)
             signal.throwIfAborted()
             evolution.recordConversationGuidance(parseConversationGuidanceRecord({ ...arm, resultCheck: {

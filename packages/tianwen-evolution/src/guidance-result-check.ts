@@ -4,6 +4,9 @@ import type { Sha256Digest } from './ledger.js'
 import type { GuidanceArmRecord, GuidanceStudy, GuidanceStudyBody } from './conversation-guidance.js'
 
 export interface GuidanceCaseResultCheck {
+  /** Omitted preserves the original code/files protocol and byte identity. */
+  readonly inputKind?: 'text-material.v1' | 'file-chat-material.v1'
+  readonly fileInputsDigest?: Sha256Digest
   readonly caseId: string
   readonly checkerId: string
   readonly checkerDigest: Sha256Digest
@@ -29,14 +32,26 @@ function digest(value: unknown): Sha256Digest {
   return value as Sha256Digest
 }
 export function parseGuidanceCaseResultChecks(value: unknown, opened: Pick<GuidanceStudyBody, 'cases' | 'family' | 'evaluationMode' | 'fileOutputKind'>): readonly GuidanceCaseResultCheck[] {
-  if (opened.family !== 'code' || opened.evaluationMode !== 'local-files' || opened.fileOutputKind !== 'files'
-    || !Array.isArray(value) || value.length !== 5) throw new TypeError('guidance result check requires five file code cases')
+  if (!Array.isArray(value) || value.length !== 5) throw new TypeError('guidance result check requires five complete cases')
   return Array.from(value, (item, index) => {
-    const row = fields(item, ['caseId', 'checkerId', 'checkerDigest', 'contractDigest', 'inputsDigest', 'requiredCondition'])
-    const result = { caseId: text(row.caseId, 512), checkerId: text(row.checkerId, 512), checkerDigest: digest(row.checkerDigest),
-      contractDigest: digest(row.contractDigest), inputsDigest: digest(row.inputsDigest), requiredCondition: text(row.requiredCondition, 4096) }
+    const kind = item !== null && typeof item === 'object' ? (item as Record<string, unknown>).inputKind : undefined
+    const answerCheck = kind === 'text-material.v1' || kind === 'file-chat-material.v1'
+    if (answerCheck ? kind === 'text-material.v1'
+      ? opened.evaluationMode !== undefined || opened.fileOutputKind !== undefined
+      : opened.evaluationMode !== 'local-files' || opened.fileOutputKind !== 'chat'
+      : opened.family !== 'code' || opened.evaluationMode !== 'local-files' || opened.fileOutputKind !== 'files') {
+      throw new TypeError('guidance result check input mode does not match its study')
+    }
+    const row = fields(item, ['caseId', 'checkerId', 'checkerDigest', 'contractDigest', 'inputsDigest', 'requiredCondition',
+      ...(answerCheck ? ['inputKind'] : []), ...(kind === 'file-chat-material.v1' ? ['fileInputsDigest'] : [])])
+    const result: GuidanceCaseResultCheck = { caseId: text(row.caseId, 512), checkerId: text(row.checkerId, 512), checkerDigest: digest(row.checkerDigest),
+      contractDigest: digest(row.contractDigest), inputsDigest: digest(row.inputsDigest), requiredCondition: text(row.requiredCondition, 4096),
+      ...(answerCheck ? { inputKind: kind } : {}), ...(kind === 'file-chat-material.v1' ? { fileInputsDigest: digest(row.fileInputsDigest) } : {}) }
     const task = opened.cases[index]
-    if (task?.id !== result.caseId || 'prompt' in task && (task.files === undefined || conversationExternalInputsDigest(task.files.entries) !== result.inputsDigest)) {
+    if (task?.id !== result.caseId || (answerCheck ? result.inputsDigest !== task.materialDigest : false)
+      || 'prompt' in task && (answerCheck ? kind === 'text-material.v1' ? task.files !== undefined
+        : task.files?.outputKind !== 'chat' || conversationExternalInputsDigest(task.files.entries) !== result.fileInputsDigest
+        : task.files === undefined || conversationExternalInputsDigest(task.files.entries) !== result.inputsDigest)) {
       throw new TypeError('guidance result check does not match the exact case or frozen inputs')
     }
     return result

@@ -46,7 +46,7 @@ import { TianwenResearchSummaryAdmissionService } from './research-summary-admis
 import { TianwenConversationObserverService } from './conversation-observer.js'
 import { TianwenConversationFileObserverService } from './conversation-file-observer.js'
 import type { ConversationExternalCodeCheck } from './conversation-external-check.js'
-import type { ConversationStudyResultCheck } from './conversation-study-result-check.js'
+import type { ConversationStudyResultCheck, ConversationAnswerStudyResultCheck } from './conversation-study-result-check.js'
 import { TianwenNativeToolObservationService } from './native-tool-observation.js'
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
@@ -72,6 +72,8 @@ export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly externalCodeCheck?: ConversationExternalCodeCheck
   /** Trusted pre-proposal code study checks; does not lift formal activation quarantine. */
   readonly studyResultCheck?: ConversationStudyResultCheck
+  /** Trusted complete text/file-to-chat contracts, fixed before proposal; no default oracle or permission. */
+  readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
@@ -529,6 +531,7 @@ async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig,
     ...(goalStateRoot === undefined ? {} : { goalStateRoot }),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
     ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
+    ...(config.answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck: config.answerStudyResultCheck }),
     guidanceActivationQuarantine,
   })
   ctx.plugin(TianwenLearningExplorationService)

@@ -27,6 +27,7 @@ export { createConversationIsolatedNodeProjectCheck, createConversationStudyIsol
 export type { ConversationIsolatedNodeProjectCheckConfig, ConversationIsolatedNodeProjectStudyCase, GoalTaskIsolatedNodeProjectCheckConfig } from './conversation-isolated-node-project-check.js'
 export type {
   ConversationStudyResultPreparation, ConversationStudyResultCandidate, PreparedConversationStudyResultCheck, ConversationStudyResultCheck,
+  ConversationAnswerStudyMaterial, PreparedConversationAnswerStudyResultCheck, ConversationAnswerStudyResultCheck,
 } from './conversation-study-result-check.js'
 export type {
   ConversationExternalCodePreparation,

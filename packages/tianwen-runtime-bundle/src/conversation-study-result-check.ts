@@ -51,9 +51,53 @@ export interface ConversationStudyResultCheck {
   /** All applicable cases must be prepared before proposal; undefined stops this study. */
   readonly prepare: (material: ConversationStudyResultPreparation) => Promise<PreparedConversationStudyResultCheck | undefined>
 }
+/** Complete pre-answer material; its digest includes the original requirements. */
+export type ConversationAnswerStudyMaterial = ConversationTaskMaterial | NativeGoalTaskStudyMaterial
+  | { readonly prompt: string, readonly criteria: readonly string[], readonly qualityContract?: ConversationQualityContract, readonly files?: ConversationFileMaterial }
+export interface PreparedConversationAnswerStudyResultCheck {
+  readonly checkerId: string
+  readonly checkerDigest: ReturnType<typeof sha256>
+  readonly contractDigest: ReturnType<typeof sha256>
+  readonly inputsDigest: ReturnType<typeof sha256>
+  readonly requiredCondition: string
+  readonly waitsForCancellationCleanup?: true
+  readonly evaluate: (candidate: { readonly material: ConversationAnswerStudyMaterial, readonly answer: string,
+    readonly files: readonly ConversationFileEntry[], readonly signal: AbortSignal }) => Promise<ConversationExternalCheckOutcome>
+}
+export interface ConversationAnswerStudyResultCheck {
+  /** No complete independent contract means stop this study, never a model fallback. */
+  readonly prepare: (input: { readonly material: ConversationAnswerStudyMaterial, readonly caseId: string,
+    readonly modelConfigDigest: ReturnType<typeof sha256>, readonly signal: AbortSignal }) => Promise<PreparedConversationAnswerStudyResultCheck | undefined>
+}
 export interface PreparedStudyResultChecks {
   readonly checks: readonly GuidanceCaseResultCheck[]
   readonly evaluators: ReadonlyMap<string, { readonly material: ConversationStudyResultMaterial, readonly evaluate: PreparedConversationStudyResultCheck['evaluate'], readonly waitsForCancellationCleanup?: true }>
+  readonly answerEvaluators?: ReadonlyMap<string, { readonly material: ConversationAnswerStudyMaterial,
+    readonly evaluate: PreparedConversationAnswerStudyResultCheck['evaluate'], readonly waitsForCancellationCleanup?: true }>
+}
+export async function prepareConversationAnswerStudyResultChecks(check: ConversationAnswerStudyResultCheck, body: GuidanceStudyBody,
+  materials: readonly ConversationAnswerStudyMaterial[], signal: AbortSignal): Promise<PreparedStudyResultChecks> {
+  const fileChat = body.evaluationMode === 'local-files' && body.fileOutputKind === 'chat'
+  if (materials.length !== 5 || (!fileChat && (body.evaluationMode !== undefined || body.fileOutputKind !== undefined))) throw new Error('source-unavailable')
+  const preparedChecks: GuidanceCaseResultCheck[] = []
+  const answerEvaluators = new Map<string, { material: ConversationAnswerStudyMaterial,
+    evaluate: PreparedConversationAnswerStudyResultCheck['evaluate'], waitsForCancellationCleanup?: true }>()
+  for (const [index, value] of materials.entries()) {
+    const item = body.cases[index]
+    if (item === undefined || sha256(value) !== item.materialDigest || (fileChat ? value.files?.outputKind !== 'chat' : value.files !== undefined)) throw new Error('source-unavailable')
+    const material = structuredClone(value)
+    const prepared = await withConversationObservationCancellation(signal, () => check.prepare({ material: structuredClone(material),
+      caseId: item.id, modelConfigDigest: body.modelConfigDigest, signal }))
+    signal.throwIfAborted()
+    if (prepared === undefined || typeof prepared.evaluate !== 'function' || prepared.inputsDigest !== item.materialDigest) throw new Error('source-unavailable')
+    preparedChecks.push({ inputKind: fileChat ? 'file-chat-material.v1' : 'text-material.v1', caseId: item.id,
+      checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
+      inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition,
+      ...(fileChat ? { fileInputsDigest: conversationExternalInputsDigest(material.files!.entries) } : {}) })
+    answerEvaluators.set(item.id, { material, evaluate: prepared.evaluate,
+      ...(prepared.waitsForCancellationCleanup === true ? { waitsForCancellationCleanup: true } : {}) })
+  }
+  return { checks: parseGuidanceCaseResultChecks(preparedChecks, body), evaluators: new Map(), answerEvaluators }
 }
 export async function prepareConversationStudyResultChecks(check: ConversationStudyResultCheck, body: GuidanceStudyBody,
   materials: readonly (ConversationTaskMaterial | { readonly prompt: string, readonly criteria: readonly string[], readonly qualityContract?: ConversationQualityContract, readonly files?: ConversationFileMaterial })[],
@@ -85,12 +129,15 @@ export async function evaluateConversationStudyResultCheck(prepared: PreparedStu
   output: { readonly answer: string, readonly files: readonly ConversationFileEntry[] }, signal: AbortSignal): Promise<ConversationExternalCheckOutcome> {
   try {
     const current = prepared.evaluators.get(caseId)
+    const answerCheck = prepared.answerEvaluators?.get(caseId)
     const check = prepared.checks.find(check => check.caseId === caseId)
-    if (current === undefined || check === undefined) throw new Error('Prepared study check unavailable; no post-answer preparation or rerun.')
-    const outcome = parseConversationExternalCheckOutcome(await withConversationObservationCancellation(signal, () => current.evaluate({
-      ...structuredClone(current.material), answer: output.answer, inputs: structuredClone(current.material.files.entries),
-      outputs: structuredClone(output.files), outputPaths: [...current.material.files.outputPaths], signal,
-    }), current.waitsForCancellationCleanup === true))
+    if (current === undefined && answerCheck === undefined || check === undefined) throw new Error('Prepared study check unavailable; no post-answer preparation or rerun.')
+    const outcome = parseConversationExternalCheckOutcome(await withConversationObservationCancellation(signal, () => answerCheck !== undefined
+      ? answerCheck.evaluate({ material: structuredClone(answerCheck.material), answer: output.answer, files: structuredClone(output.files), signal })
+      : current!.evaluate({
+      ...structuredClone(current!.material), answer: output.answer, inputs: structuredClone(current!.material.files.entries),
+      outputs: structuredClone(output.files), outputPaths: [...current!.material.files.outputPaths], signal,
+    }), (answerCheck ?? current)?.waitsForCancellationCleanup === true))
     if (outcome.failedRequiredConditionDigest !== undefined && outcome.failedRequiredConditionDigest !== sha256(check.requiredCondition)) throw new Error('Check failure does not match the frozen required condition.')
     return outcome
   } catch (error) {

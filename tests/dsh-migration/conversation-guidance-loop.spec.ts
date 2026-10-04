@@ -201,6 +201,86 @@ it('wakes a completed study source after its ordinary root agent has been releas
   } finally { await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
 
+it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real native text study outputs through a pre-proposal answer contract: %s', async outcome => {
+  const publishedCold = outcome === 'cold' && process.env.TIANWEN_ANSWER_CHECK_PUBLISHED === '1'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? tmpdir()
+  mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'answer-study-'))
+  const script: ScriptEntry[] = []
+  for (let i = 0; i < 3; i++) script.push(structured(admission), textResponse(`pilot answer ${i}`), ...reviewPair(verdict(i === 2, 'pilot')))
+  script.push(structured({ adjacent: { prompt: 'Summarize adjacent laboratory result.', criteria: ['Preserve scope'] },
+    holdout: { prompt: 'Summarize independent field result.', criteria: ['Preserve scope'] } }),
+    request => { expect(prepare).toHaveBeenCalledTimes(5); return structured({ guidance: 'Preserve the stated source scope.' }) })
+  for (let i = 0; i < 5; i++) for (const role of ['baseline', 'candidate']) {
+    script.push(structured({ answer: `pilot trial ${i} ${role}` }), ...reviewPair(verdict(role === 'candidate' || i > 0, 'pilot')))
+  }
+  const evaluate = vi.fn(async (candidate: { answer: string }) => candidate.answer === 'pilot trial 0 baseline'
+    ? { status: 'rejected' as const, detail: 'Original required scope lost.', failedRequiredConditionDigest: sha256('Preserve scope.') }
+    : outcome === 'rejected' && candidate.answer === 'pilot trial 4 candidate' ? { status: 'rejected' as const, detail: 'Candidate scope lost.' }
+      : { status: 'verified' as const, detail: 'Complete engineering scope contract passed.' })
+  const prepare = vi.fn(async (input: { material: unknown }) => outcome === 'unavailable' ? undefined : ({ checkerId: 'engineering-native-answer',
+    checkerDigest: sha256('checker'), contractDigest: sha256(input.material), inputsDigest: sha256(input.material), requiredCondition: 'Preserve scope.', evaluate }))
+  const harness = await mountFeedbackHarness(publishedCold ? root : join(root, 'sessions'), script)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  await harness.ctx.plugin(TianwenConversationObserverService)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('answer-study-root'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const record = harness.ctx.tianwenEvolution.recordConversationGuidance.bind(harness.ctx.tianwenEvolution)
+  const fault = outcome === 'cold' ? vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationGuidance').mockImplementation(value => {
+    if (value.kind === 'guidance-activated') throw new Error('lost activation write')
+    return record(value)
+  }) : undefined
+  try {
+    for (let i = 0; i < 3; i++) {
+      handle.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `Summarize pilot source ${i}.` }] }))
+      await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    }
+    const before = harness.ctx.tianwenEvolution.listConversationTasks()
+    await harness.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck: { prepare } })
+    await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
+    if (outcome === 'unavailable') {
+      expect(prepare).toHaveBeenCalledOnce(); expect(evaluate).not.toHaveBeenCalled()
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    } else {
+      const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(study.decision?.verdict).toBe('accepted')
+      expect(study.arms).toHaveLength(10); expect(evaluate).toHaveBeenCalledTimes(10)
+      expect(study.opened.resultChecks?.every(check => check.inputKind === 'text-material.v1')).toBe(true)
+      expect(study.activation !== undefined).toBe(outcome === 'verified')
+      expect(evaluate.mock.calls.map(call => call[0].answer)).toEqual(Array.from({ length: 5 }, (_, i) => [`pilot trial ${i} baseline`, `pilot trial ${i} candidate`]).flat())
+      if (outcome === 'cold') {
+        const requests = harness.adapter.requests.length
+        fault!.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose()
+        const cold = await mountFeedbackHarness(publishedCold ? root : join(root, 'sessions'), [])
+        try {
+          await cold.ctx.plugin(SubagentRuntime); await cold.ctx.plugin(spawn, { providerName: 'spawn' })
+          if (publishedCold) {
+            await cold.ctx.plugin(Loader, { baseUrl: pathToFileURL(root).href })
+            const runtime = await import('../../packages/tianwen-runtime-bundle/dist/runtime.js')
+            cold.ctx.loader.builtins['answer-study-cold'] = { apply: runtime.applyDevelopment }
+            await cold.ctx.loader.create({ name: 'cordis:answer-study-cold', config: { developmentRoot: root, answerStudyResultCheck: { prepare } } })
+            await cold.ctx.loader.await()
+            await Promise.all([...cold.ctx.registry.values()].flatMap(scope => [...scope.fibers].map(value => value.await())))
+          } else {
+            await applyRuntime(cold.ctx, { evolutionRoot: join(root, 'evolution') })
+            await cold.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck: { prepare } })
+          }
+          await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+          const recovered = cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+          const { activation, activatedAt, ...body } = recovered
+          expect(activation).toBeDefined(); expect(activatedAt).toBeDefined(); expect(body).toEqual(study)
+          expect(cold.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
+          expect(cold.ctx.agents.list()).toEqual([]); expect(cold.adapter.requests).toHaveLength(0)
+          expect(harness.adapter.requests).toHaveLength(requests)
+          expect(prepare).toHaveBeenCalledTimes(5); expect(evaluate).toHaveBeenCalledTimes(10)
+        } finally { await cold.ctx.fiber.dispose() }
+      }
+    }
+  } finally { fault?.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
 it('retries persisted evidence if a live root disappears while waiting for idle', async () => {
   const scopeKey = `conversation:${sha256({ cwd: 'D:/DevData/stale-root' })}`
   const task = { source: { taskId: 'stale-task', scopeKey }, completion: { status: 'completed' } }
@@ -387,17 +467,20 @@ it.each(['feedback.v2', 'feedback.v1', 'absent', 'packet-whole', 'packet-two', '
   }
 })
 
-it.each(['explicit', 'default'] as const)('forwards the actual %s runtime environment and independent natural admissions', async setting => {
+it.each(['explicit', 'default', 'answer-check'] as const)('forwards the actual %s runtime environment and independent natural admissions', async setting => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'bundle-config-'))
   const harness = await mountFeedbackHarness(join(root, 'sessions'), [])
   const plugin = vi.spyOn(harness.ctx, 'plugin')
   harness.ctx.baseUrl = pathToFileURL(root).href
   const evolutionRoot = setting === 'explicit' ? join(root, 'evolution') : join(root, 'state', 'evolution')
+  const answerCheck = { prepare: vi.fn(async () => undefined) }
   try {
-    await applyBundle(harness.ctx, { ...(setting === 'explicit' ? { evolutionRoot } : {}), conversationSkillSources: [] })
+    await applyBundle(harness.ctx, { ...(setting === 'explicit' ? { evolutionRoot } : {}), conversationSkillSources: [],
+      ...(setting === 'answer-check' ? { answerStudyResultCheck: answerCheck } : {}) })
     expect(plugin).toHaveBeenCalledWith(TianwenEvolutionService, { root: evolutionRoot, guidanceActivationQuarantine: true })
-    expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, goalStateRoot: join(root, 'state'), skillSources: [], guidanceActivationQuarantine: true })
+    expect(plugin).toHaveBeenCalledWith(TianwenConversationGuidanceLoopService, { evolutionRoot, goalStateRoot: join(root, 'state'), skillSources: [], guidanceActivationQuarantine: true,
+      ...(setting === 'answer-check' ? { answerStudyResultCheck: answerCheck } : {}) })
     expect(plugin).toHaveBeenCalledWith(TianwenConversationFileObserverService, { evolutionRoot, skillSources: [], externalCodeArtifacts: false })
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
     expect(harness.adapter.requests).toHaveLength(0)

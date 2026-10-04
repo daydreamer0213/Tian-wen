@@ -3309,7 +3309,10 @@ export class EvolutionLedger {
         const task = 'sourceTaskId' in item ? tasks.find(task => task.source.taskId === item.sourceTaskId) : undefined
         const check = study.resultChecks.find(check => check.caseId === item.id)
         try {
-          if (task === undefined || conversationTaskFileInputs(task) === undefined || check === undefined || conversationExternalInputsDigest(conversationTaskFileInputs(task)!) !== check.inputsDigest) {
+          if (task === undefined || check === undefined || (check.inputKind === 'text-material.v1'
+            ? conversationTaskInputDigest(task) === undefined || check.inputsDigest !== item.materialDigest
+            : conversationTaskFileInputs(task) === undefined || conversationExternalInputsDigest(conversationTaskFileInputs(task)!) !== (check.fileInputsDigest ?? check.inputsDigest)
+              || check.inputKind === 'file-chat-material.v1' && check.inputsDigest !== item.materialDigest)) {
             throw new Error('unavailable or changed source input')
           }
         } catch { throw new LedgerIntegrityError('study result check requires exact original frozen task inputs') }
@@ -3427,8 +3430,14 @@ export class EvolutionLedger {
       const item = binding.cases[index]
       if (item === undefined || !('sourceTaskId' in item) || item.sourceTaskId !== source.sourceId
         || item.inputDigest !== source.input.inputDigest || item.materialDigest !== source.input.materialDigest) throw new LedgerIntegrityError('native Goal study requires exact original material and actual input identity')
-      if (binding.resultChecks !== undefined && binding.resultChecks.find(check => check.caseId === item.id)?.inputsDigest !== source.input.fileInputsDigest) {
-        throw new LedgerIntegrityError('native Goal study program check inputs differ from original frozen files')
+      if (binding.resultChecks !== undefined) {
+        const check = binding.resultChecks.find(check => check.caseId === item.id)
+        if (check === undefined || (check.inputKind === 'text-material.v1'
+          ? check.inputsDigest !== source.input.materialDigest
+          : (check.fileInputsDigest ?? check.inputsDigest) !== source.input.fileInputsDigest
+            || check.inputKind === 'file-chat-material.v1' && check.inputsDigest !== source.input.materialDigest)) {
+          throw new LedgerIntegrityError('native Goal study program check inputs differ from original frozen material')
+        }
       }
     }
     if (firstProblem.checkedFailure && binding.resultChecks === undefined) throw new LedgerIntegrityError('native Goal program failure study requires independent prepared program checks')
