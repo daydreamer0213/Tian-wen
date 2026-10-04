@@ -71,7 +71,7 @@ it('preserves every old v1 file shape and digest when ancillary fields are absen
 })
 
 for (const historicalFileClue of [false, true])
-for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat-recover', 'pre-design-late-cancel', 'pre-design-pass', 'pre-design-recover', 'pre-design-missing', 'pre-design-drift', 'pre-design-duplicate', 'pre-design-cancel', 'pre-design-invalid', 'pre-design-check-missing', 'result-check-late-cancel', 'result-check-consent', 'result-check-native-drift', 'result-check-pass', 'result-check-rejected', 'result-check-exception', 'result-check-missing', 'result-check-recover', 'result-check-rejected-recover', 'duplicate-case-order', 'duplicate-case-path-case', 'duplicate-case-source-order', 'accepted', 'packet-quarantined', 'checked-failure', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-study', 'feedback-clue', 'feedback-clue-external', 'feedback-clue-packet-overflow', 'feedback-clue-frozen-overflow', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-projection-drift', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) if (!historicalFileClue || ['feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted'].includes(scenario)) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}${historicalFileClue ? ' (legacy-v1)' : ''}`, async () => {
+for (const scenario of ['answer-chat-pre-design-pass', 'answer-chat-pre-design-drift', 'answer-chat-pre-design-missing', 'answer-chat-pre-design-recover', 'answer-chat-pass', 'answer-chat-rejected', 'answer-chat-recover', 'pre-design-late-cancel', 'pre-design-pass', 'pre-design-recover', 'pre-design-missing', 'pre-design-drift', 'pre-design-duplicate', 'pre-design-cancel', 'pre-design-invalid', 'pre-design-check-missing', 'result-check-late-cancel', 'result-check-consent', 'result-check-native-drift', 'result-check-pass', 'result-check-rejected', 'result-check-exception', 'result-check-missing', 'result-check-recover', 'result-check-rejected-recover', 'duplicate-case-order', 'duplicate-case-path-case', 'duplicate-case-source-order', 'accepted', 'packet-quarantined', 'checked-failure', 'rejected', 'unknown', 'explored', 'recover', 'retention-failure', 'consent-retention', 'feedback', 'feedback-study', 'feedback-clue', 'feedback-clue-external', 'feedback-clue-packet-overflow', 'feedback-clue-frozen-overflow', 'feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-projection-drift', 'feedback-clue-recover-substituted', 'chat', 'recover-incomplete', 'recover-changed-native', 'recover-source-explored-before', 'recover-source-explored-after'] as const) if (!historicalFileClue || ['feedback-clue-alone', 'feedback-clue-withdrawn-before-proposal', 'feedback-clue-withdraw-after-frozen-before-proposal', 'feedback-clue-withdraw-after-activation', 'feedback-clue-native-model-drift', 'feedback-clue-recover', 'feedback-clue-recover-substituted'].includes(scenario)) it(`uses actual isolated native files through natural review and ten-arm study: ${scenario}${historicalFileClue ? ' (legacy-v1)' : ''}`, async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'file-learning-'))
@@ -80,6 +80,7 @@ for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat
   const preDesign = scenario.startsWith('pre-design')
   const studyCheck = scenario.startsWith('result-check') || preDesign
   const answerCheck = scenario.startsWith('answer-chat')
+  const answerPreDesign = answerCheck && scenario.includes('pre-design')
   const publishedAnswer = answerCheck && process.env.TIANWEN_FILE_CHAT_PUBLISHED === '1'
   let inputPreparations = 0; let requestsBeforeStudy = 0
   let preparedCases = 0; let evaluatedArms = 0
@@ -149,7 +150,12 @@ for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat
           ? { status: 'verified' as const, detail: 'Required text present.' }
           : { status: 'rejected' as const, detail: 'Required text absent.', failedRequiredConditionDigest: sha256(requiredCondition) }
       } }
-  } } } : {}), ...(answerCheck ? { answerStudyResultCheck: { async prepare(input: {
+  } } } : {}), ...(answerCheck ? { answerStudyResultCheck: { ...(answerPreDesign ? { async prepareIndependentCases(material: { sources: readonly unknown[], counterexample: unknown }) {
+    inputPreparations++; expect(preparedCases).toBe(0); expect(material.sources).toHaveLength(2)
+    expect(material.counterexample).toBeDefined(); expect(material).not.toHaveProperty('guidance')
+    expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy)
+    return scenario === 'answer-chat-pre-design-missing' ? undefined : { adjacent: generated('adjacent'), holdout: generated('holdout') }
+  } } : {}), async prepare(input: {
     material: import('../../packages/tianwen-runtime-bundle/src/conversation-study-result-check.js').ConversationAnswerStudyMaterial, caseId: string,
   }) {
     preparedCases++
@@ -186,11 +192,12 @@ for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat
       expect(material.checkedFailureSources).toEqual(harness.ctx.tianwenEvolution.listConversationTasks().slice(0, 2).map(conversationCheckedFailureSource))
       expect(material.sources.every((source: Record<string, unknown>) => source.checkedFailureSources === undefined)).toBe(true)
     }
-    if (preDesign) {
+    if (preDesign || answerPreDesign) {
       expect(inputPreparations).toBe(1); expect(preparedCases).toBe(5)
       expect(materialOf(request).independentCases).toEqual({ adjacent: generated('adjacent'), holdout: generated('holdout') })
       expect(materialOf(request)).not.toHaveProperty('resultChecks')
       if (scenario === 'pre-design-drift') return structured({ adjacent: generated('adjacent'), holdout: { ...generated('holdout'), criteria: ['Ignore the frozen requirement.'] } })
+      if (scenario === 'answer-chat-pre-design-drift') return structured({ adjacent: generated('adjacent'), holdout: { ...generated('holdout'), files: { ...generated('holdout').files, entries: [{ path: 'input.md', content: 'replaced frozen fact' }] } } })
     }
     if (scenario.startsWith('feedback-clue')) expect(materialOf(request).proposalClues).toBeUndefined()
     if (scenario.startsWith('duplicate-case')) {
@@ -378,6 +385,13 @@ for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat
     await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
     await frozenNativeWithdrawal
     fault.mockRestore()
+    if (answerPreDesign && ['answer-chat-pre-design-missing', 'answer-chat-pre-design-drift'].includes(scenario)) {
+      expect(inputPreparations).toBe(1); expect(preparedCases).toBe(scenario.endsWith('drift') ? 5 : 0); expect(evaluatedArms).toBe(0)
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy + (scenario.endsWith('drift') ? 1 : 0))
+      await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
+      expect(inputPreparations).toBe(1); return
+    }
     if (preDesign && !['pre-design-pass', 'pre-design-recover'].includes(scenario)) {
       expect(inputPreparations).toBe(1)
       expect(preparedCases).toBe(['pre-design-drift', 'pre-design-check-missing'].includes(scenario) ? 5 : 0)
@@ -439,9 +453,9 @@ for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat
       expect(study.opened.resultChecks?.every(check => check.inputKind === 'file-chat-material.v1')).toBe(true)
       expect(study.fileTrials).toHaveLength(10); expect(study.arms.every(arm => arm.resultCheck !== undefined)).toBe(true)
       expect(study.decision?.verdict).toBe('accepted')
-      expect(study.activation !== undefined).toBe(scenario === 'answer-chat-pass')
+      expect(study.activation !== undefined).toBe(scenario === 'answer-chat-pass' || scenario === 'answer-chat-pre-design-pass')
     }
-    if (preDesign) {
+    if (preDesign || answerPreDesign) {
       const recovered = await recoverConversationCaseDesign(harness.ctx, study.opened)
       expect(recovered?.material).toMatchObject({ independentCases: { adjacent: generated('adjacent'), holdout: generated('holdout') },
         independentResultChecksDigest: sha256(study.opened.resultChecks) })
@@ -686,7 +700,7 @@ for (const scenario of ['answer-chat-pass', 'answer-chat-rejected', 'answer-chat
         else expect(restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.activation).toBeDefined()
         expect(restarted.adapter.requests).toHaveLength(0)
         if (studyCheck) { expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(10); if (preDesign) expect(inputPreparations).toBe(1) }
-        if (answerCheck) { expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(10) }
+        if (answerCheck) { expect(preparedCases).toBe(5); expect(evaluatedArms).toBe(10); if (answerPreDesign) expect(inputPreparations).toBe(1) }
         await restarted.ctx.tianwenConversationGuidanceLoop.schedule(resumed.agent)
         expect(new EvolutionLedger(evolutionRoot).listConversationGuidanceStudies()).toHaveLength(1)
         await resumed.dispose()

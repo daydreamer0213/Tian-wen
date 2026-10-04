@@ -65,6 +65,18 @@ export interface PreparedConversationAnswerStudyResultCheck {
     readonly files: readonly ConversationFileEntry[], readonly signal: AbortSignal }) => Promise<ConversationExternalCheckOutcome>
 }
 export interface ConversationAnswerStudyResultCheck {
+  /** Complete host cases fixed before native design; absence preserves original pre-proposal preparation. */
+  readonly prepareIndependentCases?: (input: {
+    readonly sources: readonly (ConversationTaskMaterial | NativeGoalTaskStudyMaterial)[]
+    readonly counterexample: ConversationTaskMaterial | NativeGoalTaskStudyMaterial
+    readonly modelConfigDigest: ReturnType<typeof sha256>
+    readonly qualityContract: ConversationQualityContract
+    readonly cwd?: string
+    readonly signal: AbortSignal
+  }) => Promise<{
+    readonly adjacent: { readonly prompt: string, readonly criteria: readonly string[], readonly files?: { readonly entries: readonly ConversationFileEntry[], readonly outputPaths: readonly string[] } }
+    readonly holdout: { readonly prompt: string, readonly criteria: readonly string[], readonly files?: { readonly entries: readonly ConversationFileEntry[], readonly outputPaths: readonly string[] } }
+  } | undefined>
   /** No complete independent contract means stop this study, never a model fallback. */
   readonly prepare: (input: { readonly material: ConversationAnswerStudyMaterial, readonly caseId: string,
     readonly modelConfigDigest: ReturnType<typeof sha256>, readonly signal: AbortSignal }) => Promise<PreparedConversationAnswerStudyResultCheck | undefined>

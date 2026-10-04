@@ -27,6 +27,7 @@ import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evo
 import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
+import { recoverConversationCaseDesign } from '../../packages/tianwen-runtime-bundle/src/conversation-case-design.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 
@@ -201,15 +202,26 @@ it('wakes a completed study source after its ordinary root agent has been releas
   } finally { await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
 
-it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real native text study outputs through a pre-proposal answer contract: %s', async outcome => {
-  const publishedCold = outcome === 'cold' && process.env.TIANWEN_ANSWER_CHECK_PUBLISHED === '1'
+it.each(['verified', 'rejected', 'unavailable', 'cold', 'pre-design-verified', 'pre-design-drift', 'pre-design-missing', 'pre-design-cancel', 'pre-design-cold'] as const)('checks real native text study outputs through a pre-proposal answer contract: %s', async outcome => {
+  const preDesign = outcome.startsWith('pre-design'), coldOutcome = outcome === 'cold' || outcome === 'pre-design-cold'
+  const publishedCold = coldOutcome && process.env.TIANWEN_ANSWER_CHECK_PUBLISHED === '1'
+  const publishedHot = outcome === 'pre-design-verified' && process.env.TIANWEN_ANSWER_CHECK_PUBLISHED_HOT === '1'
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? tmpdir()
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'answer-study-'))
   const script: ScriptEntry[] = []
   for (let i = 0; i < 3; i++) script.push(structured(admission), textResponse(`pilot answer ${i}`), ...reviewPair(verdict(i === 2, 'pilot')))
-  script.push(structured({ adjacent: { prompt: 'Summarize adjacent laboratory result.', criteria: ['Preserve scope'] },
-    holdout: { prompt: 'Summarize independent field result.', criteria: ['Preserve scope'] } }),
+  const independentCases = { adjacent: { prompt: 'Summarize adjacent laboratory result.', criteria: ['Preserve scope'] },
+    holdout: { prompt: 'Summarize independent field result.', criteria: ['Preserve scope'] } }
+  script.push(request => {
+    if (preDesign) {
+      expect(prepare).toHaveBeenCalledTimes(5)
+      const block = request.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))
+      if (block?.type !== 'text') throw new Error('missing packet')
+      expect(JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!)).toMatchObject({ independentCases, independentResultChecksDigest: expect.any(String) })
+    }
+    return structured(outcome === 'pre-design-drift' ? { ...independentCases, holdout: { ...independentCases.holdout, prompt: 'Changed host task.' } } : independentCases)
+  },
     request => { expect(prepare).toHaveBeenCalledTimes(5); return structured({ guidance: 'Preserve the stated source scope.' }) })
   for (let i = 0; i < 5; i++) for (const role of ['baseline', 'candidate']) {
     script.push(structured({ answer: `pilot trial ${i} ${role}` }), ...reviewPair(verdict(role === 'candidate' || i > 0, 'pilot')))
@@ -220,14 +232,28 @@ it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real n
       : { status: 'verified' as const, detail: 'Complete engineering scope contract passed.' })
   const prepare = vi.fn(async (input: { material: unknown }) => outcome === 'unavailable' ? undefined : ({ checkerId: 'engineering-native-answer',
     checkerDigest: sha256('checker'), contractDigest: sha256(input.material), inputsDigest: sha256(input.material), requiredCondition: 'Preserve scope.', evaluate }))
-  const harness = await mountFeedbackHarness(publishedCold ? root : join(root, 'sessions'), script)
+  const prepareIndependentCases = vi.fn(async () => {
+    expect(prepare).not.toHaveBeenCalled()
+    if (outcome === 'pre-design-missing') return undefined
+    if (outcome === 'pre-design-cancel') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    return structuredClone(independentCases)
+  })
+  const answerStudyResultCheck = { prepare, ...(preDesign ? { prepareIndependentCases } : {}) }
+  const harness = await mountFeedbackHarness(publishedCold || publishedHot ? root : join(root, 'sessions'), script)
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
-  await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
+  if (publishedHot) {
+    await harness.ctx.plugin(Loader, { baseUrl: pathToFileURL(root).href })
+    const runtime = await import(new URL('../../packages/tianwen-runtime-bundle/dist/runtime.js', import.meta.url).href)
+    harness.ctx.loader.builtins['answer-study-hot'] = { apply: runtime.applyDevelopment }
+    await harness.ctx.loader.create({ name: 'cordis:answer-study-hot', config: { developmentRoot: root, answerStudyResultCheck } })
+    await harness.ctx.loader.await()
+    await Promise.all([...harness.ctx.registry.values()].flatMap(scope => [...scope.fibers].map(value => value.await())))
+  } else await applyRuntime(harness.ctx, { evolutionRoot: join(root, 'evolution') })
   harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
-  await harness.ctx.plugin(TianwenConversationObserverService)
+  if (!publishedHot) await harness.ctx.plugin(TianwenConversationObserverService)
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('answer-study-root'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
   const record = harness.ctx.tianwenEvolution.recordConversationGuidance.bind(harness.ctx.tianwenEvolution)
-  const fault = outcome === 'cold' ? vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationGuidance').mockImplementation(value => {
+  const fault = coldOutcome ? vi.spyOn(harness.ctx.tianwenEvolution, 'recordConversationGuidance').mockImplementation(value => {
     if (value.kind === 'guidance-activated') throw new Error('lost activation write')
     return record(value)
   }) : undefined
@@ -237,10 +263,14 @@ it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real n
       await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
     }
     const before = harness.ctx.tianwenEvolution.listConversationTasks()
-    await harness.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck: { prepare } })
+    if (!publishedHot) await harness.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck })
     await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
-    if (outcome === 'unavailable') {
+    if (preDesign) expect(prepareIndependentCases).toHaveBeenCalledOnce()
+    if (['pre-design-missing', 'pre-design-cancel', 'pre-design-drift'].includes(outcome)) {
+      expect(prepare).toHaveBeenCalledTimes(outcome === 'pre-design-drift' ? 5 : 0); expect(evaluate).not.toHaveBeenCalled()
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+    } else if (outcome === 'unavailable') {
       expect(prepare).toHaveBeenCalledOnce(); expect(evaluate).not.toHaveBeenCalled()
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
     } else {
@@ -248,9 +278,14 @@ it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real n
       expect(study.decision?.verdict).toBe('accepted')
       expect(study.arms).toHaveLength(10); expect(evaluate).toHaveBeenCalledTimes(10)
       expect(study.opened.resultChecks?.every(check => check.inputKind === 'text-material.v1')).toBe(true)
-      expect(study.activation !== undefined).toBe(outcome === 'verified')
+      expect(study.activation !== undefined).toBe(outcome === 'verified' || outcome === 'pre-design-verified')
+      if (preDesign) {
+        const recovered = await recoverConversationCaseDesign(harness.ctx, study.opened)
+        expect(recovered?.material).toMatchObject({ independentCases, independentResultChecksDigest: sha256(study.opened.resultChecks) })
+        expect(recovered?.semanticIndependence).toBe('unestablished')
+      }
       expect(evaluate.mock.calls.map(call => call[0].answer)).toEqual(Array.from({ length: 5 }, (_, i) => [`pilot trial ${i} baseline`, `pilot trial ${i} candidate`]).flat())
-      if (outcome === 'cold') {
+      if (coldOutcome) {
         const requests = harness.adapter.requests.length
         fault!.mockRestore(); await handle.dispose(); await harness.ctx.fiber.dispose()
         const cold = await mountFeedbackHarness(publishedCold ? root : join(root, 'sessions'), [])
@@ -258,14 +293,14 @@ it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real n
           await cold.ctx.plugin(SubagentRuntime); await cold.ctx.plugin(spawn, { providerName: 'spawn' })
           if (publishedCold) {
             await cold.ctx.plugin(Loader, { baseUrl: pathToFileURL(root).href })
-            const runtime = await import('../../packages/tianwen-runtime-bundle/dist/runtime.js')
+            const runtime = await import(new URL('../../packages/tianwen-runtime-bundle/dist/runtime.js', import.meta.url).href)
             cold.ctx.loader.builtins['answer-study-cold'] = { apply: runtime.applyDevelopment }
-            await cold.ctx.loader.create({ name: 'cordis:answer-study-cold', config: { developmentRoot: root, answerStudyResultCheck: { prepare } } })
+            await cold.ctx.loader.create({ name: 'cordis:answer-study-cold', config: { developmentRoot: root, answerStudyResultCheck } })
             await cold.ctx.loader.await()
             await Promise.all([...cold.ctx.registry.values()].flatMap(scope => [...scope.fibers].map(value => value.await())))
           } else {
             await applyRuntime(cold.ctx, { evolutionRoot: join(root, 'evolution') })
-            await cold.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck: { prepare } })
+            await cold.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck })
           }
           await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
           const recovered = cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
@@ -275,6 +310,7 @@ it.each(['verified', 'rejected', 'unavailable', 'cold'] as const)('checks real n
           expect(cold.ctx.agents.list()).toEqual([]); expect(cold.adapter.requests).toHaveLength(0)
           expect(harness.adapter.requests).toHaveLength(requests)
           expect(prepare).toHaveBeenCalledTimes(5); expect(evaluate).toHaveBeenCalledTimes(10)
+          if (preDesign) expect(prepareIndependentCases).toHaveBeenCalledOnce()
         } finally { await cold.ctx.fiber.dispose() }
       }
     }

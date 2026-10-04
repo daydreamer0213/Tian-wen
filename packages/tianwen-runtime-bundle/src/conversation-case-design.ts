@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { sha256, type GuidanceProof, type GuidanceStudyOpened } from '@tianwen/evolution'
+import { parseGuidanceCaseResultChecks, sha256, type GuidanceProof, type GuidanceStudyOpened } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 
 export interface RecoveredConversationCaseDesign {
@@ -37,9 +37,11 @@ export async function recoverConversationCaseDesign(ctx: Context, opened: Guidan
     || recovered.modelConfigDigests.length === 0 || recovered.modelConfigDigests.some(digest => digest !== opened.modelConfigDigest)) {
     throw new Error('source-unavailable:case-design-material')
   }
-  if (frozen && (opened.family !== 'code' || opened.evaluationMode !== 'local-files' || opened.fileOutputKind !== 'files'
-    || opened.resultChecks === undefined || row.independentResultChecksDigest !== sha256(opened.resultChecks)
-    || sha256(row.independentCases) !== sha256(output))) throw new Error('source-unavailable:case-design-inputs')
+  if (frozen) {
+    if (opened.resultChecks === undefined || row.independentResultChecksDigest !== sha256(opened.resultChecks)
+      || sha256(row.independentCases) !== sha256(output)) throw new Error('source-unavailable:case-design-inputs')
+    parseGuidanceCaseResultChecks(opened.resultChecks, opened)
+  }
   for (const [index, kind] of (['source1', 'source2'] as const).entries()) {
     const matches = opened.cases.filter(item => item.kind === kind)
     const item = matches[0]

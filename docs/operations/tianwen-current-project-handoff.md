@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 答案独立案例事前供给收口
+
+原code/files预设计接缝支持text/filechat，五项完整合同先于案例模型调用，原生设计精确复制/缺失漂移取消停止，原检查不重复准备。公开Python答案工厂显式完整五角色供给，精确原三材料/模型/质量/模式/cwd，默认不供给；原设计恢复使用原模式parser核检查摘要，语义独立仍unestablished。168相关/新filechat四控制/旧files与chat七定向/四依赖及15构建过。实际发行DEV文本完整热研究1项、文本/filechat冷恢复各1项及发行工厂供给通过；scripted、非独立CLI/新Node/自然学习/十次Python执行。[准确失败、范围及下一责任](tianwen-answer-independent-cases-delivery-20261004.md)。
+
+三完整修改测试展开旧59/现59/新增0，产品原构建另过，独立审查无新增有据P1/P2。四历史摘要保持/仍原1问题/R9风险未解/0新自然来源反馈研究真实采用或未来效果。完整目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口保持。事前供给机制收口，下一固定真实开发任务的完整独立依据和核验身份、唯一首次答案前瞻，不反复通路测试、桥接旧身份/重评失败/索题或机械整体blocked；原相容性、治理/未来效果各自验收，NativeGoal新模式与开放语义缺口如实保留。测试自清/D>=15/77保护不碰/本轮Docker未启动，见audit。
+
 ## 2026-10-04 当前推进：具体答案核验生产者交付
 
 公开createConversationStudyIsolatedPythonAnswerCheck冻结完整宿主材料/案例/模型/原条件/规则，只执行宿主源码，回答仅stdin数据；原执行器及Loop/Ledger默认不改。111相关、原四依赖/Runtime15步骤、实际发行工厂五次真实隔离执行通过，损坏检查器为unverifiable而非任务失败。原file/chat源码十臂合法/拒绝/恢复三控制及旧chat通过，实际发行DEV冷恢复0模型/0再准备核验（会resume根Agent，不称零Agent）。独立审查无新增有据P1/P2。[准确范围、失败及下一责任](tianwen-isolated-answer-check-delivery-20261004.md)。

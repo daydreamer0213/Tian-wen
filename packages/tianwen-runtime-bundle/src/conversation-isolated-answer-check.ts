@@ -20,6 +20,8 @@ export interface ConversationIsolatedPythonAnswerCheckConfig {
   readonly modelConfigDigest: ReturnType<typeof sha256>
   readonly cases: readonly ConversationIsolatedPythonAnswerCase[]
   readonly isolated: IsolatedPythonCliConfig
+  /** Explicit full five-role cohort; supply fixed cases, never generate them from model answers. */
+  readonly provideIndependentCases?: true
 }
 const packet = (material: ConversationAnswerStudyMaterial, answer: string, files: unknown) =>
   JSON.stringify({ schemaVersion: 'tianwen.answer-check.v1', material, answer, files })
@@ -50,7 +52,41 @@ export function createConversationStudyIsolatedPythonAnswerCheck(raw: Conversati
     return [entry.caseId, { ...entry, materialDigest: sha256(material) }] as const
   }))
   assert.equal(definitions.size, config.cases.length)
-  return { async prepare(input) {
+  const roles = ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const
+  let prepareIndependentCases: ConversationAnswerStudyResultCheck['prepareIndependentCases']
+  if (config.provideIndependentCases === true) {
+    assert.deepEqual([...definitions.keys()].sort(), [...roles].sort())
+    const first = definitions.get('source1')!.material, qualityDigest = sha256(first.qualityContract)
+    assert(first.qualityContract !== undefined)
+    assert(roles.slice(0, 3).every(id => {
+      const material = definitions.get(id)!.material
+      return ('request' in material || 'sourceKind' in material && material.sourceKind === 'native-goal-task')
+        && ('sourceKind' in material) === ('sourceKind' in first)
+    }))
+    assert(roles.slice(3).every(id => {
+      const material = definitions.get(id)!.material
+      return 'prompt' in material && !('sourceKind' in material) && !('request' in material)
+    }))
+    assert(roles.every(id => {
+      const material = definitions.get(id)!.material
+      return material.qualityContract !== undefined && sha256(material.qualityContract) === qualityDigest
+        && (material.files === undefined) === (first.files === undefined) && material.files?.cwd === first.files?.cwd
+    }))
+    prepareIndependentCases = async input => {
+      input.signal.throwIfAborted()
+      if (input.modelConfigDigest !== config.modelConfigDigest || input.sources.length !== 2 || sha256(input.qualityContract) !== qualityDigest
+        || input.cwd !== first.files?.cwd || [...input.sources, input.counterexample].some((material, index) => sha256(material) !== definitions.get(roles[index]!)!.materialDigest)) return undefined
+      const independent = (id: 'adjacent' | 'holdout') => {
+        const material = definitions.get(id)!.material
+        assert('prompt' in material)
+        return { prompt: material.prompt, criteria: [...material.criteria], ...(material.files === undefined ? {} : {
+          files: { entries: structuredClone(material.files.entries), outputPaths: [...material.files.outputPaths] },
+        }) }
+      }
+      return { adjacent: independent('adjacent'), holdout: independent('holdout') }
+    }
+  }
+  return { ...(prepareIndependentCases === undefined ? {} : { prepareIndependentCases }), async prepare(input) {
     input.signal.throwIfAborted()
     try {
       const entry = definitions.get(input.caseId)

@@ -805,42 +805,57 @@ export class TianwenConversationGuidanceLoopService extends Service {
       // not turn unrelated wakeups or a restart into retries of this pair.
       if (evolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(attemptBody), ...attemptBody }).duplicate) return
       let preparedChecks: PreparedStudyResultChecks | undefined
-      let independentCases: Awaited<ReturnType<NonNullable<ConversationStudyResultCheck['prepareIndependentCases']>>> | undefined
+      let independentCases: Awaited<ReturnType<NonNullable<ConversationAnswerStudyResultCheck['prepareIndependentCases']>>> | undefined
       const assertPreparationCurrent = () => {
         signal.throwIfAborted()
         const consent = evolution.getLearningAnalysisConsent()
         if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== metadata.consentRevision
           || guidanceVersion(evolution.getConversationGuidance(metadata.scopeKey)) !== guidanceVersion(parentSnapshot)) throw new Error('scope-changed')
       }
-      if (this.studyResultCheck?.prepareIndependentCases !== undefined && family === 'code' && fileConfig?.outputKind === 'files') {
-        const hostCases = await withConversationObservationCancellation(signal, () => this.studyResultCheck!.prepareIndependentCases!({
+      const validateIndependent = (independent: readonly GuidanceGeneratedCase[]) => {
+        const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => studyTexts(material)).map(text => guidanceInputDigest(text)))
+        if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
+        if (fileMode) {
+          const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(studyTexts(material,true).join('\n'), material.files!)))
+          for (const item of independent) {
+            const identity = guidanceFileInputIdentity(item.prompt, item.files!)
+            if (fileInputs.has(identity)) throw new Error('invalid-judgment')
+            fileInputs.add(identity)
+          }
+        } else {
+          const sourcePrompts = [...sources, counter].flatMap(material => studyTexts(material,true))
+          if (independent.some((item, index) => sharesCopiedQuantifiedFact([...sourcePrompts, ...independent.slice(0, index).map(previous => previous.prompt)], item.prompt))) throw new Error('invalid-judgment')
+        }
+      }
+      const prepareHostCases = this.studyResultCheck?.prepareIndependentCases !== undefined && family === 'code' && fileConfig?.outputKind === 'files'
+        ? () => this.studyResultCheck!.prepareIndependentCases!({
           sources: structuredClone(sources), counterexample: structuredClone(counter), modelConfigDigest: sha256(callConfig),
           qualityContract: structuredClone(qualityContract!), cwd: fileConfig.cwd, signal,
-        }))
+        }) : this.answerStudyResultCheck?.prepareIndependentCases !== undefined && (!fileMode || fileConfig?.outputKind === 'chat')
+        ? () => this.answerStudyResultCheck!.prepareIndependentCases!({
+          sources: structuredClone(sources), counterexample: structuredClone(counter), modelConfigDigest: sha256(callConfig),
+          qualityContract: structuredClone(qualityContract!), ...(fileConfig === undefined ? {} : { cwd: fileConfig.cwd }), signal,
+        }) : undefined
+      if (prepareHostCases !== undefined) {
+        const hostCases = await withConversationObservationCancellation(signal, prepareHostCases)
         assertPreparationCurrent()
         if (hostCases === undefined) throw new Error('source-unavailable')
         independentCases = structuredClone(hostCases)
-        const frozenCases = [...cases, ...generatedCases(independentCases, qualityContract!, fileConfig)]
-        const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(
-          studyTexts(material,true).join('\n'), material.files!)))
-        for (const item of frozenCases.slice(3)) {
-          if (!('prompt' in item)) throw new Error('source-unavailable')
-          const identity = guidanceFileInputIdentity(item.prompt, item.files!)
-          if (fileInputs.has(identity)) throw new Error('invalid-judgment')
-          fileInputs.add(identity)
-        }
+        const frozenIndependent = generatedCases(independentCases, qualityContract!, fileConfig)
+        validateIndependent(frozenIndependent)
+        const frozenCases = [...cases, ...frozenIndependent]
         const frozenBody: GuidanceStudyBody = {
-          scopeKey: metadata.scopeKey, family: 'code', failureCategory: group.category, consentRevision: metadata.consentRevision,
+          scopeKey: metadata.scopeKey, family, failureCategory: group.category, consentRevision: metadata.consentRevision,
           parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: attemptBody.sourceTaskIds,
           counterexampleTaskId: sourceId(group.counterexample), cases: frozenCases, modelConfigDigest: sha256(callConfig),
-          qualityContract: qualityContract!, evaluationMode: 'local-files', fileOutputKind: 'files', ...checkedEvidence,
+          qualityContract: qualityContract!, ...(fileMode ? { evaluationMode: 'local-files', fileOutputKind: fileConfig!.outputKind } : {}), ...checkedEvidence,
         }
         parseConversationGuidanceRecord({ kind: 'study-opened', studyId: guidanceStudyId(frozenBody), ...frozenBody })
-        preparedChecks = await prepareConversationStudyResultChecks(this.studyResultCheck, frozenBody,
-          [...sources, counter, ...frozenCases.slice(3).map(item => {
-            if (!('prompt' in item)) throw new Error('source-unavailable')
-            return { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }
-          })], signal)
+        const materials = [...sources, counter, ...frozenIndependent.map(item => ({ prompt: item.prompt, criteria: item.criteria,
+          qualityContract: item.qualityContract!, ...(item.files === undefined ? {} : { files: item.files }) }))]
+        preparedChecks = fileConfig?.outputKind === 'files'
+          ? await prepareConversationStudyResultChecks(this.studyResultCheck!, frozenBody, materials, signal)
+          : await prepareConversationAnswerStudyResultChecks(this.answerStudyResultCheck!, frozenBody, materials, signal)
         assertPreparationCurrent()
       }
       const generated = await runConversationJudgment(this.ctx, agent, {
@@ -857,21 +872,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       assertPreparationCurrent()
       if (independentCases !== undefined && sha256(generated.value) !== sha256(independentCases)) throw new Error('invalid-judgment')
       const independent = generatedCases(generated.value, qualityContract!, fileConfig)
-      const seen = new Set(fileMode ? cases.map(item => item.inputDigest) : [...sources, counter].flatMap(material => studyTexts(material)).map(text => guidanceInputDigest(text)))
-      if (independent.some(item => seen.has(item.inputDigest))) throw new Error('invalid-judgment')
-      if (fileMode) {
-        const fileInputs = new Set([...sources, counter].map(material => guidanceFileInputIdentity(
-          studyTexts(material,true).join('\n'), material.files!)))
-        for (const item of independent) {
-          const identity = guidanceFileInputIdentity(item.prompt, item.files!)
-          if (fileInputs.has(identity)) throw new Error('invalid-judgment')
-          fileInputs.add(identity)
-        }
-      }
-      if (!fileMode) {
-        const sourcePrompts = [...sources, counter].flatMap(material => studyTexts(material,true))
-        if (independent.some((item, index) => sharesCopiedQuantifiedFact([...sourcePrompts, ...independent.slice(0, index).map(previous => previous.prompt)], item.prompt))) throw new Error('invalid-judgment')
-      }
+      validateIndependent(independent)
       cases.push(...independent)
       const environmentDigest = this.sourceEnvironment()
       const registry = this.ctx.get('skills') as Context['skills'] | undefined
@@ -896,7 +897,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
           : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files: item.files! }), signal)
         signal.throwIfAborted()
       }
-      if (this.answerStudyResultCheck !== undefined && (!fileMode || fileConfig?.outputKind === 'chat')) {
+      if (preparedChecks === undefined && this.answerStudyResultCheck !== undefined && (!fileMode || fileConfig?.outputKind === 'chat')) {
         preparedChecks = await prepareConversationAnswerStudyResultChecks(this.answerStudyResultCheck, bodyFor([]), cases.map(item => 'sourceTaskId' in item
           ? item.kind === 'counterexample' ? counter : sources[item.kind === 'source1' ? 0 : 1]!
           : { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, ...(item.files === undefined ? {} : { files: item.files }) }), signal)
