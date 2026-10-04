@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 天问首稿交付可复用 CLI 配置
+
+事前08de35b6固定25检查，唯一第八自然Task原生生成5506B配置工厂，程序verified/原双审met/权限exact，11提供方请求含根5，原稿字节接纳；另Node0请求准确恢复封存/旧七Task。工厂实际原CLI冷消费服务/JSONL/合同/job ready/matches、退出0；明确未挂runner，不称全CLI真实执行。相关13项回归/独立无有据P1/P2，原检查器发行未变；事前JSONL/重复tools/索引纠正及事后审计路径错误保留。[准确事实和下一责任](tianwen-cli-profile-data-delivery-20261004.md)。
+
+持续账本93d6659a…97b828a，正式5af25fcd…ce80da保持。仍1问题/反馈研究0，本条成功条件不兼容报告问题，R9/采用/未来效果未完成；完整目标active/incomplete、main/Daily NO-GO/原门槛/窗口不改，不标整项目blocked或索题催评。下一用已交付配置执行真正原CLI开发任务，不再复制宿主驱动/重复冷控制/加报告题，既有连续数据保留原地；研究及语义工作各自按实际证据推进。D新增约半MiB、无环境副本、自有临时home已清、71拒删根不碰、Docker收尾停止，资源见本轮final-audit。
+
 ## 2026-10-04 原 CLI 能直接加载 DEV，下一做实际配置交付
 
 旧直接子DEV目录与原CLI固定home/profiles/name布局不相容。公开同一只读根验证器保留旧根并认可专用DEV home的原Profile，逐层canonical、同baseUrl、派生存储/实际JSONL和fresh Evolution保留；合同插件复用，CLI未改。首次两个真实拒绝先红；原包15构建步骤及源20项通过。首组合109/110的尾斜杠URL控制断言错误留存，改按实际目录比较后最终六文件110通过。实际CLI加载公开DEV、原服务/JSONL并原退出0，无Task/请求/研究/自动同意，两账本保持；index检查器字节未变。[准确接入证据](tianwen-dev-cli-profile-20261004.md)。
