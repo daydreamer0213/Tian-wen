@@ -55,6 +55,9 @@ import { developmentRuntimeConfig, type TianwenDevelopmentRuntimeConfig } from '
 export type { TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
+// DEV hosts consume the exact published cancellation boundary, without
+// importing source-only observer classes or supplying their own implementation.
+export { withConversationObservationCancellation } from './observation-cancellation.js'
 
 export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string

@@ -1,6 +1,5 @@
-import { sha256 } from '../packages/tianwen-evolution/src/learning-intake.js'
-import { parseConversationFileEntries } from '../packages/tianwen-evolution/src/conversation-files.js'
-import { conversationExternalInputsDigest, parseConversationExternalCheck, supportsConversationCodeCheck } from '../packages/tianwen-evolution/src/conversation-external-check.js'
+import { sha256, parseConversationFileEntries, conversationExternalInputsDigest,
+  parseConversationExternalCheck, supportsConversationCodeCheck } from '../packages/tianwen-evolution/dist/index.js'
 
 const sequence = value => Number.isSafeInteger(value) && value >= 1
 const samePaths = (left, right) => sha256([...left].sort()) === sha256([...right].sort())

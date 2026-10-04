@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 普通 Node 原执行器接入，未新增来源
+
+仅公开原取消helper、nativeTask转Runtime/compat公开入口、prepared门转Evolution公开dist；修实测源语法和不存在扩展名，无协议/原门逻辑改变。92相关及完整依赖发行/声明构建通过；独立关闭已启动取消控制P2，无有据产品P1/P2。[准确交付与首错误](tianwen-standard-native-execution-20261004.md)。
+
+普通Node原Loader调用原归档inspect，原第六Task完整seal匹配且unverifiable/inconclusive不变；六记录/同意/两账本保持，0请求/新Task/重评。普通入口消费不充自然效果。下一由执行者补一次性原Loader任务启动，委托现有nativeTask而不新建执行框架，再事前冻结真正工作的独立要求。仍1问题/1不兼容完整成功/0真实反馈研究，完整目标active/incomplete、main/Daily NO-GO及原资格/窗口不变；原71拒删路径不碰，D17.916GiB/无新环境/Docker停止。
+
 ## 2026-10-04 标准可信合同 Loader 已交付，来源不补判
 
 原Loader薄入口通过原公开DEV Runtime/工厂读取SHA固定包；祖先junction物理包含反例先红后修，最终10相关通过、独立无有据P1/P2。[准确交付与界限](tianwen-standard-dev-runtime-20261004.md)。实际另Node冷载无harness/脚本适配器，原提供方配置及原文件工具注册可解析，0模型/Task/功能执行，六原Task exact、同意与两账本不变；不能计作来源或学习效果。

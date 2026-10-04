@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原执行器已能在普通 Node 消费公开接口
+
+标准加载后实际发现nativeTask源取消类无法被原生类型擦除导入；公开原取消helper并转原dist入口。首完整回归又发现prepared门指向不存在的Evolution/src/*.js，仅改原公开dist导入；nativeTask改原compat/runtime，逻辑及协议不变。原请求观察器可原生导入，无必要迁移，不制造额外题。[准确首次错误、交付及下一项](tianwen-standard-native-execution-20261004.md)。
+
+首次mjs0测试不算red；匹配red1失败、首相关34/35失败保持；最终92相关通过，依赖图五项目/Runtime/两声明构建过。独立指出取消控制须等待实际启动，已修且无有据P1/P2。普通Node原Loader实际调用原归档inspect，原第六Task完整seal匹配且保持unverifiable/inconclusive；0模型/Task/功能检查，六原记录及两账本dispose后保持。
+
+下一补原Loader一次性任务入口，直接委托现有nativeTask/权限/准备门/单次尝试/取消归档，衔接事前固定任务与可信合同，不复建宿主；继续真正开发工作和原研究/安全/采用/未来效果，不索题催评。仍1问题/不兼容成功1/反馈研究0，完整目标active/incomplete、main/Daily NO-GO/原门槛及窗口保持。控制约56KiB，无新环境/删除/拒删，原71路径保持；D17.916GiB、Docker停止。
+
 ## 2026-10-04 标准 Loader 可信合同接入已实现
 
 新增薄DEV插件，原字节SHA锁定JSON→既有普通/Goal/研究工厂→公开applyDevelopment；复用原Loader/JSONL/Agent/提供方，无临时harness装配。独立发现的祖先junction路径问题先红再以物理cwd修复，合法外部包别名保留；最终10相关通过，两次只读复查无有据P1/P2。[准确接口、消费证据及剩余](tianwen-standard-dev-runtime-20261004.md)。
