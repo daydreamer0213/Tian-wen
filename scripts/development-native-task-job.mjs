@@ -9,7 +9,7 @@ const {createDevelopmentNativeFilePolicy}=await loadDevelopmentNativeModules()
 const key=path=>resolve(path).toLowerCase()
 export const name='tianwen-development-native-task-job'
 export const inject=['tianwenDevelopmentRuntimeContracts','tianwenEvolution','tianwenConversationObserver',
- 'tianwenConversationFileObserver','tianwenConversationGuidanceLoop','agents','tools','llm','sessionPersistence']
+ 'tianwenConversationFileObserver','tianwenConversationGuidanceLoop','agents','tools','llm','sessions','sessionPersistence']
 
 /** Frozen job data only; no signal, callback, Runtime flags or executable JSON. */
 export function loadDevelopmentNativeTaskJob(config) {
@@ -38,13 +38,20 @@ export function loadDevelopmentNativeTaskJob(config) {
 function freeze(value) {if(value&&typeof value==='object'){for(const child of Object.values(value))freeze(child);Object.freeze(value)}return value}
 class DevelopmentNativeTaskJob extends Service {
  static inject=inject
- constructor(ctx,job) {super(ctx,'tianwenDevelopmentNativeTaskJob');Object.defineProperty(this,'job',{value:freeze(structuredClone(job))})}
- async run(signal) {
+ constructor(ctx,job) {
+  super(ctx,'tianwenDevelopmentNativeTaskJob')
+  const frozenJob=freeze(structuredClone(job))
+  Object.defineProperty(this,'job',{value:frozenJob})
+  // The job provider owns execution resources until its original settlement.
+  // A traced consumer Context would bind the Agent to the unloading runner,
+  // releasing its live session concurrently with cancellation archival.
+  this.run=async signal=>{
   AbortSignal.prototype.throwIfAborted.call(signal)
-  const ctx=this.ctx,{schemaVersion,...job}=structuredClone(this.job)
+  const {schemaVersion,...job}=structuredClone(frozenJob)
   assert(ctx.tianwenDevelopmentRuntimeContracts.matches(job),'DEV job differs from its mounted original contract')
   return runDevelopmentNativeTask(ctx,{...job,signal,isPrepared:()=>ctx.tianwenEvolution.listConversationTasks(job.sessionId)
    .some(task=>task.externalCheckPrepared!==undefined)})
+  }
  }
 }
 /** Loading prepares a data-bound entry; the caller explicitly runs and owns it. */
