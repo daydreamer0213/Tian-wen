@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原生不同合同的实际 SDK 入口已通过
+
+实际发行Runtime新工程控制三Goal/不同合同及前像/六原检查，原Loop记录三来源attempt；脚本34请求、真实模型0，study/activation0。新Node零请求准确恢复全部会话/状态/账本及原材料，九个改合同/检查器/条件恢复均拒绝。最终153相关回归通过/4显式跳过，独立无有据P1/P2。[准确范围与首次失败](tianwen-native-check-family-sdk-20261004.md)。
+
+首次失败来自上一轮只构建bundle、未重建evolution工作区依赖；源码正确但编译旧。已改用`pnpm --filter '@tianwen/runtime-bundle...' build`，五项目/Runtime/两声明成功。首日志/摘要保留，首临时Profile已被fixture清理，不能称其完整冷恢复；本轮成功工程场景留存约0.64MiB。自然五Task/问题1/feedback-study0及正式/持续账本不变，不能计合成失败为自然证据。
+
+下一查原研究独立检查器对native Goal材料的实际消费，真实缺口才窄修；本入口控制结束，不再重复或新增报告功能。完整目标active/incomplete、main/Daily NO-GO及原门槛/窗口保持，D约17.96GiB>=15，原24拒删路径不碰，用户无须补题或评价。
+
 ## 2026-10-04 双审并行及原生来源分组修复
 
 原compact完整文件双审并行，意见/材料/原校验/预算保持，组失败取消排空并保留原错误。固定52单元新合成对照4真实请求/0natural，两组met/四proof新Node0模型准确恢复；native实际同时启动但本组无加速（86.392→89.634秒），不追加轮数或宣称自然可靠性/成本改善。

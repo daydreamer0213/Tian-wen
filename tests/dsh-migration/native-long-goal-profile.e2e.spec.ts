@@ -148,6 +148,7 @@ class ProfileAdapter extends LlmAdapter {
     private readonly failTaskFinalResponse = false,
     private readonly researchControl = false,
     private readonly researchExploration = false,
+    private readonly checkedSourceEntryControl = false,
   ) { super() }
   private reviews = 0
 
@@ -182,6 +183,7 @@ class ProfileAdapter extends LlmAdapter {
       const packet = JSON.parse(raw.text.slice(raw.text.indexOf(marker) + marker.length))
       if (this.researchControl && packet.claimEvidence === undefined) {
         const instruction = raw.text.slice(0, raw.text.indexOf(marker))
+        if (this.checkedSourceEntryControl) throw new Error('Controlled stop after original native source selection; no cases or method evaluated.')
         const value = instruction.startsWith('Design exactly two independent')
           ? { adjacent: { prompt: 'Write a short note about the independent orchard schedule.', criteria: ['Follow the independent orchard requirement.'] },
             holdout: { prompt: 'Write a short note about the independent library schedule.', criteria: ['Preserve the independent library requirement.'] } }
@@ -200,7 +202,7 @@ class ProfileAdapter extends LlmAdapter {
       const answers = evidence.items.filter(item => item.role === 'answer')
       const index = ++this.reviews
       this.beforeReview?.(index)
-      const verdict = this.researchControl ? packet.original.source === undefined
+      const verdict = this.checkedSourceEntryControl ? 'met' : this.researchControl ? packet.original.source === undefined
         ? packet.original.answer === 'Controlled baseline answer.' ? 'not-met' : 'met'
         : packet.original.source.nativeGoal.task.objective.endsWith('case 3') ? 'met' : 'not-met' : this.contentVerdict
       const value = { verdict, category: verdict === 'not-met' ? 'instruction-following' : null,
@@ -306,6 +308,7 @@ async function mountProfile(
     readonly failTaskFinalResponse?: boolean
     readonly researchControl?: boolean
     readonly researchExploration?: boolean
+    readonly checkedSourceEntryControl?: boolean
     readonly development?: boolean
     readonly quarantineOverride?: boolean
   } = {},
@@ -374,7 +377,7 @@ async function mountProfile(
   await ctx.plugin(SubagentRuntime)
   if (options.contentVerdict === undefined) ctx.subagents.registerProvider(spawnProvider)
   else await ctx.plugin(nativeSpawn, { providerName: 'spawn' })
-  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse, options.researchControl, options.researchExploration)
+  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse, options.researchControl, options.researchExploration, options.checkedSourceEntryControl)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
   const runtimeApi = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
     ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)) as typeof runtimePublic
@@ -835,6 +838,66 @@ describe('native Long Goal profile execution', () => {
       }
     } finally { await cold?.dispose(false); await future?.dispose(false); await first.dispose() }
   }, 60_000)
+  it('selects different original native Goal file contracts through actual SDK recovery without evaluating a synthetic method',async()=>{
+    let preparations=0,evaluations=0
+    const receiptRoot=process.env.TIANWEN_NATIVE_CHECK_FAMILY_RECEIPTS_ROOT===undefined?undefined:resolve(process.env.TIANWEN_NATIVE_CHECK_FAMILY_RECEIPTS_ROOT)
+    if(receiptRoot!==undefined){expect(receiptRoot.startsWith(resolve('D:/DevData')+'\\')).toBe(true);mkdirSync(receiptRoot,{recursive:true})}
+    const profile=await mountProfile('Update the distinct native check-family engineering output',{
+      completeTaskThroughTool:true,contentVerdict:'met',taskCount:3,fileActions:'read-success',researchControl:true,checkedSourceEntryControl:true,
+      goalTaskAcceptance:{async methodScope(){return{family:'code',evaluationMode:'local-files',fileOutputKind:'files'}},
+        async prepare(material){
+          preparations++;const index=Number(material.task.objective.match(/case (\d+)$/)![1])
+          const files={schemaVersion:'tianwen.conversation-file-material.v1' as const,cwd:material.cwd,outputKind:'files' as const,
+            entries:[{path:'input.txt',content:'Original independent input '+index},{path:'first.txt',content:'Original independent preimage '+index}],outputPaths:['first.txt']}
+          for(const entry of files.entries)writeFileSync(join(material.cwd,entry.path),entry.content)
+          const contractDigest=sha256({requirements:material.task.objective,files,cases:{index}})
+          const requiredCondition='Controlled mandatory original file condition.'
+          return{checkerId:'native-file-check-family-control',checkerDigest:sha256('fixed native file checker'),contractDigest,
+            inputsDigest:conversationExternalInputsDigest(files.entries),requiredCondition,contentReview:{files},
+            async evaluate(candidate){evaluations++;expect(candidate.preparation.contractDigest).toBe(contractDigest)
+              return index<3?{status:'rejected',detail:'Scripted original condition failure, not natural evidence.',failedRequiredConditionDigest:sha256(requiredCondition)}
+                :{status:'verified',detail:'Scripted original condition success, not natural evidence.'}}}
+        }},
+    })
+    let cold:Awaited<ReturnType<typeof mountProfile>>|undefined
+    try{
+      if(receiptRoot!==undefined)writeFileSync(join(receiptRoot,'profile-path.json'),JSON.stringify({root:profile.root,controlled:true,naturalEvidence:false}),{flag:'wx'})
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({enabled:true,revision:1,policyVersion:'tianwen-auto-analysis.v3'})
+      await profile.startGoal();profile.releaseTask()
+      await vi.waitFor(()=>expect(profile.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(3),{timeout:15_000})
+      await profile.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const sources=profile.ctx.tianwenEvolution.listGoalTaskResearchSources(),attempts=profile.ctx.tianwenEvolution.listConversationCaseDesignAttempts()
+      expect(sources.map(source=>source.outcome.classification)).toEqual(['checked-failure','checked-failure','checked-success'])
+      expect(new Set(sources.map(source=>source.outcome.input.contractDigest)).size).toBe(3)
+      expect(new Set(sources.map(source=>source.outcome.input.inputsDigest)).size).toBe(3)
+      expect(new Set(sources.map(source=>source.outcome.input.checkerDigest)).size).toBe(1)
+      expect(sources.every(source=>source.input.checks.every(check=>check.verdict==='met'))).toBe(true)
+      expect(attempts).toHaveLength(1)
+      expect(attempts[0]!.nativeGoalSources?.map(ref=>ref.sourceId).sort()).toEqual(sources.map(source=>source.sourceId).sort())
+      expect(profile.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(0)
+      const materials=await Promise.all(sources.map(source=>recoverGoalTaskResearchSource(profile.ctx,profile.stateRoot,source)))
+      expect(materials.map(item=>item.preparation.contractDigest)).toEqual(sources.map(source=>source.outcome.input.contractDigest))
+      expect(preparations).toBe(3);expect(evaluations).toBe(3)
+      await vi.waitFor(()=>{for(const source of sources)expect(readTianwenTaskAttemptProjection(readLongGoal(profile.stateRoot,source.outcome.input.goalId) as LongGoalRecordV3,source.outcome.input.taskId).attempts.at(-1)?.status).toBe('settled')})
+      const ledger=readFileSync(join(profile.evolutionRoot,'ledger.jsonl')),goals=listLongGoals(profile.stateRoot)
+      await profile.dispose(false)
+      cold=await mountProfile('Update the distinct native check-family engineering output',{root:profile.root,resumeMain:true,contentVerdict:'met',researchControl:true,checkedSourceEntryControl:true,
+        goalTaskAcceptance:{async prepare(){throw new Error('cold must not prepare an original completed Task')}}})
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(await Promise.all(sources.map(source=>recoverGoalTaskResearchSource(cold!.ctx,cold!.stateRoot,source)))).toEqual(materials)
+      expect(cold.ctx.tianwenEvolution.listGoalTaskResearchSources()).toEqual(sources)
+      expect(cold.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toEqual(attempts)
+      expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(0)
+      expect(cold.adapter.requests).toHaveLength(0)
+      expect(listLongGoals(profile.stateRoot)).toEqual(goals)
+      expect(readFileSync(join(profile.evolutionRoot,'ledger.jsonl'))).toEqual(ledger)
+      if(receiptRoot!==undefined){
+        writeFileSync(join(receiptRoot,'sdk-entry.json'),JSON.stringify({controlled:true,naturalEvidence:false,realModelRequests:0,
+          publishedRuntime:process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED==='1',preparations,evaluations,scriptedRequests:profile.adapter.requests.length,
+          sources,attempts,studies:0,activations:0,materialsDigests:materials.map(sha256),cold:{requests:0,exactGoalsAndLedger:true,exactOriginalMaterials:true}},null,2),{flag:'wx'})
+      }
+    }finally{await cold?.dispose(false);await profile.dispose(receiptRoot===undefined)}
+  },60_000)
   it.each([false, true])('automatically consumes original native Goal sources in the existing research owner and cold restores the exact decision without new requests (exploration=%s)', async researchExploration => {
     const profile = await mountProfile('Write the native Goal research engineering control', {
       completeTaskThroughTool: true, contentVerdict: 'met', taskCount: 3, researchControl: true,
