@@ -1041,6 +1041,47 @@ describe('native Long Goal profile execution', () => {
       }
     }finally{await cold?.dispose(false);await profile.dispose(receiptRoot===undefined)}
   },60_000)
+  it.skipIf(process.env.TIANWEN_NATIVE_GOAL_ANSWER_CHECK !== '1').each(['text','chat'] as const)('checks an original native Goal %s answer with the published frozen Python producer',async mode=>{
+    const api=await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle')).href) as typeof import('../../packages/tianwen-runtime-bundle/src/index.js')
+    const packetRoot=resolve(process.env.TIANWEN_NATIVE_GOAL_ANSWER_RECEIPTS_ROOT!),ownedBase=resolve('D:/DevData/tianwen-development-runtime')
+    if(!packetRoot.startsWith(resolve('D:/DevData')+'\\'))throw new Error('Goal answer receipts outside D')
+    mkdirSync(ownedBase,{recursive:true});const root=mkdtempSync(join(ownedBase,'native-goal-answer-')),cwd=join(root,'workspace'),chat=mode==='chat'
+    mkdirSync(cwd,{recursive:true});writeFileSync(join(cwd,'input.txt'),'Original controlled pending record.')
+    const host=JSON.parse(readFileSync('scripts/development-isolated-python-answer-host.json','utf8'))
+    const requiredCondition='Return exactly Controlled baseline answer. and preserve the original input graph.'
+    const objective='For original controlled Task case 1 return Controlled baseline answer.'
+    const definition=(input:Parameters<NonNullable<NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['goalTaskAcceptance']>['prepare']>[0],modelConfigDigest:ReturnType<typeof sha256>)=>({
+      cwd,family:'writing' as const,modelConfigDigest,requiredCondition,isolated:{...host,workRoot:join(packetRoot,'isolated-receipts',mode)},
+      verifierSource:'import json,sys\np=json.load(sys.stdin)\nprint(json.dumps(p["answer"]=="Controlled baseline answer." and p["files"]==p["material"].get("files",{}).get("entries",[])))',
+      material:{sourceKind:'native-goal-task' as const,prompt:JSON.stringify({protocol:'tianwen.native-goal-study-input.v1',originalCommand:input.source.data.args,
+        goal:{objective:input.goal.objective,context:input.goal.context,successCriteria:input.goal.successCriteria},delegatedTask:input.task.objective,
+        ...(input.attempt.permissionMode===undefined?{}:{permissionMode:input.attempt.permissionMode})}),
+        criteria:[input.task.objective,requiredCondition,...(input.goal.successCriteria===null?[]:[input.goal.successCriteria])],qualityContract:conversationQualityContract(),
+        ...(chat?{files:{schemaVersion:'tianwen.conversation-file-material.v1' as const,cwd,outputKind:'chat' as const,outputPaths:[],entries:[{path:'input.txt',content:'Original controlled pending record.'}]}}:{})},
+    })
+    let preparations=0,evaluations=0
+    const goalTaskAcceptance:NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['goalTaskAcceptance']={
+      async methodScope(input){return api.createGoalTaskIsolatedPythonAnswerCheck(definition({...input,modelConfigDigest:sha256('scope only')},sha256('scope only'))).methodScope!(input)},
+      async prepare(input){preparations++;const prepared=await api.createGoalTaskIsolatedPythonAnswerCheck(definition(input,input.modelConfigDigest)).prepare(input)
+        expect(prepared).toBeDefined();return prepared===undefined?undefined:{...prepared,async evaluate(candidate){evaluations++;return prepared.evaluate(candidate)}}},
+    }
+    let profile:Awaited<ReturnType<typeof mountProfile>>|undefined
+    try {
+      profile=await mountProfile(objective,{root,completeTaskThroughTool:true,contentVerdict:'met',answerStudyControl:true,...(chat?{fileActions:'chat-read' as const}:{}),goalTaskAcceptance})
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({enabled:true,revision:1,policyVersion:'tianwen-auto-analysis.v3'})
+      await profile.startGoal();profile.releaseTask()
+      await vi.waitFor(()=>expect(profile!.ctx.tianwenEvolution.listGoalTaskOutcomes()).toHaveLength(1),{timeout:30_000})
+      const outcomes=profile.ctx.tianwenEvolution.listGoalTaskOutcomes();expect(outcomes[0]!.classification).toBe('checked-success')
+      await vi.waitFor(()=>expect(profile!.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(1),{timeout:10_000})
+      const source=profile.ctx.tianwenEvolution.listGoalTaskResearchSources()[0]!,recovered=await recoverGoalTaskResearchSource(profile.ctx,profile.stateRoot,source)
+      expect(source.input).toMatchObject({family:'writing',evaluationMode:chat?'local-files':'text',...(chat?{fileOutputKind:'chat'}:{})})
+      expect(recovered?.studyMaterial.files?.entries??[]).toEqual(chat?[{path:'input.txt',content:'Original controlled pending record.'}]:[])
+      expect([preparations,evaluations]).toEqual([1,1]);expect(profile.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(0)
+      mkdirSync(packetRoot,{recursive:true});writeFileSync(join(packetRoot,`native-goal-answer-${mode}.json`),JSON.stringify({controlled:true,naturalEvidence:false,
+        actualProviderRequests:0,publishedFactory:true,publishedRuntime:process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED==='1',mode,preparations,evaluations,
+        outcomes,source,inputMaterial:recovered?.studyMaterial,scriptedRequests:profile.adapter.requests.length},null,2))
+    }finally{await profile?.dispose(false);if(lstatSync(root).isSymbolicLink()||realpathSync(root).toLowerCase()!==root.toLowerCase()||!root.startsWith(ownedBase+'\\'))throw new Error('Goal answer cleanup boundary');rmSync(root,{recursive:true,force:true})}
+  },65_000)
   it.skipIf(process.env.TIANWEN_NATIVE_ANSWER_COMBINATION !== '1').each(['text','chat'] as const)('consumes native Goal %s sources through frozen published answer contracts, ten isolated checks and exact cold recovery',async mode=>{
     const host=await import(new URL('../../scripts/development-isolated-node-project-check.mjs',import.meta.url).href)
     const fixtures=await import(new URL('../../scripts/test-fixtures/development-study-result-host.mjs',import.meta.url).href)

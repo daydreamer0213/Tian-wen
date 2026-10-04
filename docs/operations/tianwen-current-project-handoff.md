@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原Goal普通text/chat可信结果生产者已交付
+
+公开createGoalTaskIsolatedPythonAnswerCheck沿原GoalTaskAcceptanceCheck匹配完整原命令/Goal上下文成功要求/委托criteria/权限/模型/cwd；原source/snapshot/原事件前缀/完成/header/检查器合同全绑定，append答案只作stdin。chat原行动图和文件前后核，拒写/edit/未声明文件；复用原Python工厂/执行器及普通-研究checker身份，不造语义oracle。18红、最终53相关/原15构建/新增严格类型0、原native类型旧22现22新增0（非全绿）；两发行原Goal控制text/chat各1真实隔离checked-success、可恢复原来源，全部scripted0真实模型、不算自然收益。独立静态无有据P1/P2。[准确限制与下一责任](tianwen-goal-answer-check-delivery-20261004.md)。
+
+新API未装普通/DEV JSON默认入口，后者goalContract仍代码生产者；不能称普通text对话已有默认检查。三旧账本保持/仍1问题无相容对/R9未解，完整目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口不变。本生产者工程收口，下一固定真实开发批次完整依据/同版本未知首答唯一执行，不靠近似小题/制造错误凑来源、不重评桥接/索题或整体机械blocked；确需JSON薄消费不复建宿主或重复加载控制当收益。新控制根清/小证据保留/容器集合保持/自启Docker停/77保护不碰/D>=15。
+
 ## 2026-10-04 原生目标与可信答案组合收口
 
 原三Task来源→设计前五份答案合同→发行Python十臂，在text/chat两新控制通过；双审met/decision accepted但独立holdout rejected，quarantine=false仍不启用。原文件工具实际捕获，新Context原来源/研究/包/账本精确恢复且0新增请求/检查；同进程，不称独立CLI。全轮真实隔离40次含首测试字段误读失败20，重复不累加；4项旧回归通过，类型旧22/现22/新增0但非全绿，独立静态无有据P1/P2。[准确失败和下一责任](tianwen-native-answer-combination-delivery-20261004.md)。

@@ -1,13 +1,113 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session'
 import { parseConversationFileMaterial, parseConversationQualityContract, sha256, type ConversationExternalCheckOutcome } from '@tianwen/evolution'
 import type { ConversationAnswerStudyMaterial, ConversationAnswerStudyResultCheck } from './conversation-study-result-check.js'
+import type { GoalTaskAcceptanceCheck, GoalTaskAcceptancePreparation } from './goal-task-acceptance.js'
+import type { NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
+import { parseNativeGoalStudyInput } from './goal-task-study-input.js'
+import { parseGoalTaskMethodScope } from './goal-task-method.js'
+import { readConversationFile } from './conversation-file-material.js'
+import { projectNativeFileActions } from './conversation-task-material.js'
 import { canonicalJsonResult, isolatedPythonPolicy, prepareIsolatedPythonCli, type IsolatedPythonCliConfig } from './isolated-python-cli.js'
 
 const checkerPath = fileURLToPath(import.meta.url), checkerSourceDigest = sha256(readFileSync(checkerPath))
 const checkerId = 'tianwen.isolated-python-answer.v1'
+export interface GoalTaskIsolatedPythonAnswerCheckConfig {
+  readonly cwd: string
+  readonly family: import('@tianwen/evolution').ConversationFamily
+  readonly material: NativeGoalTaskStudyMaterial
+  readonly modelConfigDigest: ReturnType<typeof sha256>
+  readonly requiredCondition: string
+  readonly verifierSource: string
+  readonly isolated: IsolatedPythonCliConfig
+}
+/** Original Goal interface; the same frozen rule checks ordinary and research answers. */
+export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPythonAnswerCheckConfig): GoalTaskAcceptanceCheck {
+  const config = structuredClone(raw), material = config.material, original = parseNativeGoalStudyInput(material.prompt)
+  const pathKey = (value: string) => { const path = resolve(value).replaceAll('\\', '/'); return process.platform === 'win32' ? path.toLowerCase() : path }
+  assert(isAbsolute(config.cwd) && !lstatSync(config.cwd).isSymbolicLink() && lstatSync(config.cwd).isDirectory())
+  assert.equal(pathKey(realpathSync(config.cwd)), pathKey(config.cwd))
+  assert(material.sourceKind === 'native-goal-task' && material.qualityContract !== undefined)
+  parseConversationQualityContract(material.qualityContract)
+  assert(original.originalCommand.trim() === original.goal.objective && original.goal.objective.trim() !== '')
+  assert.deepEqual(material.criteria, [original.delegatedTask, config.requiredCondition, ...(original.goal.successCriteria === null ? [] : [original.goal.successCriteria])])
+  if (material.files !== undefined) assert.equal(pathKey(material.files.cwd), pathKey(config.cwd))
+  const scope = parseGoalTaskMethodScope(material.files === undefined ? { family: config.family, evaluationMode: 'text' }
+    : { family: config.family, evaluationMode: 'local-files', fileOutputKind: 'chat' })
+  const caseId = 'native-goal-task', producer = createConversationStudyIsolatedPythonAnswerCheck({
+    modelConfigDigest: config.modelConfigDigest, isolated: config.isolated,
+    cases: [{ caseId, material, requiredCondition: config.requiredCondition, verifierSource: config.verifierSource }],
+  })
+  const applicable = (input: Omit<GoalTaskAcceptancePreparation, 'modelConfigDigest'>) => {
+    input.signal.throwIfAborted()
+    const { goal, task, attempt, source } = input
+    return pathKey(input.cwd) === pathKey(config.cwd) && pathKey(goal.workspaceRoot) === pathKey(config.cwd)
+      && goal.objective === original.goal.objective && goal.context === original.goal.context && goal.successCriteria === original.goal.successCriteria
+      && source.type === 'command/run' && source.data.name === 'goal' && source.data.source.kind === 'user'
+      && source.data.args === original.originalCommand && goal.origin !== undefined
+      && goal.origin.commandId === source.data.commandId && goal.origin.commandSeq === source.seq && goal.origin.commandDigest === sha256(source)
+      && task.objective === original.delegatedTask && goal.tasks.some(item => item.id === task.id && sha256(item) === sha256(task))
+      && task.execution !== null && task.execution.sessionId === attempt.childSessionId
+      && attempt.status === 'running' && attempt.parentSessionId === goal.planner.sessionId && attempt.permissionMode === original.permissionMode
+  }
+  return {
+    async methodScope(input) { return applicable(input) ? structuredClone(scope) : undefined },
+    async prepare(input) {
+      input.signal.throwIfAborted()
+      try {
+        if (!applicable(input) || input.modelConfigDigest !== config.modelConfigDigest) return undefined
+        const { goal, task, attempt, source } = structuredClone({ goal: input.goal, task: input.task, attempt: input.attempt, source: input.source })
+        const snapshot = { goal: { id: goal.id, objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+          workspaceRoot: goal.workspaceRoot, origin: goal.origin! }, task,
+          ...(attempt.permissionMode === undefined ? {} : { permissionMode: attempt.permissionMode }) }
+        const files = material.files, contentReview = { qualityContract: material.qualityContract, ...(files === undefined ? {} : { files }) }
+        const capturedFiles = async () => {
+          const current = files === undefined ? [] : await Promise.all(files.entries.map(entry => readConversationFile(config.cwd, entry.path)))
+          assert.equal(sha256(current), sha256(files?.entries ?? [])); return current
+        }
+        await capturedFiles(); input.signal.throwIfAborted()
+        const prepared = await producer.prepare({ caseId, material, modelConfigDigest: config.modelConfigDigest, signal: input.signal })
+        if (prepared === undefined) return undefined
+        return { checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
+          inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition, waitsForCancellationCleanup: true,
+          contentReview: structuredClone(contentReview), async evaluate(candidate) {
+            candidate.signal.throwIfAborted()
+            try {
+              const b = candidate.preparation, events = structuredClone(candidate.events)
+              assert.equal(sha256(candidate.source), sha256(source)); assert.equal(sha256(b.requirementsSnapshot), sha256(snapshot))
+              assert.equal(b.taskDigest, sha256(task)); assert.equal(b.modelConfigDigest, config.modelConfigDigest)
+              assert(b.epoch === attempt.epoch && b.parentSessionId === attempt.parentSessionId && b.childSessionId === attempt.childSessionId
+                && b.nativeGoalId === task.execution!.goalId && b.permissionFingerprint === attempt.permissionFingerprint)
+              assert(b.checkerId === prepared.checkerId && b.checkerDigest === prepared.checkerDigest && b.contractDigest === prepared.contractDigest
+                && b.inputsDigest === prepared.inputsDigest && b.requiredCondition === prepared.requiredCondition)
+              assert.equal(sha256(b.contentReview), sha256({ protocol: 'tianwen.goal-task-content-review.v1', ...contentReview }))
+              assert.equal(sha256(events.filter(event => event.seq <= b.preparedSeq)), b.prefixDigest)
+              const header = events.find(event => event.seq === b.headerSeq), end = events.at(-1)
+              assert(header?.type === 'request/header' && sha256(header.data.header.config) === b.modelConfigDigest)
+              assert(end?.type === 'turn/end' && end.seq > b.preparedSeq && end.data.reason.kind === 'completed')
+              assert(events.every(event => event.type !== 'request/header' || sha256(event.data.header.config) === b.modelConfigDigest))
+              if (files === undefined) assert(!events.some(event => event.type === 'tool/call' && ['read', 'write', 'edit'].includes(event.data.name)))
+              else if (events.some(event => event.type === 'tool/call')) {
+                const execution = projectNativeFileActions(events, end.seq, files)
+                assert(!execution.actions.some(action => action.tool === 'write' || action.tool === 'edit'))
+              }
+              const messages = events.filter(event => event.seq > b.preparedSeq && event.type === 'assistant/message' && isAppendSurfaceEvent(event))
+              assert(messages.length > 0)
+              const answer = messages.flatMap(event => event.type === 'assistant/message' ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : []).join('')
+              const currentFiles = await capturedFiles(); candidate.signal.throwIfAborted()
+              const outcome = await prepared.evaluate({ material: structuredClone(material), answer, files: currentFiles, signal: candidate.signal })
+              await capturedFiles(); candidate.signal.throwIfAborted()
+              assert.equal(sha256(candidate.events), sha256(events))
+              return outcome
+            } catch { candidate.signal.throwIfAborted(); return { status: 'unverifiable' as const, detail: 'Original Goal answer contract, native evidence or unchanged file graph unavailable.' } }
+          } }
+      } catch { input.signal.throwIfAborted(); return undefined }
+    },
+  }
+}
 export interface ConversationIsolatedPythonAnswerCase {
   readonly caseId: string
   /** Complete original case contract, independently known before the answer. */
