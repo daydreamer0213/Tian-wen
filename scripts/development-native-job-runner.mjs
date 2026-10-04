@@ -15,7 +15,9 @@ export async function runDevelopmentNativeJobRunner(options) {
   result=await job.run(signal)
   stdout(JSON.stringify(result)+'\n')
   const summary=result?.summary
-  exitCode=summary?.completionStatus==='failed'||summary?.functionalStatus==='rejected'||summary?.reviewVerdict==='unmet'?1
+  // The actual Evolution review vocabulary is met/not-met/inconclusive; keep
+  // the historical 'unmet' alias alongside the original 'not-met' failure.
+  exitCode=summary?.completionStatus==='failed'||summary?.functionalStatus==='rejected'||summary?.reviewVerdict==='unmet'||summary?.reviewVerdict==='not-met'?1
    :summary?.completionStatus==='completed'&&summary?.functionalCandidateVerified===true&&summary?.reviewVerdict==='met'?0:2
  }catch(error){
   exitCode=1;result=null

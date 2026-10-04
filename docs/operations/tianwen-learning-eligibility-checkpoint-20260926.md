@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 第九自然任务经真正原CLI成功
+
+f11446f3事前26检查，唯一新Task修原runner not-met退出错误；真实原CLI原生首稿program verified/双审met/权限exact、退出0，另一Node原Task/seal/首稿完整核对。新专用CLI Profile1成功单独封存，旧两账本/八Task保持，不复制同意或旧来源，不跨原检查身份凑兼容对。[完整证据和限制](tianwen-real-cli-review-exit-delivery-20261004.md)。
+
+26已含21原工程回归，不另加重叠计数；实际SDK是独立只读入口消费，不是候选新产品API证明。0反馈/自然研究/采用/未来收益，仍原1问题/语义未解。真正原CLI任务接缝收口，下一核心独立正确性/来源选择器/语义/治理采用及未知未来效果，目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口不变，不机械blocked。临时home封存精确清理、Docker停/71拒删不碰。
+
 ## 2026-10-04 捕获SDK包映射不增加自然来源
 
 实际公开SDK捕获源码但原import找不到包，原诊断仅工程；显式readonly moduleAliases贯穿原普通/Goal/五角色及DEV，原输入/两臂/预算与隔离保持。215相关及原15构建步骤过，实际发行SDK和TS统一模块控制过、0模型/自然Task/研究/采用。[限制与交付](tianwen-captured-module-alias-delivery-20261004.md)。
