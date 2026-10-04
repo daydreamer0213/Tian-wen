@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 顶层评审引用已接原 SDK 捕获前
+
+基线1d66de5后将顶层evidenceQuotes的同一原host判定复用于紧凑validateCapture，原后验/合法子串/双审/语义/预算/历史不变；不重评本题、不增加Turn/消息/模型。SDK summary控制先红后绿，旧并行夹具改按focus分离响应；108相关及完整发行五项目/Runtime/两声明构建通过，独立无有据P1/P2。[准确交付与边界](tianwen-native-summary-quote-gate-20261004.md)。
+
+新发行另Node0模型准确恢复六Task/原native全部events-headers/四文件及归档，原五摘要/正式与持续账本保持；SDK持久化读取补默认delegationDepth=0，原归档省略，不称全meta对象全等。根恢复控制解析/上下文/Loop字段/默认meta比较错误日志保留，未改自然记录。
+
+完整目标仍active/incomplete，六普通Task/4程序verified-1rejected-1unverifiable/历史问题1/旧成功候选1/feedback-study0；新发行后的兼容资格按原身份核，不默认沿用旧来源。下一冻结当前版本与后续实际开发要求/独立检查，连续用既有持续DEV/原普通及Goal工厂，观察原研究/语义/采用/未来效果，不再重复本工程控制或报告功能、索题催评或机械整体blocked。main/Daily NO-GO及原十工作日窗口保持；29拒删路径/无环境副本，资源见D final-audit。
+
 ## 2026-10-04 多 Goal Task 接入已交付，首次记录不改判
 
 事前a5a7a0f后唯一真实Task新增5162B纯Goal分派；9实际请求、prepare/evaluate1/1，原程序unverifiable/评审inconclusive。控制聚合9330B超原8192B，且material-string误包为正常对象；原冻结/Task不改。事后43/44原工程匹配+真正string拒收，0模型冷恢复原完整记录、旧五Task不变。[准确首次事实、交付和下一步](tianwen-live-goal-contract-routing-20261004.md)。

@@ -462,11 +462,18 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     // frozen host predicates. Keep the original compact fallback on overflow.
     if (hintedBytes <= 98_304 && hintedBytes - bareBytes <= 16_384) schema = hinted
   }
+  const invalidSummaryQuoteIndex = (quotes: readonly unknown[]) => quotes.findIndex(quote =>
+    typeof quote !== 'string' || quote.length === 0 || (quoteChoices === undefined
+      ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))
   const check = async (focus: 'requirements' | 'grounding', signal: AbortSignal): Promise<AuditedCheck> => {
     const result = await runConversationJudgment(ctx, parent, { ...input, signal, material, label: `${input.label} ${focus}`,
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
       ...(compactReview ? { validateCapture: (value: unknown) => {
         if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
+        if (Array.isArray(value.evidenceQuotes)) {
+          const index = invalidSummaryQuoteIndex(value.evidenceQuotes)
+          if (index !== -1) return `Invalid evidenceQuotes item ${index + 1}: copy a non-empty exact quote from one supplied claimEvidence item, preserving punctuation and whitespace.`
+        }
         try { validateClaimAudit(value.audit, evidence, value.verdict as 'met' | 'not-met' | 'inconclusive') }
         catch (error) {
           if (error instanceof ConversationClaimReviewUnitQuoteError) return `Invalid quote in ${error.answerId}: copy a non-empty exact substring from that answer unit, preserving punctuation and whitespace.`
@@ -476,9 +483,7 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
     if (!Array.isArray(result.value.evidenceQuotes)) throw new Error('invalid-judgment')
-    const invalidQuoteIndex = result.value.evidenceQuotes.findIndex(quote =>
-      typeof quote !== 'string' || quote.length === 0 || (quoteChoices === undefined
-        ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))
+    const invalidQuoteIndex = invalidSummaryQuoteIndex(result.value.evidenceQuotes)
     if (invalidQuoteIndex !== -1) throw new ConversationClaimReviewQuoteError(focus, invalidQuoteIndex)
     const audit = validateClaimAudit(result.value.audit, evidence, result.value.verdict as 'met' | 'not-met' | 'inconclusive')
     const { audit: _audit, ...summary } = result.value

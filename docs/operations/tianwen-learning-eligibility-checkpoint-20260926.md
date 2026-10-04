@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 原顶层引文判定前移，旧未定结果保持
+
+同一原host顶层evidenceQuotes判断接紧凑SDK捕获前，错误工具反馈允许原同Turn自行纠正；原双审/合法子串/语义/覆盖/预算/历史保持，无旧题重评。108相关及发行依赖图构建过，独立无有据P1/P2；0新增真实Task/模型/反馈/研究，不宣称自然效果改善。[准确实现与剩余](tianwen-native-summary-quote-gate-20261004.md)。
+
+新发行零模型另Node准确恢复六原Task及全部native事件/headers/四文件，旧五摘要和两账本不变；原meta字段准确，持久化额外默认delegationDepth0与归档省略单独记录。根恢复脚本控制错误日志保留，不改产品或首Task。持续程序4verified/1rejected/1unverifiable，历史问题1/旧成功候选1，仍须按当前检查身份核兼容，不能自动充当新版本合格研究组。
+
+继续冻结当前版本及后续真实开发需求和事前独立检查，消费原持续DEV/普通与Goal工厂，原研究/采用/语义/未来效果分别记账；工程控制收口，不索题催评或机械blocked。完整目标active/incomplete、main/Daily NO-GO及原资格/十工作日窗口不变；29拒删路径保持，D及Docker事实见本包final-audit。
+
 ## 2026-10-04 多 Goal 合同产品接入交付，不回填首次自然结果
 
 新唯一真实Task9请求/prepare-evaluate1/1，首5162B代码未改，程序unverifiable/评审inconclusive。聚合观察9330B超原8192B及string样例误包属控制错误，不充自然问题/成功；原Task、冻结期望及旧五Task保持。另Node0模型原图/归档准确恢复；事后43/44原匹配及真正string拒收仅工程诊断。[准确范围与原错误](tianwen-live-goal-contract-routing-20261004.md)。

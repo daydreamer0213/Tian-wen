@@ -28,7 +28,7 @@ function input(override?: { content: string; answer: string }) {
   return { original: { source: task, evaluationMode: 'local-files', conversation: [{ role: 'assistant', content: [{ type: 'text', text: answer }] }], toolEvidence: [], fileResult }, study: { task, answer, fileResult } }
 }
 
-it('returns a wrong-unit quote through the native tool gate before capture and cold-verifies one corrected capture', async () => {
+it.each(['unit', 'summary'] as const)('returns a wrong %s quote through the native tool gate before capture and cold-verifies one corrected capture', async mode => {
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-capture-quote-')); roots.push(root)
   const material = input().original, evidence = projectClaimEvidence(material, 'file-chunks-v1')
   const target = evidence.items.find(item => item.id === 'answer-3')!
@@ -37,14 +37,16 @@ it('returns a wrong-unit quote through the native tool gate before capture and c
   const changed = (request: Parameters<typeof response>[0], id: string, quote: string) => response(request).map(chunk => {
     if (chunk.type !== 'block-end' || chunk.block.type !== 'tool-call') return chunk
     const value = JSON.parse(chunk.block.arguments)
-    value.audit.units[target.id].firstClaim.quote = quote
+    if (mode === 'unit') value.audit.units[target.id].firstClaim.quote = quote
+    else value.evidenceQuotes = [quote]
     return { ...chunk, block: { ...chunk.block, id: CallId(id), arguments: JSON.stringify(value) } }
   })
-  const h = await mountPersistentHarness(root, [
-    request => changed(request, 'invalid-unit-quote', 'WRONG_UNIT_FRAGMENT'),
-    request => changed(request, 'corrected-unit-quote', substring),
-    response,
-  ])
+  let requirementsCalls = 0
+  const scripted = (request: Parameters<typeof response>[0]) => {
+    if (JSON.stringify(request.messages).includes('Independently try to falsify')) return response(request)
+    return changed(request, `requirements-${++requirementsCalls}`, requirementsCalls === 1 ? 'WRONG_UNIT_FRAGMENT' : substring)
+  }
+  const h = await mountPersistentHarness(root, [scripted, scripted, scripted])
   await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await h.ctx.agents.create({ sessionId: SessionId('file-capture-quote-control'), meta: { cwd: root }, agentOptions: config })
   try {
@@ -52,7 +54,8 @@ it('returns a wrong-unit quote through the native tool gate before capture and c
       evidence: ['Saved requested output.'], signal: new AbortController().signal, callConfig: config })
     expect(reviewed.verdict).toBe('met'); expect(h.adapter.requests).toHaveLength(3)
     const first = await recoverConversationJudgmentRequest(h.ctx, reviewed.reviewChecks[0])
-    expect(reviewed.reviewChecks[0].audit).toMatchObject({ units: { [target.id]: { firstClaim: { quote: substring } } } })
+    if (mode === 'unit') expect(reviewed.reviewChecks[0].audit).toMatchObject({ units: { [target.id]: { firstClaim: { quote: substring } } } })
+    else expect(reviewed.reviewChecks[0].evidenceQuotes).toEqual([substring])
     expect((first.material as any).original).toEqual(material)
     const saved = await h.ctx.sessionPersistence.inspect(SessionId(reviewed.reviewChecks[0].proof.sessionId))
     const calls = saved.events.filter(event => event.type === 'tool/call')
