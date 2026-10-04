@@ -3,7 +3,7 @@ import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, co
 import { conversationFileTaskInputDigest, conversationTaskFileInputs } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
-import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
+import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchCheckInputsMatch, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
 import {
   closeSync,
   existsSync,
@@ -3418,8 +3418,8 @@ export class EvolutionLedger {
         // Original per-Task contracts remain bound by the source/outcome digest.
         return sha256({ checkerId: b.checkerId, checkerDigest: b.checkerDigest, requiredConditionDigest: b.requiredConditionDigest })
       }
-      if (sources.some(source => checkIdentity(source) !== checkIdentity(first) || source.input.fileInputsDigest !== source.outcome.input.inputsDigest)) {
-        throw new LedgerIntegrityError('native Goal checked failure requires the same original checker and condition with exact frozen file inputs')
+      if (sources.some(source => checkIdentity(source) !== checkIdentity(first) || !goalTaskResearchCheckInputsMatch(source))) {
+        throw new LedgerIntegrityError('native Goal checked failure requires the same original checker and condition with exact frozen inputs')
       }
     }
     if (!('cases' in binding)) return

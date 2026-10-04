@@ -21,7 +21,7 @@ import { guidanceResultCheckDigest, hasSatisfiedGuidanceResultChecks } from '@ti
 import { withConversationObservationCancellation } from './conversation-external-check.js'
 import { prepareConversationStudyResultChecks, prepareConversationAnswerStudyResultChecks, evaluateConversationStudyResultCheck, type ConversationStudyResultCheck, type ConversationAnswerStudyResultCheck, type PreparedStudyResultChecks } from './conversation-study-result-check.js'
 import { SOURCE_EXCLUSION_KEYS, type ConversationSourceExclusion, type ConversationSourceReadinessDiagnostics } from './conversation-source-readiness.js'
-import { goalTaskResearchProblem, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
+import { goalTaskResearchProblem, goalTaskResearchCheckInputsMatch, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
 import { recoverGoalTaskResearchSource, recoverGoalGuidanceSource, type NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
 
 declare module '@deepseek-ai/cordis' {
@@ -625,14 +625,14 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const problem=goalTaskResearchProblem(first)!,other=goalTaskResearchProblem(second)!
       if(first.sourceId===second.sourceId || sameGoalTaskResearchInput(first,second) || !compatible(second,first)
         || problem.category!==other.category || problem.checkedFailure!==other.checkedFailure
-        || problem.checkedFailure && (checkIdentity(second)!==checkIdentity(first) || [first,second].some(source=>source.input.fileInputsDigest!==source.outcome.input.inputsDigest))) continue
+        || problem.checkedFailure && (checkIdentity(second)!==checkIdentity(first) || [first,second].some(source=>!goalTaskResearchCheckInputsMatch(source)))) continue
       paired=true
       const sources=[second,first] as const
       if(studies.some(study=>sources.every(source=>study.opened.sourceTaskIds.includes(source.sourceId)))) continue
       if(attempts.some(attempt=>sources.every(source=>attempt.sourceTaskIds.includes(source.sourceId)))) {attempted=true;continue}
       unstudied=true
       const counterexample=successful.find(source=>compatible(source,first) && (!problem.checkedFailure
-        || checkIdentity(source)===checkIdentity(first) && source.input.fileInputsDigest===source.outcome.input.inputsDigest))
+        || checkIdentity(source)===checkIdentity(first) && goalTaskResearchCheckInputsMatch(source)))
       if(counterexample !== undefined) return {state:'ready-to-schedule',group:{kind:'native-goal-task',sources,counterexample,category:problem.category,assessments:[]}}
     }
     return {state:unstudied?'awaiting-counterexample':attempted?'already-attempted':paired?'already-studied':'awaiting-compatible-sources'}

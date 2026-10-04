@@ -5,9 +5,10 @@ import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract, parseConversationAuditedReviewChecks, conversationReviewConsensus } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { guidanceInputDigest, guidanceFileInputIdentity, guidanceStudyId, guidanceVersion, caseDesignAttemptId } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
+import type { GuidanceStudyBody } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import type { GoalTaskOutcomeInput } from '../../packages/tianwen-evolution/src/goal-task-outcome.js'
 import type { GoalTaskResearchSourceInput } from '../../packages/tianwen-evolution/src/goal-task-research.js'
-import { isGoalTaskGuidanceRegression, parseGoalTaskResearchSourceInput } from '../../packages/tianwen-evolution/src/goal-task-research.js'
+import { goalTaskResearchProblem, isGoalTaskGuidanceRegression, parseGoalTaskResearchSourceInput } from '../../packages/tianwen-evolution/src/goal-task-research.js'
 import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import { prepareConversationLearningExploration, parseConversationLearningExplorationRequest } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
@@ -27,6 +28,7 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
   separateContracts?: boolean
   changedIndex?: number
   change?: Partial<Pick<GoalTaskOutcomeInput, 'checkerId' | 'checkerDigest' | 'requiredConditionDigest'>>
+  answerMode?: 'text' | 'chat'
 } = {}) {
   mkdirSync(BASE, { recursive: true }); const root = mkdtempSync(join(BASE, 'ledger-'))
   let tick=0
@@ -34,7 +36,11 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
     clock:()=>new Date(Date.UTC(2026,9,3)+tick++*1000).toISOString() })
   ledger.recordLearningAnalysisConsent({ enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' })
   const files = (index: number | string) => ({ schemaVersion: 'tianwen.conversation-file-material.v1' as const, cwd: 'D:/original-Goal',
-    outputKind: 'files' as const, entries: [{ path: 'input.txt', content: 'Original input '+index }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] })
+    outputKind: options.answerMode === 'chat' ? 'chat' as const : 'files' as const,
+    entries: [{ path: 'input.txt', content: 'Original input '+index }, ...(options.answerMode === 'chat' ? [] : [{ path: 'output.txt', content: null }])],
+    outputPaths: options.answerMode === 'chat' ? [] : ['output.txt'] })
+  const answerMaterial = (index: number) => ({ sourceKind: 'native-goal-task', prompt: 'actual requirements-'+index,
+    criteria: ['Original condition'], qualityContract: conversationQualityContract(), ...(options.answerMode === 'chat' ? { files: files(index) } : {}) })
   const sources = [1,2,3].map(index => {
     const change = index === options.changedIndex ? options.change ?? {} : {}
     const condition = change.requiredConditionDigest ?? sha256('condition')
@@ -42,18 +48,19 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
       origin: { sessionId: 'command', commandId: 'original-command', commandSeq: 1, commandDigest: sha256('command') },
       parentSessionId: 'planner', childSessionId: 'child-'+index, nativeGoalId: 'native-'+index, preparedSeq: 2, endSeq: 8,
       preparationDigest: sha256('prep-'+index), materialDigest: sha256('SDK-'+index), consentRevision: 1, modelConfigDigest: sha256('model'),
-      checkerId: 'original-check', checkerDigest: sha256('check'), contractDigest: sha256(options.separateContracts ? 'original contract '+index : 'contract'), inputsDigest: checkedCode ? conversationExternalInputsDigest(files(index).entries) : sha256('input-'+index),
-      ...change, requiredConditionDigest: condition, outcome: checkedCode && index < 3
+      checkerId: options.answerMode === undefined ? 'original-check' : 'tianwen.isolated-python-answer.v1', checkerDigest: sha256('check'), contractDigest: sha256(options.separateContracts ? 'original contract '+index : 'contract'),
+      inputsDigest: options.answerMode !== undefined ? sha256(answerMaterial(index)) : checkedCode ? conversationExternalInputsDigest(files(index).entries) : sha256('input-'+index),
+      ...change, requiredConditionDigest: condition, outcome: (checkedCode || options.answerMode !== undefined) && index < 3
         ? { status: 'rejected', detail: 'Controlled original condition failure.', failedRequiredConditionDigest: condition }
         : { status: 'verified', detail: 'functional fixture' } }
     const receipt = ledger.recordGoalTaskOutcome(outcome)
     const input: GoalTaskResearchSourceInput = { sourceKind: 'native-goal-task', sourceId: receipt.sourceId,
-      outcomeInputDigest: sha256(outcome), scopeKey, family: checkedCode ? 'code' : 'writing', evaluationMode: checkedCode ? 'local-files' : 'text', behaviorVersion: guidanceVersion(snapshot),
-      ...(checkedCode ? { fileOutputKind: 'files' as const, fileInputsDigest: outcome.inputsDigest } : {}),
+      outcomeInputDigest: sha256(outcome), scopeKey, family: checkedCode ? 'code' : 'writing', evaluationMode: checkedCode || options.answerMode === 'chat' ? 'local-files' : 'text', behaviorVersion: guidanceVersion(snapshot),
+      ...(checkedCode || options.answerMode === 'chat' ? { fileOutputKind: files(index).outputKind, fileInputsDigest: conversationExternalInputsDigest(files(index).entries) } : {}),
       sessionLifecycleFingerprint: sha256('child-lifecycle-'+index), assistantMessageIds: ['answer-'+index],
       qualityContract: conversationQualityContract(), inputDigest: guidanceInputDigest('actual requirements-'+index),
       ...(aliasedInputs ? { inputIdentityDigest:sha256(index<3?'same canonical input':'separate counter input') } : {}),
-      materialDigest: sha256('study material-'+index), reviewMaterialDigest: sha256('original review-'+index), checks: checks('source-'+index, checkedCode || index===3) }
+      materialDigest: options.answerMode !== undefined ? sha256(answerMaterial(index)) : sha256('study material-'+index), reviewMaterialDigest: sha256('original review-'+index), checks: checks('source-'+index, checkedCode || options.answerMode !== undefined || index===3) }
     ledger.recordGoalTaskResearchSource(input)
     return ledger.listGoalTaskResearchSources().find(item => item.sourceId === receipt.sourceId)!
   })
@@ -61,19 +68,81 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
   const attemptBody = { scopeKey, consentRevision: 1, parentVersion: guidanceVersion(snapshot), sourceTaskIds: sources.slice(0,2).map(source => source.sourceId),
     counterexampleTaskId: sources[2]!.sourceId, modelConfigDigest: sha256('model'), materialDigest: sha256('case-design-original'), nativeGoalSources }
   const generated = (kind: 'adjacent'|'holdout') => {
-    const material = { prompt: 'independent '+kind, criteria: ['Complete this new original request.'], qualityContract: conversationQualityContract(), ...(checkedCode ? { files: files(kind) } : {}) }
+    const material = { prompt: 'independent '+kind, criteria: ['Complete this new original request.'], qualityContract: conversationQualityContract(), ...(checkedCode || options.answerMode === 'chat' ? { files: files(kind) } : {}) }
     return { id:kind,kind,...material,inputDigest:guidanceInputDigest(material.prompt,material.files),materialDigest:sha256(material) }
   }
   const cases=[...sources.map((source,index)=>({id:['source1','source2','counterexample'][index]!,kind:['source1','source2','counterexample'][index]!,
     sourceTaskId:source.sourceId,materialDigest:source.input.materialDigest,inputDigest:source.input.inputDigest})),generated('adjacent'),generated('holdout')]
+  const checkConfig: Partial<Pick<GuidanceStudyBody,'evaluationMode'|'fileOutputKind'|'resultChecks'>> = checkedCode ? { evaluationMode: 'local-files' as const, fileOutputKind: 'files' as const,
+      resultChecks:cases.map((item,index)=>({caseId:item.id,checkerId:'independent-study-check',checkerDigest:sha256('study checker'),contractDigest:sha256('study contract'),
+        inputsDigest:index<3?sources[index]!.input.fileInputsDigest!:conversationExternalInputsDigest(files(item.kind).entries),requiredCondition:'Original condition'})) }
+      : options.answerMode === undefined ? {} : {
+        ...(options.answerMode === 'chat' ? { evaluationMode: 'local-files' as const, fileOutputKind: 'chat' as const } : {}),
+        resultChecks: cases.map((item,index)=>({caseId:item.id,checkerId:'tianwen.isolated-python-answer.v1',checkerDigest:sha256('study checker'),contractDigest:sha256('study contract'),
+          inputKind: options.answerMode === 'text' ? 'text-material.v1' as const : 'file-chat-material.v1' as const,
+          inputsDigest:item.materialDigest,requiredCondition:'Original condition',
+          ...(options.answerMode === 'chat' ? {fileInputsDigest:index<3?sources[index]!.input.fileInputsDigest!:conversationExternalInputsDigest(files(item.kind).entries)} : {})}))
+      }
   const body = { scopeKey, family:checkedCode ? 'code' as const : 'writing' as const, failureCategory:'instruction-following' as const, consentRevision:1,
     parentVersion:guidanceVersion(snapshot),parentSnapshot:snapshot,sourceTaskIds:attemptBody.sourceTaskIds,counterexampleTaskId:attemptBody.counterexampleTaskId,
-    modelConfigDigest:sha256('model'),qualityContract:conversationQualityContract(),nativeGoalSources,caseDesignProof:proof('case-design'),
-    cases, ...(checkedCode ? { evaluationMode: 'local-files' as const, fileOutputKind: 'files' as const,
-      resultChecks:cases.map((item,index)=>({caseId:item.id,checkerId:'independent-study-check',checkerDigest:sha256('study checker'),contractDigest:sha256('study contract'),
-        inputsDigest:index<3?sources[index]!.input.fileInputsDigest!:conversationExternalInputsDigest(files(item.kind).entries),requiredCondition:'Original condition'})) } : {}) }
+    modelConfigDigest:sha256('model'),qualityContract:conversationQualityContract(),nativeGoalSources,caseDesignProof:proof('case-design'),cases,...checkConfig }
   return {root,ledger,sources,attemptBody,body,remove(){if(!resolve(root).startsWith(BASE+sep))throw new Error('cleanup outside owned fixture');rmSync(root,{recursive:true,force:true})}}
 }
+
+it.each(['text','chat'] as const)('admits bound original %s answer failures into an independently checked native study despite met reviews', mode=>{
+  const f=fixture(false,true,false,{answerMode:mode,separateContracts:true})
+  try {
+    expect(f.sources.slice(0,2).map(goalTaskResearchProblem)).toEqual([
+      {category:'instruction-following',checkedFailure:true},{category:'instruction-following',checkedFailure:true}])
+    if(mode==='chat') expect(f.sources[0]!.input.fileInputsDigest).not.toBe(f.sources[0]!.outcome.input.inputsDigest)
+    const attempt={...f.attemptBody,attemptId:caseDesignAttemptId(f.attemptBody as never)}
+    expect(f.ledger.recordConversationCaseDesignAttempt(attempt as never)).toEqual({duplicate:false})
+    const {resultChecks: _checks,...withoutChecks}=f.body
+    expect(()=>f.ledger.recordConversationGuidance({kind:'study-opened',...withoutChecks,studyId:guidanceStudyId(withoutChecks as never)} as never)).toThrow(/independent prepared program checks/)
+    const changed={...f.body,resultChecks:f.body.resultChecks!.map((check,index)=>index===0?{...check,inputsDigest:sha256('changed material')}:check)}
+    expect(()=>f.ledger.recordConversationGuidance({kind:'study-opened',...changed,studyId:guidanceStudyId(changed as never)} as never)).toThrow(/inputs/)
+    const opened={kind:'study-opened',...f.body,studyId:guidanceStudyId(f.body as never)}
+    expect(f.ledger.recordConversationGuidance(opened as never)).toEqual({duplicate:false})
+    const bytes=readFileSync(join(f.root,'ledger.jsonl')),cold=new EvolutionLedger(f.root,{guidanceActivationQuarantine:true})
+    expect(cold.listConversationGuidanceStudies()).toEqual(f.ledger.listConversationGuidanceStudies())
+    expect(cold.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+it.each(['text','chat'] as const)('selects original checked %s failures in original older/newer source order',async mode=>{
+  const f=fixture(false,true,false,{answerMode:mode,separateContracts:true})
+  const recovery=vi.spyOn(goalSources,'recoverGoalTaskResearchSource').mockResolvedValue({} as never)
+  try {
+    const service=Object.create(TianwenConversationGuidanceLoopService.prototype)
+    Object.assign(service,{ctx:{tianwenEvolution:f.ledger},sourceConfig:{goalStateRoot:'controlled-state'}})
+    const selection=await service.scanGoal(scopeKey)
+    expect(selection.state).toBe('ready-to-schedule')
+    expect(selection.group.sources.map((source:any)=>source.sourceId)).toEqual(f.sources.slice(0,2).map(source=>source.sourceId))
+    expect(selection.group.counterexample).toEqual(f.sources[2])
+  }finally{recovery.mockRestore();f.remove()}
+})
+
+it.each(['text','chat'] as const)('uses original full %s material binding for checked regression and rejects unsupported answers', mode=>{
+  const f=fixture(false,true,false,{answerMode:mode})
+  try {
+    const old=f.sources[0]!,source={...old,input:{...old.input,inputIdentityDigest:sha256('distinct original input')}}
+    const scope={scopeKey,family:source.input.family,evaluationMode:source.input.evaluationMode,fileOutputKind:source.input.fileOutputKind,
+      qualityContract:conversationQualityContract(),consentRevision:1,modelConfigDigest:sha256('model'),expectedVersion:source.input.behaviorVersion,activatedAt:'2026-10-02T00:00:00.000Z'}
+    expect(isGoalTaskGuidanceRegression(source,scope)).toBe(true)
+    const invalid=[{...source,input:{...source.input,materialDigest:sha256('changed material')}},
+      {...source,outcome:{...source.outcome,input:{...source.outcome.input,checkerId:'unknown-answer-check'}}},
+      {...source,outcome:{...source.outcome,classification:'checked-success' as const}},
+      {...source,outcome:{...source.outcome,classification:'unverifiable' as const}}]
+    for(const changed of invalid) {
+      expect(goalTaskResearchProblem(changed)).toBeUndefined()
+      expect(isGoalTaskGuidanceRegression(changed,scope)).toBe(false)
+    }
+    const changed={...source,outcome:{...source.outcome,input:{...source.outcome.input,inputsDigest:sha256('unbound check input')}}}
+    expect(goalTaskResearchProblem(changed)).toBeUndefined()
+    expect(isGoalTaskGuidanceRegression(changed,scope)).toBe(false)
+  }finally{f.remove()}
+})
 
 it('groups original Goal program failures by checker and condition while retaining each independent contract',()=>{
   const f=fixture(true,true,false,{separateContracts:true})

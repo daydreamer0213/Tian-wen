@@ -111,15 +111,28 @@ export function isGoalTaskGuidanceRegression(source: GoalTaskResearchSource, sco
     && input.evaluationMode === (scope.evaluationMode ?? 'text') && input.fileOutputKind === scope.fileOutputKind
     && source.outcome.input.consentRevision === scope.consentRevision && source.outcome.input.modelConfigDigest === scope.modelConfigDigest
     && sha256(input.qualityContract) === sha256(scope.qualityContract ?? null) && problem !== undefined
-    && (!problem.checkedFailure || input.fileInputsDigest === source.outcome.input.inputsDigest)
+    && (!problem.checkedFailure || goalTaskResearchCheckInputsMatch(source))
+}
+
+/** Original answer checks bind complete material; existing code checks bind frozen files. */
+export function goalTaskResearchCheckInputsMatch(source: GoalTaskResearchSource): boolean {
+  if (source.outcome.input.checkerId === 'tianwen.isolated-python-answer.v1'
+    && (source.input.evaluationMode === 'text'
+      || source.input.evaluationMode === 'local-files' && source.input.fileOutputKind === 'chat')) {
+    return source.input.materialDigest === source.outcome.input.inputsDigest
+  }
+  return source.input.family === 'code' && source.input.evaluationMode === 'local-files' && source.input.fileOutputKind === 'files'
+    && source.input.fileInputsDigest === source.outcome.input.inputsDigest
 }
 
 /** The original bounded check-failure branch is kept distinct from a failed semantic review. */
 export function goalTaskResearchProblem(source: GoalTaskResearchSource): { category: ConversationFailure; checkedFailure: boolean } | undefined {
   const review = conversationReviewConsensus(source.input.checks)
   if (review.verdict === 'not-met' && review.category !== null) return { category: review.category, checkedFailure: false }
-  return source.input.family === 'code' && source.input.evaluationMode === 'local-files' && source.input.fileOutputKind === 'files'
-    && review.verdict === 'met' && source.outcome.classification === 'checked-failure'
+  const checkedCode = source.input.family === 'code' && source.input.evaluationMode === 'local-files' && source.input.fileOutputKind === 'files'
+  const checkedAnswer = source.outcome.input.checkerId === 'tianwen.isolated-python-answer.v1'
+    && goalTaskResearchCheckInputsMatch(source)
+  return (checkedCode || checkedAnswer) && review.verdict === 'met' && source.outcome.classification === 'checked-failure'
     ? { category: 'instruction-following', checkedFailure: true } : undefined
 }
 export function goalTaskResearchSuccess(source: GoalTaskResearchSource): boolean {
