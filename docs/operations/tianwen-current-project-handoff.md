@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 最新：模拟批发现 Task 漏收尾，公共恢复入口已验证
+
+所有者确认主动模拟缺条件覆盖全部开发，不等待自然发生/索题/机械 blocked，不增加原验收要求。null-state 唯一批20真实请求/20完整轨迹，第一未来 Task complete/独立 rejected；第二答对但 native Goal 未 complete、无 acceptance，原30分钟结束/原排空成功。训练/来源/研究/激活/方法未来效果/反馈0。[准确结果与责任](tianwen-native-task-finalization-gap-20261005.md)。
+
+重新启用独立 Goal driver 的候选虽53源码通过/9原跳过，实际 continuable CLI disposed，未合入。现有 followupTask 原生 CLI 零真实调用已证同一 child/Goal 冷恢复、模型真实结束、答案保持/退出0；不是自动实现或学习效果完成。下一[自动收尾计划](../superpowers/plans/2026-10-05-tianwen-native-task-finalization-plan.md)由执行者接入原 lane/权限/原次数，再新身份短真实任务和原学习阶段。完整目标 active、main/Daily NO-GO/R9/原窗口保持；旧三账本/84容器/保护根保持，自启Docker停，D>=15，资源见本批最终审计。
+
 ## 2026-10-05 最新：主动模拟触发真实错误，学习材料误计修复交付
 
 semantic-adapter 唯一正式批 97 真实请求/97 完整原及实际轨迹、六原生 Task；四未来基线 4/4、第一训练成功，第二 Task 实际 complete/独立 rejected，但内容评审 material-too-large，整体 Goal 原总预算结束才停止，CLI 1/排空成功。两个 outcome、一成功来源、0 合格问题/研究/激活/方法未来效果/反馈；原错误不补评。3,419 流式片段把原材料推到 660,230 字节，实际非片段 118,769 字节；读取器预算仅排除传输片段，完整事件和原校验/裁决保留。修复 871f6e7c，64 相关通过、原生源码 50/9 原跳过、发布包 49/10 原跳过、原 15 步构建通过。[准确结果、修复和下一责任](tianwen-learning-stream-budget-delivery-20261005.md)。

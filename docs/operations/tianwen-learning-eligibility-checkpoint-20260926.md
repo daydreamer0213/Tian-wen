@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 最新接续：主动模拟与 Task 收尾缺口
+
+所有者授权主动设计并触发缺少的故障、反馈和后续任务，覆盖全部开发；效果实际运行核实，模拟和真人反馈分别标记，不等待自然发生、索题、机械 blocked 或加门槛。null-state 唯一批20真实请求/完整轨迹，第一基线 complete/rejected，第二正确答但 native Goal 未结束、无 acceptance，原总预算停止/排空成功；0训练/合格来源/研究/激活/方法效果/反馈。旧首结果不补评。[准确范围和下一责任](tianwen-native-task-finalization-gap-20261005.md)。
+
+独立 Goal driver re-arm 候选被实际 continuable CLI 否定，未交付；现有 followupTask 公开冷恢复同一 child/Goal 已在0真实模型原生 CLI 中结束/保留原答/退出0。下一实现原次数内的自动收尾，再短真实任务及原受控学习，不把机制验证当学习效果。完整目标 active、main/Daily NO-GO、R9、原门槛和原十工作日窗口保持。
+
 ## 2026-10-05 最新：模拟错误真实发生，传输片段不再误占学习内容预算
 
 semantic-adapter 唯一批 97 请求/完整轨迹、六 Task；基线 4/4、训练一 verified、训练二实际 complete/独立 rejected，原语义资格因 material-too-large 未完成。原总预算停止/CLI 1/排空成功，两个 outcome、一 checked-success 来源、0 合格问题/研究/启用/方法未来效果/反馈。不能把原真实错误补记为合格研究来源。[准确证据和下一自主执行](tianwen-learning-stream-budget-delivery-20261005.md)。
