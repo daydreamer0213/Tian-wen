@@ -15,6 +15,15 @@ import { canonicalJsonResult, isolatedPythonPolicy, prepareIsolatedPythonCli, ty
 
 const checkerPath = fileURLToPath(import.meta.url), checkerSourceDigest = sha256(readFileSync(checkerPath))
 const checkerId = 'tianwen.isolated-python-answer.v1'
+/** Change only Planner requirements; serialize exactly like original source recovery. */
+function bindNativeTaskMaterial(template: NativeGoalTaskStudyMaterial, delegatedTask: string, requiredCondition: string): NativeGoalTaskStudyMaterial {
+  const original = parseNativeGoalStudyInput(template.prompt)
+  assert(typeof delegatedTask === 'string' && delegatedTask.trim() !== '')
+  return { ...structuredClone(template), prompt: JSON.stringify({ protocol: original.protocol, originalCommand: original.originalCommand,
+    goal: { objective: original.goal.objective, context: original.goal.context, successCriteria: original.goal.successCriteria }, delegatedTask,
+    ...(original.permissionMode === undefined ? {} : { permissionMode: original.permissionMode }) }),
+    criteria: [delegatedTask, requiredCondition, ...(original.goal.successCriteria === null ? [] : [original.goal.successCriteria])] }
+}
 export interface GoalTaskIsolatedPythonAnswerCheckConfig {
   readonly cwd: string
   readonly family: import('@tianwen/evolution').ConversationFamily
@@ -23,10 +32,13 @@ export interface GoalTaskIsolatedPythonAnswerCheckConfig {
   readonly requiredCondition: string
   readonly verifierSource: string
   readonly isolated: IsolatedPythonCliConfig
+  /** Explicit Goal scope template; bind actual original Task before its first answer. Default is exact Task. */
+  readonly bindActualTask?: true
 }
 /** Original Goal interface; the same frozen rule checks ordinary and research answers. */
 export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPythonAnswerCheckConfig): GoalTaskAcceptanceCheck {
   const config = structuredClone(raw), material = config.material, original = parseNativeGoalStudyInput(material.prompt)
+  assert(config.bindActualTask === undefined || config.bindActualTask === true)
   const pathKey = (value: string) => { const path = resolve(value).replaceAll('\\', '/'); return process.platform === 'win32' ? path.toLowerCase() : path }
   assert(isAbsolute(config.cwd) && !lstatSync(config.cwd).isSymbolicLink() && lstatSync(config.cwd).isDirectory())
   assert.equal(pathKey(realpathSync(config.cwd)), pathKey(config.cwd))
@@ -37,10 +49,11 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
   if (material.files !== undefined) assert.equal(pathKey(material.files.cwd), pathKey(config.cwd))
   const scope = parseGoalTaskMethodScope(material.files === undefined ? { family: config.family, evaluationMode: 'text' }
     : { family: config.family, evaluationMode: 'local-files', fileOutputKind: 'chat' })
-  const caseId = 'native-goal-task', producer = createConversationStudyIsolatedPythonAnswerCheck({
+  const caseId = 'native-goal-task', producerFor = (material: NativeGoalTaskStudyMaterial) => createConversationStudyIsolatedPythonAnswerCheck({
     modelConfigDigest: config.modelConfigDigest, isolated: config.isolated,
     cases: [{ caseId, material, requiredCondition: config.requiredCondition, verifierSource: config.verifierSource }],
   })
+  const producer = producerFor(material)
   const applicable = (input: Omit<GoalTaskAcceptancePreparation, 'modelConfigDigest'>) => {
     input.signal.throwIfAborted()
     const { goal, task, attempt, source } = input
@@ -49,7 +62,8 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
       && source.type === 'command/run' && source.data.name === 'goal' && source.data.source.kind === 'user'
       && source.data.args === original.originalCommand && goal.origin !== undefined
       && goal.origin.commandId === source.data.commandId && goal.origin.commandSeq === source.seq && goal.origin.commandDigest === sha256(source)
-      && task.objective === original.delegatedTask && goal.tasks.some(item => item.id === task.id && sha256(item) === sha256(task))
+      && (config.bindActualTask === true ? typeof task.objective === 'string' && task.objective.trim() !== '' : task.objective === original.delegatedTask)
+      && goal.tasks.some(item => item.id === task.id && sha256(item) === sha256(task))
       && task.execution !== null && task.execution.sessionId === attempt.childSessionId
       && attempt.status === 'running' && attempt.parentSessionId === goal.planner.sessionId && attempt.permissionMode === original.permissionMode
   }
@@ -60,6 +74,8 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
       try {
         if (!applicable(input) || input.modelConfigDigest !== config.modelConfigDigest) return undefined
         const { goal, task, attempt, source } = structuredClone({ goal: input.goal, task: input.task, attempt: input.attempt, source: input.source })
+        const actualMaterial = config.bindActualTask === true ? bindNativeTaskMaterial(material, task.objective, config.requiredCondition) : material
+        const actualProducer = config.bindActualTask === true ? producerFor(actualMaterial) : producer
         const snapshot = { goal: { id: goal.id, objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
           workspaceRoot: goal.workspaceRoot, origin: goal.origin! }, task,
           ...(attempt.permissionMode === undefined ? {} : { permissionMode: attempt.permissionMode }) }
@@ -69,7 +85,7 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
           assert.equal(sha256(current), sha256(files?.entries ?? [])); return current
         }
         await capturedFiles(); input.signal.throwIfAborted()
-        const prepared = await producer.prepare({ caseId, material, modelConfigDigest: config.modelConfigDigest, signal: input.signal })
+        const prepared = await actualProducer.prepare({ caseId, material: actualMaterial, modelConfigDigest: config.modelConfigDigest, signal: input.signal })
         if (prepared === undefined) return undefined
         return { checkerId: prepared.checkerId, checkerDigest: prepared.checkerDigest, contractDigest: prepared.contractDigest,
           inputsDigest: prepared.inputsDigest, requiredCondition: prepared.requiredCondition, waitsForCancellationCleanup: true,
@@ -98,7 +114,7 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
               assert(messages.length > 0)
               const answer = messages.flatMap(event => event.type === 'assistant/message' ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : []).join('')
               const currentFiles = await capturedFiles(); candidate.signal.throwIfAborted()
-              const outcome = await prepared.evaluate({ material: structuredClone(material), answer, files: currentFiles, signal: candidate.signal })
+              const outcome = await prepared.evaluate({ material: structuredClone(actualMaterial), answer, files: currentFiles, signal: candidate.signal })
               await capturedFiles(); candidate.signal.throwIfAborted()
               assert.equal(sha256(candidate.events), sha256(events))
               return outcome
@@ -122,6 +138,8 @@ export interface ConversationIsolatedPythonAnswerCheckConfig {
   readonly isolated: IsolatedPythonCliConfig
   /** Explicit full five-role cohort; supply fixed cases, never generate them from model answers. */
   readonly provideIndependentCases?: true
+  /** Bind recovered native original Tasks once; Goal scope and independent cases stay host-frozen. */
+  readonly bindActualGoalTasks?: true
 }
 const packet = (material: ConversationAnswerStudyMaterial, answer: string, files: unknown) =>
   JSON.stringify({ schemaVersion: 'tianwen.answer-check.v1', material, answer, files })
@@ -132,6 +150,8 @@ function saveExact(path: string, text: string): void {
 /** Produces results only for explicit frozen host contracts; does not design cases or certify an arbitrary verifier. */
 export function createConversationStudyIsolatedPythonAnswerCheck(raw: ConversationIsolatedPythonAnswerCheckConfig): ConversationAnswerStudyResultCheck {
   const config = structuredClone(raw)
+  assert(config.bindActualGoalTasks === undefined || config.bindActualGoalTasks === true)
+  assert(config.bindActualGoalTasks !== true || config.provideIndependentCases === true)
   assert.match(config.modelConfigDigest, /^sha256:[a-f0-9]{64}$/u)
   assert(config.cases.length > 0 && config.cases.length <= 5)
   const definitions = new Map(config.cases.map(entry => {
@@ -153,6 +173,7 @@ export function createConversationStudyIsolatedPythonAnswerCheck(raw: Conversati
   }))
   assert.equal(definitions.size, config.cases.length)
   const roles = ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const
+  let boundDefinitions = definitions, boundOriginalsDigest: ReturnType<typeof sha256> | undefined
   let prepareIndependentCases: ConversationAnswerStudyResultCheck['prepareIndependentCases']
   if (config.provideIndependentCases === true) {
     assert.deepEqual([...definitions.keys()].sort(), [...roles].sort())
@@ -172,10 +193,39 @@ export function createConversationStudyIsolatedPythonAnswerCheck(raw: Conversati
       return material.qualityContract !== undefined && sha256(material.qualityContract) === qualityDigest
         && (material.files === undefined) === (first.files === undefined) && material.files?.cwd === first.files?.cwd
     }))
+    if (config.bindActualGoalTasks === true) for (const id of roles.slice(0, 3)) {
+      const entry = definitions.get(id)!, material = entry.material
+      assert('sourceKind' in material && material.sourceKind === 'native-goal-task')
+      const original = parseNativeGoalStudyInput(material.prompt)
+      assert(original.originalCommand.trim() === original.goal.objective && original.goal.objective.trim() !== '')
+      assert.deepEqual(material.criteria, [original.delegatedTask, entry.requiredCondition, ...(original.goal.successCriteria === null ? [] : [original.goal.successCriteria])])
+    }
     prepareIndependentCases = async input => {
       input.signal.throwIfAborted()
       if (input.modelConfigDigest !== config.modelConfigDigest || input.sources.length !== 2 || sha256(input.qualityContract) !== qualityDigest
-        || input.cwd !== first.files?.cwd || [...input.sources, input.counterexample].some((material, index) => sha256(material) !== definitions.get(roles[index]!)!.materialDigest)) return undefined
+        || input.cwd !== first.files?.cwd) return undefined
+      const originals = [...input.sources, input.counterexample]
+      if (config.bindActualGoalTasks === true) {
+        try {
+          const bindings = originals.map((material, index) => {
+            const id = roles[index]!, template = definitions.get(id)!
+            assert('sourceKind' in material && material.sourceKind === 'native-goal-task')
+            const actual = parseNativeGoalStudyInput(material.prompt)
+            const bound = bindNativeTaskMaterial(template.material as NativeGoalTaskStudyMaterial, actual.delegatedTask, template.requiredCondition)
+            assert.equal(sha256(material), sha256(bound))
+            assert(Buffer.byteLength(packet(bound, '', bound.files?.entries ?? [])) < isolatedPythonPolicy.ioBytes)
+            return [id, { ...template, material: bound, materialDigest: sha256(bound) }] as const
+          })
+          const digest = sha256(originals)
+          if (boundOriginalsDigest !== undefined && boundOriginalsDigest !== digest) return undefined
+          input.signal.throwIfAborted()
+          if (boundOriginalsDigest === undefined) {
+            boundDefinitions = new Map(definitions)
+            for (const [id, entry] of bindings) boundDefinitions.set(id, entry)
+            boundOriginalsDigest = digest
+          }
+        } catch { input.signal.throwIfAborted(); return undefined }
+      } else if (originals.some((material, index) => sha256(material) !== definitions.get(roles[index]!)!.materialDigest)) return undefined
       const independent = (id: 'adjacent' | 'holdout') => {
         const material = definitions.get(id)!.material
         assert('prompt' in material)
@@ -189,7 +239,8 @@ export function createConversationStudyIsolatedPythonAnswerCheck(raw: Conversati
   return { ...(prepareIndependentCases === undefined ? {} : { prepareIndependentCases }), async prepare(input) {
     input.signal.throwIfAborted()
     try {
-      const entry = definitions.get(input.caseId)
+      if (config.bindActualGoalTasks === true && boundOriginalsDigest === undefined) return undefined
+      const entry = boundDefinitions.get(input.caseId)
       if (entry === undefined || input.modelConfigDigest !== config.modelConfigDigest || sha256(input.material) !== entry.materialDigest) return undefined
       assert.equal(sha256(readFileSync(checkerPath)), checkerSourceDigest)
       const runner = await prepareIsolatedPythonCli(config.isolated, input.signal)

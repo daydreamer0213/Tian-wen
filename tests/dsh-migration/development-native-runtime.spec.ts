@@ -95,6 +95,44 @@ it('permits different original Goals but rejects duplicate answer routes, execut
  expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:bad} as any))).toThrow()
 })
 
+function originalGoalInput(contract:ReturnType<typeof goalAnswerContract>, taskText:string) {
+ const original=JSON.parse(contract.material.prompt),source={seq:2,type:'command/run',data:{name:'goal',args:original.originalCommand,source:{kind:'user'},commandId:'original-command'}}
+ const task={id:'actual-task',objective:taskText,execution:{sessionId:'child',goalId:'native-goal'},resolution:null}
+ return {cwd:contract.cwd,modelConfigDigest:contract.modelConfigDigest,signal:new AbortController().signal,source,task,
+  goal:{id:'original-goal',...original.goal,workspaceRoot:contract.cwd,origin:{sessionId:'main',commandId:'original-command',commandSeq:2,commandDigest:sha256(source)},tasks:[task],planner:{sessionId:'planner'}},
+  attempt:{status:'running',epoch:1,parentSessionId:'planner',childSessionId:'child',permissionMode:original.permissionMode,permissionFingerprint:sha256('workspace-write')}}
+}
+it.each([false,true])('routes an explicit whole-Goal %s answer contract after legitimate Task wording changes',async chat=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract={...goalAnswerContract(f.packet.studyContracts.cwd,chat),bindActualTask:true}
+ const {goalContract,...packet}=f.packet,options=loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:contract} as any))
+ const input=originalGoalInput(contract,'Actual Planner wording preserving the original verdict.')
+ expect(await options.goalTaskAcceptance.methodScope(input)).toEqual(chat?{family:'writing',evaluationMode:'local-files',fileOutputKind:'chat'}:{family:'writing',evaluationMode:'text'})
+ input.goal.context='Changed original context'
+ expect(await options.goalTaskAcceptance.methodScope(input)).toBeUndefined();expect(await options.goalTaskAcceptance.prepare(input)).toBeUndefined()
+})
+it('rejects ambiguous whole-Goal routes while permitting distinct Goals with the same Task template',async()=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),cwd=f.packet.studyContracts.cwd,{goalContract,...packet}=f.packet
+ const first={...goalAnswerContract(cwd),bindActualTask:true},sameGoal=structuredClone(first)
+ sameGoal.material.prompt=JSON.stringify({...JSON.parse(first.material.prompt),delegatedTask:'Another template Task.'});sameGoal.material.criteria[0]='Another template Task.'
+ const second={...goalAnswerContract(cwd,false,'two'),bindActualTask:true}
+ second.material.prompt=JSON.stringify({...JSON.parse(second.material.prompt),delegatedTask:JSON.parse(first.material.prompt).delegatedTask});second.material.criteria[0]=first.material.criteria[0]!
+ expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:[first,second]} as any))).not.toThrow()
+ const {bindActualTask:_flag,...staticSameGoal}=sameGoal
+ for(const contracts of [[first,sameGoal],[first,staticSameGoal],[{...first,bindActualTask:false}],[{...first,bindActualTask:'true'}]])
+  expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:contracts} as any))).toThrow()
+})
+it('supplies fixed independent cases for actual native original Task materials through explicit DEV opt-in',async()=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract={...answerContracts(f.packet.studyContracts.cwd),bindActualGoalTasks:true}
+ for(const [index,role] of ['source1','source2','counterexample'].entries()){
+  const native=goalAnswerContract(f.packet.studyContracts.cwd,false,role)
+  contract.cases[index]!.material=native.material as any;contract.cases[index]!.requiredCondition=native.requiredCondition
+ }
+ const options=loadDevelopmentNativeRuntimeOptions(f.write({...f.packet,answerStudyContracts:contract} as any))
+ const actual=contract.cases.slice(0,3).map(entry=>{const material=structuredClone(entry.material),prompt=JSON.parse(material.prompt!);prompt.delegatedTask+=' Actual original planning wording.';material.prompt=JSON.stringify(prompt);material.criteria[0]=prompt.delegatedTask;return material})
+ const input={sources:actual.slice(0,2),counterexample:actual[2]!,modelConfigDigest:contract.modelConfigDigest,qualityContract:conversationQualityContract(),signal:new AbortController().signal}
+ expect(await options.answerStudyResultCheck.prepareIndependentCases(input)).toEqual(Object.fromEntries(contract.cases.slice(3).map(c=>[c.caseId,{prompt:c.material.prompt,criteria:c.material.criteria}])))
+})
+
 it.each([false,true])('loads optional frozen answer contracts and supplies exact %s-mode cases without executor preparation',async chat=>{
  const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract=answerContracts(f.packet.studyContracts.cwd,chat)
  const packet={...f.packet,answerStudyContracts:contract},options=loadDevelopmentNativeRuntimeOptions(f.write(packet as any))

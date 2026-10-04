@@ -111,24 +111,46 @@ export function createDevelopmentFunctionalStudyResultCheck(config) {
 
 /** Thin original Goal interface; all native authority remains in the public factory. */
 function goalAnswerChecks(raw, cwd) {
-  const contracts = structuredClone(Array.isArray(raw) ? raw : [raw]), routes = new Map()
+  const contracts = structuredClone(Array.isArray(raw) ? raw : [raw]), routes = new Map(), goalRoutes = new Map(), staticGoals = new Set()
   assert(contracts.length > 0, 'DEV Goal answer contracts must be nonempty')
   const fields = ['cwd','family','material','modelConfigDigest','requiredCondition','verifierSource']
   for (const contract of contracts) {
     assert(contract !== null && typeof contract === 'object' && !Array.isArray(contract)
-      && fields.every(key => Object.hasOwn(contract,key)) && Object.keys(contract).every(key => fields.includes(key)),
+      && fields.every(key => Object.hasOwn(contract,key)) && Object.keys(contract).every(key => [...fields,'bindActualTask'].includes(key)),
       'DEV Goal answer contracts have missing or unsupported fields; isolated override is not permitted')
     assert.equal(contract.cwd,cwd,'DEV Goal answer contract must share the frozen cwd')
+    assert(contract.bindActualTask === undefined || contract.bindActualTask === true, 'DEV actual Task binding must be explicitly true')
     const check = createGoalTaskIsolatedPythonAnswerCheck({ ...contract, isolated: structuredClone(answerHost) })
     // The constructor has already validated the complete native prompt and
     // criteria. Route only; do not reinterpret its command or authority here.
-    const task = JSON.parse(contract.material.prompt).delegatedTask
-    assert(!routes.has(task),'DEV Goal answer task routes must be distinct')
-    routes.set(task,check)
+    const original = JSON.parse(contract.material.prompt), task = original.delegatedTask
+    const goalKey = JSON.stringify([original.originalCommand, original.goal.objective,
+      original.goal.context, original.goal.successCriteria, original.permissionMode ?? null])
+    if (contract.bindActualTask === true) {
+      assert(!goalRoutes.has(goalKey),'DEV whole-Goal answer routes must be distinct')
+      goalRoutes.set(goalKey,check)
+    } else {
+      assert(!routes.has(task),'DEV Goal answer task routes must be distinct')
+      routes.set(task,check)
+      staticGoals.add(goalKey)
+    }
+  }
+  assert([...goalRoutes.keys()].every(key => !staticGoals.has(key)), 'DEV whole-Goal and static Task routes must not overlap')
+  async function select(input) {
+    const direct = routes.get(input?.task?.objective)
+    if (direct !== undefined) {
+      const scope = await direct.methodScope(input)
+      if (scope !== undefined) return { check: direct, scope }
+    }
+    for (const check of goalRoutes.values()) {
+      const scope = await check.methodScope(input)
+      if (scope !== undefined) return { check, scope }
+    }
+    return undefined
   }
   return {
-    async methodScope(input) { return routes.get(input?.task?.objective)?.methodScope(input) },
-    async prepare(input) { return routes.get(input?.task?.objective)?.prepare(input) },
+    async methodScope(input) { return (await select(input))?.scope },
+    async prepare(input) { return (await select(input))?.check.prepare(input) },
   }
 }
 
@@ -145,7 +167,7 @@ export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContr
   if (answerStudyContracts !== undefined) {
     assert(answerStudyContracts !== null && typeof answerStudyContracts === 'object' && !Array.isArray(answerStudyContracts))
     assert(['modelConfigDigest','cases'].every(key => Object.hasOwn(answerStudyContracts,key))
-      && Object.keys(answerStudyContracts).every(key => ['modelConfigDigest','cases','provideIndependentCases'].includes(key)),
+      && Object.keys(answerStudyContracts).every(key => ['modelConfigDigest','cases','provideIndependentCases','bindActualGoalTasks'].includes(key)),
       'DEV answer contracts have missing or unsupported fields; isolated override is not permitted')
     assert(Array.isArray(answerStudyContracts.cases))
     for (const entry of answerStudyContracts.cases) if (entry?.material?.files !== undefined)
