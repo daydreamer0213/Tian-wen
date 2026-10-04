@@ -154,7 +154,13 @@ export async function scanDurableGoals(
       .toSorted((left, right) => String(left.id).localeCompare(String(right.id)))
     const snapshots: DurableGoalSnapshot[] = []
     for (const header of headers) {
-      const inspection = await persistence.inspect(header.id)
+      // Status reports persisted facts. Cold inspect adds crash-recovery closers
+      // to an open turn, including results for tool requests not yet dispatched.
+      // Those logical recovery events are not observed execution evidence.
+      const inspection = await persistence.readFrom(header.id, 0)
+      // Preserve the original SDK replay validation on this same physical
+      // snapshot, without publishing a Session or synthesizing recovery events.
+      ctx.sessions.prepare(header.id, { seed: inspection.events, meta: inspection.meta, seedSource: 'persistence' })
       snapshots.push({ inspection, folded: foldGoal(inspection.events) })
     }
     return snapshots

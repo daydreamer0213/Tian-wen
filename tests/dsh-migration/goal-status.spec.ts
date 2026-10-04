@@ -452,6 +452,53 @@ describe('authoritative governed ledger inspection', () => {
 })
 
 describe('Tianwen read-only Goal status', () => {
+  it.each(['before-call', 'before-result', 'after-result'] as const)('reads a real stored SDK prefix without inventing crash-recovery tool outcomes: %s', async boundary => {
+    const fixture = await createFixture()
+    try {
+      const path = sessionLog(fixture.dataDir, fixture.sessionId)
+      const lines = readFileSync(path, 'utf8').trimEnd().split('\n')
+      const records = lines.map(line => JSON.parse(line))
+      const call = records.findIndex(record => record.type === 'tool/call')
+      const result = records.findIndex(record => record.type === 'tool/result')
+      expect(call).toBeGreaterThan(0); expect(result).toBeGreaterThan(call)
+      const length = boundary === 'before-call' ? call : boundary === 'before-result' ? result : result + 1
+      writeFileSync(path, lines.slice(0, length).join('\n')+'\n')
+      const before = snapshotTree(fixture.dataDir)
+      const status = await readGoalStatus({ dataDir: fixture.dataDir, goalId: fixture.goalId })
+      expect(status.session.eventCount).toBe(length - 1)
+      expect(status.evidence).toMatchObject({ total: boundary === 'before-call' ? 0 : 1,
+        counts: { complete: boundary === 'after-result' ? 1 : 0, 'missing-result': boundary === 'before-result' ? 1 : 0 } })
+      expect(status.runtime).toMatchObject({ modelRequests: 0, readOnly: true })
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally { rmSync(fixture.dataDir, { recursive: true, force: true }) }
+  })
+
+  it('still rejects a physically stored orphan tool result without repairing or skipping it', async () => {
+    const fixture = await createFixture()
+    try {
+      const path = sessionLog(fixture.dataDir, fixture.sessionId)
+      const lines = readFileSync(path, 'utf8').trimEnd().split('\n').filter(line => JSON.parse(line).type !== 'tool/call')
+      writeFileSync(path, lines.join('\n')+'\n')
+      const before = snapshotTree(fixture.dataDir)
+      await expect(readGoalStatus({ dataDir: fixture.dataDir, goalId: fixture.goalId })).rejects.toBeInstanceOf(GoalStatusIntegrityError)
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally { rmSync(fixture.dataDir, { recursive: true, force: true }) }
+  })
+
+  it('keeps the original SDK replay validation for a malformed stored request header', async () => {
+    const fixture = await createFixture()
+    try {
+      const path = sessionLog(fixture.dataDir, fixture.sessionId)
+      const records = readFileSync(path, 'utf8').trimEnd().split('\n').map(line => JSON.parse(line))
+      const request = records.find(record => record.type === 'request/header')
+      expect(request).toBeDefined(); request.data.header.config = {}
+      writeFileSync(path, records.map(record => JSON.stringify(record)).join('\n')+'\n')
+      const before = snapshotTree(fixture.dataDir)
+      await expect(readGoalStatus({ dataDir: fixture.dataDir, goalId: fixture.goalId })).rejects.toBeInstanceOf(GoalStatusIntegrityError)
+      expect(snapshotTree(fixture.dataDir)).toEqual(before)
+    } finally { rmSync(fixture.dataDir, { recursive: true, force: true }) }
+  })
+
   it('keeps the status bundle free of private runtime and probe inputs', () => {
     const metafile = JSON.parse(readFileSync(STATUS_METAFILE, 'utf8')) as {
       inputs: Record<string, { imports: readonly { path: string }[] }>
