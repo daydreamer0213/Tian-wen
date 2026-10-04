@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原生目标与可信答案组合收口
+
+原三Task来源→设计前五份答案合同→发行Python十臂，在text/chat两新控制通过；双审met/decision accepted但独立holdout rejected，quarantine=false仍不启用。原文件工具实际捕获，新Context原来源/研究/包/账本精确恢复且0新增请求/检查；同进程，不称独立CLI。全轮真实隔离40次含首测试字段误读失败20，重复不累加；4项旧回归通过，类型旧22/现22/新增0但非全绿，独立静态无有据P1/P2。[准确失败和下一责任](tianwen-native-answer-combination-delivery-20261004.md)。
+
+三账本保持/0真实模型自然学习收益，仍1问题/无相容对/R9未解；完整目标active/incomplete、main/Daily NO-GO/原门槛/十工作日窗口不变。本组合收口，下一补真正核心缺口：原Goal普通text/chat任务缺现成可信答案生产者，沿已有接口/同一Python工厂绑定完整原始材料，再固定真实开发批次唯一前瞻，不重复通路/索题/造来源/重评历史或机械blocked。95新增检查文件清理/40小收据保留/Profile自清/原容器集合不变/自启Docker已停/77保护不碰/D>=15。
+
 ## 2026-10-04 标准 DEV 入口消费答案合同
 
 Native Goal新答案模式静态核对无有据连接缺陷，组合执行尚未证明；不将缺测试写成产品阻塞。发现标准JSON宿主仅挂代码研究检查，已薄接入可选answerStudyContracts，经原固定Python host/公开工厂/applyDevelopment进入Loop。原外部数据摘要/同cwd/不可写合同/默认行为保持，拒绝执行器及Runtime覆盖；不另建平台。29相关通过/1原可选控制跳过；正常Loader真实CLI Profile布局发行消费0请求/0同意/0Task/0研究。脚本语法/diff通过，完整测试类型旧13/现6/新增0但非全绿；独立复核无有据P1/P2。[准确失败、范围和下一责任](tianwen-dev-answer-contract-delivery-20261004.md)。

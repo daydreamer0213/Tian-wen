@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 原生答案组合不补自然资格
+
+text/chat原三Task来源及答案工厂各5准备/10隔离检查通过，双审met/原裁决accepted的holdout错误未启用（quarantine=false）。原保存材料新Context精确恢复0新增调用，非新Node/CLI；0真实模型/自然来源/反馈/收益。首字段误读测试失败与类型比较描述变化均留存，最终2新+4旧控制过、旧22/现22类型新增0，独立静态无有据P1/P2。[完整范围](tianwen-native-answer-combination-delivery-20261004.md)。
+
+三原账本保持/仍1合格问题无相容对/R9未解，目标active/incomplete、main/Daily NO-GO及原门槛/十工作日窗口不变。组合收口，下一原Goal普通text/chat可信结果生产者（当前功能结果脚本控制不能冒充），沿原接口完整绑定/复用同执行器，再固定有用真实开发批次与同版本唯一前瞻；不桥接旧来源/索题/造反馈/机械blocked。95自有文件清、40原小收据保留/Profile清/容器集合保持/自启Docker停/77保护不碰/D>=15。
+
 ## 2026-10-04 标准答案合同入口不增加学习资格
 
 标准DEV JSON插件可选answerStudyContracts，交原固定Python host及发行工厂，原Loop实际消费；缺省/原不可写数据摘要/同workspace/原隔离守卫保持。29相关通过/1原控制跳过，正常Loader发行装配0请求/0同意/0Task/0研究；完整类型旧13/现6/新增0、独立复核无有据P1/P2。仅补实际宿主消费，不当语义oracle或研究效果。[准确范围和下一责任](tianwen-dev-answer-contract-delivery-20261004.md)。
