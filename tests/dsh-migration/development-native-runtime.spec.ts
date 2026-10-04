@@ -61,6 +61,40 @@ function answerContracts(cwd:string, chat=false) {
  return {modelConfigDigest:sha256('frozen-model'),provideIndependentCases:true,cases}
 }
 
+function goalAnswerContract(cwd:string, chat=false, suffix='one') {
+ const requiredCondition='Report pending for an unresolved original verdict.',objective=`Report the controlled original ${suffix} status.`,task=`Preserve original ${suffix} verdict.`
+ return {cwd,family:'writing',modelConfigDigest:sha256('frozen-model'),requiredCondition,
+  verifierSource:'import json,sys\np=json.load(sys.stdin)\nprint(json.dumps(p["answer"]=="pending"))',
+  material:{sourceKind:'native-goal-task',prompt:JSON.stringify({protocol:'tianwen.native-goal-study-input.v1',originalCommand:objective,
+   goal:{objective,context:null,successCriteria:null},delegatedTask:task,permissionMode:'workspace-write'}),
+   criteria:[task,requiredCondition],qualityContract:conversationQualityContract(),...(chat?{files:{schemaVersion:'tianwen.conversation-file-material.v1',cwd,
+    outputKind:'chat',outputPaths:[],entries:[{path:'record.md',content:'Verdict not yet measured.'}]}}:{})}}
+}
+
+it.each([false,true])('loads frozen ordinary Goal %s answer contracts from the original DEV JSON without executor preparation',async chat=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract=goalAnswerContract(f.packet.studyContracts.cwd,chat)
+ const {goalContract,...packet}=f.packet
+ const options=loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:contract} as any))
+ expect(typeof options.goalTaskAcceptance.methodScope).toBe('function')
+ expect(typeof options.goalTaskAcceptance.prepare).toBe('function')
+ expect(await options.goalTaskAcceptance.prepare({task:{objective:'another delegated task'}})).toBeUndefined()
+ // The public producer, rather than a loose objective match, must still reject
+ // absent original Goal/command/native authority for an apparent task match.
+ await expect(options.goalTaskAcceptance.methodScope({task:{objective:'Preserve original one verdict.'},signal:new AbortController().signal})).rejects.toThrow()
+ expect(options.answerStudyResultCheck).toBeUndefined()
+})
+
+it('permits different original Goals but rejects duplicate answer routes, execution overrides and ambiguous checker modes',async()=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),cwd=f.packet.studyContracts.cwd
+ const {goalContract,...packet}=f.packet,first=goalAnswerContract(cwd),second=goalAnswerContract(cwd,true,'two')
+ expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:[first,second]} as any))).not.toThrow()
+ for(const values of [[],[first,first],[{...first,cwd:'D:/DevData/unrelated'}],[{...first,isolated:{}}],[{...first,guidanceActivationQuarantine:false}]])
+  expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:values} as any))).toThrow()
+ expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...f.packet,goalAnswerContracts:first} as any))).toThrow()
+ const bad=structuredClone(first);bad.material.criteria=['A different condition.']
+ expect(()=>loadDevelopmentNativeRuntimeOptions(f.write({...packet,goalAnswerContracts:bad} as any))).toThrow()
+})
+
 it.each([false,true])('loads optional frozen answer contracts and supplies exact %s-mode cases without executor preparation',async chat=>{
  const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture(),contract=answerContracts(f.packet.studyContracts.cwd,chat)
  const packet={...f.packet,answerStudyContracts:contract},options=loadDevelopmentNativeRuntimeOptions(f.write(packet as any))

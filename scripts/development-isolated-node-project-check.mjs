@@ -13,7 +13,7 @@ const require = createRequire(packageUrl)
 const { parseConversationFileMaterial, parseConversationQualityContract } = await import(pathToFileURL(require.resolve('@tianwen/evolution')).href)
 const { createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck,
   createConversationStudyIsolatedNodeProjectCohortCheck, createGoalTaskIsolatedNodeProjectCheck,
-  createConversationStudyIsolatedPythonAnswerCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
+  createConversationStudyIsolatedPythonAnswerCheck, createGoalTaskIsolatedPythonAnswerCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
 
 function withFixedHost(config) {
   assert(config !== null && typeof config === 'object' && !Array.isArray(config))
@@ -109,8 +109,32 @@ export function createDevelopmentFunctionalStudyResultCheck(config) {
   }
 }
 
+/** Thin original Goal interface; all native authority remains in the public factory. */
+function goalAnswerChecks(raw, cwd) {
+  const contracts = structuredClone(Array.isArray(raw) ? raw : [raw]), routes = new Map()
+  assert(contracts.length > 0, 'DEV Goal answer contracts must be nonempty')
+  const fields = ['cwd','family','material','modelConfigDigest','requiredCondition','verifierSource']
+  for (const contract of contracts) {
+    assert(contract !== null && typeof contract === 'object' && !Array.isArray(contract)
+      && fields.every(key => Object.hasOwn(contract,key)) && Object.keys(contract).every(key => fields.includes(key)),
+      'DEV Goal answer contracts have missing or unsupported fields; isolated override is not permitted')
+    assert.equal(contract.cwd,cwd,'DEV Goal answer contract must share the frozen cwd')
+    const check = createGoalTaskIsolatedPythonAnswerCheck({ ...contract, isolated: structuredClone(answerHost) })
+    // The constructor has already validated the complete native prompt and
+    // criteria. Route only; do not reinterpret its command or authority here.
+    const task = JSON.parse(contract.material.prompt).delegatedTask
+    assert(!routes.has(task),'DEV Goal answer task routes must be distinct')
+    routes.set(task,check)
+  }
+  return {
+    async methodScope(input) { return routes.get(input?.task?.objective)?.methodScope(input) },
+    async prepare(input) { return routes.get(input?.task?.objective)?.prepare(input) },
+  }
+}
+
 /** Spread these host-owned options into the actual DEV Runtime before tasks arrive. */
-export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract, answerStudyContracts) {
+export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract, answerStudyContracts, goalAnswerContracts) {
+  assert(goalContract === undefined || goalAnswerContracts === undefined, 'DEV Goal code and answer checker modes are mutually exclusive')
   const ordinaryContracts = Array.isArray(ordinaryContract) ? ordinaryContract : [ordinaryContract]
   for (const contract of ordinaryContracts)
     assert.equal(contract?.cwd, studyContracts.cwd, 'DEV ordinary and study contracts must share the frozen cwd')
@@ -132,5 +156,6 @@ export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContr
   }
   return { externalCodeCheck: createDevelopmentOrdinaryTaskCheck(ordinaryContract, createDevelopmentIsolatedNodeProjectCheck), studyResultCheck,
     ...(answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck }),
-    ...(goalContract === undefined ? {} : { goalTaskAcceptance: createDevelopmentGoalTaskCheck(goalContract, createDevelopmentGoalTaskIsolatedNodeProjectCheck) }) }
+    ...(goalContract === undefined ? {} : { goalTaskAcceptance: createDevelopmentGoalTaskCheck(goalContract, createDevelopmentGoalTaskIsolatedNodeProjectCheck) }),
+    ...(goalAnswerContracts === undefined ? {} : { goalTaskAcceptance: goalAnswerChecks(goalAnswerContracts,studyContracts.cwd) }) }
 }
