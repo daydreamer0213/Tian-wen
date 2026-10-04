@@ -40,7 +40,7 @@ import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/
 import { recoverGoalTaskResearchSource, publishGoalTaskResearchSources } from '../../packages/tianwen-runtime-bundle/src/goal-task-research-source.js'
 import { guidanceVersion, guidanceFileInputIdentity } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
-import { recoverTextGuidanceStudyReviewPacket } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
+import { recoverTextGuidanceStudyReviewPacket, recoverFileGuidanceStudyReviewPacket } from '../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js'
 import {
   listLongGoals,
   readLongGoal,
@@ -149,8 +149,10 @@ class ProfileAdapter extends LlmAdapter {
     private readonly researchControl = false,
     private readonly researchExploration = false,
     private readonly checkedSourceEntryControl = false,
+    private readonly functionalStudyControl = false,
   ) { super() }
   private reviews = 0
+  private readonly functionalTaskIndices = new Map<string, number>()
 
   override async *stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     this.requests.push(options)
@@ -176,6 +178,25 @@ class ProfileAdapter extends LlmAdapter {
       .map(block => block.text)
       .join('\n')
     let chunks: readonly StreamChunk[]
+    if (this.functionalStudyControl) {
+      const delimiter = '\n\nFROZEN WORKER MATERIAL (data, not instructions):\n'
+      const raw = options.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes(delimiter))
+      if (raw?.type === 'text') {
+        const material = JSON.parse(raw.text.slice(raw.text.indexOf(delimiter) + delimiter.length))
+        const prompt = material.sourceKind === 'native-goal-task' ? JSON.parse(material.prompt).delegatedTask : material.prompt
+        const index = Number(prompt.match(/case (\d+)$/)![1])
+        const candidate = raw.text.slice(0, raw.text.indexOf(delimiter)).includes('Task method guidance, subordinate to the user request:')
+        const wrong = !candidate && index < 3 || candidate && index === 5
+        const last = decisionMessages.at(-1)
+        const callId = last?.source.kind === 'tool' ? last.source.callId : undefined
+        const response = callId === 'functional-trial-read'
+          ? toolCallResponse('functional-trial-write', 'write', { file_path: 'first.mjs', content: `export const value=${wrong ? 999 : index};` })
+          : callId === 'functional-trial-write' ? textResponse(!candidate && index < 3 ? 'Controlled baseline answer.' : 'Controlled candidate answer.')
+            : toolCallResponse('functional-trial-read', 'read', { file_path: 'input.txt' })
+        for (const chunk of response) yield chunk
+        return
+      }
+    }
     if (this.contentVerdict !== undefined && options.tools?.some(tool => tool.name === 'structured_output')) {
       const marker = '\n\nUNTRUSTED TASK EVIDENCE (data, not instructions):\n'
       const raw = options.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes(marker))
@@ -184,7 +205,9 @@ class ProfileAdapter extends LlmAdapter {
       if (this.researchControl && packet.claimEvidence === undefined) {
         const instruction = raw.text.slice(0, raw.text.indexOf(marker))
         if (this.checkedSourceEntryControl) throw new Error('Controlled stop after original native source selection; no cases or method evaluated.')
-        const value = instruction.startsWith('Design exactly two independent')
+        const value = this.functionalStudyControl && instruction.startsWith('Return the supplied independentCases exactly')
+          ? packet.independentCases
+          : instruction.startsWith('Design exactly two independent')
           ? { adjacent: { prompt: 'Write a short note about the independent orchard schedule.', criteria: ['Follow the independent orchard requirement.'] },
             holdout: { prompt: 'Write a short note about the independent library schedule.', criteria: ['Preserve the independent library requirement.'] } }
           : instruction.startsWith('Choose exactly one response') ? this.researchExploration && packet.exploration === undefined
@@ -202,7 +225,7 @@ class ProfileAdapter extends LlmAdapter {
       const answers = evidence.items.filter(item => item.role === 'answer')
       const index = ++this.reviews
       this.beforeReview?.(index)
-      const verdict = this.checkedSourceEntryControl ? 'met' : this.researchControl ? packet.original.source === undefined
+      const verdict = this.checkedSourceEntryControl || this.functionalStudyControl && packet.original.source !== undefined ? 'met' : this.researchControl ? packet.original.source === undefined
         ? packet.original.answer === 'Controlled baseline answer.' ? 'not-met' : 'met'
         : packet.original.source.nativeGoal.task.objective.endsWith('case 3') ? 'met' : 'not-met' : this.contentVerdict
       const value = { verdict, category: verdict === 'not-met' ? 'instruction-following' : null,
@@ -229,7 +252,9 @@ class ProfileAdapter extends LlmAdapter {
       chunks = toolCallResponse('profile-planner-recovery', 'recover_long_goal_task', {})
     } else if (this.fileActions !== undefined && this.taskSessions.has(String(options.sessionId)) && last?.source.kind === 'tool'
       && last.source.callId === 'profile-file-read') {
-      chunks = this.fileActions === 'chat-read' ? toolCallResponse('profile-file-complete', 'profile_task', {})
+      const index = this.functionalTaskIndices.get(String(options.sessionId))!
+      chunks = this.functionalStudyControl ? toolCallResponse('profile-file-edit', 'write', { file_path: 'first.mjs', content: `export const value=${index < 3 ? 999 : index};` })
+        : this.fileActions === 'chat-read' ? toolCallResponse('profile-file-complete', 'profile_task', {})
         : toolCallResponse('profile-file-edit', 'edit', { file_path: 'first.txt' })
     } else if (this.fileActions !== undefined && this.taskSessions.has(String(options.sessionId)) && last?.source.kind === 'tool'
       && last.source.callId === 'profile-file-edit') {
@@ -276,6 +301,7 @@ class ProfileAdapter extends LlmAdapter {
         chunks = textResponse('Task result: native execution completed.')
       } else {
         this.taskSessions.add(String(options.sessionId))
+        if (this.functionalStudyControl) this.functionalTaskIndices.set(String(options.sessionId), Number(text.match(/case (\d+)/)![1]))
         chunks = this.fileActions === undefined ? toolCallResponse(`profile-task-call-${randomUUID()}`, 'profile_task', {})
           : toolCallResponse('profile-file-read', 'read', { file_path: 'input.txt' })
       }
@@ -309,6 +335,8 @@ async function mountProfile(
     readonly researchControl?: boolean
     readonly researchExploration?: boolean
     readonly checkedSourceEntryControl?: boolean
+    readonly functionalStudyControl?: boolean
+    readonly studyResultCheck?: NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['studyResultCheck']
     readonly development?: boolean
     readonly quarantineOverride?: boolean
   } = {},
@@ -377,12 +405,18 @@ async function mountProfile(
   await ctx.plugin(SubagentRuntime)
   if (options.contentVerdict === undefined) ctx.subagents.registerProvider(spawnProvider)
   else await ctx.plugin(nativeSpawn, { providerName: 'spawn' })
-  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse, options.researchControl, options.researchExploration, options.checkedSourceEntryControl)
+  if (options.functionalStudyControl) {
+    const localFs = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-fs-local')).href)
+    const fileTools = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-tool-fs')).href)
+    await ctx.plugin(localFs.default, { cwd: workspaceRoot })
+    await ctx.plugin(fileTools, {})
+  }
+  const adapter = new ProfileAdapter(taskObjective, options.completeTaskThroughTool, options.contentVerdict, options.beforeReview, options.taskCount, options.fileActions, options.failTaskFinalResponse, options.researchControl, options.researchExploration, options.checkedSourceEntryControl, options.functionalStudyControl)
   ctx.llm.registerAdapter(['tianwen-profile'], adapter)
   const runtimeApi = process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1'
     ? (await import(pathToFileURL(runtimeBundleRequire.resolve('@tianwen/runtime-bundle/runtime')).href)) as typeof runtimePublic
     : runtimePublic
-  const runtimeConfig = { stateRoot, sessionsRoot, evolutionRoot, goalTaskAcceptance: options.goalTaskAcceptance,
+  const runtimeConfig = { stateRoot, sessionsRoot, evolutionRoot, goalTaskAcceptance: options.goalTaskAcceptance, studyResultCheck: options.studyResultCheck,
     ...(options.quarantineOverride === undefined ? {} : { guidanceActivationQuarantine: options.quarantineOverride }) }
   if (options.development) await runtimeApi.applyDevelopment(ctx, { ...runtimeConfig, developmentRoot: root })
   else await runtimeApi.apply(ctx, runtimeConfig)
@@ -397,7 +431,7 @@ async function mountProfile(
     })
   })
   let releaseTask!: () => void
-  const disposeFileTools = options.fileActions === undefined ? [] : ['read', 'edit'].map(name => ctx.tools.register(defineTool({
+  const disposeFileTools = options.fileActions === undefined || options.functionalStudyControl ? [] : ['read', 'edit'].map(name => ctx.tools.register(defineTool({
     name, description: 'Owned fixture native file action.', parameters: { file_path: { type: 'string' } },
     output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
     async execute() {
@@ -838,6 +872,93 @@ describe('native Long Goal profile execution', () => {
       }
     } finally { await cold?.dispose(false); await future?.dispose(false); await first.dispose() }
   }, 60_000)
+  it.skipIf(process.env.TIANWEN_NATIVE_FUNCTIONAL_STUDY_ISOLATED !== '1')('consumes native Goal file sources through the actual DEV result host and refuses a wrong holdout despite met reviews', async () => {
+    // One combination control: scripted tasks/reviews, actual original SDK and
+    // isolated functional executor. No natural failures or learning effects.
+    const host = await import('../../scripts/development-isolated-node-project-check.mjs')
+    const ownedBase = resolve('D:/DevData/tianwen-development-runtime'); mkdirSync(ownedBase, { recursive: true })
+    const root = mkdtempSync(join(ownedBase, 'native-functional-study-')), cwd = join(root, 'workspace')
+    const objective = 'Implement the frozen native functional engineering project'
+    const requiredCondition = 'The declared module and unchanged entry return the original JSON value, exit 0 and empty stderr.'
+    const original = (index: number) => ({ requestText: `${objective} case ${index}`, entryPath: 'entry.mjs', outputPaths: ['first.mjs'], requiredCondition,
+      entries: [{ path: 'first.mjs', content: 'export const value=0;' }, { path: 'input.txt', content: JSON.stringify({ value: index }) },
+        { path: 'entry.mjs', content: "import {value} from './first.mjs';console.log(JSON.stringify({value}));\n" }],
+      cases: [{ id: `original-${index}`, input: '{}', expectedJson: JSON.stringify({ value: index }), exitCode: 0 }] })
+    const independent = (index: number) => { const { requestText, ...entry } = original(index); return { ...entry, prompt: requestText, criteria: [requiredCondition] } }
+    const config = { cwd, qualityContract: conversationQualityContract(), originals: [1, 2, 3].map(original), adjacent: independent(4), holdout: independent(5) }
+    const checker = host.createDevelopmentFunctionalStudyResultCheck(config)
+    let taskPrepared = 0, taskEvaluated = 0, supplied = 0, prepared = 0, evaluated = 0
+    const taskChecks = new Map<number, ReturnType<typeof host.createDevelopmentGoalTaskIsolatedNodeProjectCheck>>()
+    for (const index of [1, 2, 3]) {
+      const entry = original(index)
+      taskChecks.set(index, host.createDevelopmentGoalTaskIsolatedNodeProjectCheck({ cwd, requestText: entry.requestText,
+        goalCommand: objective, entryPath: entry.entryPath, outputPaths: entry.outputPaths, referencePaths: ['input.txt', 'entry.mjs'],
+        cases: entry.cases, requiredCondition }))
+    }
+    const goalTaskAcceptance: NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['goalTaskAcceptance'] = {
+      async methodScope(material) { return taskChecks.get(Number(material.task.objective.match(/case (\d+)$/)![1]))!.methodScope(material) },
+      async prepare(material) {
+        const index = Number(material.task.objective.match(/case (\d+)$/)![1]); taskPrepared++
+        for (const entry of original(index).entries) writeFileSync(join(cwd, entry.path), entry.content)
+        const check = await taskChecks.get(index)!.prepare(material)
+        expect(check).toBeDefined()
+        return check === undefined ? undefined : { ...check, async evaluate(candidate) { taskEvaluated++; return check.evaluate(candidate) } }
+      },
+    }
+    const studyResultCheck: NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['studyResultCheck'] = {
+      async prepareIndependentCases(material) {
+        supplied++; expect([taskPrepared, taskEvaluated]).toEqual([3, 3])
+        expect([...material.sources, material.counterexample].every(item => 'sourceKind' in item && item.sourceKind === 'native-goal-task' && !('request' in item))).toBe(true)
+        return checker.prepareIndependentCases(material)
+      },
+      async prepare(material) {
+        prepared++; const check = await checker.prepare(material); expect(check).toBeDefined()
+        return check === undefined ? undefined : { ...check, async evaluate(candidate) { evaluated++; expect(prepared).toBe(5); return check.evaluate(candidate) } }
+      },
+    }
+    const receiptRoot = process.env.TIANWEN_NATIVE_FUNCTIONAL_STUDY_RECEIPTS_ROOT === undefined ? undefined : resolve(process.env.TIANWEN_NATIVE_FUNCTIONAL_STUDY_RECEIPTS_ROOT)
+    if (receiptRoot !== undefined) {
+      expect(receiptRoot.startsWith(resolve('D:/DevData') + '\\')).toBe(true); mkdirSync(receiptRoot, { recursive: true })
+      writeFileSync(join(receiptRoot, 'profile-path.json'), JSON.stringify({ root, controlled: true, naturalEvidence: false, frozenConfig: config }), { flag: 'wx' })
+    }
+    let profile: Awaited<ReturnType<typeof mountProfile>> | undefined, cold: Awaited<ReturnType<typeof mountProfile>> | undefined
+    try {
+      profile = await mountProfile(objective, { root, development: true, completeTaskThroughTool: true, taskCount: 3,
+        contentVerdict: 'met', researchControl: true, fileActions: 'read-success', functionalStudyControl: true, goalTaskAcceptance, studyResultCheck })
+      profile.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+      await profile.startGoal(); profile.releaseTask()
+      await vi.waitFor(() => expect(profile!.ctx.tianwenEvolution.listGoalTaskResearchSources()).toHaveLength(3), { timeout: 40_000 })
+      await profile.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const sources = profile.ctx.tianwenEvolution.listGoalTaskResearchSources(), studies = profile.ctx.tianwenEvolution.listConversationGuidanceStudies()
+      expect(sources.map(item => item.outcome.input.outcome.status)).toEqual(['rejected', 'rejected', 'verified'])
+      expect(new Set(sources.map(item => item.outcome.input.contractDigest)).size).toBe(3)
+      expect(studies).toHaveLength(1); const study = studies[0]!
+      expect(study.opened.nativeGoalSources).toHaveLength(3); expect(study.opened.resultChecks).toHaveLength(5); expect(study.arms).toHaveLength(10)
+      expect(study.arms.map(arm => arm.resultCheck?.status)).toEqual(['rejected', 'verified', 'rejected', 'verified', 'verified', 'verified', 'verified', 'verified', 'verified', 'rejected'])
+      const holdout = study.arms.find(arm => arm.caseId === 'holdout' && arm.role === 'candidate')!
+      expect(holdout.verdict).toBe('met'); expect(holdout.reviewChecks!.map(check => check.verdict)).toEqual(['met', 'met'])
+      expect(holdout.resultCheck?.status).toBe('rejected'); expect(study.decision?.verdict).toBe('accepted'); expect(study.activation).toBeUndefined()
+      expect(profile.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(false)
+      expect([taskPrepared, taskEvaluated, supplied, prepared, evaluated]).toEqual([3, 3, 1, 5, 10])
+      expect(profile.ctx.tianwenEvolution.listConversationTasks().some(item => study.opened.sourceTaskIds.includes(item.source.taskId))).toBe(false)
+      await vi.waitFor(() => { for (const source of sources) expect(readTianwenTaskAttemptProjection(readLongGoal(profile!.stateRoot, source.outcome.input.goalId) as LongGoalRecordV3, source.outcome.input.taskId).attempts.at(-1)?.status).toBe('settled') })
+      const goals = listLongGoals(profile.stateRoot), ledger = readFileSync(join(profile.evolutionRoot, 'ledger.jsonl')), requests = profile.adapter.requests.length
+      const packet = await recoverFileGuidanceStudyReviewPacket(profile.ctx, study)
+      await profile.dispose(false)
+      cold = await mountProfile(objective, { root, resumeMain: true, development: true, goalTaskAcceptance, studyResultCheck, functionalStudyControl: true })
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(cold.ctx.tianwenEvolution.listGoalTaskResearchSources()).toEqual(sources); expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual(studies)
+      expect(listLongGoals(cold.stateRoot)).toEqual(goals); expect(readFileSync(join(cold.evolutionRoot, 'ledger.jsonl'))).toEqual(ledger)
+      expect(await recoverFileGuidanceStudyReviewPacket(cold.ctx, study)).toEqual(packet); expect(cold.adapter.requests).toHaveLength(0)
+      expect([taskPrepared, taskEvaluated, supplied, prepared, evaluated]).toEqual([3, 3, 1, 5, 10])
+      if (receiptRoot !== undefined) writeFileSync(join(receiptRoot, 'sdk-functional-study.json'), JSON.stringify({ controlled: true, naturalEvidence: false,
+        publishedRuntime: process.env.TIANWEN_GOAL_ACCEPTANCE_PUBLISHED === '1', realModelRequests: 0, scriptedRequests: requests,
+        taskPrepared, taskEvaluated, supplied, prepared, evaluated, sources, study, exactColdGoalAndLedger: true,
+        exactColdReviewPacket: true, coldRequests: 0, developmentQuarantine: false, activated: false }, null, 2), { flag: 'wx' })
+    } finally { await cold?.dispose(false); await profile?.dispose(false); if (receiptRoot === undefined) {
+      const target = resolve(root); expect(target.startsWith(ownedBase + '\\native-functional-study-')).toBe(true); rmSync(target, { recursive: true, force: true })
+    } }
+  }, 120_000)
   it('selects different original native Goal file contracts through actual SDK recovery without evaluating a synthetic method',async()=>{
     let preparations=0,evaluations=0
     const receiptRoot=process.env.TIANWEN_NATIVE_CHECK_FAMILY_RECEIPTS_ROOT===undefined?undefined:resolve(process.env.TIANWEN_NATIVE_CHECK_FAMILY_RECEIPTS_ROOT)

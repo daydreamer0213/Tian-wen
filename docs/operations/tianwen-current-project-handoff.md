@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原生文件研究独立功能关口已组合验证
+
+实际发行DEV：三Goal不同原合同、原公开检查器prepare/evaluate3/3；研究供给1、五角色准备5、十臂实际隔离evaluate10。脚本87请求、真实模型0/自然来源0。候选holdout双审met/原裁决accepted但程序rejected，DEV隔离关闭仍无activation；冷Context/另Node零请求准确恢复原来源/五案例/十臂/文件证明，原所有字节保持。[准确组合结果与控制端错误](tianwen-native-functional-study-sdk-20261004.md)。
+
+只新增fixture明确选项及一SDK项，无生产修改。首启动根错误、结果字段错误、误用text恢复API及新Node解析启动错误皆保留，按原接口修控制，不改预期/自然记录。旧SDK48通过及新项最终1通过，4显式跳过；不是一次全组绿色。独立无有据P1/P2。本控制收口，不再重复；下一为DEV多Task Goal合同薄分派的真实首次产品工作，再依原来源/研究/安全/未来效果推进，用户无须补题评价。
+
+持续DEV五普通Task/问题1/feedback-study0及正式/持续账本不变，完整目标active/incomplete、main/Daily NO-GO/原门槛及窗口保持。Docker已停、84历史容器ID保持，D约17.95GiB>=15。删除本轮四临时目录整条命令被自动审批审查拒绝，未执行归档/删除或重试；原24加新4共28拒删路径，以新包cleanup-refusal.json为新增清单。三个工程Profile约5.4MiB保留，无环境副本。
+
 ## 2026-10-04 原生不同合同的实际 SDK 入口已通过
 
 实际发行Runtime新工程控制三Goal/不同合同及前像/六原检查，原Loop记录三来源attempt；脚本34请求、真实模型0，study/activation0。新Node零请求准确恢复全部会话/状态/账本及原材料，九个改合同/检查器/条件恢复均拒绝。最终153相关回归通过/4显式跳过，独立无有据P1/P2。[准确范围与首次失败](tianwen-native-check-family-sdk-20261004.md)。
