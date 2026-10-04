@@ -10,12 +10,14 @@ assert(['peer', 'original', 'permissions', 'file-guard', 'missing-native-provena
 const original = { source: { taskId: 'control-task' }, completion: { status: 'completed', files: { outputPaths: ['second.mjs', 'first.mjs'] } }, externalCheckPrepared: { checkerId: 'control-check' }, externalCheckFinished: { status: 'verified' }, review: { verdict: 'inconclusive' } }
 const native = { header: { id: 'control-session' }, events: [] }, log = [], guards = []
 const resultRoot = mkdtempSync(resolve(base, 'tianwen-native-host-unit-')), cancellation = new AbortController()
+const pendingReview = Promise.withResolvers()
+if (scenario === 'review-cancel') delete original.review
 let submitted
 const sections = []
 const variables = new Map()
 const local = { systemPrompt: { variable: (name, provider) => { variables.set(name, provider);return () => {} }, section: value => { sections.push(value);return () => {} } }, tools: { presentAs: value => log.push(value), restrict: () => {}, guard: fn => guards.push(fn) } }
 const handle = { agent: { session: native, followup: message => { submitted = message }, cancel: () => log.push('cancel'), whenIdle: async () => { if (scenario === 'cancel') cancellation.abort(); log.push('root-idle') } }, dispose: async () => { if (scenario === 'seal-write-error' || scenario === 'seal-prior-error') mkdirSync(resolve(resultRoot, 'archive-seal.json')); log.push('dispose') } }
-const ctx = { on: () => () => log.push('observer-off'), agents: { get: () => undefined, create: async config => { config.setup(local); return handle } }, tianwenConversationObserver: { whenIdle: async () => { if (scenario === 'review-cancel') { setTimeout(() => cancellation.abort(), 10); await new Promise(() => {}) } log.push('observer-idle') } }, tianwenConversationGuidanceLoop: { whenIdle: async () => log.push('guidance-idle') }, tianwenEvolution: { listConversationTasks: () => submitted || scenario === 'prior-session' ? [original] : [] }, sessions: { get: () => scenario === 'live-session' ? native : undefined, flush: async () => { if (['flush-error', 'seal-prior-error', 'archive-limit-prior-error'].includes(scenario)) throw new Error('flush-control-error') } }, sessionPersistence: { list: async () => scenario === 'durable-session' ? [{ id: 'control-session' }] : [], inspect: async () => native } }
+const ctx = { on: () => () => log.push('observer-off'), agents: { get: () => undefined, create: async config => { config.setup(local); return handle } }, tianwenConversationObserver: { cancelReviews: sessionId => { assert.equal(sessionId, 'control-session'); log.push('reviews-cancel'); pendingReview.resolve() }, whenIdle: async sessionId => { if (scenario === 'review-cancel') { if (cancellation.signal.aborted) assert.equal(sessionId, 'control-session', 'failure cleanup must not wait for unrelated sessions'); else setTimeout(() => cancellation.abort(), 10); await pendingReview.promise; original.review = { verdict: 'inconclusive', unavailableReason: 'cancelled', proof: null } } log.push('observer-idle') } }, tianwenConversationGuidanceLoop: { whenIdle: async () => log.push('guidance-idle') }, tianwenEvolution: { listConversationTasks: () => submitted || scenario === 'prior-session' ? [original] : [] }, sessions: { get: () => scenario === 'live-session' ? native : undefined, flush: async () => { if (scenario === 'review-cancel') assert(!log.includes('dispose'), 'native store must remain live until archive flush'); if (['flush-error', 'seal-prior-error', 'archive-limit-prior-error'].includes(scenario)) throw new Error('flush-control-error') } }, sessionPersistence: { list: async () => scenario === 'durable-session' ? [{ id: 'control-session' }] : [], inspect: async () => native } }
 const config = { cwd: resolve('.'), sessionId: 'control-session', requestText: 'ordinary control request', outputPaths: ['first.mjs', 'second.mjs'], referencePaths: ['reference.md'], maxTargetBytes: 20, resultRoot, callConfig: { provider: 'control', model: 'control' }, isPrepared: () => true, signal: cancellation.signal }
 const read = name => JSON.parse(readFileSync(resolve(resultRoot, name + '.json'), 'utf8'))
 const assertSeal = complete => {
@@ -83,6 +85,11 @@ try {
     await assert.rejects(runDevelopmentNativeTask(ctx, config))
     assert.deepEqual(read('task'), original); assert.equal(read('cleanup').cancelled, true)
     assert(log.includes('cancel')); assert(log.includes('dispose'))
+    if (scenario === 'review-cancel') {
+      assert.deepEqual(read('task').review, { verdict: 'inconclusive', unavailableReason: 'cancelled', proof: null })
+      assert.equal(read('failure').message, 'external check cancelled')
+      assert(log.includes('reviews-cancel')); assert(log.includes('observer-idle'))
+    }
     assertSeal(true)
   } else {
     const before = JSON.stringify(original), result = await runDevelopmentNativeTask(ctx, config)

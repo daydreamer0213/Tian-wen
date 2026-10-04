@@ -55,9 +55,11 @@ function capturedAdmission(value: unknown) {
 
 export class TianwenConversationObserverService extends Service {
   static inject = ['agents', 'sessions', 'sessionPersistence', 'tianwenEvolution', 'subagents', 'llm'] as const
-  private readonly pending = new Set<Promise<void>>()
+  private readonly pending = new Map<Promise<void>, string>()
   private readonly restoring = new Map<Agent, Promise<void>>()
   private readonly reviewing = new Set<string>()
+  private readonly reviewControllers = new Map<string, AbortController>()
+  private readonly cancelledReviews = new Set<string>()
   private readonly analyses = new Set<AbortController>()
   private readonly shutdown = new AbortController()
 
@@ -130,12 +132,12 @@ export class TianwenConversationObserverService extends Service {
       try {
         this.complete(task, events, event)
         if (task.externalCheckPrepared?.project === undefined) {
-          this.track(this.externalChecks.finish(task.source.taskId))
-          this.track(this.review(agent, task.source.taskId, events))
+          this.track(this.externalChecks.finish(task.source.taskId), task.source.sessionId)
+          this.track(this.review(agent, task.source.taskId, events), task.source.sessionId)
         } else this.track((async () => {
           await this.externalChecks.finish(task.source.taskId)
           await this.review(agent, task.source.taskId, events)
-        })())
+        })(), task.source.sessionId)
       } catch (error) { this.warn(error) }
     })
     const offCreated = this.ctx.on('agent/created', ({ agent }) => this.restore(agent))
@@ -151,12 +153,26 @@ export class TianwenConversationObserverService extends Service {
     }, 'tianwen-conversation-observer.dispose')
   }
 
-  async whenIdle(): Promise<void> { while (this.pending.size > 0) await Promise.allSettled([...this.pending]) }
+  async whenIdle(sessionId?: string): Promise<void> {
+    while (true) {
+      const pending = [...this.pending].filter(([, id]) => sessionId === undefined || id === sessionId).map(([work]) => work)
+      if (pending.length === 0) return
+      await Promise.allSettled(pending)
+    }
+  }
+  /** Stop only this session's original pending reviews; preserve consent and other sessions. */
+  cancelReviews(sessionId: string): void {
+    for (const task of this.ctx.tianwenEvolution.listConversationTasks(sessionId)) {
+      if (task.review !== undefined) continue
+      this.cancelledReviews.add(task.source.taskId)
+      this.reviewControllers.get(task.source.taskId)?.abort()
+    }
+  }
   private warn(error: unknown): void { this.ctx.logger.warn('Conversation observation failed: %s', error instanceof Error ? error.message : String(error)) }
-  private track(work: Promise<void>): void {
+  private track(work: Promise<void>, sessionId: string): void {
     const caught = work.catch(error => this.warn(error))
       .finally(() => this.pending.delete(caught))
-    this.pending.add(caught)
+    this.pending.set(caught, sessionId)
   }
   private complete(task: ConversationTask, events: readonly SessionEvent[], terminal: Extract<SessionEvent, { type: 'turn/end' }>): void {
     if (task.admission === undefined) this.ctx.tianwenEvolution.recordConversationLearning({ kind: 'task-admitted', taskId: task.source.taskId, decision: null, proof: null, unavailableReason: 'cancelled' })
@@ -175,7 +191,7 @@ export class TianwenConversationObserverService extends Service {
     if (!isRoot(agent) || this.restoring.has(agent)) return
     const work = this.recover(agent).finally(() => this.restoring.delete(agent))
     this.restoring.set(agent, work)
-    this.track(work)
+    this.track(work, String(agent.session.id))
   }
   private async recover(agent: Agent): Promise<void> {
     const tasks = this.ctx.tianwenEvolution.listConversationTasks(String(agent.session.id))
@@ -214,7 +230,7 @@ export class TianwenConversationObserverService extends Service {
     if (direct.length === 0) return
     if (!this.authorized()) {
       const consentAgent = this.ctx.get('tianwenLearningConsentAgent')
-      if (consentAgent !== undefined) this.track(consentAgent.observeConversationWithoutConsent(String(agent.session.id)).then(() => undefined))
+      if (consentAgent !== undefined) this.track(consentAgent.observeConversationWithoutConsent(String(agent.session.id)).then(() => undefined), String(agent.session.id))
       return
     }
     const consent = this.ctx.tianwenEvolution.getLearningAnalysisConsent()!
@@ -363,6 +379,7 @@ export class TianwenConversationObserverService extends Service {
     this.reviewing.add(taskId)
     const base = { kind: 'task-reviewed' as const, taskId, admissionDigest: sha256(task.admission), resultDigest: task.completion.resultDigest }
     const controller = new AbortController(); this.analyses.add(controller)
+    this.reviewControllers.set(taskId, controller)
     const signal = AbortSignal.any([this.shutdown.signal, controller.signal])
     const failed = (error: unknown) => {
       const unavailableReason = unavailable(error, signal)
@@ -373,9 +390,10 @@ export class TianwenConversationObserverService extends Service {
           : 'Automatic review could not establish the task result.'
       this.ctx.tianwenEvolution.recordConversationLearning({ ...base, verdict: 'inconclusive', category: null, explanation, evidenceQuotes: [], proof: null, unavailableReason })
     }
-    const settled = () => { this.analyses.delete(controller); this.reviewing.delete(taskId) }
+    const settled = () => { this.analyses.delete(controller); this.reviewing.delete(taskId); this.reviewControllers.delete(taskId); this.cancelledReviews.delete(taskId) }
     let queued = false
     try {
+      if (this.cancelledReviews.has(taskId)) throw new Error('cancelled')
       if (task.reviewIntent !== undefined) throw new Error('cancelled')
       if (!this.authorized(task.source.consentRevision)) throw new Error('cancelled')
       if (!hasCurrentConversationQuality(task.admission.qualityContract)) throw new Error('cancelled')
@@ -414,7 +432,7 @@ export class TianwenConversationObserverService extends Service {
         } else this.ctx.tianwenEvolution.recordConversationLearning(review)
       }
       queued = true
-      this.track(judge().catch(failed).finally(settled))
+      this.track(judge().catch(failed).finally(settled), task.source.sessionId)
     } catch (error) { failed(error) }
     finally { if (!queued) settled() }
   }

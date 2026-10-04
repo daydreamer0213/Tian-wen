@@ -1,5 +1,12 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 同会话取消与最终归档修复完成
+
+原取消结果落盘后才保存，native会话保留到flush完成，再释放自有handle；调用者Context/同意/其他会话不改。原SDK并发A/B控制、161相关回归及最终宿主28通过，完整Runtime/两声明构建通过。独立评审发现的全局等待与真实发行控制发现的过早dispose均窄修，新控制原Task/native/seal完整一致、另Node0请求/0检查准确恢复。首工程失败的缺native/incomplete seal留原样；16scripted/0natural，不算学习收益。详见[取消归档修复和真实缺口](tianwen-cancelled-review-archive-20261004.md)。
+
+当前持续DEV问题仅1；原规则还缺第二个输入独立的同条件问题和同模型配置/同条件合格成功对照，随后才有研究/采用/未来效果。最近实际任务程序通过，但双审不完整，不能充成功来源。下一聚焦评审耗时/可靠性及原自动研究链，不再扩展状态报告、不重评旧Task/造失败/索题催评。完整目标active/incomplete、main/Daily NO-GO和原十工作日决策窗口保持。
+
+
 ## 2026-10-04 中文概览首次交付；已确认取消归档顺序缺陷
 
 原首代码18263B/115条件及旧基础4通过，18实际请求、prepare/evaluate1/1。原requirements错引answer-38被SDK原guard拒收，模型同一Turn更正后进入grounding；总8分钟时限使第二审取消，整体inconclusive/cancelled、0整体proof，不当合格成功对照。新Node0模型确认首代码/完整7图/header/原四Task及正式账本不变。[准确首次结果](tianwen-live-overview-report-20261004.md)。

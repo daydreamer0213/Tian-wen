@@ -144,8 +144,16 @@ export async function runDevelopmentNativeTask(ctx, config) {
       },
     ),
   })
-  let handle, failure, result, archivedTask, taskSaved = false, nativeSaved = false
-  const cancel = () => handle?.agent.cancel({ kind: 'user' })
+  let handle, failure, result, archivedTask, cleanupError, disposed = false, taskSaved = false, nativeSaved = false
+  const cancel = () => {
+    handle?.agent.cancel({ kind: 'user' })
+    ctx.tianwenConversationObserver.cancelReviews?.(sessionId)
+  }
+  const disposeHandle = async () => {
+    if (disposed) return
+    disposed = true
+    try { await handle?.dispose() } catch (error) { cleanupError = error.message; failure ??= error }
+  }
   const archive = async () => {
     if (!taskSaved) {
       const task = ctx.tianwenEvolution.listConversationTasks(sessionId)[0] ?? null
@@ -189,13 +197,23 @@ export async function runDevelopmentNativeTask(ctx, config) {
     save('result', result)
   } catch (error) {
     failure = error
+    let settlementError
+    try {
+      if (handle) {
+        // Cancelling the root does not cancel its independently owned review.
+        // Drain the original cancelled receipt before the exclusive task snapshot.
+        await handle.agent.whenIdle()
+        assert.equal(typeof ctx.tianwenConversationObserver.cancelReviews, 'function', 'DEV Runtime lacks scoped review cancellation')
+        ctx.tianwenConversationObserver.cancelReviews(sessionId)
+        await ctx.tianwenConversationObserver.whenIdle(sessionId)
+      }
+    } catch (error) { settlementError = error.message }
     let archivalError
     try { await archive() } catch (error) { archivalError = error.message }
-    save('failure', { name: error.name, message: error.message, ...(archivalError ? { archivalError } : {}), requests: observation.counts() })
+    save('failure', { name: error.name, message: error.message, ...(settlementError ? { settlementError } : {}), ...(archivalError ? { archivalError } : {}), requests: observation.counts() })
   } finally {
     signal?.removeEventListener('abort', cancel)
-    let cleanupError
-    try { await handle?.dispose() } catch (error) { cleanupError = error.message; failure ??= error }
+    await disposeHandle()
     observation.dispose()
     const diagnostics = collectDevelopmentNativeFileDiagnostics(ctx.logger?.buffer, {
       fiber: diagnosticFiber, taskId: archivedTask?.source?.taskId, sessionId,

@@ -749,6 +749,56 @@ it('associates native feedback and retraction with the exact later natural task'
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('cancels only the requested session review and leaves another native session usable', async () => {
+  const script: Parameters<typeof mountPersistentHarness>[1] = [structured(admission), textResponse('预计 5 天完成。')]
+  const harness = await mount(script)
+  const waiting = Promise.withResolvers<void>()
+  const release = Promise.withResolvers<void>()
+  let reviewWaiting = 0
+  const originalStream = harness.adapter.stream.bind(harness.adapter)
+  const stream = vi.spyOn(harness.adapter, 'stream').mockImplementation(async function* (request) {
+    if (JSON.stringify(request.messages).includes('Evaluate the complete answer against the original direct-user instructions')) {
+      reviewWaiting++; waiting.resolve()
+      let off = () => {}
+      const aborted = new Promise<void>(resolve => {
+        const abort = () => resolve()
+        request.signal?.addEventListener('abort', abort, { once: true })
+        off = () => request.signal?.removeEventListener('abort', abort)
+        if (request.signal?.aborted) abort()
+      })
+      try { await Promise.race([release.promise, aborted]) } finally { off() }
+      if (request.signal?.aborted) return
+    }
+    yield* originalStream(request)
+  })
+  let other: Awaited<ReturnType<typeof harness.ctx.agents.create>> | undefined
+  try {
+    harness.handle.agent.followup(direct('概括：预计 5 天完成。'))
+    await harness.handle.agent.whenIdle()
+    await waiting.promise
+    const before = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(before.reviewIntent).toBeDefined(); expect(before.review).toBeUndefined()
+    script.push(structured(admission), textResponse('预计 5 天完成。'), ...reviewPair(review))
+    other = await harness.ctx.agents.create({ sessionId: SessionId('other-live-session'), meta: { cwd: roots.at(-1)! }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    other.agent.followup(direct('概括：预计 5 天完成。'))
+    await other.agent.whenIdle()
+    await vi.waitFor(() => expect(reviewWaiting).toBe(2), { timeout: 1_000 })
+    harness.ctx.tianwenConversationObserver.cancelReviews('ordinary-chat')
+    await harness.ctx.tianwenConversationObserver.whenIdle('ordinary-chat')
+    const cancelled = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(cancelled.review).toMatchObject({ verdict: 'inconclusive', unavailableReason: 'cancelled', proof: null })
+    expect(cancelled.completion).toEqual(before.completion)
+    expect(harness.ctx.tianwenEvolution.getLearningAnalysisConsent()).toMatchObject({ enabled: true, revision: 1 })
+    expect(harness.ctx.tianwenEvolution.listConversationTasks('other-live-session')[0]?.review).toBeUndefined()
+    stream.mockRestore(); release.resolve()
+    await other.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    expect(harness.ctx.tianwenEvolution.listConversationTasks('other-live-session')[0]?.review?.verdict).toBe('met')
+    expect(harness.ctx.tianwenEvolution.listConversationTasks('ordinary-chat')[0]).toEqual(cancelled)
+  } finally {
+    release.resolve(); stream.mockRestore(); await other?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose()
+  }
+})
+
 it('cancels an in-flight observation on disable without cancelling the user task', async () => {
   let harness: Awaited<ReturnType<typeof mount>>
   harness = await mount([() => {
