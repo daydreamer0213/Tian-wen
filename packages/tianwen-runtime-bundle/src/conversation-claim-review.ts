@@ -468,18 +468,33 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
   const check = async (focus: 'requirements' | 'grounding', signal: AbortSignal): Promise<AuditedCheck> => {
     const result = await runConversationJudgment(ctx, parent, { ...input, signal, material, label: `${input.label} ${focus}`,
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
-      ...(compactReview ? { validateCapture: (value: unknown) => {
+      captureReminder: 'review', validateCapture: (value: unknown) => {
         if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
         if (Array.isArray(value.evidenceQuotes)) {
           const index = invalidSummaryQuoteIndex(value.evidenceQuotes)
           if (index !== -1) return `Invalid evidenceQuotes item ${index + 1}: copy a non-empty exact quote from one supplied claimEvidence item, preserving punctuation and whitespace.`
+        }
+        // The current capture schema is v2. Check quotes before parsing the
+        // audit: empty/whitespace quotes otherwise fail with a generic parse
+        // error, after the native tool has already committed the result.
+        if (record(value.audit) && record(value.audit.units)) {
+          for (const answer of evidence.items.filter(item => item.role === 'answer' && item.text.trim() !== '')) {
+            const unit = value.audit.units[answer.id]
+            if (!record(unit)) continue
+            for (const claim of [unit.firstClaim, ...(Array.isArray(unit.additionalClaims) ? unit.additionalClaims : [])]) {
+              if (record(claim) && typeof claim.quote === 'string'
+                && (claim.quote.trim() === '' || !answer.text.includes(claim.quote))) {
+                return `Invalid quote in ${answer.id}: copy a non-empty exact substring from that answer unit, preserving punctuation and whitespace.`
+              }
+            }
+          }
         }
         try { validateClaimAudit(value.audit, evidence, value.verdict as 'met' | 'not-met' | 'inconclusive') }
         catch (error) {
           if (error instanceof ConversationClaimReviewUnitQuoteError) return `Invalid quote in ${error.answerId}: copy a non-empty exact substring from that answer unit, preserving punctuation and whitespace.`
         }
         return undefined
-      } } : {}) })
+      } })
     if (!record(result.value) || !exactKeys(result.value, ['verdict', 'category', 'explanation', 'evidenceQuotes', 'audit'])
       || !['met', 'not-met', 'inconclusive'].includes(String(result.value.verdict))) throw new Error('invalid-judgment')
     if (!Array.isArray(result.value.evidenceQuotes)) throw new Error('invalid-judgment')
