@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { isUtf8 } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { lstatSync, readFileSync, realpathSync } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { isAbsolute, relative, resolve } from 'node:path'
 import { Service } from '@deepseek-ai/cordis'
 import { createDevelopmentNativeCheckOptions } from './development-isolated-node-project-check.mjs'
 
@@ -63,10 +63,7 @@ function readDevelopmentNativeRuntime(config) {
  closedDevelopmentData(config,['developmentRoot','contractPath','contractDigest'])
  assert(process.platform==='win32','DEV loading requires Windows')
  const {developmentRoot,contractPath,contractDigest}=config
- assert(typeof developmentRoot==='string'&&isAbsolute(developmentRoot),'DEV root must be absolute')
- const root=resolve(developmentRoot)
- assert(key(dirname(root))===key('D:/DevData/tianwen-development-runtime')
-  &&lstatSync(root).isDirectory()&&!lstatSync(root).isSymbolicLink()&&key(realpathSync(root))===key(root),'DEV root must be its original canonical D directory')
+ const root=runtime.resolveDevelopmentRuntimeRoot(developmentRoot)
  const packet=readPinnedDevelopmentJson(contractPath,contractDigest)
  closedDevelopmentData(packet,['schemaVersion','ordinaryContract','studyContracts'],['goalContract'])
  assert.equal(packet.schemaVersion,'tianwen.development-native-contracts.v1')

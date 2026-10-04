@@ -53,6 +53,7 @@ import { TianwenConversationFeedbackService } from './conversation-feedback-asse
 import * as controlledSessionArchive from './controlled-session-archive.js'
 import { developmentRuntimeConfig, type TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
 export type { TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
+export { resolveDevelopmentRuntimeRoot } from './development-runtime-boundary.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
 // DEV hosts consume the exact published cancellation boundary, without

@@ -1,21 +1,32 @@
 import { existsSync, lstatSync, realpathSync } from 'node:fs'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { TianwenRuntimeBundleConfig } from './runtime.js'
 
 export interface TianwenDevelopmentRuntimeConfig extends TianwenRuntimeBundleConfig {
-  /** Trusted Windows DEV host only; existing direct child of the dedicated D data root. */
+  /** Trusted Windows DEV directory or original CLI Profile under a dedicated D home. */
   readonly developmentRoot: string
 }
 const key=(path:string)=>resolve(path).toLowerCase()
+/** Read-only directory identity shared by DEV hosts; no permissions or mounts. */
+export function resolveDevelopmentRuntimeRoot(value:unknown):string {
+  const fail=():never=>{throw new Error('Development Runtime requires its separate canonical D root and original derived state/sessions/evolution paths')}
+  if(process.platform!=='win32'||typeof value!=='string'||!isAbsolute(value))return fail()
+  const root=resolve(value),base=resolve('D:/DevData/tianwen-development-runtime'),profiles=dirname(root),home=dirname(profiles)
+  const direct=key(profiles)===key(base)
+  const cli=basename(profiles)==='profiles'&&key(dirname(home))===key(base)&&basename(root).toLowerCase()!=='node_modules'
+  if(!direct&&!cli)return fail()
+  for(const path of cli?[home,profiles,root]:[root]) {
+    if(!existsSync(path)||!lstatSync(path).isDirectory()||lstatSync(path).isSymbolicLink()||key(realpathSync(path))!==key(path))return fail()
+  }
+  return root
+}
 /** No writes or mounts: reject formal Profiles and redirected roots first. */
 export function developmentRuntimeConfig(baseUrl:string|undefined,config:TianwenDevelopmentRuntimeConfig,sessionPersistence:unknown):TianwenRuntimeBundleConfig {
   const fail=()=>{throw new Error('Development Runtime requires its separate canonical D root and original derived state/sessions/evolution paths')}
-  if(process.platform!=='win32'||typeof config.developmentRoot!=='string'||!isAbsolute(config.developmentRoot))return fail()
-  const root=resolve(config.developmentRoot),base=resolve('D:/DevData/tianwen-development-runtime')
-  if(key(dirname(root))!==key(base)||!existsSync(root)||!lstatSync(root).isDirectory()||key(realpathSync(root))!==key(root))return fail()
+  const root=resolveDevelopmentRuntimeRoot(config.developmentRoot)
   try{if(baseUrl===undefined||key(fileURLToPath(baseUrl))!==key(root))return fail()}catch{return fail()}
   const {developmentRoot:_root,...rest}=config
   const paths={stateRoot:join(root,'state'),sessionsRoot:join(root,'sessions'),evolutionRoot:join(root,'evolution')}

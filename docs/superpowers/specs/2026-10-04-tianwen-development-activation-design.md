@@ -1,5 +1,7 @@
 # 原DEV受治理启用入口设计
 
+2026-10-04接入修订：实际原CLI固定使用`<home>/profiles/<profile>`，原直接子目录限制使这条正常入口不可组合。保留原直接根，并增加专用`D:/DevData/tianwen-development-runtime/<home>/profiles/<profile>`精确布局，逐层真实canonical、同baseUrl和原派生存储/实际JSONL检查保持；见[当前接入设计](2026-10-04-tianwen-dev-cli-profile-design.md)。这是开发宿主隔离目录实现的修正，不是修改学习/发布资格，也不回写历史。下文直接子目录措辞记录原实施时的选择。
+
 基线f120b80，沿原三项收口第三项。使用brainstorming/当前原代码分析；所有者已授权持续自主实现、不重复审批。普通Runtime仍默认新启用隔离true，main/Daily NO-GO、原发布门槛/同意/停止/十工作日窗口保持。
 
 已核实原Ledger及GuidanceLoop已有accepted/shared evaluation receipt、原来源支持/输入独立/质量合同/当前同意/父版本/结果检查及冷恢复校验；公开Runtime将两处策略固定true，实际DEV不能配置原受治理启用。此前隔离Ledger手动控制没有证明原Loop自动启用。原语义独立性仍unestablished，不能因此宣布自然收益。

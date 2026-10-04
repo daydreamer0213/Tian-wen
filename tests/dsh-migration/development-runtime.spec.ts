@@ -12,6 +12,39 @@ function fixture(){mkdirSync(base,{recursive:true});const root=mkdtempSync(join(
 it('provides an explicit development Runtime entry rather than exposing a default quarantine override',()=>{
   expect((runtime as any).applyDevelopment).toBeTypeOf('function')
 })
+it('mounts the original DEV Runtime in a dedicated canonical CLI Profile',async()=>{
+  const f=fixture(),profile=join(f.root,'profiles','owned-dev');mkdirSync(profile,{recursive:true})
+  f.ctx.baseUrl=pathToFileURL(profile).href
+  try{
+    await mountAgentLoopTestDependencies(f.ctx)
+    await f.ctx.plugin(JsonlSessionPersistence,{root:join(profile,'sessions'),compression:'none'})
+    await runtime.applyDevelopment(f.ctx,{developmentRoot:profile})
+    expect(f.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(false)
+    expect(f.ctx.tianwenEvolution.listConversationTasks()).toEqual([])
+    expect(f.ctx.tianwenEvolution.getLearningAnalysisConsent()).toBeUndefined()
+    expect(existsSync(join(f.root,'evolution'))).toBe(false)
+  }finally{await f.ctx.fiber.dispose()}
+})
+it.each(['wrong-depth','module-fallback','profile-link','profiles-link','home-link','wrong-backend','wrong-base','state-link'] as const)('rejects CLI DEV %s before mounting Evolution',async mode=>{
+  const f=fixture();let profile=join(f.root,'profiles','owned-dev')
+  if(mode==='wrong-depth')profile=join(f.root,'extra','profiles','owned-dev')
+  if(mode==='module-fallback')profile=join(f.root,'profiles','node_modules')
+  if(mode==='profiles-link'){
+    const other=fixture();mkdirSync(join(other.root,'owned-dev'))
+    symlinkSync(other.root,join(f.root,'profiles'),'junction')
+  }else mkdirSync(profile,{recursive:true})
+  if(mode==='profile-link'){const alias=join(f.root,'profiles','alias');symlinkSync(profile,alias,'junction');profile=alias}
+  if(mode==='home-link'){const alias=join(base,'alias-'+f.root.split('\\').at(-1));symlinkSync(f.root,alias,'junction');roots.push(alias);profile=join(alias,'profiles','owned-dev')}
+  if(mode==='state-link'){const other=fixture();symlinkSync(other.root,join(profile,'state'),'junction')}
+  f.ctx.baseUrl=pathToFileURL(mode==='wrong-base'?f.root:profile).href
+  try{
+    await mountAgentLoopTestDependencies(f.ctx)
+    await f.ctx.plugin(JsonlSessionPersistence,{root:join(mode==='wrong-backend'?f.root:profile,'sessions'),compression:'none'})
+    await expect(runtime.applyDevelopment(f.ctx,{developmentRoot:profile})).rejects.toThrow(/development/i)
+    expect(f.ctx.get('tianwenEvolution')).toBeUndefined()
+    expect(existsSync(join(profile,'evolution','ledger.jsonl'))).toBe(false)
+  }finally{await f.ctx.fiber.dispose()}
+})
 it('refuses a Context already carrying another Evolution service before configuring DEV activation',async()=>{
   const f=fixture()
   f.ctx.provide('tianwenEvolution',{} as never)

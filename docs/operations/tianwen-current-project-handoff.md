@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 原 CLI 能直接加载 DEV，下一做实际配置交付
+
+旧直接子DEV目录与原CLI固定home/profiles/name布局不相容。公开同一只读根验证器保留旧根并认可专用DEV home的原Profile，逐层canonical、同baseUrl、派生存储/实际JSONL和fresh Evolution保留；合同插件复用，CLI未改。首次两个真实拒绝先红；原包15构建步骤及源20项通过。首组合109/110的尾斜杠URL控制断言错误留存，改按实际目录比较后最终六文件110通过。实际CLI加载公开DEV、原服务/JSONL并原退出0，无Task/请求/研究/自动同意，两账本保持；index检查器字节未变。[准确接入证据](tianwen-dev-cli-profile-20261004.md)。
+
+此加载控制收口。下一事前冻结可复用DEV Profile配置数据工厂的实际需求和独立功能入口，经原入口唯一首次由天问实现；不重开冷加载/关闭控制、复制驱动或增加报告任务。七自然Task/原20验收保持，1问题/1不兼容成功/反馈研究0，语义/采用/未来效果仍缺；完整目标active/incomplete、main/Daily NO-GO/原门槛/窗口保持。两CLI自有临时home已释放、71拒删根不碰、Docker未启动，资源见本轮D审计。
+
 ## 2026-10-04 原统一关闭排空修复完成，合法 DEV 接入继续
 
 复用固定DSH patch，原CLI统一关闭先等公开before-exit，再整Context卸载；runner取消/等待原job，正常完成注销，不自等待。原CLI信号两项先红后绿，合法DEV Runtime调用同一安装函数时原Task/native/seal完整一致、全Context释放/退出一次，0真实模型/0自然来源。六文件47项及新增失败/无hook两项通过，共49不同检查，独立无有据P1/P2；原5秒强退/重复信号/退出码保持。[准确证据和后续责任](tianwen-native-host-shutdown-20261004.md)。

@@ -31,11 +31,12 @@ const cli=createRequire(bundle.resolve('@deepseek-ai/dsh/package.json'))
 const load=(owner:NodeRequire,name:string)=>import(pathToFileURL(owner.resolve(name)).href)
 const pluginUrl=new URL('../../scripts/development-native-runtime.mjs',import.meta.url).href
 const digest=(bytes:Buffer|string)=>'sha256:'+createHash('sha256').update(bytes).digest('hex')
-function fixture() {
+function fixture(cliProfile=false) {
  const packetRoot=mkdtempSync(root+'/packet-'), profileRoot=resolve('D:/DevData/tianwen-development-runtime')
  mkdirSync(profileRoot,{recursive:true})
- const profile=resolve(mkdtempSync(profileRoot+'/standard-loader-'))
- ownedRoots.push(resolve(packetRoot),profile)
+ const home=resolve(mkdtempSync(profileRoot+'/standard-loader-'))
+ const profile=cliProfile?resolve(home,'profiles','owned-dev'):home
+ ownedRoots.push(resolve(packetRoot),home)
  mkdirSync(profile+'/workspace',{recursive:true})
  const f=developmentStudyResultFixture(profile+'/workspace')
  const packet={schemaVersion:'tianwen.development-native-contracts.v1',ordinaryContract:[1,2,3].map(f.ordinary),studyContracts:f.config,
@@ -110,8 +111,8 @@ it('keeps a legitimate ancestor alias when the pinned packet is physically outsi
  expect(typeof loadDevelopmentNativeRuntimeOptions(f.write()).externalCodeCheck.prepare).toBe('function')
 })
 
-it('normal Loader waits for the original JSONL backend then imports the DEV plugin without a harness or request',async()=>{
- const f=fixture(),ctx=new Context(),requests:unknown[]=[]
+it.each([false,true])('normal Loader imports DEV without a request under CLI profile=%s',async cliProfile=>{
+ const f=fixture(cliProfile),ctx=new Context(),requests:unknown[]=[]
  try {
   await ctx.plugin(Loader,{baseUrl:pathToFileURL(f.profile).href})
   const id=await ctx.loader.create({name:pluginUrl,config:f.config})
