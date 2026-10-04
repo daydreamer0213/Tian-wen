@@ -32,12 +32,13 @@ await check('invalid-options-before-effects',async()=>{for(const change of [{sig
 
 async function pluginScene(mode){
  const original={setTimeout,clearTimeout,stdout:process.stdout.write,stderr:process.stderr.write}
- const trace=[],out=[],err=[];let disposer,signal,release,finish
+ const trace=[],out=[],err=[];let disposer,beforeExit,signal,release,finish
  const finished=new Promise(r=>finish=r),timer={id:'owned-only'}
  globalThis.setTimeout=(callback,delay)=>{trace.push(['timer',delay]);timer.callback=callback;return timer}
  globalThis.clearTimeout=actual=>{assert.equal(actual,timer);trace.push(['clear'])}
  process.stdout.write=text=>{out.push(text);return true};process.stderr.write=text=>{err.push(text);return true}
  const ctx={get:name=>name==='appExit'?(code=>{trace.push(['exit',code]);finish(code)}):undefined,
+  on:(name,callback)=>{assert.equal(name,'app/before-exit');beforeExit=callback;return ()=>trace.push(['shutdown-off'])},
   effect:setup=>{const dispose=setup();trace.push(['listen']);let called=false;disposer=()=>{if(called)return;called=true;trace.push(['off']);return dispose()};return disposer},
   tianwenDevelopmentNativeTaskJob:{run(actual){assert.equal(this,ctx.tianwenDevelopmentNativeTaskJob);signal=actual;trace.push(['run']);return new Promise((resolve,reject)=>{release=()=>resolve(good);actual.addEventListener('abort',()=>{trace.push(['cancel']);release=()=>reject(new Error('original cancellation settled'))},{once:true})})}}
  }
@@ -45,11 +46,12 @@ async function pluginScene(mode){
   const value=module.apply(ctx,{});assert.equal(value,undefined)
   for(let i=0;i<4;i++)await Promise.resolve();assert.equal(trace.filter(x=>x[0]==='run').length,1);assert.equal(signal instanceof AbortSignal,true)
   assert.deepEqual(trace.filter(x=>x[0]==='timer'),[['timer',480000]])
-  let disposal;if(mode==='dispose')disposal=disposer();if(mode==='timeout')timer.callback()
+  let disposal;if(mode==='dispose')disposal=disposer();if(mode==='before-exit')disposal=beforeExit();if(mode==='timeout')timer.callback()
   if(mode!=='normal'){assert.equal(signal.aborted,true);assert.equal(trace.some(x=>x[0]==='exit'),false)}
   release();if(disposal)await disposal;const code=await finished;await Promise.resolve();await Promise.resolve()
   assert.equal(code,mode==='normal'?0:1);assert.equal(trace.filter(x=>x[0]==='run').length,1);assert.equal(trace.filter(x=>x[0]==='exit').length,1)
   assert.equal(trace.filter(x=>x[0]==='clear').length,1);assert.equal(trace.filter(x=>x[0]==='off').length,1)
+  assert.equal(trace.filter(x=>x[0]==='shutdown-off').length,1)
   const at=trace.findIndex(x=>x[0]==='exit');assert(trace.findIndex(x=>x[0]==='clear')<at);assert(trace.findIndex(x=>x[0]==='off')<at)
   if(mode==='normal'){assert.deepEqual(out,[JSON.stringify(good)+'\n']);assert.deepEqual(err,[])}else{assert.deepEqual(out,[]);assert.equal(JSON.parse(err[0]).error.message,'original cancellation settled')}
  }finally{globalThis.setTimeout=original.setTimeout;globalThis.clearTimeout=original.clearTimeout;process.stdout.write=original.stdout;process.stderr.write=original.stderr}
@@ -57,5 +59,6 @@ async function pluginScene(mode){
 await check('plugin-normal-cleanup-before-exit',()=>pluginScene('normal'))
 await check('plugin-dispose-waits-cancellation',()=>pluginScene('dispose'))
 await check('plugin-timeout-waits-cancellation',()=>pluginScene('timeout'))
+await check('plugin-before-exit-waits-original-settlement',()=>pluginScene('before-exit'))
 await check('plugin-invalid-preflight-no-work',async()=>{for(const config of [null,[],{timeoutMs:1}])assert.throws(()=>module.apply({get:()=>()=>{},tianwenDevelopmentNativeTaskJob:{run:()=>{throw Error('must not run')}}},config));assert.throws(()=>module.apply({get:()=>undefined,tianwenDevelopmentNativeTaskJob:{run:()=>{throw Error('must not run')}}},{}))})
 console.log(JSON.stringify({engineeringOnly:true,originalAcceptanceUnchanged:true,passed}))

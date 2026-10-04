@@ -1,14 +1,61 @@
 diff --git a/lib/profile-boot-DG5t9aNs.js b/lib/profile-boot-DG5t9aNs.js
+index e63d1935..b4e3652a 100644
 --- a/lib/profile-boot-DG5t9aNs.js
 +++ b/lib/profile-boot-DG5t9aNs.js
-@@ -140,5 +140,4 @@
+@@ -138,7 +138,6 @@ function resolveTelemetryPatch(disabledEnv, hasRow) {
+ * @returns the loaded profile.
+ */
  function prepareProfile(name, userLayer = true) {
 -	healProfilesModuleFallback(INSTALL_ANCHOR);
  	const profile = loadProfile(NAME, name, INSTALL_ANCHOR, void 0, { userLayer });
  	writeFileSync(join(profile.dir, PROFILE_ROOT_FILENAME), PROFILE_ROOT_CONFIG);
  	return profile;
-@@ -166,3 +165,4 @@
+@@ -164,6 +163,7 @@ function allPatches(composed) {
+ * @returns the profile, its patch layers, and the composed row index.
+ */
  function composeProfile(name, patchFiles) {
 +	healProfilesModuleFallback(INSTALL_ANCHOR);
  	const profile = prepareProfile(name);
  	const homePatches = loadOptionalPatches(NAME, homePatchPath()) ?? [];
+ 	const overlays = patchFiles.flatMap((file) => loadOverlayPatches(NAME, resolve(file)));
+@@ -217,12 +217,20 @@ function suppressShutdownError(ctx, signal, error) {
+ * @param options - environment snapshot, profile name, overlays, and the booted app's own arguments.
+ * @returns the settled root context and the shutdown controller.
+ */
++/** Drain live owners before the original whole-tree teardown. */
++async function disposeProfileContext(ctx) {
++	if (ctx === void 0) return;
++	try {
++		await ctx.parallel("app/before-exit");
++	} finally {
++		await ctx.fiber.dispose();
++	}
++}
+ async function runProfile(options) {
+ 	const composed = composeProfile(options.profile, options.patchFiles);
+ 	const app = {};
+-	const shutdown = createProcessShutdown(async () => {
+-		await app.current?.fiber.dispose();
+-	});
++	const disposeApp = () => disposeProfileContext(app.current);
++	const shutdown = createProcessShutdown(disposeApp);
+ 	const signalShutdown = new AbortController();
+ 	const interrupt = (code) => {
+ 		signalShutdown.abort();
+@@ -234,9 +242,7 @@ async function runProfile(options) {
+ 	process.on("SIGINT", () => {
+ 		interrupt(130);
+ 	});
+-	installFailLoud(NAME, process, async () => {
+-		await app.current?.fiber.dispose();
+-	});
++	installFailLoud(NAME, process, disposeApp);
+ 	const rootConfig = join(composed.profile.dir, PROFILE_ROOT_FILENAME);
+ 	const composeLive = () => structuredClone([
+ 		...composed.bundlePatches,
+@@ -280,4 +286,4 @@ async function runProfile(options) {
+ 	};
+ }
+ //#endregion
+-export { resolveTelemetryPatch as a, prepareProfile as i, PROFILE_ROOT_FILENAME as n, runProfile as o, homePatchPath as r, INSTALL_ANCHOR as t };
++export { disposeProfileContext, resolveTelemetryPatch as a, prepareProfile as i, PROFILE_ROOT_FILENAME as n, runProfile as o, homePatchPath as r, INSTALL_ANCHOR as t };

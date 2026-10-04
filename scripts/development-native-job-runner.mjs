@@ -33,7 +33,7 @@ export function apply(ctx,config) {
  if(config===null||typeof config!=='object'||Array.isArray(config)||Object.keys(config).length!==0)
   throw new TypeError('DEV job runner accepts only empty config')
  const exit=ctx.get('appExit'),job=ctx.tianwenDevelopmentNativeTaskJob
- if(typeof exit!=='function'||typeof job?.run!=='function'||typeof ctx.effect!=='function')
+ if(typeof exit!=='function'||typeof job?.run!=='function'||typeof ctx.effect!=='function'||typeof ctx.on!=='function')
   throw new TypeError('DEV job runner requires original appExit, job and Context disposal')
  const controller=new AbortController()
  const timer=setTimeout(()=>controller.abort(new Error('original eight-minute task budget')),480000)
@@ -45,7 +45,10 @@ export function apply(ctx,config) {
   if(!settled)controller.abort(new Error('DEV job runner disposed'))
   if(settlement)await settlement.catch(()=>{})
  })
- const cleanup=()=>cleanupPromise??=Promise.resolve(off())
+ const cleanup=()=>cleanupPromise??=Promise.resolve(off()).finally(()=>offBeforeExit())
+ // The original CLI waits this hook before unloading its whole tree. Keep
+ // injected services and the original session alive until the archive seals.
+ const offBeforeExit=ctx.on('app/before-exit',()=>cleanup())
  runDevelopmentNativeJobRunner({job:{run(signal){
   settlement=Promise.resolve().then(()=>job.run(signal)).finally(()=>{settled=true})
   return settlement
