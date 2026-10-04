@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 核心失效 pending 修复不补自然来源
+
+原来源/对照/线索六处pending仅在原active为真时继续否决；已撤回/替换旧评估保留未完成，不补判/重跑/放松资格。最终402相关过，末两项线索复核重叠不相加；单独Evolution旧dist实际消费失败保持，原四依赖更新及原Runtime15步骤过，公开Evolution四合成控制/冷恢复终端0，Runtime仅入口导入/六守卫字节核对。[完整限制和下一责任](tianwen-inactive-pending-feedback-delivery-20261004.md)。
+
+0模型/自然Task/真实反馈/自然研究/激活。两原账本/上轮CLI新账本/首稿保持，不桥接新发布身份或合并来源，仍原1问题、语义/采用后未知效果未完成，完整目标active/incomplete、main/Daily NO-GO/原门槛/十工作日窗口不改。下一核原反馈异常恢复唤醒；正常scanSession已取消未完成评估，不只凭同ID早return推缺陷，只查无live/root/flush退出路径；不索题催评、不重评业务历史或整体blocked。最终4自有根已清、D>=15/Docker未启动，无环境副本；新增6精确根两次清理policy执行前拒绝未绕过，77保护根保持。
+
 ## 2026-10-04 第九自然任务经真正原CLI成功
 
 f11446f3事前26检查，唯一新Task修原runner not-met退出错误；真实原CLI原生首稿program verified/双审met/权限exact、退出0，另一Node原Task/seal/首稿完整核对。新专用CLI Profile1成功单独封存，旧两账本/八Task保持，不复制同意或旧来源，不跨原检查身份凑兼容对。[完整证据和限制](tianwen-real-cli-review-exit-delivery-20261004.md)。

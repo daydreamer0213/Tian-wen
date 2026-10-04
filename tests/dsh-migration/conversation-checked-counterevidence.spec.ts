@@ -173,6 +173,91 @@ it.each(['source', 'counter'] as const)('waits for pending feedback before selec
   expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
   expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/feedback/)
 })
+it.each(['source', 'counter'] as const)('withdrawn unfinished feedback does not permanently block checked %s selection or durable writes', async role => {
+  const f = seeded('verified', true, undefined, true), target = f.tasks[role === 'source' ? 0 : 2]
+  const beforeTasks = f.ledger.listConversationTasks(), messageId = target.completion!.assistantMessageIds[0]!
+  f.ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'withdrawn-pending-v1',
+    rating: role === 'source' ? 'negative' : 'positive', note: 'Engineering interrupted-feedback fixture; not a user evaluation.',
+    scopeKey: scope, sessionDigest: sha256('withdrawn pending'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  const status = f.ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
+  const source = {kind:'native' as const,sessionId:target.source.sessionId,messageId,sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,
+    feedbackVersion:status.feedbackVersion,feedbackFingerprint:status.feedbackFingerprint}
+  const assessmentId = conversationFeedbackAssessmentId({taskId:target.source.taskId,source})
+  f.ledger.recordConversationFeedback({kind:'feedback-assessment-started',assessmentId,taskId:target.source.taskId,source,
+    admissionDigest:sha256(target.admission),resultDigest:target.completion!.resultDigest,materialDigest:sha256('interrupted original material'),consentRevision:1})
+  expect(await readiness(f)).toEqual({state:role==='source'?'awaiting-compatible-sources':'awaiting-counterexample'})
+  expect(()=>f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  f.ledger.recordLearningFeedbackRetraction({sessionId:source.sessionId,messageId,retractedFeedbackVersion:source.feedbackVersion,
+    sessionLifecycleFingerprint:source.sessionLifecycleFingerprint})
+  const originalAssessment = f.ledger.listConversationFeedbackAssessments(target.source.taskId)
+  expect(f.ledger.isConversationFeedbackAssessmentActive(assessmentId)).toBe(false)
+  expect(await readiness(f)).toEqual({state:'ready-to-schedule'})
+  expect(f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toEqual({duplicate:false})
+  expect(f.ledger.recordConversationGuidance(f.opened)).toEqual({duplicate:false})
+  const replay = new EvolutionLedger(f.directory)
+  expect(replay.isConversationGuidanceSupported(f.opened.studyId)).toBe(true)
+  expect(replay.listConversationTasks()).toEqual(beforeTasks)
+  expect(replay.listConversationFeedbackAssessments(target.source.taskId)).toEqual(originalAssessment)
+  expect(replay.listConversationFeedbackAssessments(target.source.taskId)[0]?.result).toBeUndefined()
+})
+
+it.each(['source', 'counter'] as const)('superseded unfinished feedback waits only for the active replacement on checked %s', async role => {
+  const f = seeded('verified', true, undefined, true), target = f.tasks[role === 'source' ? 0 : 2], beforeTasks = f.ledger.listConversationTasks()
+  const messageId = target.completion!.assistantMessageIds[0]!
+  function start(version:string,supersedes?:string) {
+    f.ledger.recordLearningFeedbackRevision({intake:{sessionId:target.source.sessionId,messageId,feedbackVersion:version,rating:role==='source'?'negative':'positive',
+      note:'Engineering feedback revision fixture; not a user evaluation.',scopeKey:scope,sessionDigest:sha256(version),evidenceIds:[target.completion!.resultDigest]},
+      sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,analysisConsentRevision:1,...(supersedes?{supersedesFeedbackVersion:supersedes}:{})})
+    const status=f.ledger.getLearningIntakeStatus(target.source.sessionId,messageId)!
+    const source={kind:'native' as const,sessionId:target.source.sessionId,messageId,sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,
+      feedbackVersion:version,feedbackFingerprint:status.feedbackFingerprint}
+    const assessmentId=conversationFeedbackAssessmentId({taskId:target.source.taskId,source})
+    f.ledger.recordConversationFeedback({kind:'feedback-assessment-started',assessmentId,taskId:target.source.taskId,source,
+      admissionDigest:sha256(target.admission),resultDigest:target.completion!.resultDigest,materialDigest:sha256(version),consentRevision:1})
+    return assessmentId
+  }
+  const oldId=start('interrupted-v1'),newId=start('replacement-v2','interrupted-v1')
+  expect(f.ledger.isConversationFeedbackAssessmentActive(oldId)).toBe(false)
+  expect(f.ledger.isConversationFeedbackAssessmentActive(newId)).toBe(true)
+  expect(await readiness(f)).toEqual({state:role==='source'?'awaiting-compatible-sources':'awaiting-counterexample'})
+  expect(()=>f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/feedback/)
+  f.ledger.recordConversationFeedback({kind:'feedback-assessed',assessmentId:newId,taskId:target.source.taskId,classification:'inconclusive',category:null,
+    supplementalCriteria:[],evidenceQuotes:[],explanation:'Engineering replacement settled without an attributable verdict.',proof:null,unavailableReason:'model-unavailable'})
+  const assessments=f.ledger.listConversationFeedbackAssessments(target.source.taskId)
+  expect(await readiness(f)).toEqual({state:'ready-to-schedule'})
+  expect(f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toEqual({duplicate:false})
+  expect(f.ledger.recordConversationGuidance(f.opened)).toEqual({duplicate:false})
+  const replay=new EvolutionLedger(f.directory)
+  expect(replay.isConversationGuidanceSupported(f.opened.studyId)).toBe(true)
+  expect(replay.listConversationTasks()).toEqual(beforeTasks)
+  expect(replay.listConversationFeedbackAssessments(target.source.taskId)).toEqual(assessments)
+  expect(replay.listConversationFeedbackAssessments(target.source.taskId)[0]?.result).toBeUndefined()
+})
+
+it.each([false,true])('proposal clue ignores only an inactive unfinished assessment (active pending %s)', async pendingActive => {
+  const f=seeded('verified',true,undefined,true),service=serviceFor(f)
+  const {fileInputs:_inputs,completion:originalCompletion,...original}=f.tasks[0]
+  const {files:_files,...completion}=originalCompletion!
+  const clue={...original,source:{...original.source,taskId:'engineering-incomplete-clue',proposalCluePolicy:'feedback.v1' as const},completion}
+  const current={started:{assessmentId:'current-complete',taskId:clue.source.taskId,materialDigest:sha256('current clue')},result:{proof:proof('current clue judge'),
+    classification:'attributable-problem',category:'instruction-following',supplementalCriteria:['Preserve the API.']}}
+  const unfinished={started:{assessmentId:'old-unfinished',taskId:clue.source.taskId}}
+  const material={schemaVersion:'tianwen.proposal-clue.v1',taskId:clue.source.taskId}
+  const readClue=vi.fn().mockResolvedValue(material)
+  vi.spyOn(taskMaterial,'recoverConversationTaskModel').mockResolvedValue('scripted native model' as never)
+  const ctx=(service as unknown as {ctx:any}).ctx
+  ctx.get=(name:string)=>name==='tianwenConversationFeedback'?{proposalClueForAssessment:readClue}:undefined
+  ctx.tianwenEvolution.listConversationTasks=()=>[...f.tasks,clue]
+  ctx.tianwenEvolution.listConversationFeedbackAssessments=()=>[unfinished,current]
+  ctx.tianwenEvolution.isConversationFeedbackAssessmentActive=(id:string)=>id==='old-unfinished'?pendingActive:id==='current-complete'
+  const result=await (service as unknown as {proposalClues(scopeKey:string,first:ConversationTask,category:string,ids:string[]):Promise<any[]>})
+    .proposalClues(scope,f.tasks[0],'instruction-following',f.tasks.map(item=>item.source.taskId))
+  expect(result).toHaveLength(pendingActive?0:1)
+  expect(readClue).toHaveBeenCalledTimes(pendingActive?0:1)
+  if(!pendingActive)expect(result[0]?.material).toBe(material)
+})
+
 it('preserves model not-met priority on direct checked failure source writes', () => {
   const f = seeded('verified', true, undefined, true, false)
   expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/review|priority/)

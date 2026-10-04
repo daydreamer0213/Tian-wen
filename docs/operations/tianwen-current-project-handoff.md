@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 修复失效 pending 反馈对核心研究的永久否决
+
+原 Runtime/Ledger 六处把历史所有未完成评估当当前等待，即使已撤回/替换仍否决来源、对照和线索。仅复用原 active 判定，旧记录原样、当前有效 pending/反馈范围/来源规则保持。正确首红八控制七失败一保护通过；最终五文件402过，最后不可变线索两项重叠复核不相加。公开消费实测 Evolution/dist 旧，更新原四依赖再原Runtime15步骤，最终公开 Evolution 四控制及冷恢复终端0；Runtime仅公开导入/六字节守卫，不称全挂载。[准确证据、失败、范围和后续责任](tianwen-inactive-pending-feedback-delivery-20261004.md)。
+
+0模型/自然Task/真实反馈/自然研究/采用，两原账本及上轮新CLI账本/首稿保持，仍原1合格问题/语义风险未解，完整目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口保持。下一核原反馈异常恢复唤醒：正常scanSession已取消未完成评估，不能只凭assess同ID早return推永久pending；只查无live/root/flush退出路径，不先造功能或补写历史；继续原实际开发、独立正确性/研究治理/未知未来效果，不机械整体blocked或索题催评。最终4自有控制根清，少量失败根保留、无环境副本/D>=15/Docker未启动；新增6精确根两次清理执行前policy拒绝未重试，保护77，见本轮final-audit。
+
 ## 2026-10-04 真正原CLI完成评审退出状态修复
 
 事前f11446f3冻结26项；实际Evolution not-met被原runner当未定，原复现2不等于1。原CLI/交付Profile/原Loader+runner唯一第九自然Task首稿仅补not-met，独立程序verified/原双审met/权限exact、9实际请求根4、自动封存排空退出0；另一Node0请求精确重建原Task/seal/首稿，旧两账本和八Task保持。[准确范围、启动纠正和下一责任](tianwen-real-cli-review-exit-delivery-20261004.md)。

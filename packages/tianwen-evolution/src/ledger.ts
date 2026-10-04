@@ -3146,7 +3146,7 @@ export class EvolutionLedger {
       const all = this.listConversationFeedbackAssessments(task.source.taskId)
       const latest = [...all].reverse().find(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
         && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
-      if (all.some(item => item.result === undefined) || latest?.result?.classification === 'positive'
+      if (all.some(item => item.result === undefined && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)) || latest?.result?.classification === 'positive'
         || latest?.result !== undefined && latest.result.supplementalCriteria.length > 0 && hasVerifiedContinuingPreference(latest.result)
         || this.listLearningIntakeStatuses(task.source.sessionId).some(status => status.state === 'active' && status.rating === 'positive'
           && status.sessionLifecycleFingerprint === task.source.sessionLifecycleFingerprint && task.completion!.assistantMessageIds.includes(status.messageId))) {
@@ -3161,7 +3161,7 @@ export class EvolutionLedger {
     const counterAssessments = this.listConversationFeedbackAssessments(counter!.source.taskId)
     const latestCounter = [...counterAssessments].reverse().find(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
       && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
-    if (counterAssessments.some(item => item.result === undefined) || latestCounter !== undefined && latestCounter.result!.classification !== 'positive'
+    if (counterAssessments.some(item => item.result === undefined && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)) || latestCounter !== undefined && latestCounter.result!.classification !== 'positive'
       || this.listLearningIntakeStatuses(counter!.source.sessionId).some(status => status.state === 'active' && status.rating === 'negative'
         && status.sessionLifecycleFingerprint === counter!.source.sessionLifecycleFingerprint && counter!.completion!.assistantMessageIds.includes(status.messageId))) {
       throw new LedgerIntegrityError('checked failure counter has pending or adverse feedback')
@@ -3367,7 +3367,7 @@ export class EvolutionLedger {
         throw new LedgerIntegrityError('proposal clue requires a marked compatible completed task with eligible feedback evidence')
       }
       const all = this.#conversationFeedback.list(task.source.taskId)
-      if (all.some(item => item.result === undefined)) throw new LedgerIntegrityError('proposal clue has a pending replacement assessment')
+      if (all.some(item => item.result === undefined && this.isConversationFeedbackAssessmentActive(item.started.assessmentId))) throw new LedgerIntegrityError('proposal clue has a pending replacement assessment')
       const active = all.filter(item => item.result?.proof !== null && item.result?.proof !== undefined
         && this.isConversationFeedbackAssessmentActive(item.started.assessmentId))
       const latest = [...active].reverse().find(item => ['attributable-problem', 'preference', 'positive'].includes(item.result!.classification))

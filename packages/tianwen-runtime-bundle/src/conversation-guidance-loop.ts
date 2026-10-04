@@ -188,7 +188,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private support(task: ConversationTask): { readonly category: ConversationFailure, readonly assessment?: ConversationFeedbackAssessment, readonly checkedFailure?: ConversationCheckedFailureSource } | undefined {
     const evolution = this.ctx.tianwenEvolution
     const assessments = evolution.listConversationFeedbackAssessments(task.source.taskId)
-    if (assessments.some(item => item.result === undefined)) return undefined
+    if (assessments.some(item => item.result === undefined && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))) return undefined
     const latest = [...assessments].reverse().find(item => item.result?.proof != null && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification)
       && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))
     if (latest?.result?.classification === 'positive') return undefined
@@ -207,7 +207,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private checkedCounter(task: ConversationTask, first: ConversationTask): boolean {
     if (!hasSatisfiedConversationCodeCheck(task) || task.externalCheckFinished?.status !== 'verified' || conversationCodeCheckIdentity(task) !== conversationCodeCheckIdentity(first)) return false
     const all = this.ctx.tianwenEvolution.listConversationFeedbackAssessments(task.source.taskId)
-    if (all.some(item => item.result === undefined)) return false
+    if (all.some(item => item.result === undefined && this.ctx.tianwenEvolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))) return false
     return this.counterFeedbackAllowed(task, all)
   }
   private counterFeedbackAllowed(task: ConversationTask,
@@ -246,7 +246,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const clues: { reference: GuidanceProposalClue, material: ConversationProposalClueMaterial }[] = []
     for (const task of candidates) {
       const all = evolution.listConversationFeedbackAssessments(task.source.taskId)
-      if (all.some(item => item.result === undefined)) continue
+      if (all.some(item => item.result === undefined && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))) continue
       const assessment = [...all].reverse().find(item => item.result?.proof !== null && item.result?.proof !== undefined
         && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification)
         && evolution.isConversationFeedbackAssessmentActive(item.started.assessmentId))

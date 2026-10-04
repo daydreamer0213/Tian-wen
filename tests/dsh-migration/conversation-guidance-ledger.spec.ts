@@ -736,12 +736,13 @@ it('quarantines new activation writes while retaining accepted decisions and his
   expect(replay.recordConversationGuidance(activation(value))).toEqual({ duplicate: true })
 })
 
-function nativeFeedback(ledger: EvolutionLedger, target: ConversationTask) {
+function nativeFeedback(ledger: EvolutionLedger, target: ConversationTask, supersedesFeedbackVersion?: string) {
   const messageId = target.completion!.assistantMessageIds[0]!
   ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'feedback-v1',
     rating: 'negative', note: 'You omitted the pilot-only qualification.', scopeKey: target.source.scopeKey,
     sessionDigest: sha256(`feedback session:${target.source.taskId}`), evidenceIds: [target.completion!.resultDigest] },
-    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1,
+    ...(supersedesFeedbackVersion === undefined ? {} : { supersedesFeedbackVersion }) })
   const status = ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
   const source: ConversationFeedbackSource = { kind: 'native', sessionId: target.source.sessionId, messageId,
     sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, feedbackVersion: 'feedback-v1', feedbackFingerprint: status.feedbackFingerprint }
@@ -817,14 +818,30 @@ it('requires a current marked incomplete local-file task and its exact active fe
   expect(ledger.isConversationGuidanceSupported(opened.studyId)).toBe(false)
 })
 
-it.each(['text-study', 'file-study', 'v1-external', 'unmarked', 'complete-text', 'complete-file', 'subjective', 'family', 'scope', 'model', 'category', 'consent', 'pending', 'positive'] as const)('validates v2 external clue compatibility on disk replay: %s', scenario => {
+it.each(['text-study', 'file-study', 'v1-external', 'unmarked', 'complete-text', 'complete-file', 'subjective', 'family', 'scope', 'model', 'category', 'consent', 'pending', 'positive', 'stale-pending-retracted', 'stale-pending-superseded'] as const)('validates v2 external clue compatibility on disk replay: %s', scenario => {
   const { root, ledger, tasks } = seeded()
   const fileStudy = scenario === 'file-study'
   const sources = fileStudy ? [10, 11, 12].map(turn => task(ledger, turn, turn === 12 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, 'files')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask] : tasks
   const target = task(ledger, 20, 'inconclusive', scenario === 'scope' ? 'other-scope' : scope, 'external feedback clue', scenario === 'model' ? [sha256('different model')] : undefined, undefined, undefined,
     scenario === 'complete-file' ? 'files' : undefined, scenario === 'unmarked' ? false : scenario === 'v1-external' ? true : 'feedback.v2', true,
     scenario === 'complete-file' || scenario === 'complete-text' ? undefined : scenario === 'subjective' ? 'subjective' : 'external', scenario === 'family' ? 'writing' : 'summarization')
-  const assessment = nativeFeedback(ledger, target)
+  const stale = scenario.startsWith('stale-pending-')
+  let unfinishedId: string | undefined
+  if (stale) {
+    const messageId=target.completion!.assistantMessageIds[0]!
+    ledger.recordLearningFeedbackRevision({intake:{sessionId:target.source.sessionId,messageId,feedbackVersion:'pending-clue-v0',rating:'negative',
+      note:'Engineering interrupted clue fixture, not actual user feedback.',scopeKey:scope,sessionDigest:sha256('old pending clue'),evidenceIds:[target.completion!.resultDigest]},
+      sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,analysisConsentRevision:1})
+    const status=ledger.getLearningIntakeStatus(target.source.sessionId,messageId)!
+    const source={kind:'native' as const,sessionId:target.source.sessionId,messageId,sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,
+      feedbackVersion:status.feedbackVersion,feedbackFingerprint:status.feedbackFingerprint}
+    unfinishedId=conversationFeedbackAssessmentId({taskId:target.source.taskId,source})
+    ledger.recordConversationFeedback({kind:'feedback-assessment-started',assessmentId:unfinishedId,taskId:target.source.taskId,source,
+      admissionDigest:sha256(target.admission),resultDigest:target.completion!.resultDigest,materialDigest:sha256('old pending clue material'),consentRevision:1})
+    if(scenario==='stale-pending-retracted')ledger.recordLearningFeedbackRetraction({sessionId:source.sessionId,messageId,
+      retractedFeedbackVersion:source.feedbackVersion,sessionLifecycleFingerprint:source.sessionLifecycleFingerprint})
+  }
+  const assessment = nativeFeedback(ledger, target, scenario === 'stale-pending-superseded' ? 'pending-clue-v0' : undefined)
   const { kind: _kind, studyId: _id, ...base } = fileStudy ? fileOpening(sources) : opening(sources)
   const body = { ...base, ...(scenario === 'category' ? { failureCategory: 'user-preference' as const } : {}), ...(scenario === 'consent' ? { consentRevision: 2 } : {}), proposalClues: [{ taskId: target.source.taskId, assessmentId: assessment.started.assessmentId, assessmentDigest: sha256(assessment.result), materialDigest: assessment.started.materialDigest }] }
   if (scenario === 'pending' || scenario === 'positive') {
@@ -837,9 +854,13 @@ it.each(['text-study', 'file-study', 'v1-external', 'unmarked', 'complete-text',
     if (scenario === 'positive') ledger.recordConversationFeedback({ ...assessment.result, assessmentId: started.assessmentId, classification: 'positive', category: null, supplementalCriteria: [], proof: proof('replacement-positive') })
   }
   const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
-  if (scenario === 'text-study' || fileStudy) {
+  if (scenario === 'text-study' || fileStudy || stale) {
     expect(ledger.recordConversationGuidance(opened)).toEqual({ duplicate: false })
     expect(new EvolutionLedger(root).isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    if(stale) {
+      expect(ledger.isConversationFeedbackAssessmentActive(unfinishedId!)).toBe(false)
+      expect(ledger.listConversationFeedbackAssessments(target.source.taskId)[0]?.result).toBeUndefined()
+    }
   } else expect(() => new EvolutionLedger(root).recordConversationGuidance(opened)).toThrow()
 })
 
