@@ -17,3 +17,9 @@ The controlled full-learning stage is closed at 9488ffc5. The owner authorizes p
 - Generated data goes to D:/DevData, no dependency/profile copies. D free >=15GiB, prefer20. Preserve the old three ledgers and 77 protected roots. Do not retry deletion of the additional rejected root `D:/DevData/tianwen-development-runtime/controlled-pending-GLh8yC`; preserve the policy rejection and only clean newly owned allowed resources.
 
 The full goal stays active. This consumes an already delivered mechanism so the next evidence can come from real model execution.
+
+## Execution checkpoint
+
+Steps 1–3 delivered at f1dfbb76 and real CLI executions. Final related checks: 41 pass/1 existing skip; independent review no grounded P1/P2. Two startup failures had zero requests/tasks. Alpha exact-task delimiter failed and correctly got no checker credit. New beta exact-task routing prepared/executed two real checks, both rejected missing status/extra fields, despite all four actual model content reviews saying met. Combined real requests 38, independent checks 2, actual studies/activation/later benefit 0. Native beta retry has identical source material identity and is not an independent pair. Original histories/84 containers unchanged, owned Docker stopped, generated records about 1.9MiB, D>=15GiB.
+
+Step 4 remains actual real-model effects, not another loader test: first correct the ordinary native Task versus study requirement visibility difference through existing Task prompting if needed, then prepare the new controlled batch and future tasks proactively. The original finite controlled-stage rules remain; do not wait for a natural event, add post-hoc gates, reuse/regrade alpha/beta or demand owner input. The transparent operator must allow main delivery and original learning work to settle before teardown. See the operational delivery record for exact failures and scope.
