@@ -110,9 +110,11 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
                 const execution = projectNativeFileActions(events, end.seq, files)
                 assert(!execution.actions.some(action => action.tool === 'write' || action.tool === 'edit'))
               }
-              const messages = events.filter(event => event.seq > b.preparedSeq && event.type === 'assistant/message' && isAppendSurfaceEvent(event))
-              assert(messages.length > 0)
-              const answer = messages.flatMap(event => event.type === 'assistant/message' ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : []).join('')
+              // Match native subagent delivery: intermediate tool-step replies are not the terminal answer.
+              const terminal = events.findLast(event => event.seq > b.preparedSeq && event.type === 'assistant/message'
+                && isAppendSurfaceEvent(event) && event.data.message.content.length > 0)
+              assert(terminal?.type === 'assistant/message')
+              const answer = terminal.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('')
               const currentFiles = await capturedFiles(); candidate.signal.throwIfAborted()
               const outcome = await prepared.evaluate({ material: structuredClone(actualMaterial), answer, files: currentFiles, signal: candidate.signal })
               await capturedFiles(); candidate.signal.throwIfAborted()

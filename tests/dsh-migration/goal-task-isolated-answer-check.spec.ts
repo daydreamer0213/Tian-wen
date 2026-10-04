@@ -148,3 +148,24 @@ it('preserves explicit host rejection and cancellation instead of manufacturing 
  expect(await prepared.evaluate(f.candidate(prepared))).toMatchObject({status:'rejected',failedRequiredConditionDigest:sha256(f.config.requiredCondition)})
  const controller=new AbortController();controller.abort();await expect(prepared.evaluate({...f.candidate(prepared),signal:controller.signal})).rejects.toThrow()
 })
+it.each([false,true])('checks the native terminal deliverable rather than concatenating earlier tool-step replies (chat=%s)',async chat=>{
+ const f=fixture(chat),prepared=(await createGoalTaskIsolatedPythonAnswerCheck(f.config).prepare(f.input))!,candidate=f.candidate(prepared)
+ const first=candidate.events[1]!
+ Object.assign(first.data,{message:{id:'intermediate',role:'assistant',content:[{type:'text',text:'pending'},{type:'tool-call',name:'update_goal',tool_call_id:'native-update',input:{}}]}})
+ const final={seq:6,type:'assistant/message',surfaceOp:'append',data:{message:{id:'terminal',role:'assistant',content:[{type:'text',text:'pen'},{type:'text',text:'ding'}]}}} as unknown as SessionEvent
+ Object.assign(candidate.events.at(-1)!,{seq:7});candidate.events.splice(2,0,final)
+ mock.run.mockImplementation(async(_source,packet)=>({status:'completed',stdout:JSON.stringify(JSON.parse(packet).answer==='pending'),stderr:'',exitCode:0}))
+ expect(await prepared.evaluate(candidate)).toMatchObject({status:'verified'})
+ expect(JSON.parse(mock.run.mock.calls[0]![1]).answer).toBe('pending')
+ expect(candidate.events[1]).toBe(first)
+})
+it.each(['wrong','tool-only','empty-text','whitespace','empty-content'] as const)('retains the last non-empty native message without finding an earlier acceptable answer (%s)',async kind=>{
+ const f=fixture(),prepared=(await createGoalTaskIsolatedPythonAnswerCheck(f.config).prepare(f.input))!,candidate=f.candidate(prepared)
+ const content=kind==='tool-only'?[{type:'tool-call',name:'update_goal',tool_call_id:'last-call',input:{}}]
+  :kind==='empty-content'?[]:[{type:'text',text:kind==='wrong'?'failed':kind==='whitespace'?'   ':''}]
+ const final={seq:6,type:'assistant/message',surfaceOp:'append',data:{message:{id:'last',role:'assistant',content}}} as unknown as SessionEvent
+ Object.assign(candidate.events.at(-1)!,{seq:7});candidate.events.splice(2,0,final)
+ mock.run.mockImplementation(async(_source,packet)=>({status:'completed',stdout:JSON.stringify(JSON.parse(packet).answer==='pending'),stderr:'',exitCode:0}))
+ expect(await prepared.evaluate(candidate)).toMatchObject({status:kind==='empty-content'?'verified':'rejected'})
+ expect(JSON.parse(mock.run.mock.calls[0]![1]).answer).toBe(kind==='empty-content'?'pending':kind==='wrong'?'failed':kind==='whitespace'?'   ':'')
+})
