@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 多 Goal Task 接入已交付，首次记录不改判
+
+事前a5a7a0f后唯一真实Task新增5162B纯Goal分派；9实际请求、prepare/evaluate1/1，原程序unverifiable/评审inconclusive。控制聚合9330B超原8192B，且material-string误包为正常对象；原冻结/Task不改。事后43/44原工程匹配+真正string拒收，0模型冷恢复原完整记录、旧五Task不变。[准确首次事实、交付和下一步](tianwen-live-goal-contract-routing-20261004.md)。
+
+原DEV options单份/多份接新分派，普通/原工厂/研究规则保持；76相关通过及发行SDK实际options控制1通过（87scripted/0natural），独立无有据P1/P2。工程fixture事前拒超预算/错误string编码，固定22/22。当前持续六Task/程序4verified-1rejected-1unverifiable/问题1/旧成功1/feedback-study0，不补自然成功或失败。
+
+下一实际缺口是紧凑评审顶层evidenceQuotes仍在成功捕获后才验：grounding原单位引文门已能同Turn纠正，requirements概括引用却被后置host拒绝。继续将同一原条件前移至原SDK捕获前，不改双审/合法引用/语义/预算/历史、不重评旧Task或催用户补输入；真实研究/采用/未来效果仍分别核。完整目标active/incomplete、main/Daily NO-GO及原十工作日窗口不变。
+
+新临时SDK根XvAO3C的删除被自动审批执行前拒绝，仅blocked by policy；未删/绕过，原28加新1共29拒删路径保持。D约17.9GiB>=15，无环境副本，容器和Docker最终事实见D包final-audit。
+
 ## 2026-10-04 原生文件研究独立功能关口已组合验证
 
 实际发行DEV：三Goal不同原合同、原公开检查器prepare/evaluate3/3；研究供给1、五角色准备5、十臂实际隔离evaluate10。脚本87请求、真实模型0/自然来源0。候选holdout双审met/原裁决accepted但程序rejected，DEV隔离关闭仍无activation；冷Context/另Node零请求准确恢复原来源/五案例/十臂/文件证明，原所有字节保持。[准确组合结果与控制端错误](tianwen-native-functional-study-sdk-20261004.md)。

@@ -1,0 +1,2110 @@
+[
+  {
+    "id": "single-compatible",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "single-compatible",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": "A",
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "array-A",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "third Task",
+        "token": "C",
+        "nested": {
+          "value": "frozen-C"
+        },
+        "cases": [
+          {
+            "id": "original-C"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "array-A",
+      "constructors": [
+        "A",
+        "B",
+        "C"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B",
+        "frozen-C"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": "A",
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "array-B",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "third Task",
+        "token": "C",
+        "nested": {
+          "value": "frozen-C"
+        },
+        "cases": [
+          {
+            "id": "original-C"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "second Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "array-B",
+      "constructors": [
+        "A",
+        "B",
+        "C"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B",
+        "frozen-C"
+      ],
+      "calls": [
+        "scope:B",
+        "prepare:B"
+      ],
+      "scope": "B",
+      "selected": "B",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "array-C",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "third Task",
+        "token": "C",
+        "nested": {
+          "value": "frozen-C"
+        },
+        "cases": [
+          {
+            "id": "original-C"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "third Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "array-C",
+      "constructors": [
+        "A",
+        "B",
+        "C"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B",
+        "frozen-C"
+      ],
+      "calls": [
+        "scope:C",
+        "prepare:C"
+      ],
+      "scope": "C",
+      "selected": "C",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "unknown",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "third Task",
+        "token": "C",
+        "nested": {
+          "value": "frozen-C"
+        },
+        "cases": [
+          {
+            "id": "original-C"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "another Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "unknown",
+      "constructors": [
+        "A",
+        "B",
+        "C"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B",
+        "frozen-C"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "exact-case",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "First Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "exact-case",
+      "constructors": [
+        "A",
+        "B"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "exact-space",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task "
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "exact-space",
+      "constructors": [
+        "A",
+        "B"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "actual-leading-space",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": " first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": " first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "actual-leading-space",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": "A",
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "goal-is-not-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "wrong"
+      },
+      "goal": {
+        "objective": "first Task"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "goal-is-not-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "request-is-not-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "wrong"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      },
+      "request": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "text": "first Task"
+            }
+          ]
+        }
+      ]
+    },
+    "expected": {
+      "id": "request-is-not-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "context-is-not-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "wrong"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      },
+      "context": [
+        {
+          "objective": "first Task"
+        }
+      ]
+    },
+    "expected": {
+      "id": "context-is-not-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-null",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": null,
+    "expected": {
+      "id": "material-null",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-array",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": [],
+    "expected": {
+      "id": "material-array",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-string",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": "first Task",
+    "expected": {
+      "id": "material-string",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-no-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {},
+    "expected": {
+      "id": "material-no-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-null-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "task": null
+    },
+    "expected": {
+      "id": "material-null-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-array-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "task": []
+    },
+    "expected": {
+      "id": "material-array-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-string-task",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "task": "first Task"
+    },
+    "expected": {
+      "id": "material-string-task",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-bad-objective",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "task": {
+        "objective": 42
+      }
+    },
+    "expected": {
+      "id": "material-bad-objective",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "material-no-objective",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "task": {}
+    },
+    "expected": {
+      "id": "material-no-objective",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [],
+      "scope": null,
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "frozen-single",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "mutate": true,
+    "expected": {
+      "id": "frozen-single",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": "A",
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "frozen-array",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "third Task",
+        "token": "C",
+        "nested": {
+          "value": "frozen-C"
+        },
+        "cases": [
+          {
+            "id": "original-C"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "second Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "mutate": true,
+    "expected": {
+      "id": "frozen-array",
+      "constructors": [
+        "A",
+        "B",
+        "C"
+      ],
+      "nested": [
+        "frozen-A",
+        "frozen-B",
+        "frozen-C"
+      ],
+      "calls": [
+        "scope:B",
+        "prepare:B"
+      ],
+      "scope": "B",
+      "selected": "B",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "prototype-key",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "__proto__",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "__proto__"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "prototype-key",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": "A",
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "absent-scope",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "omitScope": true,
+    "expected": {
+      "id": "absent-scope",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "prepare:A"
+      ],
+      "scope": null,
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "scope-undefined",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "scopeUndefined": true,
+    "expected": {
+      "id": "scope-undefined",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": null,
+      "selected": "A",
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "prepare-undefined",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "prepareUndefined": true,
+    "expected": {
+      "id": "prepare-undefined",
+      "constructors": [
+        "A"
+      ],
+      "nested": [
+        "frozen-A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "scope": "A",
+      "selected": null,
+      "exactMaterial": true,
+      "thisBinding": true,
+      "returnedIdentity": true,
+      "unchangedAtConstruction": true,
+      "materialUnchanged": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "empty-array",
+    "config": [],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "empty-array",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "null-contract",
+    "config": null,
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "null-contract",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "array-contract",
+    "config": [
+      []
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "array-contract",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "string-contract",
+    "config": "first Task",
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "string-contract",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "blank-cwd",
+    "config": {
+      "cwd": "",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "blank-cwd",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "blank-command",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": " ",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "blank-command",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "blank-request",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": " ",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "blank-request",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "missing-command",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "requestText": "first Task"
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "missing-command",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "duplicate",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "duplicate",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "different-cwd",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/other",
+        "goalCommand": "Original long Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "different-cwd",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "different-command",
+    "config": [
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Original long Goal",
+        "requestText": "first Task",
+        "token": "A",
+        "nested": {
+          "value": "frozen-A"
+        },
+        "cases": [
+          {
+            "id": "original-A"
+          }
+        ]
+      },
+      {
+        "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+        "goalCommand": "Other Goal",
+        "requestText": "second Task",
+        "token": "B",
+        "nested": {
+          "value": "frozen-B"
+        },
+        "cases": [
+          {
+            "id": "original-B"
+          }
+        ]
+      }
+    ],
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "expected": {
+      "id": "different-command",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "invalid-factory",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "invalidFactory": true,
+    "expected": {
+      "id": "invalid-factory",
+      "error": "TypeError",
+      "constructors": [],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "bad-prepare",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "badPrepare": true,
+    "expected": {
+      "id": "bad-prepare",
+      "error": "TypeError",
+      "constructors": [
+        "A"
+      ],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "bad-scope",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "badScope": true,
+    "expected": {
+      "id": "bad-scope",
+      "error": "TypeError",
+      "constructors": [
+        "A"
+      ],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "factory-error",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "factoryThrows": true,
+    "expected": {
+      "id": "factory-error",
+      "error": "original-error",
+      "constructors": [
+        "A"
+      ],
+      "calls": [],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "scope-error",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "scopeThrows": true,
+    "expected": {
+      "id": "scope-error",
+      "error": "original-error",
+      "constructors": [
+        "A"
+      ],
+      "calls": [
+        "scope:A"
+      ],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "prepare-error",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "prepareThrows": true,
+    "expected": {
+      "id": "prepare-error",
+      "error": "original-error",
+      "constructors": [
+        "A"
+      ],
+      "calls": [
+        "scope:A",
+        "prepare:A"
+      ],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  },
+  {
+    "id": "original-cancellation",
+    "config": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "goalCommand": "Original long Goal",
+      "requestText": "first Task",
+      "token": "A",
+      "nested": {
+        "value": "frozen-A"
+      },
+      "cases": [
+        {
+          "id": "original-A"
+        }
+      ]
+    },
+    "material": {
+      "cwd": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge",
+      "task": {
+        "objective": "first Task"
+      },
+      "goal": {
+        "objective": "Original long Goal"
+      },
+      "epoch": 1,
+      "source": {
+        "original": true
+      }
+    },
+    "cancelled": true,
+    "expected": {
+      "id": "original-cancellation",
+      "error": "original-error",
+      "constructors": [
+        "A"
+      ],
+      "calls": [
+        "scope:A"
+      ],
+      "originalError": true,
+      "factoryFieldsComplete": true
+    }
+  }
+]

@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 多 Goal 合同产品接入交付，不回填首次自然结果
+
+新唯一真实Task9请求/prepare-evaluate1/1，首5162B代码未改，程序unverifiable/评审inconclusive。聚合观察9330B超原8192B及string样例误包属控制错误，不充自然问题/成功；原Task、冻结期望及旧五Task保持。另Node0模型原图/归档准确恢复；事后43/44原匹配及真正string拒收仅工程诊断。[准确范围与原错误](tianwen-live-goal-contract-routing-20261004.md)。
+
+DEV options多Goal合同接新纯分派，76相关及发行实际options控制1项过（87scripted/0natural），错误holdout仍不启用；无有据P1/P2。持续DEV六普通Task/程序verified4-rejected1-unverifiable1/问题1/旧成功候选1/feedback-study0，原资格、同意、完整目标active/incomplete及main/Daily NO-GO/窗口不变，不机械整体blocked。
+
+下一将紧凑评审顶层summary引文原判定接至原SDK捕获前：本次requirements无效引用过早成功捕获，随后被原host拒绝，不能回写旧记录或放宽原语义。继续后续真正开发任务及原研究/采用/未来效果，不索题催评。D约17.9GiB>=15；新工程根XvAO3C删除在执行前被自动审批拒绝，未删或重试，拒删路径原28加新1为29。
+
 ## 2026-10-04 原生文件研究消费独立功能检查已证
 
 三个原生Goal/六原检查→DEV供给1/五角色准备5/十臂实际隔离evaluate10；真实模型0、脚本87请求，工程错误产物不算自然问题。候选holdout双审met/原裁决accepted但程序rejected，DEV隔离关闭仍无activation。冷Context及另Node零请求准确恢复来源/案例/文件证明及原字节。[准确结果、首控制失败和恢复API纠正](tianwen-native-functional-study-sdk-20261004.md)。

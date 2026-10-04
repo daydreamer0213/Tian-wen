@@ -886,21 +886,21 @@ describe('native Long Goal profile execution', () => {
       cases: [{ id: `original-${index}`, input: '{}', expectedJson: JSON.stringify({ value: index }), exitCode: 0 }] })
     const independent = (index: number) => { const { requestText, ...entry } = original(index); return { ...entry, prompt: requestText, criteria: [requiredCondition] } }
     const config = { cwd, qualityContract: conversationQualityContract(), originals: [1, 2, 3].map(original), adjacent: independent(4), holdout: independent(5) }
-    const checker = host.createDevelopmentFunctionalStudyResultCheck(config)
     let taskPrepared = 0, taskEvaluated = 0, supplied = 0, prepared = 0, evaluated = 0
-    const taskChecks = new Map<number, ReturnType<typeof host.createDevelopmentGoalTaskIsolatedNodeProjectCheck>>()
-    for (const index of [1, 2, 3]) {
+    const goalContracts = [1, 2, 3].map(index => {
       const entry = original(index)
-      taskChecks.set(index, host.createDevelopmentGoalTaskIsolatedNodeProjectCheck({ cwd, requestText: entry.requestText,
+      return { cwd, requestText: entry.requestText,
         goalCommand: objective, entryPath: entry.entryPath, outputPaths: entry.outputPaths, referencePaths: ['input.txt', 'entry.mjs'],
-        cases: entry.cases, requiredCondition }))
-    }
+        cases: entry.cases, requiredCondition }
+    })
+    const options = host.createDevelopmentNativeCheckOptions(goalContracts.map(({goalCommand,...contract}) => contract), config, goalContracts)
+    const checker = options.studyResultCheck, taskChecks = options.goalTaskAcceptance
     const goalTaskAcceptance: NonNullable<Parameters<typeof applyRuntimeBundle>[1]>['goalTaskAcceptance'] = {
-      async methodScope(material) { return taskChecks.get(Number(material.task.objective.match(/case (\d+)$/)![1]))!.methodScope(material) },
+      async methodScope(material) { return taskChecks.methodScope(material) },
       async prepare(material) {
         const index = Number(material.task.objective.match(/case (\d+)$/)![1]); taskPrepared++
         for (const entry of original(index).entries) writeFileSync(join(cwd, entry.path), entry.content)
-        const check = await taskChecks.get(index)!.prepare(material)
+        const check = await taskChecks.prepare(material)
         expect(check).toBeDefined()
         return check === undefined ? undefined : { ...check, async evaluate(candidate) { taskEvaluated++; return check.evaluate(candidate) } }
       },
