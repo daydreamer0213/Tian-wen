@@ -85,6 +85,11 @@ function formatControlResult(result: ControlOperationResult, agent: Agent): stri
       completedTasks: status.goal.completedTasks,
       totalTasks: status.goal.totalTasks,
       autoProgress: status.control.autoProgress,
+      ...(status.tasks.some(task => task.acceptance !== undefined) ? {
+        taskAcceptances: status.tasks.filter(task => task.acceptance !== undefined).map(task => ({
+          id: task.id, objective: task.objective, phase: task.phase, acceptance: task.acceptance,
+        })),
+      } : {}),
       currentTask: currentTask === undefined
         ? null
         : {
@@ -206,6 +211,7 @@ export function installBoundContinuousGoalControls(
         'If status includes requiredUserAction, explain that native main Session setting in plain language and end your reply. Do not use request_user_input to invent an approval or promise one-time elevated execution.',
         'Each Task owns a separate native Goal. A Task reporting its Goal complete is normal Task completion, not premature completion of the continuous Goal; do not investigate it with get_goal.',
         'Report the Goal as complete only after goal_control reports phase "complete".',
+        'Task phase complete and completedTasks describe execution only. taskAcceptances preserve the original host verdicts: rejected, pending or unverifiable is not a pass, even when a content review says met. Do not use guidance to override those verdicts or claim the original requirements have passed. A new user direction may change future work; it does not rewrite an old acceptance.',
         'Use exactly one of:',
         ...GOAL_CONTROL_SHAPES,
         'Do not add fields or use text/resume for an action that does not list them.',
