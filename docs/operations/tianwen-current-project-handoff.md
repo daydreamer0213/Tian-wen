@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 标准 Loader 可信合同接入已实现
+
+新增薄DEV插件，原字节SHA锁定JSON→既有普通/Goal/研究工厂→公开applyDevelopment；复用原Loader/JSONL/Agent/提供方，无临时harness装配。独立发现的祖先junction路径问题先红再以物理cwd修复，合法外部包别名保留；最终10相关通过，两次只读复查无有据P1/P2。[准确接口、消费证据及剩余](tianwen-standard-dev-runtime-20261004.md)。
+
+普通Node实际原Loader冷载连续Profile及真实提供方配置/原生文件注册，0模型/新Task/检查，六原Task exact、同意revision1true、feedback-study0、两原账本dispose前后保持。冷载不是实际新任务或完整交互权限/自然学习收益。下一由执行者用该入口及既有受控权限/Agent推进真正后续开发，事前冻结未知答案的要求和独立检查；不再加报告小功能、索题催评、造失败或重复本控制。
+
+来源仍1问题/1完整成功但不兼容，三个报告程序成功原双审未定；研究/语义/采用/未来效果未完成，完整目标active/incomplete、main/Daily NO-GO及原发布条件/十工作日窗口保持。新测试自有根已自动清理；早期42根删除被自动审批执行前拒绝，仅blocked by policy，未删/重试，原29加新42共71精确拒删路径见D包cleanup-refusal.json。D17.944GiB>=15、Docker停止、无环境副本。
+
 ## 2026-10-04 推进方式纠偏：从临时装配转向标准 DEV 消费
 
 只读领域校验六原Task：程序4verified/1rejected/1unverifiable，唯一完整成功与报告问题的原条件/检查身份不同；报告三个程序成功原复核未定。仍只有1可信问题、0真实反馈/自然研究。当前公开检查器与最近首Task原底层清单源码身份相同，不能笼统说每次Runtime修复使来源失效；不重评/写账本/调用模型。

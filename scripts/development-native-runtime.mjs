@@ -1,0 +1,58 @@
+import assert from 'node:assert/strict'
+import { isUtf8 } from 'node:buffer'
+import { createHash } from 'node:crypto'
+import { lstatSync, readFileSync, realpathSync } from 'node:fs'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { createDevelopmentNativeCheckOptions } from './development-isolated-node-project-check.mjs'
+
+const packageUrl=new URL('../packages/tianwen-runtime-bundle/package.json',import.meta.url)
+const manifest=JSON.parse(readFileSync(packageUrl,'utf8'))
+const runtime=await import(new URL(manifest.exports['./runtime'].default,packageUrl).href)
+export const name='tianwen-development-native-runtime'
+// Upstream Loader owns service readiness; the original DEV boundary requires
+// the already mounted original backend, not a replacement constructed here.
+export const inject=[...runtime.inject,'sessionPersistence']
+const key=path=>resolve(path).toLowerCase()
+const hash=bytes=>'sha256:'+createHash('sha256').update(bytes).digest('hex')
+const packetMaxBytes=8*1024*1024
+function object(value,fields,optional=[]) {
+ assert(value!==null&&typeof value==='object'&&!Array.isArray(value),'DEV config must be an object')
+ assert(fields.every(field=>Object.hasOwn(value,field))&&Object.keys(value).every(field=>[...fields,...optional].includes(field)),'DEV config has missing or unsupported fields')
+}
+
+/** Operator-owned JSON becomes only the original fixed-host factory options. */
+export function loadDevelopmentNativeRuntimeOptions(config) {
+ object(config,['developmentRoot','contractPath','contractDigest'])
+ assert(process.platform==='win32','DEV loading requires Windows')
+ const {developmentRoot,contractPath,contractDigest}=config
+ assert(typeof developmentRoot==='string'&&isAbsolute(developmentRoot),'DEV root must be absolute')
+ const root=resolve(developmentRoot)
+ assert(key(dirname(root))===key('D:/DevData/tianwen-development-runtime')
+  &&lstatSync(root).isDirectory()&&!lstatSync(root).isSymbolicLink()&&key(realpathSync(root))===key(root),'DEV root must be its original canonical D directory')
+ assert(typeof contractPath==='string'&&isAbsolute(contractPath),'DEV contract path must be absolute')
+ const path=resolve(contractPath),stat=lstatSync(path)
+ assert(key(path).startsWith(key('D:/DevData')+'\\')&&stat.isFile()&&!stat.isSymbolicLink()&&key(realpathSync(path))===key(path),'DEV contract must be an original regular D data file')
+ assert(stat.size<=packetMaxBytes,'DEV contract exceeds the loading budget')
+ assert(typeof contractDigest==='string'&&/^sha256:[0-9a-f]{64}$/u.test(contractDigest),'DEV contract digest is invalid')
+ const bytes=readFileSync(path)
+ assert(bytes.length<=packetMaxBytes&&isUtf8(bytes),'DEV contract is oversized or not exact UTF-8')
+ assert.equal(hash(bytes),contractDigest,'DEV contract digest mismatch')
+ const packet=JSON.parse(bytes.toString('utf8'))
+ object(packet,['schemaVersion','ordinaryContract','studyContracts'],['goalContract'])
+ assert.equal(packet.schemaVersion,'tianwen.development-native-contracts.v1')
+ // The mutable task workspace cannot contain the operator's pinned contract.
+ assert(typeof packet.studyContracts?.cwd==='string'&&isAbsolute(packet.studyContracts.cwd),'DEV workspace must be absolute')
+ assert(lstatSync(packet.studyContracts.cwd).isDirectory(),'DEV workspace must be an existing directory')
+ const child=relative(key(realpathSync(packet.studyContracts.cwd)),key(path))
+ assert(child!==''&&(isAbsolute(child)||child==='..'||child.startsWith('..\\')),'DEV contract must be outside the mutable workspace')
+ const options=createDevelopmentNativeCheckOptions(packet.ordinaryContract,packet.studyContracts,packet.goalContract)
+ const producer={id:'tianwen.development-native-file-policy.v1',digest:hash(readFileSync(new URL('./development-native-file-policy.mjs',import.meta.url)))}
+ return {developmentRoot:root,captureExternalCodeArtifacts:true,exposeCapturedFileFacts:false,...options,
+  conversationReadDenialSources:[producer],conversationFileMutationDenialSources:[producer]}
+}
+
+/** Normal Cordis plugin: no harness, request, consent, Agent or host shutdown. */
+export async function apply(ctx,config) {
+ const options=loadDevelopmentNativeRuntimeOptions(config)
+ await runtime.applyDevelopment(ctx,options)
+}
