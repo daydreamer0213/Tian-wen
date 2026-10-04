@@ -4,6 +4,14 @@ import * as scriptApi from '../../scripts/conversation-isolated-python-check.js'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
+it('exports the answer verifier through both public source and actual published JS', async () => {
+  const packageRequire = createRequire(new URL('../../packages/tianwen-runtime-bundle/package.json', import.meta.url))
+  const bundled = await import(pathToFileURL(packageRequire.resolve('@tianwen/runtime-bundle')).href)
+  expect(publicApi.createConversationStudyIsolatedPythonAnswerCheck).toBeTypeOf('function')
+  expect(bundled.createConversationStudyIsolatedPythonAnswerCheck).toBeTypeOf('function')
+  expect(() => bundled.createConversationStudyIsolatedPythonAnswerCheck({ modelConfigDigest: 'sha256:' + 'a'.repeat(64), cases: [], isolated: {} })).toThrow()
+})
+
 it('uses the concrete public producer to validate host cases before any execution', () => {
   const create = publicApi.createConversationIsolatedPythonCheck
   const config = { cwd: 'D:/DevData/tianwen-reusable-result-checks-20261002', requestText: 'Create task.py', targetPath: 'task.py',

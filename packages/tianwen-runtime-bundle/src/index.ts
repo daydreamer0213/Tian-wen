@@ -12,6 +12,8 @@ export type {
   ConversationIsolatedPythonStudyCase,
 } from './conversation-isolated-python-check.js'
 export type { IsolatedPythonCliConfig } from './isolated-python-cli.js'
+export { createConversationStudyIsolatedPythonAnswerCheck } from './conversation-isolated-answer-check.js'
+export type { ConversationIsolatedPythonAnswerCase, ConversationIsolatedPythonAnswerCheckConfig } from './conversation-isolated-answer-check.js'
 export {
   createConversationIsolatedNodeCheck,
   createConversationStudyIsolatedNodeCheck,

@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 当前推进：具体答案核验生产者交付
+
+公开createConversationStudyIsolatedPythonAnswerCheck冻结完整宿主材料/案例/模型/原条件/规则，只执行宿主源码，回答仅stdin数据；原执行器及Loop/Ledger默认不改。111相关、原四依赖/Runtime15步骤、实际发行工厂五次真实隔离执行通过，损坏检查器为unverifiable而非任务失败。原file/chat源码十臂合法/拒绝/恢复三控制及旧chat通过，实际发行DEV冷恢复0模型/0再准备核验（会resume根Agent，不称零Agent）。独立审查无新增有据P1/P2。[准确范围、失败及下一责任](tianwen-isolated-answer-check-delivery-20261004.md)。
+
+具体执行不是开放文本语义已解；宿主须有事前完整独立依据，工厂不生成案例。下一复用原宿主独立案例供给接入答案路径，再由实际开发任务唯一前瞻；原相容来源/研究/治理启用/未知未来效果及回滚各自留证，不索题/造反馈/重评旧案或机械整体blocked。四历史摘要保持/仍原1问题/R9风险未解，0新增自然Task/反馈/研究/真实采用/未来效果，完整目标active/incomplete、main/Daily NO-GO/原门槛/十工作日窗口保持。新容器自清/原84集合保持/Docker已停/77保护不碰/D>=15，审计在本轮证据目录。
+
 ## 2026-10-04 文本研究可接独立完整答案合同
 
 新增optional answerStudyResultCheck，显式 text-material/file-chat-material，绑定完整原案例材料，文件chat另核原冻结图；五项提案前准备、两臂共用，原模型裁决/独立改善及采用守卫保持。文本前后原worker/方法/模型/output恢复，cold只核原证明不再执行。7协议/6准备先红后绿，原生文本合法/拒绝/缺合同/冷恢复四场景通过；308相关+新增1配置控制（末7定向重叠不累加），原四依赖/Runtime15步骤通过，实际发布DEV冷消费1项通过。文件chat完整十臂/发行、NativeGoal新模式仍缺执行证据。[准确范围与下一责任](tianwen-answer-study-check-delivery-20261004.md)。
