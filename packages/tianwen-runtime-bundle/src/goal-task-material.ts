@@ -83,7 +83,11 @@ export async function readGoalTaskOutcomeMaterial(ctx: Context, input: {
   const material = await readGoalTaskAcceptanceMaterial(ctx, { stateRoot: input.stateRoot,
     goalId: outcome.goalId, taskId: outcome.taskId, epoch: outcome.epoch })
   if (material.outcomeInput === undefined || sha256(material.outcomeInput) !== sha256(outcome)) throw new Error('Goal Task learning source differs from original result')
-  if (Buffer.byteLength(JSON.stringify(material), 'utf8') > 512 * 1024) throw new Error('material-too-large')
+  // Streaming transport frames duplicate the completed assistant messages.
+  // Their bytes do not consume the semantic budget; all frames remain in the
+  // returned material and its original native digest verification above.
+  const boundedMaterial = { ...material, events: material.events.filter(event => event.type !== 'assistant/chunk') }
+  if (Buffer.byteLength(JSON.stringify(boundedMaterial), 'utf8') > 512 * 1024) throw new Error('material-too-large')
   authorized()
   return material
 }

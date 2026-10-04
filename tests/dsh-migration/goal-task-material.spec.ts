@@ -11,7 +11,7 @@ import type { LongGoalRecordV3 } from '../../packages/tianwen-runtime-bundle/src
 import type { GoalTaskAcceptanceBinding } from '../../packages/tianwen-runtime-bundle/src/goal-task-acceptance-contract.js'
 
 const BASE = resolve('D:/DevData/tianwen-dsh-probe/goal-task-material')
-function fixture(options: { legacy?: boolean; large?: boolean } = {}) {
+function fixture(options: { legacy?: boolean; large?: boolean; streamFrames?: boolean; largeTool?: boolean } = {}) {
   mkdirSync(BASE, { recursive: true })
   const root = mkdtempSync(join(BASE, 'control-'))
   const command = { type: 'command/run', seq: 0, data: { commandId: 'original-command', name: 'goal', source: { kind: 'user' }, args: 'Original requirement' } } as unknown as SessionEvent
@@ -28,13 +28,22 @@ function fixture(options: { legacy?: boolean; large?: boolean } = {}) {
   goal = bindGoalFirstLongGoalTask({ stateRoot: root, longGoalId: goal.id, expectedRevision: goal.revision, taskId,
     execution: { sessionId: 'child', goalId: 'native-goal' } }) as LongGoalRecordV3
   const config = { provider: 'scripted', model: 'control' }
+  const frames = options.streamFrames ? Array.from({ length: 4000 }, (_, index) => ({
+    type: 'assistant/chunk', seq: index + 3, time: 1000 + index,
+    data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'r' } },
+  })) : []
+  const offset = frames.length
   const events = [
     { type: 'sandbox/mode', seq: 0, data: { mode: 'workspace-write' } },
     { type: 'request/header', seq: 1, data: { header: { config } } },
     { type: 'request/context', seq: 2, data: { request: 'Original native request' } },
-    { type: 'tool/result', seq: 3, data: { value: 'Original tool result' } },
-    { type: 'assistant/message', seq: 4, data: { message: { content: [{ type: 'text', text: 'Original answer' }] } } },
-    { type: 'turn/end', seq: 5, data: { reason: { kind: 'completed' } } },
+    ...frames,
+    { type: 'tool/result', seq: 3 + offset, data: { value: options.largeTool ? 'x'.repeat(512 * 1024) : 'Original tool result' } },
+    { type: 'assistant/message', seq: 4 + offset, data: { message: { content: [
+      ...(options.streamFrames ? [{ type: 'reasoning', text: 'r'.repeat(offset) }] : []),
+      { type: 'text', text: 'Original answer' },
+    ] } } },
+    { type: 'turn/end', seq: 5 + offset, data: { reason: { kind: 'completed' } } },
   ] as unknown as SessionEvent[]
   const binding: GoalTaskAcceptanceBinding = {
     epoch: 1, parentSessionId: goal.planner.sessionId, childSessionId: 'child', nativeGoalId: 'native-goal', permissionFingerprint: sha256('permission'),
@@ -48,7 +57,7 @@ function fixture(options: { legacy?: boolean; large?: boolean } = {}) {
   goal = appendGoalTaskAcceptance({ stateRoot: root, longGoalId: goal.id, expectedRevision: goal.revision, taskId,
     event: { type: 'task-acceptance-prepared', taskId, binding } })
   goal = appendGoalTaskAcceptance({ stateRoot: root, longGoalId: goal.id, expectedRevision: goal.revision, taskId,
-    event: { type: 'task-acceptance-finished', taskId, epoch: 1, preparationDigest: sha256(binding), endSeq: 5,
+    event: { type: 'task-acceptance-finished', taskId, epoch: 1, preparationDigest: sha256(binding), endSeq: 5 + offset,
       materialDigest: sha256(events), outcome: { status: 'verified', detail: 'Independent control assertion passed.' } } })
   let consent = { enabled: true, revision: 1, policyVersion: 'tianwen-auto-analysis.v3' }
   const logs = new Map([['control', { meta: { id: 'control', createdAt: 1 }, events: [command] }],
@@ -136,6 +145,35 @@ describe('original Goal Task learning material', () => {
       expect(material.requirementsSnapshot!.goal.context).toHaveLength(512 * 1024)
       await expect(readGoalTaskOutcomeMaterial(f.ctx, { stateRoot: f.root, outcome: material.outcomeInput! })).rejects.toThrow('material-too-large')
       expect(readFileSync(f.path)).toEqual(before)
+    } finally { f.remove() }
+  })
+  it('admits a small completed result despite many stream frames, preserving the full original log', async () => {
+    const f = fixture({ streamFrames: true })
+    try {
+      const before = readFileSync(f.path)
+      const raw = await readGoalTaskAcceptanceMaterial(f.ctx, f.reference)
+      expect(Buffer.byteLength(JSON.stringify(raw), 'utf8')).toBeGreaterThan(512 * 1024)
+      expect(raw.events.filter(event => event.type === 'assistant/chunk')).toHaveLength(4000)
+      const material = await readGoalTaskOutcomeMaterial(f.ctx, { stateRoot: f.root, outcome: raw.outcomeInput! })
+      expect(material).toEqual(raw)
+      expect(material.events).toEqual(f.logs.get('child')!.events)
+      expect(readFileSync(f.path)).toEqual(before)
+    } finally { f.remove() }
+  })
+  it('still detects a changed stream frame after the original result was checked', async () => {
+    const f = fixture({ streamFrames: true })
+    try {
+      const raw = await readGoalTaskAcceptanceMaterial(f.ctx, f.reference)
+      const events = f.logs.get('child')!.events
+      events[3] = { ...events[3]!, data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', index: 0, text: 'changed' } } } as unknown as SessionEvent
+      await expect(readGoalTaskOutcomeMaterial(f.ctx, { stateRoot: f.root, outcome: raw.outcomeInput! })).rejects.toThrow('original native material changed')
+    } finally { f.remove() }
+  })
+  it('keeps the original bound on actual tool evidence even when stream frames are present', async () => {
+    const f = fixture({ streamFrames: true, largeTool: true })
+    try {
+      const raw = await readGoalTaskAcceptanceMaterial(f.ctx, f.reference)
+      await expect(readGoalTaskOutcomeMaterial(f.ctx, { stateRoot: f.root, outcome: raw.outcomeInput! })).rejects.toThrow('material-too-large')
     } finally { f.remove() }
   })
 })
