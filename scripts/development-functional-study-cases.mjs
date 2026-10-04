@@ -218,6 +218,7 @@ function buildOriginalEntry(config, index, raw) {
     entryPath: contract.entryPath,
     cases: clone(contract.cases),
     requiredCondition: contract.requiredCondition,
+    ...(Object.hasOwn(contract,'moduleAliases') ? {moduleAliases:clone(contract.moduleAliases)} : {}),
   }
 }
 
@@ -239,6 +240,7 @@ function buildIndependentEntry(config, key) {
     entryPath: independent.entryPath,
     cases: clone(independent.cases),
     requiredCondition: independent.requiredCondition,
+    ...(Object.hasOwn(independent,'moduleAliases') ? {moduleAliases:clone(independent.moduleAliases)} : {}),
   }
 }
 

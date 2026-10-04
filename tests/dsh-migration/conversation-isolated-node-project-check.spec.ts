@@ -29,6 +29,20 @@ function fixture() {
   return { cwd, config, material, candidate, study, studyCandidate, signal }
 }
 
+it('allows only explicitly frozen readonly package targets and binds the mapping before candidate work',async()=>{
+ const f=fixture(),mapping={'@product/ref':'entry.mjs'}
+ expect(()=>createConversationIsolatedNodeProjectCheck({...f.config,moduleAliases:{'@product/ref':'first.ts'}})).toThrow()
+ expect(()=>createConversationIsolatedNodeProjectCheck({...f.config,moduleAliases:{'@product/ref':'missing.mjs'}})).toThrow()
+ const check=createConversationIsolatedNodeProjectCheck({...f.config,moduleAliases:mapping})
+ mapping['@product/ref']='first.ts'
+ const prepared=await check.prepare(f.material)
+ expect(prepared).toBeDefined()
+ expect(mock.prepare).toHaveBeenCalledWith(f.config.isolated,f.signal,{'@product/ref':'entry.mjs'})
+ expect(await prepared!.evaluate(f.candidate())).toMatchObject({status:'verified'})
+ const original=await createConversationIsolatedNodeProjectCheck(f.config).prepare(f.material)
+ expect(original!.contractDigest).not.toBe(prepared!.contractDigest)
+})
+
 function nativeFixture() {
   const f=fixture(), goalCommand='Complete the real project work represented by this controlled native Goal.'
   const source={type:'command/run',seq:1,data:{name:'goal',args:goalCommand,commandId:'original-command',source:{kind:'user'}}}
@@ -251,6 +265,16 @@ function cohortFixture() {
   const host = { sources: [cases.source1.material, cases.source2.material], counterexample: cases.counterexample.material, cwd: f.cwd, qualityContract: f.study.qualityContract, modelConfigDigest: config.modelConfigDigest, signal: f.signal } as Parameters<NonNullable<typeof check.prepareIndependentCases>>[0]
   return { ...f, ids, cases, config, check, host }
 }
+it('prepares the same frozen readonly module mapping for each of the five original study roles',async()=>{
+ const f=cohortFixture()
+ const cases=Object.fromEntries(f.ids.map(id=>[id,{...f.cases[id],moduleAliases:{'@product/ref':'entry.mjs'}}])) as typeof f.config.cases
+ const check=createConversationStudyIsolatedNodeProjectCohortCheck({...f.config,cases})
+ expect(await check.prepareIndependentCases!(f.host)).toBeDefined()
+ for(const id of f.ids)expect(await check.prepare({...cases[id].material,caseId:id,modelConfigDigest:f.config.modelConfigDigest,signal:f.signal})).toBeDefined()
+ expect(mock.prepare).toHaveBeenCalledTimes(5)
+ for(const call of mock.prepare.mock.calls)expect(call[2]).toEqual({'@product/ref':'entry.mjs'})
+ expect(()=>createConversationStudyIsolatedNodeProjectCohortCheck({...f.config,cases:{...cases,source1:{...cases.source1,moduleAliases:{'@product/ref':'first.ts'}}}})).toThrow()
+})
 it('binds five distinct saved multi-output roles and supplies original independent materials', async () => {
   const f = cohortFixture(), supplied = await f.check.prepareIndependentCases!(f.host); expect(supplied?.adjacent.files.outputPaths).toEqual(['first.ts', 'second.ts']); expect(mock.prepare).not.toHaveBeenCalled()
   const contracts = []

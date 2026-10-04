@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 捕获SDK包映射不增加自然来源
+
+实际公开SDK捕获源码但原import找不到包，原诊断仅工程；显式readonly moduleAliases贯穿原普通/Goal/五角色及DEV，原输入/两臂/预算与隔离保持。215相关及原15构建步骤过，实际发行SDK和TS统一模块控制过、0模型/自然Task/研究/采用。[限制与交付](tianwen-captured-module-alias-delivery-20261004.md)。
+
+原两账本/八Task不改，仍1问题/自然研究0。检查器/执行器源身份已改变，未来固定新身份，不以此重评或桥接旧来源；核心C/D复查未发现需要另造helper，失败语义提取候选不接入。下一原CLI真实SDK产品任务及原研究/语义/采用未来效果分别核，完整目标active/incomplete、main/Daily NO-GO/原门槛/十日窗口保持，71拒删根不碰。
+
 ## 2026-10-04 配置工厂首次真实成功，不补学习来源
 
 原第八Task事前25检查唯一首次，program verified/双审met/权限exact，原稿接纳，另Node0请求恢复原全部记录；实际CLI仅冷消费工厂配置与惰性job，无runner/Task/同意。13相关回归及独立复查过。[交付与精确范围](tianwen-cli-profile-data-delivery-20261004.md)。

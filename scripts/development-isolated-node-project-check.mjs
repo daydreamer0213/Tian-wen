@@ -71,7 +71,8 @@ function freezeStudyContracts(config) {
       requestText: contract.requestText ?? contract.prompt, entryPath: contract.entryPath,
       outputPaths: files.outputPaths, referencePaths: references.map(entry => entry.path),
       criteria: contract.criteria ?? [contract.requiredCondition], cases: contract.cases,
-      requiredCondition: contract.requiredCondition })
+      requiredCondition: contract.requiredCondition,
+      ...(Object.hasOwn(contract,'moduleAliases') ? {moduleAliases:contract.moduleAliases} : {}) })
   }
   return frozen
 }

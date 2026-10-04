@@ -1,12 +1,14 @@
 import { createConversationIsolatedJsonCheck, createConversationStudyIsolatedJsonCheck, createConversationStudyIsolatedJsonCohortCheck,
   createGoalTaskIsolatedJsonCheck, type ConversationIsolatedPythonCheckConfig, type ConversationIsolatedPythonStudyCase } from './conversation-isolated-python-check.js'
+import type { NodeProjectModuleAliases } from './isolated-node-project.js'
 
 /** Complete captured project: declared mutable outputs plus frozen read-only references. */
 export type ConversationIsolatedNodeProjectCheckConfig = Omit<ConversationIsolatedPythonCheckConfig, 'targetPath'> & {
   readonly entryPath: string
   readonly outputPaths: readonly string[]
+  readonly moduleAliases?: NodeProjectModuleAliases
 }
-export type ConversationIsolatedNodeProjectStudyCase = ConversationIsolatedPythonStudyCase & { readonly entryPath: string }
+export type ConversationIsolatedNodeProjectStudyCase = ConversationIsolatedPythonStudyCase & { readonly entryPath: string; readonly moduleAliases?: NodeProjectModuleAliases }
 export type GoalTaskIsolatedNodeProjectCheckConfig = ConversationIsolatedNodeProjectCheckConfig & {
   readonly goalCommand: string
   readonly requiredCondition: string

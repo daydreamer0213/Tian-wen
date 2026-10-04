@@ -1,5 +1,26 @@
 import { expect, it } from 'vitest'
-import { compileNodeProject, decodeNodeProjectFrame, nodeProjectPolicy } from '../../packages/tianwen-runtime-bundle/src/isolated-node-project.js'
+import { compileNodeProject, decodeNodeProjectFrame, nodeProjectPolicy, parseNodeProjectModuleAliases } from '../../packages/tianwen-runtime-bundle/src/isolated-node-project.js'
+
+it('binds explicit captured package entries and original TS canonical aliases without importing them on the host',()=>{
+ const graph=[{path:'entry.ts',content:"import {n} from '@product/value'; throw Error('MUST NOT RUN ON HOST')"},{path:'captured/value.ts',content:'export const n:number=7'}]
+ const mapping={'@product/value':'captured/value.ts'}
+ const result=compileNodeProject(graph,'entry.ts',mapping)
+ expect(result.moduleAliases).toEqual(mapping)
+ expect(result.files.find(file=>file.path==='.tianwen-loader.mjs')?.content).toContain('captured/value.js')
+ expect(result.snapshotDigest).not.toBe(compileNodeProject(graph,'entry.ts').snapshotDigest)
+ mapping['@product/value']='other.ts'
+ expect(result.moduleAliases).toEqual({'@product/value':'captured/value.ts'})
+})
+it.each([null,[],{'fs':'captured.js'},{'fs/promises':'captured.js'},{'node:crypto':'captured.js'},{'file:///host.js':'captured.js'},{'../pkg':'captured.js'},{'@scope/pkg/../other':'captured.js'},{'constructor':'captured.js'},{'pkg':'../host.js'},{'pkg':'absent.js'},{'pkg':'data.json'},Object.fromEntries(Array.from({length:33},(_,i)=>['pkg'+i,'captured.js']))])('rejects unsafe or unavailable package mappings before source execution',mapping=>{
+ expect(()=>compileNodeProject([{path:'entry.js',content:''},{path:'captured.js',content:''}],'entry.js',mapping)).toThrow()
+})
+it('requires exact readonly reference membership, plain fields and stable sorted data',()=>{
+ expect(()=>parseNodeProjectModuleAliases({'pkg':'output.js'},['reference.js'])).toThrow()
+ expect(()=>parseNodeProjectModuleAliases(Object.assign(Object.create({inherited:'reference.js'}),{'pkg':'reference.js'}),['reference.js'])).toThrow()
+ expect(()=>parseNodeProjectModuleAliases(Object.assign({'pkg':'reference.js'},{[Symbol('extra')]:'reference.js'}),['reference.js'])).toThrow()
+ expect(parseNodeProjectModuleAliases({'z':'reference.js','a':'reference.js'},['reference.js'])).toEqual({'a':'reference.js','z':'reference.js'})
+ expect(parseNodeProjectModuleAliases(undefined,[])).toEqual({})
+})
 
 const files = [{ path: 'main.ts', content: "import { n } from './dep.js'; console.log(n)" }, { path: 'dep.ts', content: 'export const n: number = 7' }]
 it('converts captured TypeScript dependencies without executing source and unifies aliases', () => {

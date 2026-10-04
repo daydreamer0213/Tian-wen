@@ -21,6 +21,7 @@ export type { ConversationIsolatedNodeCheckConfig, ConversationIsolatedNodeStudy
 export type { IsolatedNodeCliConfig } from './isolated-node-cli.js'
 export { prepareIsolatedNodeProject } from './isolated-node-project.js'
 export type { IsolatedNodeProjectInput, IsolatedNodeProjectOutcome, PreparedIsolatedNodeProject } from './isolated-node-project.js'
+export type { NodeProjectModuleAliases } from './isolated-node-project.js'
 export { createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCohortCheck,
   createGoalTaskIsolatedNodeProjectCheck } from './conversation-isolated-node-project-check.js'
 export type { ConversationIsolatedNodeProjectCheckConfig, ConversationIsolatedNodeProjectStudyCase, GoalTaskIsolatedNodeProjectCheckConfig } from './conversation-isolated-node-project-check.js'

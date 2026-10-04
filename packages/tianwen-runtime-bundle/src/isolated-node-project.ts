@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync, existsSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
+import { builtinModules, stripTypeScriptTypes } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseConversationFileEntries, type ConversationFileEntry } from '@tianwen/evolution'
@@ -14,12 +14,34 @@ const modulePath = fileURLToPath(import.meta.url), moduleDigest = hash(readFileS
 const protocol = 'tianwen.node-project-result.v1'
 const loaderPath = '.tianwen-loader.mjs'
 
+export type NodeProjectModuleAliases = Readonly<Record<string, string>>
+/** Trusted data only: never resolve against host packages or execute modules. */
+export function parseNodeProjectModuleAliases(raw: unknown, availablePaths?: readonly string[]): NodeProjectModuleAliases {
+  if (raw === undefined) return {}
+  assert(raw !== null && typeof raw === 'object' && !Array.isArray(raw))
+  assert([Object.prototype, null].includes(Object.getPrototypeOf(raw)))
+  const keys = Reflect.ownKeys(raw)
+  assert(keys.length <= 32 && keys.every(key => typeof key === 'string'))
+  const builtins = new Set(builtinModules.map(name => name.replace(/^node:/u, '')))
+  const entries = (keys as string[]).sort().map(specifier => {
+    assert(/^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*(?:\/[a-zA-Z0-9._-]+)*$/u.test(specifier))
+    assert(!builtins.has(specifier) && !specifier.split('/').some(part => ['.', '..', '__proto__', 'constructor', 'prototype'].includes(part)))
+    const path = (raw as Record<string, unknown>)[specifier]
+    assert(typeof path === 'string' && /\.(?:m?js|m?ts)$/u.test(path))
+    parseConversationFileEntries([{ path, content: null }])
+    assert(availablePaths === undefined || availablePaths.includes(path), 'Module aliases require an exact captured readonly module')
+    return [specifier, path] as const
+  })
+  return Object.fromEntries(entries)
+}
+
 /** Pure source conversion: never imports or evaluates candidate modules on the host. */
-export function compileNodeProject(raw: readonly ConversationFileEntry[], entryPath: string) {
+export function compileNodeProject(raw: readonly ConversationFileEntry[], entryPath: string, rawModuleAliases?: unknown) {
   const original = parseConversationFileEntries(structuredClone(raw))
   assert(original.length > 0 && original.every(file => file.content !== null))
   assert(original.some(file => file.path === entryPath) && /\.(?:m?js|m?ts)$/u.test(entryPath))
   assert(original.every(file => !file.path.toLowerCase().split('/').includes('package.json') && file.path.toLowerCase() !== loaderPath && !file.path.toLowerCase().startsWith(loaderPath + '/')))
+  const moduleAliases = parseNodeProjectModuleAliases(rawModuleAliases, original.map(file => file.path))
   const files: { path: string; content: string }[] = [], aliases: Record<string, string> = {}
   const names = new Set(original.map(file => file.path.toLowerCase()))
   for (const file of original) {
@@ -34,11 +56,12 @@ export function compileNodeProject(raw: readonly ConversationFileEntry[], entryP
   }
   assert(files.reduce((bytes, file) => bytes + Buffer.byteLength(file.content), 0) <= nodeProjectPolicy.transformedBytes)
   // Resolve both original TS imports and emitted JS imports to one canonical module URL.
-  const loader = `import {registerHooks} from 'node:module';\nimport {pathToFileURL} from 'node:url';\nconst aliases=${JSON.stringify(aliases)};\nregisterHooks({resolve(specifier,context,nextResolve){const result=nextResolve(specifier,context);const url=new URL(result.url);if(url.protocol==='file:'&&url.pathname.startsWith('/project/')){const key=decodeURIComponent(url.pathname.slice(9));if(Object.hasOwn(aliases,key)){const target=pathToFileURL('/project/'+aliases[key]);target.search=url.search;target.hash=url.hash;return {...result,url:target.href};}}return result;}});\n`
+  const mapped = Object.fromEntries(Object.entries(moduleAliases).map(([name,path]) => [name, aliases[path] ?? path]))
+  const loader = `import {registerHooks} from 'node:module';\nimport {pathToFileURL} from 'node:url';\nconst aliases=${JSON.stringify(aliases)};\nconst modules=${JSON.stringify(mapped)};\nregisterHooks({resolve(specifier,context,nextResolve){if(Object.hasOwn(modules,specifier))return {url:pathToFileURL('/project/'+modules[specifier]).href,shortCircuit:true};const result=nextResolve(specifier,context);const url=new URL(result.url);if(url.protocol==='file:'&&url.pathname.startsWith('/project/')){const key=decodeURIComponent(url.pathname.slice(9));if(Object.hasOwn(aliases,key)){const target=pathToFileURL('/project/'+aliases[key]);target.search=url.search;target.hash=url.hash;return {...result,url:target.href};}}return result;}});\n`
   files.push({ path: 'package.json', content: '{"type":"module"}' }, { path: loaderPath, content: loader })
   files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)
   assert(Buffer.byteLength(JSON.stringify(files)) <= nodeProjectPolicy.transformedBytes)
-  return { files, aliases, entryPath: aliases[entryPath] ?? entryPath, snapshotDigest: hash(JSON.stringify(files)) }
+  return { files, aliases, moduleAliases, entryPath: aliases[entryPath] ?? entryPath, snapshotDigest: hash(JSON.stringify(files)) }
 }
 
 interface FrameBinding { readonly snapshotDigest: string; readonly entryPath: string }
@@ -69,20 +92,21 @@ export interface PreparedIsolatedNodeProject {
 }
 
 /** Fixed opt-in executor; mounts only its small generated read-only snapshot, never the source project. */
-export async function prepareIsolatedNodeProject(raw: IsolatedNodeCliConfig, signal: AbortSignal): Promise<PreparedIsolatedNodeProject> {
+export async function prepareIsolatedNodeProject(raw: IsolatedNodeCliConfig, signal: AbortSignal, rawModuleAliases?: NodeProjectModuleAliases): Promise<PreparedIsolatedNodeProject> {
   const config = structuredClone(raw)
+  const moduleAliases = parseNodeProjectModuleAliases(rawModuleAliases)
   const compilerDigest = hash(readFileSync(process.execPath))
   assert.equal(process.versions.node, '22.23.1', 'Fixed host Node 22.23.1 conversion is required')
   assert.equal(typeof stripTypeScriptTypes, 'function'); assert.equal(stripTypeScriptTypes('export const n: number = 1', { mode: 'transform' }).trim(), 'export const n = 1;')
   const runner = await prepareIsolatedJsonCli(config, signal, 'node-project'), root = resolve(config.workRoot)
   const intact = () => { assert.equal(hash(readFileSync(modulePath)), moduleDigest); assert.equal(hash(readFileSync(process.execPath)), compilerDigest); assert.equal(realpathSync(root), root) }
-  const digest = hash(JSON.stringify({ executorDigest: runner.digest, moduleDigest, compilerDigest, compilerVersion: process.versions.node, policy: nodeProjectPolicy, parentSource }))
+  const digest = hash(JSON.stringify({ executorDigest: runner.digest, moduleDigest, compilerDigest, compilerVersion: process.versions.node, policy: nodeProjectPolicy, parentSource, moduleAliases }))
   return { digest, async run(rawInput, currentSignal) {
     currentSignal.throwIfAborted(); intact()
     const input = structuredClone(rawInput)
     assert(typeof input.input === 'string' && Buffer.byteLength(input.input) <= isolatedPythonPolicy.ioBytes)
     let project: ReturnType<typeof compileNodeProject>
-    try { project = compileNodeProject(input.files, input.entryPath) }
+    try { project = compileNodeProject(input.files, input.entryPath, moduleAliases) }
     catch { return { status: 'source-rejected', detail: 'Captured source, entry or module aliases cannot form a supported project.' } }
     const request = JSON.stringify({ snapshotDigest: project.snapshotDigest, entryPath: project.entryPath, input: input.input, timeoutMs: config.timeoutMs ?? isolatedPythonPolicy.maxTimeoutMs })
     if (Buffer.byteLength(request) > isolatedPythonPolicy.ioBytes) return { status: 'unverifiable', detail: 'Project input exceeds the bounded transport.' }

@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 独立检查可消费保存的实际SDK模块
+
+核心C/D限定复查无有据P1/P2，不另造helper、不装旧失败语义候选。实际公开SDK捕获图仍因包名import失败，原诊断保持；原compiler/工厂/DEV添加host显式readonly moduleAliases，原预算/隔离/依赖闭包/两臂绑定保持，不指向output或builtin、不读主机库。先红15，最终215相关及原15构建步骤通过，真实发布工厂SDK与TS统一模块控制过、独立无有据P1/P2。[准确限制、接入与下一责任](tianwen-captured-module-alias-delivery-20261004.md)。
+
+0模型/自然Task/反馈研究采用，3工程容器，自有临时根已清/71拒删不碰，Docker收尾停、资源见D包final-audit。两账本/八自然Task保持；原检查器/执行器字节已变，未来固定新身份，不桥接旧来源。下一原CLI消费真实SDK的实际产品需求，不重开本控制/无依赖小模块/报告题；旧数据原地、Profile不复制历史或同意。仍1问题/0自然研究/语义及采用未来效果未完成，完整目标active/incomplete、main/Daily NO-GO/原门槛/窗口保持，不机械整体blocked或索题。
+
 ## 2026-10-04 天问首稿交付可复用 CLI 配置
 
 事前08de35b6固定25检查，唯一第八自然Task原生生成5506B配置工厂，程序verified/原双审met/权限exact，11提供方请求含根5，原稿字节接纳；另Node0请求准确恢复封存/旧七Task。工厂实际原CLI冷消费服务/JSONL/合同/job ready/matches、退出0；明确未挂runner，不称全CLI真实执行。相关13项回归/独立无有据P1/P2，原检查器发行未变；事前JSONL/重复tools/索引纠正及事后审计路径错误保留。[准确事实和下一责任](tianwen-cli-profile-data-delivery-20261004.md)。

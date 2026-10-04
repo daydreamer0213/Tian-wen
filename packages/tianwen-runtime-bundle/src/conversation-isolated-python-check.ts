@@ -12,7 +12,7 @@ import { parseNativeGoalStudyInput } from './goal-task-study-input.js'
 import { canonicalJsonResult, isolatedPythonPolicy, prepareIsolatedPythonCli, type IsolatedPythonCliConfig } from './isolated-python-cli.js'
 
 import { prepareIsolatedNodeCli } from './isolated-node-cli.js'
-import { prepareIsolatedNodeProject } from './isolated-node-project.js'
+import { prepareIsolatedNodeProject, parseNodeProjectModuleAliases, type NodeProjectModuleAliases } from './isolated-node-project.js'
 const checkerPath = fileURLToPath(import.meta.url), checkerSourceDigest = sha256(readFileSync(checkerPath).toString('utf8'))
 const pathKey = (path: string) => process.platform === 'win32' ? resolve(path).toLowerCase() : resolve(path)
 const requestText = (request: ConversationExternalCodePreparation['request']) => request.flatMap(message =>
@@ -39,7 +39,7 @@ interface FrozenFunctionalCheck {
 }
 
 type CheckEngine = 'python' | 'node' | 'node-project'
-type InternalConfig = ConversationIsolatedPythonCheckConfig & { readonly outputPaths?: readonly string[] }
+type InternalConfig = ConversationIsolatedPythonCheckConfig & { readonly outputPaths?: readonly string[]; readonly moduleAliases?: NodeProjectModuleAliases }
 function createPreparation(raw: InternalConfig, engine: CheckEngine) {
   const checkerId = engine === 'python' ? 'conversation-isolated-python-json-cli.v1' : engine === 'node' ? 'conversation-isolated-node-json-cli.v1' : 'conversation-isolated-node-project-json-cli.v1'
   const config = structuredClone(raw), cwd = resolve(config.cwd), references = [...(config.referencePaths ?? [])]
@@ -48,6 +48,8 @@ function createPreparation(raw: InternalConfig, engine: CheckEngine) {
   assert(typeof config.requestText === 'string' && config.requestText.trim() !== '')
   assert(engine === 'python' ? config.targetPath.endsWith('.py') : /\.(?:m?js|m?ts)$/u.test(config.targetPath))
   const names = [...targets, ...references]
+  assert(engine === 'node-project' || config.moduleAliases === undefined, 'Captured module mappings require the project engine')
+  const moduleAliases = parseNodeProjectModuleAliases(config.moduleAliases, references)
   parseConversationFileEntries(names.map(path => ({ path, content: null })))
   assert(names.includes(config.targetPath))
   assert(config.requiredCondition === undefined || typeof config.requiredCondition === 'string' && config.requiredCondition.trim() !== '')
@@ -68,12 +70,14 @@ function createPreparation(raw: InternalConfig, engine: CheckEngine) {
         assert(names.length === inputs.length && names.every(path => inputs.some(entry => entry.path === path)))
         assert(references.every(path => inputs.find(entry => entry.path === path)?.content != null))
         const inputDigest = conversationExternalInputsDigest(inputs)
-        const projectRunner = engine === 'node-project' ? await prepareIsolatedNodeProject(config.isolated, signal) : undefined
+        const projectRunner = engine === 'node-project' ? await (config.moduleAliases === undefined
+          ? prepareIsolatedNodeProject(config.isolated, signal) : prepareIsolatedNodeProject(config.isolated, signal, moduleAliases)) : undefined
         const runner = projectRunner ?? (engine === 'python' ? await prepareIsolatedPythonCli(config.isolated, signal) : await prepareIsolatedNodeCli(config.isolated, signal, config.targetPath.endsWith('ts') ? 'typescript' : 'javascript'))
         signal.throwIfAborted()
         const contract = { checkerId, checkerSourceDigest, executorDigest: runner.digest, cwd, requestText: config.requestText,
           targetPath: config.targetPath, referencePaths: references, inputsDigest: inputDigest, cases: config.cases,
           ...(engine === 'node-project' ? { outputPaths: targets } : {}),
+          ...(config.moduleAliases === undefined ? {} : { moduleAliases }),
           ...(config.requiredCondition === undefined ? {} : { requiredCondition: config.requiredCondition }) }
         const contractDigest = sha256(contract), checkerDigest = sha256({ checkerSourceDigest, executorDigest: runner.digest })
         const root = resolve(config.isolated.workRoot); mkdirSync(root, { recursive: true })
@@ -273,7 +277,7 @@ export interface ConversationIsolatedPythonStudyCase {
 
 /** Closed host cohort, fixed before case design; not a task generator or source-eligibility decision. */
 type CohortConfig = { readonly modelConfigDigest: ReturnType<typeof sha256>; readonly cases: Readonly<Record<FunctionalStudyRole, ConversationIsolatedPythonStudyCase>> }
-type InternalCohortConfig = Omit<CohortConfig, 'cases'> & { readonly cases: Readonly<Record<FunctionalStudyRole, ConversationIsolatedPythonStudyCase & { readonly entryPath?: string }>> }
+type InternalCohortConfig = Omit<CohortConfig, 'cases'> & { readonly cases: Readonly<Record<FunctionalStudyRole, ConversationIsolatedPythonStudyCase & { readonly entryPath?: string; readonly moduleAliases?: NodeProjectModuleAliases }>> }
 export function createConversationStudyIsolatedPythonCohortCheck(raw: CohortConfig): ConversationStudyResultCheck {
   return createConversationStudyIsolatedJsonCohortCheck(raw, 'python')
 }
@@ -295,7 +299,8 @@ export function createConversationStudyIsolatedJsonCohortCheck(raw: InternalCoho
     const producer = createConversationStudyIsolatedJsonCheck({ cwd: files.cwd,
       requestText: 'request' in material ? requestText(material.request) : material.prompt,
       targetPath, referencePaths, ...(engine === 'node-project' ? { outputPaths: files.outputPaths } : {}),
-      criteria: material.criteria, cases: entry.cases, isolated: entry.isolated, requiredCondition: entry.requiredCondition }, engine)
+      criteria: material.criteria, cases: entry.cases, isolated: entry.isolated, requiredCondition: entry.requiredCondition,
+      ...(entry.moduleAliases === undefined ? {} : { moduleAliases: entry.moduleAliases }) }, engine)
     return [id, { material, materialDigest: sha256(material), producer }] as const
   }))
   const first = definitions.get('source1')!.material, cwd = first.files.cwd, qualityDigest = sha256(first.qualityContract)
