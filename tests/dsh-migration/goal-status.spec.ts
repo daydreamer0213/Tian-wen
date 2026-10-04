@@ -454,10 +454,13 @@ describe('authoritative governed ledger inspection', () => {
 describe('Tianwen read-only Goal status', () => {
   it('keeps the status bundle free of private runtime and probe inputs', () => {
     const metafile = JSON.parse(readFileSync(STATUS_METAFILE, 'utf8')) as {
-      inputs: Record<string, unknown>
+      inputs: Record<string, { imports: readonly { path: string }[] }>
+      outputs: Record<string, { imports: readonly { path: string }[] }>
     }
     const inputs = Object.keys(metafile.inputs).join('\n')
-    const source = readFileSync(STATUS_BUNDLE, 'utf8')
+    // Evidence parsing may name a tool without importing or activating that tool.
+    const imports = [...Object.values(metafile.inputs), ...Object.values(metafile.outputs)]
+      .flatMap(entry => entry.imports).map(entry => entry.path).join('\n')
     for (const forbidden of [
       'scripted-adapter',
       'dsh-tool-skill',
@@ -466,7 +469,7 @@ describe('Tianwen read-only Goal status', () => {
       'dsh-probe',
     ]) {
       expect(inputs).not.toContain(forbidden)
-      expect(source).not.toContain(forbidden)
+      expect(imports).not.toContain(forbidden)
     }
   })
 

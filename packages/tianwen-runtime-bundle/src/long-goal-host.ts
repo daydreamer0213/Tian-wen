@@ -92,7 +92,7 @@ import {
   projectLearningAudit,
   type LearningAudit,
 } from './learning-clue-status.js'
-import { readGoalStatus } from './status.js'
+import { GoalStatusNotFoundError, readGoalStatus } from './status.js'
 import { NativeLongGoalChild } from './native-long-goal-child.js'
 import { currentGoalCommandOrigin, GoalTaskAcceptanceChecks, type GoalTaskAcceptanceCheck } from './goal-task-acceptance.js'
 import {
@@ -200,6 +200,49 @@ export async function cancelContinuousTaskAgent(
       throw new LongGoalIntegrityError('Continuous Goal Task cancellation binding mismatch')
     }
     if (current.phase === 'active') goals.pause(taskAgent, { id: current.id, revision: current.revision })
+  }
+}
+
+export async function readLongGoalStatusWithLiveAdmission(
+  input: Parameters<typeof readLongGoalStatus>[0],
+  dependencies: {
+    readonly attachedAgent: (sessionId: string) => Agent | undefined
+    readonly getGoal?: (agent: Agent) => GoalView | undefined
+    readonly flushSession: (agent: Agent) => Promise<void>
+    readonly readStatus?: typeof readLongGoalStatus
+    readonly readRecord?: typeof readLongGoal
+  },
+): ReturnType<typeof readLongGoalStatus> {
+  const readStatus = dependencies.readStatus ?? readLongGoalStatus
+  try { return await readStatus(input) } catch (error) {
+    if (!(error instanceof GoalStatusNotFoundError)) throw error
+    const readRecord = dependencies.readRecord ?? readLongGoal
+    const record = readRecord(input.stateRoot, input.longGoalId)
+    if (record.schemaVersion !== 'tianwen.long-goal.v3') throw error
+    const task = record.tasks.find(candidate => candidate.execution?.goalId === error.goalId)
+    const execution = task?.execution
+    if (task === undefined || execution === undefined || execution === null) throw error
+    const agent = dependencies.attachedAgent(execution.sessionId)
+    const getGoal = dependencies.getGoal ?? ((candidate: Agent) => candidate.ctx.goals.get(candidate))
+    const matchesLiveGoal = (candidate: Agent): boolean => {
+      const goal = getGoal(candidate)
+      return goal !== undefined && String(goal.id) === execution.goalId
+    }
+    if (agent === undefined || String(agent.session.id) !== execution.sessionId
+      || !matchesLiveGoal(agent)
+      || agent.session.header.cwd !== record.workspaceRoot
+      || agent.session.header.agentPreset !== record.planner.agentPreset) throw error
+    // Persist existing live events only; the standalone cold reader remains read-only.
+    await dependencies.flushSession(agent)
+    const latest = readRecord(input.stateRoot, input.longGoalId)
+    const currentTask = latest.tasks.find(candidate => candidate.id === task.id)
+    if (latest.schemaVersion !== 'tianwen.long-goal.v3'
+      || latest.workspaceRoot !== record.workspaceRoot || latest.planner.agentPreset !== record.planner.agentPreset
+      || currentTask?.execution?.sessionId !== execution.sessionId || currentTask.execution.goalId !== execution.goalId
+      || dependencies.attachedAgent(execution.sessionId) !== agent || !matchesLiveGoal(agent)) {
+      throw new LongGoalIntegrityError('Continuous Goal live status binding changed while persisting')
+    }
+    return readStatus(input)
   }
 }
 
@@ -2235,6 +2278,13 @@ export function mountTianwenLongGoalHost(
       ...(config === undefined ? {} : { config }),
     })
     const host = injected as HostContext
+    const readLiveStatus: typeof readLongGoalStatus = input => readLongGoalStatusWithLiveAdmission(input, {
+      attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
+      getGoal: agent => injected.goals.get(agent),
+      flushSession: async agent => {
+        if (!await injected.sessions.flush(agent.session)) throw new Error('Session persistence is unavailable')
+      },
+    })
     const taskAcceptance = new GoalTaskAcceptanceChecks(injected, roots, config?.goalTaskAcceptance)
     injected.effect(() => taskAcceptance.mount())
     const nativeChild = new NativeLongGoalChild(injected)
@@ -2274,7 +2324,7 @@ export function mountTianwenLongGoalHost(
     }
     const runDependencies: TianwenLongGoalRunDependencies = {
       readLongGoal,
-      readLongGoalStatus,
+      readLongGoalStatus: readLiveStatus,
       bindLongGoalTask,
       bindGoalFirstLongGoalTask,
       listSessions: async () => unwrapRpc(await host.apiProxy.sessions.list({
@@ -2488,7 +2538,7 @@ export function mountTianwenLongGoalHost(
     const serviceDependencies: GoalFirstServiceDependencies = {
       createRecord: createGoalFirstLongGoal,
       readRecord: readLongGoal,
-      readStatus: readLongGoalStatus,
+      readStatus: readLiveStatus,
       appendGuidance: appendLongGoalGuidance,
       abandonBlockedTask: abandonBlockedLongGoalTask,
       runPlannerTurn: async ({ record, reason }) => {
@@ -2572,7 +2622,7 @@ export function mountTianwenLongGoalHost(
       },
     }
     const readContinuousStatus = async (longGoalId: string): Promise<LongGoalStatusProjectionV3> => {
-      const status = await readLongGoalStatus({
+      const status = await readLiveStatus({
         stateRoot: roots.stateRoot,
         longGoalId,
         dshStatusTarget,
@@ -2644,7 +2694,7 @@ export function mountTianwenLongGoalHost(
     }
     host.connection.rpc.handle('/tianwen', createTianwenLongGoalRpcHandler(
       roots,
-      undefined,
+      { listLongGoals, createLongGoal, readLongGoalStatus: readLiveStatus },
       runDependencies,
       goalFirstOperations,
       learningAuditOperations,
