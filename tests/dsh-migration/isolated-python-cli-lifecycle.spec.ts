@@ -14,7 +14,9 @@ vi.mock('node:child_process', () => {
     const command = args.slice(4); state.commands.push(command)
     const value = (text: string) => ({ stdout: Buffer.from(text), stderr: Buffer.alloc(0) })
     const promise = Promise.resolve().then(async () => {
-      if (command[0] === 'image') return value(JSON.stringify([{ Id: 'sha256:' + 'b'.repeat(64), RepoDigests: ['python@sha256:' + 'b'.repeat(64), 'node@sha256:' + 'b'.repeat(64)], Os: 'linux', Architecture: 'amd64',
+      if (state.mode === 'unresolved-image-reference' && (command[0] === 'image' && command[2] !== 'sha256:' + 'b'.repeat(64)
+        || command[0] === 'create' && command.some(argument => argument.includes('@sha256:')))) throw new Error('No such image reference')
+      if (command[0] === 'image') return value(JSON.stringify([{ Id: 'sha256:' + 'b'.repeat(64), RepoDigests: state.mode === 'mismatched-image-reference' ? [] : ['python@sha256:' + 'b'.repeat(64), 'node@sha256:' + 'b'.repeat(64)], Os: 'linux', Architecture: 'amd64',
         Config: { Env: [state.mode === 'unsupported-node-version' ? 'NODE_VERSION=22.17.0' : 'NODE_VERSION=22.23.1'] } }]))
       if (command[0] === 'create') {
         if (state.mode === 'unknown-create') throw new Error('transport lost before identity known')
@@ -60,6 +62,21 @@ function config() {
 }
 it.skipIf(language === 'python')('declines a host image outside the fixed Node version before creating any candidate container', async () => {
   state.mode = 'unsupported-node-version'
+  await expect(prepare(config(), new AbortController().signal)).rejects.toThrow()
+  expect(state.commands.some(command => command[0] === 'create')).toBe(false)
+})
+it('uses the frozen image ID when its registered digest reference cannot be resolved', async () => {
+  const cfg = config(); state.mode = 'unresolved-image-reference'
+  const prepared = await prepare(cfg, new AbortController().signal)
+  expect((await prepared.run('print(1)', '{}', new AbortController().signal)).status).toBe('completed')
+  expect(state.commands.find(command => command[0] === 'image')).toEqual(['image', 'inspect', cfg.imageId])
+  const create = state.commands.find(command => command[0] === 'create')!
+  expect(create).toContain(cfg.imageId)
+  expect(create).not.toContain(cfg.imageRef)
+  expect(state.row).toBeUndefined()
+})
+it('still rejects an image ID that lacks the frozen repository digest', async () => {
+  state.mode = 'mismatched-image-reference'
   await expect(prepare(config(), new AbortController().signal)).rejects.toThrow()
   expect(state.commands.some(command => command[0] === 'create')).toBe(false)
 })

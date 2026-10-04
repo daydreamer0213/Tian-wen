@@ -156,7 +156,7 @@ export async function prepareIsolatedJsonCli(raw: IsolatedPythonCliConfig, signa
     return pending
   }
   signal.throwIfAborted()
-  const image = JSON.parse((await command(['image', 'inspect', config.imageRef], { signal })).stdout.toString())[0] as Row
+  const image = JSON.parse((await command(['image', 'inspect', config.imageId], { signal })).stdout.toString())[0] as Row
   assert.equal(image.Id, config.imageId); assert(image.RepoDigests.includes(config.imageRef)); assert.equal(image.Os, 'linux'); assert.equal(image.Architecture, 'amd64')
   // Unsupported host runtimes are preparation failures, never original task failures.
   if (language !== 'python') assert(Array.isArray(image.Config?.Env)
@@ -190,8 +190,8 @@ export async function prepareIsolatedJsonCli(raw: IsolatedPythonCliConfig, signa
         '--tmpfs', `/tmp:${isolatedPythonPolicy.tmpfs}`, '--log-driver', 'local', '--log-opt', 'max-size=64k', '--log-opt', 'max-file=1', '--log-opt', 'compress=false',
         '--workdir', '/tmp', '--env', 'HOME=/tmp', '--env', 'TMPDIR=/tmp',
         ...(snapshot === undefined ? [] : ['--mount', `type=bind,source=${snapshot.directory},target=/project,readonly`]),
-        ...(language === 'python' ? ['--env', 'PYTHONDONTWRITEBYTECODE=1', config.imageRef, 'python3', '-I', '-S', '-B', '-c', source]
-          : ['--entrypoint', 'node', config.imageRef, ...nodeCommand(language, source)])])).stdout.toString().trim()
+        ...(language === 'python' ? ['--env', 'PYTHONDONTWRITEBYTECODE=1', config.imageId, 'python3', '-I', '-S', '-B', '-c', source]
+          : ['--entrypoint', 'node', config.imageId, ...nodeCommand(language, source)])])).stdout.toString().trim()
       assert.match(id, /^[a-f0-9]{64}$/u)
       const container = JSON.parse((await command(['inspect', id])).stdout.toString())[0]
       validateIsolatedJsonContainer(container, { name, label, imageId: config.imageId, source }, language, snapshot); boundaryVerified = true
