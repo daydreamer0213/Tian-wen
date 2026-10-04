@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 所有者纠偏：主动构造问题及未知后续任务
+
+所有者明确允许主动制造/模拟失败和后续任务，不得因等待自然相容问题积累拖延。旧“不能刻意制造失败”解释在受控实验范围内被此最新要求覆盖；正确边界是如实标注受控，不冒充自然效果，不伪造反馈或改完成历史。[新阶段执行计划与固定边界](tianwen-controlled-learning-acceptance-20261004.md)。
+
+下一复用e68f62ef Goal答案生产者及原研究机制，执行者自行冻结新专用DEV环境/同版本/完整依据：2独立问题+1正常对照，原5案例10臂自动研究，主动设计4未知后续任务、基线/方法同条件比較及撤回。允许明确故障注入，但不能靠按方法标志写定答案或同时修环境冒充方法收益；脚本只验机制，真实模型效果以实际调用与独立结果为据。自然积累不是此受控阶段先决条件；失败定位修复由执行者承担，不索题催评/整体机械blocked/反复加载恢复。旧自然历史、原同意权限治理语义守卫和main/Daily当前NO-GO保持，不新添发布标准或续期；完整目标active，受控与自然证据分别报告。D>=15，77保护不碰。
+
 ## 2026-10-04 原Goal普通text/chat可信结果生产者已交付
 
 公开createGoalTaskIsolatedPythonAnswerCheck沿原GoalTaskAcceptanceCheck匹配完整原命令/Goal上下文成功要求/委托criteria/权限/模型/cwd；原source/snapshot/原事件前缀/完成/header/检查器合同全绑定，append答案只作stdin。chat原行动图和文件前后核，拒写/edit/未声明文件；复用原Python工厂/执行器及普通-研究checker身份，不造语义oracle。18红、最终53相关/原15构建/新增严格类型0、原native类型旧22现22新增0（非全绿）；两发行原Goal控制text/chat各1真实隔离checked-success、可恢复原来源，全部scripted0真实模型、不算自然收益。独立静态无有据P1/P2。[准确限制与下一责任](tianwen-goal-answer-check-delivery-20261004.md)。
