@@ -99,7 +99,8 @@ export function createGoalTaskIsolatedPythonAnswerCheck(raw: GoalTaskIsolatedPyt
                 && b.nativeGoalId === task.execution!.goalId && b.permissionFingerprint === attempt.permissionFingerprint)
               assert(b.checkerId === prepared.checkerId && b.checkerDigest === prepared.checkerDigest && b.contractDigest === prepared.contractDigest
                 && b.inputsDigest === prepared.inputsDigest && b.requiredCondition === prepared.requiredCondition)
-              assert.equal(sha256(b.contentReview), sha256({ protocol: 'tianwen.goal-task-content-review.v1', ...contentReview }))
+              assert.equal(sha256(b.contentReview), sha256({ protocol: 'tianwen.goal-task-content-review.v1', ...contentReview,
+                ...(b.contentReview?.deliveryPolicy === 'native-terminal.v1' ? { deliveryPolicy: 'native-terminal.v1' } : {}) }))
               assert.equal(sha256(events.filter(event => event.seq <= b.preparedSeq)), b.prefixDigest)
               const header = events.find(event => event.seq === b.headerSeq), end = events.at(-1)
               assert(header?.type === 'request/header' && sha256(header.data.header.config) === b.modelConfigDigest)

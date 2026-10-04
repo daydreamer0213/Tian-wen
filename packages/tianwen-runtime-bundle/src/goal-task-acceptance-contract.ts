@@ -12,6 +12,8 @@ export interface GoalTaskContentReviewPlan {
   readonly files?: ConversationFileMaterial
   /** Frozen before execution; historical plans without it keep their original meaning. */
   readonly qualityContract?: ConversationQualityContract
+  /** Frozen before the first request; absent historical plans retain whole-transcript delivery. */
+  readonly deliveryPolicy?: 'native-terminal.v1'
 }
 export type GoalTaskContentReviewEvent = {
   readonly type: 'task-content-review-started'
@@ -119,10 +121,13 @@ function validSnapshot(value: unknown, b: Record<string, unknown>, taskId: strin
 }
 
 export function parseGoalTaskContentReviewPlan(value: unknown): GoalTaskContentReviewPlan {
-  if (!record(value) || !keys(value, ['protocol', ...(Object.hasOwn(value, 'files') ? ['files'] : []), ...(Object.hasOwn(value, 'qualityContract') ? ['qualityContract'] : [])])
-    || value.protocol !== 'tianwen.goal-task-content-review.v1') throw new TypeError('Goal Task content review plan is invalid')
+  if (!record(value) || !keys(value, ['protocol', ...(Object.hasOwn(value, 'files') ? ['files'] : []), ...(Object.hasOwn(value, 'qualityContract') ? ['qualityContract'] : []),
+    ...(Object.hasOwn(value, 'deliveryPolicy') ? ['deliveryPolicy'] : [])])
+    || value.protocol !== 'tianwen.goal-task-content-review.v1'
+    || (Object.hasOwn(value, 'deliveryPolicy') && value.deliveryPolicy !== 'native-terminal.v1')) throw new TypeError('Goal Task content review plan is invalid')
   return { protocol: value.protocol, ...(Object.hasOwn(value, 'files') ? { files: parseConversationFileMaterial(value.files) } : {}),
-    ...(Object.hasOwn(value, 'qualityContract') ? { qualityContract: parseConversationQualityContract(value.qualityContract) } : {}) }
+    ...(Object.hasOwn(value, 'qualityContract') ? { qualityContract: parseConversationQualityContract(value.qualityContract) } : {}),
+    ...(Object.hasOwn(value, 'deliveryPolicy') ? { deliveryPolicy: value.deliveryPolicy as 'native-terminal.v1' } : {}) }
 }
 
 export function parseGoalTaskContentReviewEvent(value: unknown): GoalTaskContentReviewEvent {

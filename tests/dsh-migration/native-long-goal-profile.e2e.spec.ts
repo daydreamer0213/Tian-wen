@@ -1512,7 +1512,7 @@ describe('native Long Goal profile execution', () => {
       await vi.waitFor(() => expect((listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3)?.tianwenEvents?.some(event => event.type === 'task-acceptance-prepared')).toBe(true))
       const before = listLongGoals(profile.stateRoot)[0] as LongGoalRecordV3
       const prepared = before.tianwenEvents!.find(event => event.type === 'task-acceptance-prepared')!
-      expect(prepared).toMatchObject({ binding: { contentReview: { qualityContract: conversationQualityContract() } } })
+      expect(prepared).toMatchObject({ binding: { contentReview: { qualityContract: conversationQualityContract(), deliveryPolicy: 'native-terminal.v1' } } })
       profile.releaseTask()
       await vi.waitFor(() => expect((profile.ctx.tianwenEvolution as any).listGoalTaskResearchSources()).toHaveLength(1), { timeout: 10_000 })
       const sources = (profile.ctx.tianwenEvolution as any).listGoalTaskResearchSources()
@@ -1523,6 +1523,8 @@ describe('native Long Goal profile execution', () => {
       for (const check of sources[0].input.checks) {
         const recovered = await recoverConversationJudgmentRequest(profile.ctx, check)
         expect((recovered.material as any).original.source.qualityContract).toEqual(conversationQualityContract())
+        expect((recovered.material as any).original.source.nativeGoal.delivery.protocol).toBe('native-terminal.v1')
+        expect(recovered.instruction).toContain('Output-format and sole-deliverable requirements apply to the identified terminal delivery')
       }
       expect(profile.ctx.tianwenEvolution.listConversationTasks().some(task => task.source.taskId === sources[0].input.sourceId)).toBe(false)
       const ledger = readFileSync(join(profile.evolutionRoot, 'ledger.jsonl'))

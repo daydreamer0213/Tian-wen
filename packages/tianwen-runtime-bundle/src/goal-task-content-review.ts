@@ -13,12 +13,23 @@ import type { GoalTaskContentReviewEvent } from './goal-task-acceptance-contract
 import type { LongGoalRecordV3 } from './long-goal-contract.js'
 import { projectNativeFileActions, type ConversationFileExecutionEvidence } from './conversation-task-material.js'
 
+function terminalDelivery(material: GoalTaskOutcomeMaterial) {
+  // Match the SDK subagent delivery and the independent native answer checker.
+  const event = material.events.findLast(event => event.seq > material.preparation.preparedSeq
+    && event.type === 'assistant/message' && isAppendSurfaceEvent(event) && event.data.message.content.length > 0)
+  if (event?.type !== 'assistant/message' || !String(event.data.message.id ?? '').trim()) throw new Error('terminal delivery unavailable')
+  return { protocol: 'native-terminal.v1' as const, messageId: String(event.data.message.id), seq: event.seq,
+    answer: event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('') }
+}
+
 /** A native Goal evidence view, never a persisted ConversationTask or a user-message event. */
 export function goalTaskContentReviewMaterial(material: GoalTaskOutcomeMaterial, fileResult?: ConversationFileTrialOutput) {
   const snapshot = material.requirementsSnapshot
   if (snapshot === undefined || material.preparation.contentReview === undefined) throw new Error('original content review plan unavailable')
   const plan = parseGoalTaskContentReviewPlan(material.preparation.contentReview)
+  const terminal = plan.deliveryPolicy === undefined ? undefined : terminalDelivery(material)
   if ((plan.files !== undefined) !== (fileResult !== undefined)) throw new Error('file-evidence-unavailable')
+  if (fileResult !== undefined && terminal !== undefined && fileResult.answer !== terminal.answer) throw new Error('captured terminal delivery differs')
   if (plan.files === undefined && material.events.some(event => event.type === 'tool/call'
     && ['read', 'write', 'edit'].includes(event.data.name))) throw new Error('file-evidence-unavailable')
   const conversation = material.events.flatMap(event => event.type === 'assistant/message' && isAppendSurfaceEvent(event)
@@ -36,6 +47,7 @@ export function goalTaskContentReviewMaterial(material: GoalTaskOutcomeMaterial,
       criteria: [material.preparation.requiredCondition, ...(snapshot.goal.successCriteria === null ? [] : [snapshot.goal.successCriteria])],
       ...(plan.qualityContract === undefined ? {} : { qualityContract: plan.qualityContract }),
       nativeGoal: { command: material.source, goal: snapshot.goal, task: snapshot.task,
+        ...(terminal === undefined ? {} : { delivery: { protocol: terminal.protocol, messageId: terminal.messageId, seq: terminal.seq } }),
         ...(material.methodUsage === undefined ? {} : { methodUsage: material.methodUsage }),
         preparationDigest: sha256(material.preparation), materialDigest: material.result.materialDigest,
         nativeActions: material.events.filter(event => event.type === 'tool/call'),
@@ -118,8 +130,9 @@ export async function finishGoalTaskContentReviews(ctx: Context, input: { stateR
       material = await original()
       if (b.contentReview!.files !== undefined) {
         const files = await Promise.all(b.contentReview!.files.entries.map(entry => readConversationFile(b.contentReview!.files!.cwd, entry.path)))
-        const answer = material.events.flatMap(event => event.type === 'assistant/message' && isAppendSurfaceEvent(event)
-          ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : []).join('')
+        const answer = b.contentReview!.deliveryPolicy === 'native-terminal.v1' ? terminalDelivery(material).answer
+          : material.events.flatMap(event => event.type === 'assistant/message' && isAppendSurfaceEvent(event)
+            ? event.data.message.content.flatMap(block => block.type === 'text' ? [block.text] : []) : []).join('')
         const output = { answer, files }
         fileResult = { ...output, outputDigest: sha256(output) }
       }

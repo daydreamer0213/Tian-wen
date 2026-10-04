@@ -27,7 +27,7 @@ function fixture(chat=false){
  const input={goal,task,attempt,source,cwd:root,modelConfigDigest:sha256(model),signal} as unknown as GoalTaskAcceptancePreparation
  function candidate(prepared:PreparedGoalTaskAcceptanceCheck){
   const header={seq:3,type:'request/header',data:{header:{config:model}}},message={seq:4,type:'assistant/message',surfaceOp:'append',data:{message:{id:'answer',role:'assistant',content:[{type:'text',text:'pending'}]}}},end={seq:5,type:'turn/end',data:{reason:{kind:'completed'}}}
-  const binding={epoch:1,parentSessionId:'parent',childSessionId:'child',nativeGoalId:'native-goal',permissionFingerprint:attempt.permissionFingerprint,goalDigest:sha256('goal'),taskDigest:sha256(task),headerSeq:3,preparedSeq:3,prefixDigest:sha256([header]),modelConfigDigest:sha256(model),checkerId:prepared.checkerId,checkerDigest:prepared.checkerDigest,contractDigest:prepared.contractDigest,inputsDigest:prepared.inputsDigest,requiredCondition,contentReview:{protocol:'tianwen.goal-task-content-review.v1',...prepared.contentReview},requirementsSnapshot:{goal:{id:goal.id,objective:command,context:goal.context,successCriteria:goal.successCriteria,workspaceRoot:root,origin:goal.origin},task,permissionMode:attempt.permissionMode}} as unknown as GoalTaskAcceptanceBinding
+  const binding={epoch:1,parentSessionId:'parent',childSessionId:'child',nativeGoalId:'native-goal',permissionFingerprint:attempt.permissionFingerprint,goalDigest:sha256('goal'),taskDigest:sha256(task),headerSeq:3,preparedSeq:3,prefixDigest:sha256([header]),modelConfigDigest:sha256(model),checkerId:prepared.checkerId,checkerDigest:prepared.checkerDigest,contractDigest:prepared.contractDigest,inputsDigest:prepared.inputsDigest,requiredCondition,contentReview:{protocol:'tianwen.goal-task-content-review.v1',deliveryPolicy:'native-terminal.v1',...prepared.contentReview},requirementsSnapshot:{goal:{id:goal.id,objective:command,context:goal.context,successCriteria:goal.successCriteria,workspaceRoot:root,origin:goal.origin},task,permissionMode:attempt.permissionMode}} as unknown as GoalTaskAcceptanceBinding
   return {preparation:binding,source:structuredClone(input.source),events:[header,message,end] as unknown as SessionEvent[],signal}
  }
  return {root,config,input,candidate}
@@ -39,6 +39,14 @@ it.each([false,true])('binds the complete original native text/chat contract (ch
  expect(await prepared!.evaluate(f.candidate(prepared!))).toMatchObject({status:'verified'})
  const [source,packet]=mock.run.mock.calls[0]!;expect(source).toBe(f.config.verifierSource)
  expect(JSON.parse(packet)).toEqual({schemaVersion:'tianwen.answer-check.v1',material:f.config.material,answer:'pending',files:f.config.material.files?.entries??[]})
+})
+it('retains the historical review binding and refuses unknown delivery policies',async()=>{
+ const f=fixture(),prepared=(await createGoalTaskIsolatedPythonAnswerCheck(f.config).prepare(f.input))!
+ const legacy=f.candidate(prepared);delete (legacy.preparation.contentReview as any).deliveryPolicy
+ expect(await prepared.evaluate(legacy)).toMatchObject({status:'verified'})
+ const changed=f.candidate(prepared);(changed.preparation.contentReview as any).deliveryPolicy='native-terminal.v2'
+ const calls=mock.run.mock.calls.length
+ expect(await prepared.evaluate(changed)).toMatchObject({status:'unverifiable'});expect(mock.run.mock.calls).toHaveLength(calls)
 })
 it.each([false,true])('binds a legitimately changed Task before its first answer within an explicit original Goal scope (chat=%s)',async chat=>{
  const f=fixture(chat),originalMaterial=structuredClone(f.config.material)
