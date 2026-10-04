@@ -111,6 +111,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private readonly dirty = new Set<string>()
   private readonly controllers = new Set<AbortController>()
   private readonly recoverable = new Set<string>()
+  private readonly acceptedRecoveries = new Map<string, Promise<void>>()
   private accepting = true
 
   private readonly sourceConfig: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
@@ -176,6 +177,11 @@ export class TianwenConversationGuidanceLoopService extends Service {
       for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
     })
     for (const agent of this.ctx.agents.list()) if (root(agent)) void this.schedule(agent).catch(error => this.warn(error))
+    for (const study of this.ctx.tianwenEvolution.listConversationGuidanceStudies()) {
+      if (!this.recoverable.has(study.opened.studyId) || study.opened.nativeGoalSources !== undefined) continue
+      const source = this.ctx.tianwenEvolution.listConversationTasks().find(task => task.source.taskId === study.opened.sourceTaskIds[0])
+      if (source !== undefined) void this.wakeTask(source).catch(error => this.warn(error))
+    }
     if(this.sourceConfig.goalStateRoot !== undefined) for (const source of this.ctx.tianwenEvolution.listGoalTaskResearchSources())
       void this.wakeGoalSource(source).catch(error=>this.warn(error))
     this.ctx.effect(() => async () => {
@@ -265,8 +271,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
   }
   private warn(error: unknown): void { this.ctx.logger.warn('Natural learning study unavailable: %s', error instanceof Error ? error.message : String(error)) }
   async whenIdle(): Promise<void> {
-    while (this.lanes.size > 0 || this.persistedWakes.size > 0)
-      await Promise.allSettled([...this.lanes.values(), ...this.persistedWakes.values()])
+    while (this.lanes.size > 0 || this.persistedWakes.size > 0 || this.acceptedRecoveries.size > 0)
+      await Promise.allSettled([...this.lanes.values(), ...this.persistedWakes.values(), ...this.acceptedRecoveries.values()])
   }
   private wakeTask(task: ConversationTask): Promise<void> {
     return this.wakeSource(task)
@@ -299,6 +305,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const existing = this.persistedWakes.get(scopeKey)
     if (existing !== undefined) { this.persistedWakeDirty.add(scopeKey); return existing }
     const work = Promise.resolve().then(async () => {
+      if (!this.accepting) return
+      // Recovery finishes an existing accepted decision, even when its sources
+      // cannot select a new study because they have already been studied.
+      await this.recoverAccepted(scopeKey)
       if (!this.accepting) return
       const evidence = await this.select(scopeKey)
       if (evidence === undefined) return
@@ -418,8 +428,17 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const { proof, input } = await this.armFileRecovery(study, arm)
     return recoverConversationFileTrialExecution(this.ctx, proof, input)
   }
-  private async recoverAccepted(scopeKey: string): Promise<void> {
-    if (this.sourceConfig.guidanceActivationQuarantine === true) return
+  private recoverAccepted(scopeKey: string): Promise<void> {
+    const existing = this.acceptedRecoveries.get(scopeKey)
+    if (existing !== undefined) return existing
+    const work = Promise.resolve().then(() => this.restoreAccepted(scopeKey)).finally(() => {
+      if (this.acceptedRecoveries.get(scopeKey) === work) this.acceptedRecoveries.delete(scopeKey)
+    })
+    this.acceptedRecoveries.set(scopeKey, work)
+    return work
+  }
+  private async restoreAccepted(scopeKey: string): Promise<void> {
+    if (!this.accepting || this.sourceConfig.guidanceActivationQuarantine === true) return
     const evolution = this.ctx.tianwenEvolution
     for (const study of evolution.listConversationGuidanceStudies(scopeKey)) {
       if (!this.recoverable.delete(study.opened.studyId) || study.decision?.verdict !== 'accepted' || study.candidate === undefined || study.activation !== undefined || !hasSatisfiedGuidanceResultChecks(study)) continue

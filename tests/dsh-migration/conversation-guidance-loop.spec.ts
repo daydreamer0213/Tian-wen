@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync
 import { createRequire } from 'node:module'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { MessageId, type GenerateOptions } from '@deepseek-ai/dsh-llm'
@@ -129,6 +130,46 @@ it('reports the existing study-selection gates without starting work or reading 
   expect(await readiness()).toEqual({ state: 'already-studied' })
   expect(clues).not.toHaveBeenCalled()
   expect(record).not.toHaveBeenCalled()
+})
+
+it('waits for offline accepted recovery before a fresh root can select new research in the same scope', async () => {
+  const cwd='D:/DevData/engineering-recovery-race',scopeKey=`conversation:${sha256({cwd})}`
+  const task={source:{taskId:'accepted-source',sessionId:'stored-root',scopeKey}}
+  const study={opened:{studyId:'accepted-study',scopeKey},decision:{verdict:'accepted'},candidate:{},arms:[]}
+  let live=false,settled=false,release!:()=>void,entered!:()=>void
+  const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+  const fresh={session:{id:SessionId('fresh-recovery-root'),header:{cwd}},whenIdle:async()=>{}}
+  const service=Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service,{accepting:true,sourceConfig:{},recoverable:new Set(['accepted-study']),acceptedRecoveries:new Map(),controllers:new Set(),
+    lanes:new Map(),laneAgents:new Map(),laneInterrupts:new Map(),dirty:new Set(),persistedWakes:new Map(),persistedWakeDirty:new Set(),
+    ctx:{agents:{get:(id:string)=>live&&id===String(fresh.session.id)?fresh:undefined,list:()=>live?[fresh]:[]},
+      tianwenEvolution:{listConversationGuidanceStudies:()=>[study]}}})
+  vi.spyOn(service as never,'rollbackIfNeeded' as never).mockImplementation(()=>{})
+  vi.spyOn(service as never,'warn' as never).mockImplementation(()=>{})
+  vi.spyOn(service as never,'assertCurrent' as never).mockImplementation(async()=>{entered();await gate;settled=true;throw new Error('engineering recovery interrupted')})
+  const observations:boolean[]=[]
+  const select=vi.spyOn(service as never,'select' as never).mockImplementation(async()=>{observations.push(settled);return undefined})
+  const offline=(service as unknown as {wakeTask(task:unknown):Promise<void>}).wakeTask(task)
+  await started;live=true
+  const current=service.schedule(fresh as never)
+  try {
+    for(let turn=0;turn<5;turn++)await Promise.resolve()
+    expect(select).not.toHaveBeenCalled()
+  } finally {release();await Promise.all([offline,current])}
+  expect(observations).toEqual([true,true])
+})
+
+it('does not start deferred accepted recovery after its owner has stopped', async () => {
+  const service=Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service,{accepting:true,sourceConfig:{},acceptedRecoveries:new Map(),recoverable:new Set(['stopped-study']),controllers:new Set(),
+    ctx:{tianwenEvolution:{listConversationGuidanceStudies:()=>[{opened:{studyId:'stopped-study'},candidate:{},decision:{verdict:'accepted'},arms:[]}]}}})
+  vi.spyOn(service as never,'warn' as never).mockImplementation(()=>{})
+  const inspect=vi.spyOn(service as never,'assertCurrent' as never).mockRejectedValue(new Error('engineering recovery unavailable'))
+  const work=(service as unknown as {recoverAccepted(scope:string):Promise<void>}).recoverAccepted('stopped-scope')
+  Object.assign(service,{accepting:false})
+  await work
+  expect(inspect).not.toHaveBeenCalled()
+  expect((service as unknown as {controllers:Set<AbortController>}).controllers.size).toBe(0)
 })
 
 it('wakes a completed study source after its ordinary root agent has been released', async () => {
@@ -419,10 +460,12 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   'accepted', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
+  'recover-offline', 'recover-offline-missing-proof', 'recover-offline-disabled', 'recover-offline-quarantined',
   'recover', 'recover-formatting', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'case-provider-failure', 'case-design-fresh-source', 'case-attempt-write-failure', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'
+  const publishedRecovery=scenario.startsWith('recover-offline')&&process.env.TIANWEN_OFFLINE_RECOVERY_PUBLISHED==='1'
   const explored = scenario.includes('explored')
   const exploreFirst = scenario.includes('explored-first')
   const withSource = scenario.startsWith('source-') || scenario.startsWith('recover-source')
@@ -607,7 +650,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     structured(admission), textResponse('新区总体增加 9%。'), ...reviewPair(verdict(false, '新区总体')),
     request => { expect(JSON.stringify(capturedMaterial(request))).toContain('新站测试组增加 9%'); throw new Error('simulated new-pair design failure') },
     request => { expect(JSON.stringify(capturedMaterial(request))).toContain('新站测试组增加 9%'); throw new Error('simulated new-pair design failure') })
-  const harness = await mountFeedbackHarness(join(root, 'sessions'), script)
+  const harness = await mountFeedbackHarness(publishedRecovery?root:join(root, 'sessions'), script)
   if (withdrawDuringReview) {
     const stream = harness.adapter.stream.bind(harness.adapter)
     let withdrawn = false
@@ -933,6 +976,65 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
         return
       }
       const accepted = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      if (scenario.startsWith('recover-offline')) {
+        expect(accepted.decision?.verdict).toBe('accepted')
+        expect(accepted.activation).toBeUndefined()
+        const originalTasks=harness.ctx.tianwenEvolution.listConversationTasks(),requests=harness.adapter.requests.length
+        if(scenario==='recover-offline-disabled')harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({revision:2,enabled:false,policyVersion:'tianwen-auto-analysis.v3'})
+        await handle.dispose();await harness.ctx.fiber.dispose()
+        const cold=await mountFeedbackHarness(publishedRecovery?root:join(root,'sessions'),[])
+        let fault: {mockRestore():void}|undefined
+        try {
+          await cold.ctx.plugin(SubagentRuntime);await cold.ctx.plugin(spawn,{providerName:'spawn'})
+          if(scenario==='recover-offline-missing-proof') {
+            const inspect=cold.ctx.sessionPersistence.inspect.bind(cold.ctx.sessionPersistence),missing=accepted.arms[0]!.reviewChecks![1].proof.sessionId
+            fault=vi.spyOn(cold.ctx.sessionPersistence,'inspect').mockImplementation(id=>String(id)===missing?Promise.reject(new Error('native proof missing')):inspect(id))
+          }
+          expect(cold.ctx.agents.list()).toEqual([])
+          let fiber: ReturnType<typeof cold.ctx.plugin>|undefined
+          if(publishedRecovery) {
+            await cold.ctx.plugin(Loader,{baseUrl:pathToFileURL(root).href})
+            const runtime=await import('../../packages/tianwen-runtime-bundle/dist/runtime.js')
+            // Loader owns the configured base URL on the plugin entry context.
+            // Its supported builtin entry calls the actual published function.
+            cold.ctx.loader.builtins['offline-recovery']={apply:scenario==='recover-offline-quarantined'?runtime.apply:runtime.applyDevelopment}
+            await cold.ctx.loader.create({name:'cordis:offline-recovery',config:scenario==='recover-offline-quarantined'?{evolutionRoot:join(root,'evolution')}:{developmentRoot:root}})
+            await cold.ctx.loader.await()
+            await Promise.all([...cold.ctx.registry.values()].flatMap(scope=>[...scope.fibers].map(value=>value.await())))
+          } else {
+            await applyRuntime(cold.ctx,{evolutionRoot:join(root,'evolution'),guidanceActivationQuarantine:scenario==='recover-offline-quarantined'})
+            fiber=cold.ctx.plugin(TianwenConversationGuidanceLoopService,{evolutionRoot:join(root,'evolution'),guidanceActivationQuarantine:scenario==='recover-offline-quarantined'})
+            await fiber
+          }
+          await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+          const recovered=cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+          expect(cold.ctx.agents.list()).toEqual([])
+          expect(cold.adapter.requests).toHaveLength(0)
+          expect(harness.adapter.requests).toHaveLength(requests)
+          expect(cold.ctx.tianwenEvolution.listConversationTasks()).toEqual(originalTasks)
+          const {activation,activatedAt,...body}=recovered
+          expect(body).toEqual(accepted)
+          if(scenario==='recover-offline') {
+            expect(activation).toBeDefined()
+            expect(activatedAt).toBeDefined()
+            expect(cold.ctx.tianwenEvolution.getConversationGuidance(accepted.opened.scopeKey)).toEqual(accepted.candidate!.candidateSnapshot)
+            if(fiber!==undefined) {
+              await fiber.dispose()
+              await cold.ctx.plugin(TianwenConversationGuidanceLoopService,{evolutionRoot:join(root,'evolution')})
+            } else cold.ctx.emit('tianwen/conversation-task-reviewed',originalTasks[0]!.source.taskId)
+            await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+            expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toEqual(activation)
+            expect(readFileSync(join(root,'evolution','ledger.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line))
+              .filter(event=>event.type==='conversation-guidance-recorded'&&event.record.kind==='guidance-activated')).toHaveLength(1)
+            expect(cold.adapter.requests).toHaveLength(0)
+          } else {
+            expect(activation).toBeUndefined()
+            expect(activatedAt).toBeUndefined()
+            expect(cold.ctx.tianwenEvolution.getConversationGuidance(accepted.opened.scopeKey)).toEqual(accepted.opened.parentSnapshot)
+          }
+        } finally {fault?.mockRestore();await cold.ctx.fiber.dispose()}
+        return
+      }
       const secondProof = scenario === 'recover-source-missing-selection' ? accepted.sourceReference!.selectionProof
         : scenario === 'recover-explored-missing-proposal' ? accepted.exploration!.intent.request.proposalProof
         : scenario === 'recover-explored-changed-execution' ? accepted.exploration!.arms[0]!.executionProof

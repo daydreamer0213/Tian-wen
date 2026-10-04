@@ -474,7 +474,7 @@ function checkedRegressionScene(checkedSources = false, activate = true) {
     expectedCurrentVersion: guidanceVersion(candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: values.map(value => value.source.taskId), evidenceInputPolicy: 'request-content.v1' as const,
     ...(tagged ? { evidenceFailurePolicy: 'model-or-code-check.v1' as const } : {}) })
   const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
-  Object.assign(service, { ctx: { tianwenEvolution: ledger } })
+  Object.assign(service, { sourceConfig: {}, recoverable: new Set(), acceptedRecoveries: new Map(), controllers: new Set(), ctx: { tianwenEvolution: ledger } })
   const reconcile = () => (service as unknown as { rollbackIfNeeded(scopeKey: string): void }).rollbackIfNeeded(scope)
   return { ...f, candidate, later, rollback, service, reconcile }
 }
@@ -599,7 +599,7 @@ it.each(['verified', 'rejected', 'unverifiable'] as const)('rescans a persisted 
   const resumed = { agent: { session: { id: 'source-resumed' } }, dispose: vi.fn(async () => {}) }
   const resume = vi.fn(async () => resumed)
   const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
-  Object.assign(service, { accepting: true, lanes: new Map(), persistedWakes: new Map(), persistedWakeDirty: new Set(), ctx: {
+  Object.assign(service, { accepting: true, sourceConfig: {}, recoverable: new Set(), acceptedRecoveries: new Map(), controllers: new Set(), lanes: new Map(), persistedWakes: new Map(), persistedWakeDirty: new Set(), ctx: {
     agents: { get: () => undefined, list: () => [], resume }, tianwenEvolution: {
       retireIncompatibleConversationGuidance: () => f.ledger.retireIncompatibleConversationGuidance(scope),
       getLearningAnalysisConsent: () => f.ledger.getLearningAnalysisConsent(), getConversationGuidance: () => f.ledger.getConversationGuidance(scope), listConversationTasks: () => f.ledger.listConversationTasks(),
