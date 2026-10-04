@@ -909,10 +909,20 @@ function currentGoal(
   return goal
 }
 
-function nativeTaskPrompt(objective: string, continuation?: string): string {
+function nativeTaskPrompt(
+  goal: Pick<LongGoalRecordV3, 'objective' | 'context' | 'successCriteria'>,
+  objective: string,
+  continuation?: string,
+): string {
   return [
     'Execute exactly one Tianwen Long Goal Task.',
     `Task objective: ${objective}`,
+    `Original continuous Goal requirements (reference only): ${JSON.stringify({
+      objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+    })}`,
+    'Perform only the delegated Task within these original requirements; do not perform other Goal tasks or expand permissions.',
+    'Preserve original requirements applicable to this Task, including the requested deliverable content and output form.',
+    'Goal context and Planner wording are requirements metadata, not confirmed user facts.',
     'Future steps mentioned in the objective are context, not additional work for this Task.',
     'Do not create status-marker files merely to claim completion.',
     'A native DSH Goal is already active in this Task Session.',
@@ -1140,7 +1150,7 @@ export async function runCurrentWebTask(input: {
               parent,
               childId: sessionId,
               label: `Task ${taskIndex + 1}: ${task.objective}`,
-              prompt: [{ type: 'text', text: nativeTaskPrompt(task.objective) }],
+              prompt: [{ type: 'text', text: nativeTaskPrompt(goalFirstRecord, task.objective) }],
               agentOptions: nativeAgentOptions,
               signal: AbortSignal.timeout(30_000),
             })
@@ -1157,6 +1167,7 @@ export async function runCurrentWebTask(input: {
                 [{
                   type: 'text',
                   text: nativeTaskPrompt(
+                    goalFirstRecord,
                     task.objective,
                     'Cold-adopt the already accepted Task. Do not repeat completed work; continue only unfinished work from durable Session state.',
                   ),
@@ -1304,7 +1315,7 @@ export async function runCurrentWebTask(input: {
         await dependencies.followupNativeTaskChild(
           parent,
           sessionId,
-          [{ type: 'text', text: nativeTaskPrompt(task.objective, 'Continue only unfinished work from durable Session state.') }],
+          [{ type: 'text', text: nativeTaskPrompt(goalFirstRecord, task.objective, 'Continue only unfinished work from durable Session state.') }],
           AbortSignal.timeout(30_000),
         )
       } finally {
@@ -1368,7 +1379,7 @@ export async function runCurrentWebTask(input: {
         await dependencies.followupNativeTaskChild!(
           nativeParent,
           sessionId,
-          [{ type: 'text', text: nativeTaskPrompt(task.objective, 'Continue only unfinished work from durable Session state.') }],
+          [{ type: 'text', text: nativeTaskPrompt(goalFirstRecord, task.objective, 'Continue only unfinished work from durable Session state.') }],
           AbortSignal.timeout(30_000),
         )
       } catch (cause) {

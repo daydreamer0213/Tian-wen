@@ -57,6 +57,18 @@ const TASK_2 = '00000000-0000-4000-8000-000000000003'
 const EXECUTION_1 = { sessionId: 'task-session-1', goalId: 'task-goal-1' }
 const EXECUTION_2 = { sessionId: 'task-session-2', goalId: 'task-goal-2' }
 
+function expectOriginalTaskRequirements(prompt: readonly { readonly type: 'text'; readonly text: string }[], goal: LongGoalRecordV3) {
+  const text = prompt[0]!.text
+  const prefix = 'Original continuous Goal requirements (reference only): '
+  const reference = text.split('\n').find(line => line.startsWith(prefix))
+  expect(reference, 'original Goal requirements must reach the native child').toBeDefined()
+  expect(JSON.parse(reference!.slice(prefix.length))).toEqual({
+    objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+  })
+  expect(text).toContain('Goal context and Planner wording are requirements metadata, not confirmed user facts.')
+  expect(text).toContain('Perform only the delegated Task within these original requirements; do not perform other Goal tasks or expand permissions.')
+}
+
 type ProbeProjection = {
   readonly key: string
   init(): unknown
@@ -2290,9 +2302,9 @@ describe('continuous Goal Host', () => {
       const stateRoot = resolve(fixture, 'state')
       const source = createContinuousLongGoal({
         stateRoot,
-        objective: 'Bind before work starts',
-        context: null,
-        successCriteria: null,
+        objective: 'Bind before work starts. Return only project and status.',
+        context: 'Tests passed; review is "pending".\nNo release has been approved.',
+        successCriteria: 'The JSON must contain project and status only.',
         workspaceRoot: fixture,
         agentPreset: 'planner-preset',
         controlSessionId: 'main-control',
@@ -2351,6 +2363,7 @@ describe('continuous Goal Host', () => {
         expect(input.prompt[0]?.text).toContain('Do not create another Goal')
         expect(input.prompt[0]?.text).toContain('Future steps mentioned in the objective are context, not additional work for this Task.')
         expect(input.prompt[0]?.text).toContain('Do not create status-marker files merely to claim completion.')
+        expectOriginalTaskRequirements(input.prompt, source)
         let announce: ((event: { readonly agent: Agent }) => void) | undefined
         const prepared = setup({
           agent: child,
@@ -2470,8 +2483,9 @@ describe('continuous Goal Host', () => {
         ctx: { goals: { get: () => adoptedGoal } },
       } as unknown as Agent
       const live = new Map<string, Agent>([['live-planner', planner]])
-      const followupNativeTaskChild = vi.fn(async (_parent: Agent, childId: string) => {
+      const followupNativeTaskChild = vi.fn(async (_parent: Agent, childId: string, prompt: readonly { readonly type: 'text'; readonly text: string }[]) => {
         expect(childId).toBe('accepted-before-bind-child')
+        expectOriginalTaskRequirements(prompt, source)
         live.set(childId, adoptedChild)
         return 'cold-adopt-message'
       })
@@ -3542,9 +3556,10 @@ describe('continuous Goal Host', () => {
     }))
     Object.defineProperty(task.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     let resumed = false
-    const followupNativeTaskChild = vi.fn(async (parent: Agent, childId: string) => {
+    const followupNativeTaskChild = vi.fn(async (parent: Agent, childId: string, prompt: readonly { readonly type: 'text'; readonly text: string }[]) => {
       expect(parent).toBe(planner)
       expect(childId).toBe('cold-task')
+      expectOriginalTaskRequirements(prompt, source)
       resumed = true
       return 'followup-message'
     })
@@ -3701,6 +3716,8 @@ describe('continuous Goal Host', () => {
   it('keeps a disarmed v3 Task retryable until its exact Planner parent is live', async () => {
     const execution = { sessionId: 'disarmed-task', goalId: 'disarmed-goal' }
     const source = record({
+      context: 'Only a recorded passed review permits completion.',
+      successCriteria: 'Keep pending distinct from failed.',
       planner: { ...record().planner, sessionId: 'live-planner' },
       tasks: [{ id: TASK_1, objective: 'Continue disarmed Task', execution, resolution: null }],
     })
@@ -3710,8 +3727,9 @@ describe('continuous Goal Host', () => {
     Object.defineProperty(task.value.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     const planner = { session: { id: 'live-planner' } } as unknown as Agent
     let plannerLive = false
-    const followupNativeTaskChild = vi.fn(async () => {
+    const followupNativeTaskChild = vi.fn(async (_parent: Agent, _childId: string, prompt: readonly { readonly type: 'text'; readonly text: string }[]) => {
       expect(task.current().activation).toBe('disarmed')
+      expectOriginalTaskRequirements(prompt, source)
       return 'followup-message'
     })
     const dependencies = {
