@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 最新：实际委托改写后的原答案检查已通过
+
+5afeb7cb 已推送：公开普通工厂显式 bindActualTask=true，固定完整原 Goal/命令/规则/文件/模型/权限，仅首答前绑定规划器实际 Task；研究工厂显式 bindActualGoalTasks=true 且完整五案例供给，首次固定三原来源、全部其他材料精确相同，绑定前五检查不准备。标准 DEV 以原公开 applicability 选择整 Goal 路由，拒歧义，默认精确 Task 保持。原传输预算遗漏首红复现并修复，独立复核无剩余有据 P1/P2；最终125过/原15构建过，完整测试严格旧123现123、旧13现13新增0非全绿。[准确交付、失败和下一责任](tianwen-prospective-goal-answer-binding-delivery-20261005.md)。
+
+新原 CLI/base+Web/Loader/标准DEV/真实DeepSeek13请求，1规划器自写Task、1实际隔离Python verified，原inputsDigest精确绑定实际材料，根最后输出和生命周期单独留证；0研究/激活/方法未来收益/反馈。首次入口路径不规范被原运行器拒绝，0请求0Goal，首错误原样保留；仅修入口路径、新冻结小Profile，不补评/重跑完成答案。此实现阶段收口，下一自主设计新受控真实学习问题、独立未来任务及明确故障，沿原完整学习机制执行，不等待自然、索题、强迫委托照抄或重做旧闭环。完整目标active，main/Daily NO-GO/R9及原门槛保持；三旧账本/84容器不变，77及拒绝根不碰，自启Docker收尾停，资源以新final-audit为准/D>=15。
+
 ## 2026-10-04 最新：原要求与文本失败学习入口补齐，下一解除委托原文写死
 
 已推送 e1698859/6aa5e010/469005ad/cc4ae126/01a9b3ff：原 Goal 要求进入普通 Task；根交付尊重整体输出限制；原独立 acceptance 进入 goal_control；缓存固定镜像 ID 寻址保持身份/隔离；文本/file-chat 原独立失败按完整材料进入原研究/回滚，code/files 保持。最后一项六首红、38 定向过、原依赖/15 构建过、独立无有据 P1/P2；七文件 326 过/9 测试目录设置失败，原 D 设置下定向 15 过含九失败及新六（重叠不累加），严格旧138/现138/新增0非全绿。[准确交付、首失败与下一实现](tianwen-native-original-requirements-delivery-20261004.md)。

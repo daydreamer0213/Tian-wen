@@ -18,22 +18,26 @@
 
 Files: `packages/tianwen-runtime-bundle/src/conversation-isolated-answer-check.ts`, `tests/dsh-migration/goal-task-isolated-answer-check.spec.ts`.
 
-- [ ] Add failing text/chat tests: changed Task in a fixed original Goal prepares and checks full actual material, default exact mode refuses it, result metadata stays bound, and invalid flag values fail at construction.
-- [ ] Add failing native study tests: actual original Task materials supply frozen independent cases; all five prepared checks are withheld until complete source binding; changed cohort or original scope cannot rebind; both arms retain one exact bound contract.
-- [ ] Preserve correct first red using direct Node Vitest on the changed file.
-- [ ] Add `bindActualTask?: true` and a canonical native-material helper; ordinary applicability retains all original scope checks and constructs the original producer for the actual material before the answer.
-- [ ] Add `bindActualGoalTasks?: true`, validate the three native templates, compare actual source material against canonical substitution of only Task/criteria, latch one full source cohort, and prepare only exact bound materials. Keep independent cases and default mode immutable.
-- [ ] Run focused and original relevant ordinary/study/source/guidance regressions. Build the original Runtime package; compare strict changed-test diagnostics without hiding old errors.
+- [x] Add failing text/chat tests: changed Task in a fixed original Goal prepares and checks full actual material, default exact mode refuses it, result metadata stays bound, and invalid flag values fail at construction.
+- [x] Add failing native study tests: actual original Task materials supply frozen independent cases; all five prepared checks are withheld until complete source binding; changed cohort or original scope cannot rebind; both arms retain one exact bound contract.
+- [x] Preserve correct first red using direct Node Vitest on the changed file.
+- [x] Add `bindActualTask?: true` and a canonical native-material helper; ordinary applicability retains all original scope checks and constructs the original producer for the actual material before the answer.
+- [x] Add `bindActualGoalTasks?: true`, validate the three native templates, compare actual source material against canonical substitution of only Task/criteria, latch one full source cohort, and prepare only exact bound materials. Keep independent cases and default mode immutable.
+- [x] Run focused and original relevant ordinary/study/source/guidance regressions. Build the original Runtime package; compare strict changed-test diagnostics without hiding old errors.
 
 ## Task 2: Standard DEV actual route
 
 Files: `scripts/development-isolated-node-project-check.mjs`, `tests/dsh-migration/development-native-runtime.spec.ts`.
 
-- [ ] Add failing pinned JSON tests for explicit Goal-level routes, unknown original Goal, ambiguous dynamic/static routes, closed option fields and default exact mode.
-- [ ] Pass the two exact opt-ins to the original factories, select Goal routes with their applicability and preserve old static defaults. Do not introduce fuzzy matching or Runtime/executor overrides.
-- [ ] Verify actual published loading/CLI using a fresh controlled Task with first answer unknown; freeze source/code/rules before execution. Do not repair or re-evaluate the prior unchecked answer.
-- [ ] Request read-only independent correctness/architecture/simplicity review, fix actionable issues, commit and push verified code.
+- [x] Add failing pinned JSON tests for explicit Goal-level routes, unknown original Goal, ambiguous dynamic/static routes, closed option fields and default exact mode.
+- [x] Pass the two exact opt-ins to the original factories, select Goal routes with their applicability and preserve old static defaults. Do not introduce fuzzy matching or Runtime/executor overrides.
+- [x] Verify actual published loading/CLI using a fresh controlled Task with first answer unknown; freeze source/code/rules before execution. Do not repair or re-evaluate the prior unchecked answer.
+- [x] Request read-only independent correctness/architecture/simplicity review, fix actionable issues, commit and push verified code.
 
 ## Delivery
 
-- [ ] Record reached product behavior and actual first failures separately from complete real-learning effect. Update current operations entry point, preserve original ledger hashes/container set, stop owned Docker, measure/retire only owned generated residue; leave whole goal active unless full original objective is proven.
+- [x] Record reached product behavior and actual first failures separately from complete real-learning effect. Update current operations entry point, preserve original ledger hashes/container set, stop owned Docker, measure/retire only owned generated residue; leave whole goal active unless full original objective is proven.
+
+## Execution receipt
+
+Code 5afeb7cb; final six-file 125 checks passed and original 15-step Runtime build passed. Strict full test expansion against 62f82226 test files with current dependencies: 123/123 and 13/13, zero new normalized diagnostics, not all green. Review P2 packet budget omission reproduced first red, fixed before cohort latch and re-reviewed closed. Actual published standard CLI/DEV/DeepSeek new control: 13 requests, one Planner-owned changed Task, one real isolated Python verified, exact actual material digest. First operator path setup failed before any Goal or model request and is preserved. No research/activation/effect credit. Details and final resource audit: docs/operations/tianwen-prospective-goal-answer-binding-delivery-20261005.md.
