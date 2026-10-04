@@ -178,6 +178,31 @@ export interface TianwenLongGoalHostRoots {
   readonly evolutionRoot: string
 }
 
+export async function cancelContinuousTaskAgent(
+  taskAgent: Agent,
+  goalId: string,
+  goals: Pick<Context['goals'], 'get' | 'pause'>,
+): Promise<void> {
+  const goal = goals.get(taskAgent)
+  if (goal === undefined || String(goal.id) !== goalId) {
+    throw new LongGoalIntegrityError('Continuous Goal Task binding does not match live Goal')
+  }
+  const lastTurn = taskAgent.session.events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
+  const idleError = taskAgent.status === 'idle' && lastTurn?.type === 'turn/end'
+    && lastTurn.data.reason.kind === 'error'
+  taskAgent.cancel({ kind: 'parent' })
+  await taskAgent.whenIdle()
+  // An already idle error cannot produce the aborted turn handled by the SDK driver.
+  if (idleError && taskAgent.status === 'idle'
+    && taskAgent.session.events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end') === lastTurn) {
+    const current = goals.get(taskAgent)
+    if (current === undefined || String(current.id) !== goalId) {
+      throw new LongGoalIntegrityError('Continuous Goal Task cancellation binding mismatch')
+    }
+    if (current.phase === 'active') goals.pause(taskAgent, { id: current.id, revision: current.revision })
+  }
+}
+
 export interface TianwenLongGoalHostConfig {
   readonly stateRoot?: string
   readonly sessionsRoot?: string
@@ -2527,12 +2552,7 @@ export function mountTianwenLongGoalHost(
         if (taskAgent === undefined) {
           throw new LongGoalIntegrityError('Continuous Goal Task Session is not live')
         }
-        const goal = injected.goals.get(taskAgent)
-        if (goal === undefined || String(goal.id) !== execution.goalId) {
-          throw new LongGoalIntegrityError('Continuous Goal Task binding does not match live Goal')
-        }
-        taskAgent.cancel({ kind: 'parent' })
-        await taskAgent.whenIdle()
+        await cancelContinuousTaskAgent(taskAgent, execution.goalId, injected.goals)
         if (!await injected.sessions.flush(taskAgent.session)) {
           throw new Error('Session persistence is unavailable')
         }
