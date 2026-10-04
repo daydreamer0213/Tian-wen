@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-04 标准 Loader 一次性任务入口完成
+
+基线f444d610后新增原job插件，SHA固定原JSON→冻结原合同绑定→原runDevelopmentNativeTask；加载不启动Task/请求/同意。原文件权限、准备全核、新会话/独占首次、取消排空归档及调用者Context保持。97相关通过、普通Node语法及独立无有据P1/P2；Runtime原发行字节未改。[准确实现、首失败与控制边界](tianwen-standard-native-job-20261004.md)。
+
+首SDK脚本错误假定Docker停止时已准备，原失败Task/归档保持，未当取消成功。新独立工程场景以原终端adapter消费：准备不可用根adapter0且原guard拒绝；实际准备后首次根adapter取消，原Task/seal一致、handle释放/Context保留、重启拒绝/归档不变。两个场景0真实模型/0自然Task/0研究，原持续及正式账本保持；不充学习来源或正常文件执行闭环。Docker短暂用于原prepare验证后停止，无运行容器/环境副本/新删除，原71拒删路径不碰。
+
+本入口控制收口。下一自己承担真实开发缺口，事前固定原独立检查，通过标准入口唯一首次执行；不索题催评/造失败/加报告计数/重跑旧Task。仍1合格问题/1不兼容完整成功/0真实反馈研究，研究裁决、语义安全、方法采用及未来效果分别核；完整目标active/incomplete、main/Daily NO-GO和原门槛/十工作日窗口保持，不机械整体blocked。资源与原摘要见新包final-audit。
+
 ## 2026-10-04 原执行器已能在普通 Node 消费公开接口
 
 标准加载后实际发现nativeTask源取消类无法被原生类型擦除导入；公开原取消helper并转原dist入口。首完整回归又发现prepared门指向不存在的Evolution/src/*.js，仅改原公开dist导入；nativeTask改原compat/runtime，逻辑及协议不变。原请求观察器可原生导入，无必要迁移，不制造额外题。[准确首次错误、交付及下一项](tianwen-standard-native-execution-20261004.md)。

@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-04 一次性普通任务入口不增加自然证据
+
+原Loader读取固定job数据并绑定原普通合同，委托原runner；97相关通过、独立无有据P1/P2。[准确交付及首控制错误](tianwen-standard-native-job-20261004.md)。准备不可用原guard拒根、已准备首次根取消与归档/释放/重启拒绝均在新隔离工程Profile验证，0真实模型/0自然任务/0研究，不记自然问题或效果。首脚本假定已准备的失败保留，不补判。
+
+原六自然Task/程序4verified-1rejected-1unverifiable、1问题/1不兼容完整成功/0反馈研究不变；完整目标active/incomplete、main/Daily NO-GO、原来源条件/双审/语义/十工作日窗口保持。下一由执行者事前冻结实际开发及独立检查，经已交付标准入口首次消费，不索题催评/重跑旧样本。本入口控制收口；71拒删路径保持，Docker最终停止，资源及两原账本见新包final-audit。
+
 ## 2026-10-04 普通 Node 原执行器接入，未新增来源
 
 仅公开原取消helper、nativeTask转Runtime/compat公开入口、prepared门转Evolution公开dist；修实测源语法和不存在扩展名，无协议/原门逻辑改变。92相关及完整依赖发行/声明构建通过；独立关闭已启动取消控制P2，无有据产品P1/P2。[准确交付与首错误](tianwen-standard-native-execution-20261004.md)。
