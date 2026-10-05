@@ -1,6 +1,6 @@
 # Explicit Training Fault Injection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 主动提供明确标注的两种训练故障，以真实研究和未来任务验证学习效果，不再等待模型偶然出错。
 
@@ -18,11 +18,11 @@
 
 **Interfaces:** `injectedTrainingBlock({phase, role, record, goalId, nativeGoal, tools, closing, calls})` 对非training或非原Task返回null；其余返回原SDK text/tool-call block。`closing`仅来自当前轮原宿主标记，不能按active method分支。
 
-- [ ] 固定九新df-dn记录，三原训练命令加显式注入/非自然说明。保持原caller条件和固定Python判断，不修改研究案例预期。
-- [ ] 写控制：两个未解决记录注入failed、正常passed；未来/研究/Planner均null；标记轮先get_goal，再精确goal_id/revision的scoped完成；最终JSON不变、不同Goal拒绝。首RED保存。
-- [ ] 实现训练算法：`status=stages.every(s=>current[s]==='passed')?'passed':'failed'`；不能使用正确pending分类器或未知未来答案。
-- [ ] 在旧bootstrap原provider计数前加精确Task身份分支。保存`scripted-training-traces.jsonl`（原完整envelope+actualBlock+scripted/fault原因），零真实provider派发；其他路径原实际dispatch/完整JSONL不变。
-- [ ] 检查所有新控制GREEN、真实派发不触碰错误/答案/裁决、caller合同两臂同可读、三训练显式来源说明；冻输入、脚本、方法无关适配故障。
+- [x] 固定九新df-dn记录，三原训练命令加显式注入/非自然说明。保持原caller条件和固定Python判断，不修改研究案例预期。
+- [x] 写控制：两个未解决记录注入failed、正常passed；未来/研究/Planner均null；标记轮先get_goal，再精确goal_id/revision的scoped完成；最终JSON不变、不同Goal拒绝。首RED保存。
+- [x] 实现训练算法：`status=stages.every(s=>current[s]==='passed')?'passed':'failed'`；不能使用正确pending分类器或未知未来答案。
+- [x] 在旧bootstrap原provider计数前加精确Task身份分支。保存`scripted-training-traces.jsonl`（原完整envelope+actualBlock+scripted/fault原因），零真实provider派发；其他路径原实际dispatch/完整JSONL不变。
+- [x] 检查所有新控制GREEN、真实派发不触碰错误/答案/裁决、caller合同两臂同可读、三训练显式来源说明；冻输入、脚本、方法无关适配故障。
 
 ### Task 2: 唯一受控研究和未来比较
 
