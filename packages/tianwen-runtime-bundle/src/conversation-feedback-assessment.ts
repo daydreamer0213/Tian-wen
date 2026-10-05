@@ -268,7 +268,11 @@ export class TianwenConversationFeedbackService extends Service {
       const answers = material.answer.flatMap(message => message.content.flatMap(block => block.type === 'text' ? [block.text] : []))
       const evidence = [...conversationEvidenceTexts(material.original, answers, material.toolEvidence, material.fileResult?.files),
         ...conversationEvidenceTexts({ request: material.feedback.request ?? [], context: [] },
-          material.feedback.note === undefined ? [] : [material.feedback.note])]
+          material.feedback.note === undefined ? [] : [material.feedback.note]),
+        // Native ratings are original evidence too. Keep exactly the supplied
+        // JSON fields, excluding derived criteria and internal source identity.
+        ...(material.feedback.rating === undefined ? [] : [JSON.stringify({ rating: material.feedback.rating,
+          ...(material.feedback.note === undefined ? {} : { note: material.feedback.note }) })])]
       const judgmentInput = {
         outputSchema: conversationEvidenceSchema(CONVERSATION_FEEDBACK_SCHEMA, evidence),
         instruction: material.fileResult === undefined ? ASSESSMENT_INSTRUCTION

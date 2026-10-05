@@ -180,6 +180,35 @@ async function mount(script: Parameters<typeof mountFeedbackHarness>[1], policy?
 }
 
 describe('native feedback assessment adapter', () => {
+  it.each([
+    ['exact', '"rating":"negative","note":""', null],
+    ['fabricated', '"rating":"positive","note":""', 'invalid-judgment'],
+  ] as const)('checks %s native rating metadata against the original feedback', async (_kind, quote, unavailableReason) => {
+    const judgment = { classification: 'inconclusive', category: null, supplementalCriteria: [],
+      explanation: 'A bare negative rating identifies no specific problem.', evidenceQuotes: [quote] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(judgment)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments()[0]!
+      expect(assessment.result).toMatchObject({ classification: 'inconclusive', category: null, supplementalCriteria: [], unavailableReason,
+        proof: unavailableReason === null ? { sessionId: expect.any(String) } : null })
+      if (unavailableReason === null) {
+        expect(assessment.result!.evidenceQuotes).toEqual([quote])
+        expect(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)).toMatchObject({ feedback: { rating: 'negative', note: '' } })
+      }
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(harness.adapter.requests).toHaveLength(5)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('independently rechecks a requirement-change judgment that also supplies future criteria', async () => {
     const futureNote = 'For all future pilot summaries, use two sentences. Do not revise the earlier answer.'
     const contradictory = { classification: 'requirement-change', category: null,

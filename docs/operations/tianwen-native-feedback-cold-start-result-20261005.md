@@ -1,5 +1,13 @@
 # 原生模拟反馈已归因，修复实际CLI冷启动时序
 
+## r6 同一原profile冷启动通过，补遗漏的原反馈引用字段
+
+ae36845a后r6原CLI零模型预检退出0，原Task/具体反馈归因/同意完整恢复；随后只执行原第二项，5真实/1scripted、Task complete/双评审met。只有negative无说明的真实归因模型正确选择inconclusive，并通过原structured_output捕获；但引用了实际材料中的`"rating":"negative","note":""`。宿主的quote whitelist只含request/answer/note，漏了实际rating JSON字段，后置检查丢弃为invalid-judgment/proof=null。操作员原proof断言终止，CLI1/原排空，第一/第二Task和两历史原样保存。不能把安全fallback当语义有效归因成功。
+
+窄修复只把实际native rating及optional note的紧凑JSON纳入原exact引用白名单；不包含内部source或派生criteria，不改原材料/hash/分类/同意/版本/历史。新正控制RED、伪造positive负控制保持拒绝；最终源码相关58、同组发布dist58、原十五实际构建、原发布profile49通过/10原条件跳过。限定只读复查未发现有据P1/P2。证据`D:/DevData/tianwen-feedback-rating-evidence-20261005`含原实际捕获只读诊断及RED/GREEN/构建记录，诊断0新增模型。
+
+接续r7将沿同一r2原profile，零调用核两旧Task/归因与SDK版本，只执行未做的positive Task、第二项新反馈版本revision及第一项retraction。旧invalid结果不重判、不补proof；模型请求和冷回放仍需实际运行才可称通过。main/Daily NO-GO/R9保持，完整目标active。D17.10GiB，无Docker或依赖副本。
+
 所有者允许主动模拟缺条件。新固定三普通摘要任务用原CLI/public DEV Runtime；仅root主答显式scripted，原认领、双评审、归因用deepseek-official/deepseek-v4-flash high/65536/retry0。具体negative、bare negative、明确positive及一版本修订/撤回均事前冻结，来源不冒充真人反馈或自然模型错误。
 
 首操作员尝试0真实/0scripted，在提交用户消息前因createUserMessage公共模块误选及intake查询缺sessionId退出1，日志保留。r2正式批8真实/8完整原请求、1scripted/1完整主答轨迹；第一原Task complete/双评审not-met，原SDK反馈正确绑定确切原assistantMessageId/版本/生命周期，真实归因为attributable-problem/source-fidelity，指出将“只在先导试验中使用”“尚未全面正式上线”反转成“已经全面正式上线”。原归因有实际独立proof。此后操作员用普通JSON代替产品规范JSON摘要而断言失败，原批CLI1/原句柄已排空；3计划仅完成1，研究/激活/未来效果0。首结果、原回答、原评审不重判。
