@@ -170,6 +170,138 @@ describe('same native Task finalization', () => {
     expect(f.deps.stopTask).not.toHaveBeenCalled()
   })
 
+  it('requires a new admission in each public continuable Planner recovery turn', async () => {
+    const base = resolve('D:/DevData/tianwen-planner-readmission-20261005/source-sdk-tests')
+    mkdirSync(base, { recursive: true })
+    const root = mkdtempSync(resolve(base, 'run-'))
+    const ctx = new Context()
+    const setups = new Map<string, (ctx: any) => void>()
+    ctx.provide('sessionProjections', { register() {}, snapshot() { return { values: {} } }, restore() { return { snapshot: { values: {} } } } })
+    ctx.provide('sandboxPolicy', { overrideOf() { return 'read-only' } })
+    ctx.provide('approval', {})
+    await mountAgentLoopTestDependencies(ctx)
+    await ctx.plugin(AgentLoop, { agents: [] })
+    await ctx.plugin(GoalService)
+    await ctx.plugin(JsonlSessionPersistence, { root, compression: 'none' })
+    await ctx.plugin(SubagentRuntime)
+    class Adapter extends LlmAdapter {
+      async *stream(options: any) {
+        const agent = ctx.agents.get(options.sessionId)
+        const earlierAdmission = agent?.session.events.some(event => event.type === 'tool/call' && event.data.name === 'recover_long_goal_task')
+        const work = options.messages.findLast((message: any) => message.role === 'user' && message.source.kind === 'coordinator')
+        const text = work?.content.find((block: any) => block.type === 'text')?.text ?? ''
+        const shouldAdmit = text.startsWith('Recover only as the existing Long Goal Planner parent')
+          && (!earlierAdmission || text.includes('THIS turn'))
+        for (const chunk of shouldAdmit
+          ? toolCallResponse(`admit-${agent?.session.events.length}`, 'recover_long_goal_task', {})
+          : textResponse('The earlier admission does not admit another turn.')) yield chunk
+      }
+    }
+    ctx.llm.registerAdapter(['readmission-script'], new Adapter())
+    ctx.subagents.registerProvider({ name: 'readmission-test', inheritsParentContext: false,
+      capabilities: { outputSchema: false, depthLimit: false, toolFilter: false, persona: false },
+      async start() { throw new Error('continuable only') }, async prepareContinuable() { return {} } })
+    const offSetup = ctx.subagents.registerContinuableSetup(childCtx => setups.get(String(childCtx.agent?.session.id))?.(childCtx))
+    const child = new NativeLongGoalChild(ctx)
+    const record = fixture().record()
+    record.workspaceRoot = root
+    // The public custom provider creates this Planner without a preset.
+    record.planner.agentPreset = undefined
+    try {
+      const main = (await ctx.agents.create({ sessionId: SessionId('main'), meta: { cwd: root }, agentOptions: { provider: 'readmission-script', model: 'scripted' } })).agent
+      await ctx.subagents.startContinuable({ provider: 'readmission-test', childId: SessionId('planner'), label: 'Original Planner',
+        request: { parent: main, prompt: [{ type: 'text', text: 'Report once.' }], agentOptions: { provider: 'readmission-script', model: 'scripted' } }, signal: AbortSignal.timeout(5000) })
+      for (let admission = 0; admission < 2; admission++) {
+        await vi.waitFor(() => expect(ctx.agents.get(SessionId('planner'))).toBeUndefined())
+        const lease = await recoverNativeLongGoalPlannerParent(record, {
+          listSessions: async () => [{ sessionId: 'planner', cwd: root }],
+          attachedAgent: id => ctx.agents.get(SessionId(id)),
+          installNativeSetup: (id, setup) => setups.set(id, setup),
+          followupNativeChild: (parent, id, prompt, signal) => child.followup(parent, SessionId(id), prompt, signal),
+        }, { signal: AbortSignal.timeout(1500), assertAuthority() {} })
+        lease!.release()
+      }
+      await vi.waitFor(() => expect(ctx.agents.get(SessionId('planner'))).toBeUndefined())
+      const persisted = await ctx.sessionPersistence.inspect(SessionId('planner'))
+      expect(persisted.events.filter(event => event.type === 'tool/call' && event.data.name === 'recover_long_goal_task')).toHaveLength(2)
+    } finally {
+      offSetup()
+      await ctx.fiber.dispose()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('durably pauses an unfinished original Task after parent recovery fails and still reports the cause', async () => {
+    const f = fixture()
+    const failure = new Error('Continuous Goal Planner recovery was not claimed')
+    f.deps.recoverParent = vi.fn(async () => { throw failure })
+    f.deps.stopTask = vi.fn(async (_record, reason) => {
+      expect(reason).toMatchObject({ code: 'planner-recovery-failed' })
+      expect(reason.message).toMatch(/task.*unfinished.*recovery.*not claimed/i)
+      f.record().control.autoProgress = 'paused'
+    })
+    await expect(finalizeNativeLongGoalTask(input, f.deps)).rejects.toBe(failure)
+    expect(f.deps.stopTask).toHaveBeenCalledTimes(1)
+    expect(f.record().control.autoProgress).toBe('paused')
+    expect(f.record().tasks[0].resolution).toBeNull()
+    expect(f.goal.phase).toBe('active')
+    expect(f.deps.followupTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['pause', 'cancel', 'permission', 'identity', 'latest-turn', 'terminal-goal', 'pending', 'accepted'])('does not overwrite %s after failed asynchronous parent recovery', async kind => {
+    const f = fixture()
+    const controller = new AbortController()
+    const failure = new Error('Continuous Goal Planner recovery was not claimed')
+    f.deps.recoverParent = vi.fn(async () => {
+      if (kind === 'pause') f.record().control.autoProgress = 'paused'
+      if (kind === 'cancel') controller.abort()
+      if (kind === 'permission') f.attempt.permissionFingerprint = 'sha256:changed'
+      if (kind === 'identity') f.record().tasks[0].execution.sessionId = 'replacement'
+      if (kind === 'latest-turn') f.events().push({ seq: 3, type: 'turn/start', data: { turn: 2 } })
+      if (kind === 'terminal-goal') f.goal.phase = 'complete'
+      if (kind === 'pending' || kind === 'accepted') {
+        const message = { id: 'racing-admission', source: { kind: 'coordinator', senderSessionId: 'planner' }, content: [{ type: 'text', text: 'tianwen.native-task-finalization.v1:{"longGoalId":"long","taskId":"task","epoch":1,"goalId":"goal","completedTurnSeq":2}' }] }
+        const accepted = { seq: kind === 'pending' ? 3 : 0.5, type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [message] } }
+        if (kind === 'pending') f.events().push(accepted)
+        else {
+          f.events().splice(1, 0, accepted)
+          f.events().splice(3, 0, { seq: 1.5, type: 'user/message', data: message })
+        }
+      }
+      throw failure
+    })
+    await expect(finalizeNativeLongGoalTask({ ...input, signal: controller.signal }, f.deps)).rejects.toBe(failure)
+    expect(f.deps.stopTask).not.toHaveBeenCalled()
+    expect(f.deps.followupTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['new turn', 'accepted continuation'])('does not pause after %s arrives while failed-recovery status inspection awaits', async kind => {
+    const f = fixture()
+    const failure = new Error('Continuous Goal Planner recovery was not claimed')
+    const child = { session: { id: 'child', header: { parentSession: 'planner' }, events: structuredClone(f.events()) } }
+    const attached = f.deps.attachedAgent
+    f.deps.attachedAgent = (id: string) => id === 'child' ? child : attached(id)
+    // Persistence may lag the live Session. Every inspection returns an
+    // immutable older snapshot so shared arrays cannot conceal this window.
+    f.deps.inspectSession = async () => ({ meta: { id: 'child', parentSession: 'planner' }, events: structuredClone(f.events()) })
+    const readStatus = f.deps.readStatus
+    let reads = 0
+    f.deps.readStatus = async (id: string) => {
+      if (++reads === 2) {
+        await Promise.resolve()
+        child.session.events.push(kind === 'new turn'
+          ? { seq: 3, type: 'turn/start', data: { turn: 2 } }
+          : { seq: 3, type: 'agent/inbox/spliced', data: { target: 'next-turn', start: 0, inserted: [{ id: 'new-continuation', source: { kind: 'coordinator', senderSessionId: 'planner' }, content: [{ type: 'text', text: 'Continue only the original Task.' }] }] } })
+      }
+      return readStatus(id)
+    }
+    f.deps.recoverParent = vi.fn(async () => { throw failure })
+    await expect(finalizeNativeLongGoalTask(input, f.deps)).rejects.toBe(failure)
+    expect(f.deps.stopTask).not.toHaveBeenCalled()
+    expect(f.deps.followupTask).not.toHaveBeenCalled()
+    expect(f.record().control.autoProgress).toBe('running')
+  })
+
   it('permits normal Planner disposal during inspection followed by cold recovery of that same Session', async () => {
     const f = fixture()
     let currentParent: any = f.parent

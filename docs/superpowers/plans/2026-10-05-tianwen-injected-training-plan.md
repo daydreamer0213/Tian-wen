@@ -28,8 +28,17 @@
 
 **Files:** 同根freeze-launch/launch-batch/bootstrap及原结果，repo更新权威交接。
 
-- [ ] 原清洁HEAD和二十九实际consumer/三账本冻结；Docker隐藏自启、原84完整身份与精确缓存镜像核验，不下载。原CLI0模型预检。
-- [ ] 唯一正式run：四事前未来基线真实模型；启同意后三scripted训练+真实内容评审；产品自动研究五案例十臂。不能写source/proposal/verdict/activation。
+- [x] 原清洁HEAD和二十九实际consumer/三账本冻结；Docker隐藏自启、原84完整身份与精确缓存镜像核验，不下载。原CLI0模型预检。
+- [x] 唯一正式run已执行并保存首结果：四事前未来基线3/4、两scripted错误经真实内容评审拒绝；第三正常Task因第二次Planner恢复未认领而未完成，原预算停止。111真实+12scripted请求，未进入原五案例十臂，不写source/proposal/verdict/activation。
 - [ ] 如产品原激活则四同一事前未来真实模型、记录方法材料与独立结果、原关闭同意撤回。真实baseline/after按原score比较，注入开关不会匹配两未来阶段。
-- [ ] 保存首结果与原错误，同句柄排空，确认actual与scripted请求轨迹分别完整、未修改历史/输入/消费者、真人反馈仍零。Docker自停、只清已证明的自有重复，D>=15。
-- [ ] 更新准确范围并提交推送已有隔离分支；完整目标保持active，main/Daily NO-GO不以模拟结果冒充自然证据。
+- [x] 保存首结果与原错误，同句柄排空，actual与scripted请求轨迹分别完整、历史/输入/消费者未变、真人反馈仍零。Docker自停，六精确重复清2,106,091bytes，D17.14>=15；[准确结果](../../operations/tianwen-injected-learning-readmission-result-20261005.md)。
+- [x] 更新准确首结果与后续修复范围；已有隔离分支提交推送，完整目标保持active，main/Daily NO-GO不以模拟结果冒充自然证据。
+
+### Task 3: 修复重复恢复与无停止原因的运行假象
+
+不是等待自然样本，不增加验收门槛。公共SDK历史敏感控制已复现旧提示第二次不认领，明确本轮提示恢复成功；原发布失败停止控制1 RED/6守卫GREEN。
+
+- [x] 恢复工具说明、普通和权限恢复指令明确“当前这轮”，以前工具调用不授予本次临时恢复资格。
+- [x] `recoverParent`获取失败，在原权限/身份/最新原结束轮和Goal仍有效且无已接受或pending续轮时，复用原stopTask持久暂停、记录planner-recovery-failed，原Task/Goal未完成且原cause继续上报；变化或取消不覆盖。审查补齐异步快照窗口，写停止前同步复核live事件。
+- [x] 最终源码154、严格类型/差异、原15实际构建、发布包49/10原跳过、新发布控制7全部通过；新原CLI重复认领成功/未认领明确暂停共27scripted/0real，退出和排空0，不强行调用工具或修改Goal、driver、裁决。
+- [ ] 提交准确修复及首结果；新身份继续原受控研究/未来/撤回，不重评本批或扩样本。

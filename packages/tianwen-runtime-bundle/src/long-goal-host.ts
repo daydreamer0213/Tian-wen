@@ -362,7 +362,7 @@ function installPlannerTaskAdmission(agentCtx: Context, admit: (planner: Agent) 
   let claimed = false
   agentCtx.tools.register(defineTool({
     name: 'recover_long_goal_task',
-    description: 'Let Tianwen attach the already-reserved Task while this Planner turn remains active. Call exactly once.',
+    description: 'Let Tianwen attach the already-reserved Task while this Planner turn remains active. Call exactly once in THIS turn for each new recovery admission; earlier calls in this Session do not admit the current recovery.',
     parameters: {},
     output: {
       schema: { type: 'string', const: 'task-recovery-admitted' },
@@ -417,7 +417,7 @@ export async function recoverNativeLongGoalPlannerParent(
       record.planner.sessionId,
       [{
         type: 'text',
-        text: 'Recover only as the existing Long Goal Planner parent so Tianwen can continue the already-started Task after Host restart. Call recover_long_goal_task exactly once. Do not replan, start another Task, or modify the workspace.',
+        text: 'Recover only as the existing Long Goal Planner parent so Tianwen can continue the already-started Task. This is a new recovery admission for THIS turn. Earlier calls in this Session do not admit this recovery. Call recover_long_goal_task exactly once in THIS turn, even if it was called in earlier turns. Do not replan, start another Task, or modify the workspace.',
       }],
       authorization === undefined ? AbortSignal.timeout(30_000)
         : AbortSignal.any([authorization.signal, AbortSignal.timeout(30_000)]),
@@ -777,7 +777,7 @@ export function createPermissionAttemptHost(
     if (planner === undefined) {
       const prompt = [{
         type: 'text' as const,
-        text: 'Restore only the Planner parent after a main-session permission change. Call recover_long_goal_task exactly once so Tianwen can attach the already-reserved Task. Do not execute the Task or submit a plan in this turn. Later planning requests provide the exact Goal revision.',
+        text: 'Restore only the Planner parent after a main-session permission change. This is a new recovery admission for THIS turn. Earlier calls in this Session do not admit this recovery. Call recover_long_goal_task exactly once in THIS turn, even if it was called in earlier turns, so Tianwen can attach the already-reserved Task. Do not execute the Task or submit a plan in this turn. Later planning requests provide the exact Goal revision.',
       }]
       const inspection = await dependencies.inspectSession(record.planner.sessionId)
       let admitted = false

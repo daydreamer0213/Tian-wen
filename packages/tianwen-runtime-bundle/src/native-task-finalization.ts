@@ -142,24 +142,37 @@ export async function finalizeNativeLongGoalTask(
         epoch: activeAttempt.epoch, permission: activeAttempt.permissionFingerprint, mode: activeAttempt.permissionMode,
       }) === identity
   }
-  const inspect = async () => {
-    if (!authorized()) return undefined
-    const persisted = await dependencies.inspectSession(input.sessionId)
-    const lastTurn = persisted.events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
-    const start = lastTurn?.type === 'turn/end'
-      ? persisted.events.find(event => event.type === 'turn/start' && event.data.turn === lastTurn.data.turn)
-      : undefined
+  const inspectHistory = (persisted: Awaited<ReturnType<NativeTaskFinalizationDependencies['inspectSession']>>) => {
+    const child = dependencies.attachedAgent(input.sessionId)
+    const goal = child === undefined ? undefined : dependencies.getGoal(child)
     if (String(persisted.meta?.id) !== input.sessionId
       || String(persisted.meta?.parentSession) !== original.planner.sessionId
-      || lastTurn?.type !== 'turn/end' || lastTurn.seq !== input.completedTurnSeq
+      || (child !== undefined && (String(child.session.id) !== input.sessionId
+        || String(child.session.header.parentSession) !== original.planner.sessionId
+        || goal?.id !== task.execution!.goalId || goal.phase !== 'active'))) return undefined
+    // The live Session can advance while persisted inspection or projections
+    // await. Its synchronous facts take precedence over an older snapshot.
+    const events = child?.session.events ?? persisted.events
+    const lastTurn = events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
+    const start = lastTurn?.type === 'turn/end'
+      ? events.find(event => event.type === 'turn/start' && event.data.turn === lastTurn.data.turn)
+      : undefined
+    if (lastTurn?.type !== 'turn/end' || lastTurn.seq !== input.completedTurnSeq
       || lastTurn.data.reason.kind !== 'completed' || start === undefined) return undefined
+    return finalizationHistory(events, original.planner.sessionId, marker)
+  }
+  const inspect = async () => {
+    if (!authorized()) return undefined
     const status = await dependencies.readStatus(input.longGoalId)
     const current = status.tasks.find(candidate => candidate.id === status.currentTaskId)
     if (status.goal.phase !== 'active' || current?.id !== task.id || current.phase !== 'active'
       || current.execution?.sessionId !== input.sessionId || current.execution.goalId !== task.execution!.goalId) return undefined
     const goal = await dependencies.readGoalRef(input.sessionId, task.execution!.goalId)
     if (goal.id !== task.execution!.goalId || goal.phase !== 'active' || !authorized()) return undefined
-    return finalizationHistory(persisted.events, original.planner.sessionId, marker)
+    // Read cold facts last, then recheck any Agent that became live meanwhile.
+    const persisted = await dependencies.inspectSession(input.sessionId)
+    const history = inspectHistory(persisted)
+    return history === undefined || !authorized() ? undefined : { ...history, persisted }
   }
   const history = await inspect()
   if (history === undefined || history.alreadyAccepted || history.pending) return
@@ -175,10 +188,30 @@ export async function finalizeNativeLongGoalTask(
   // then holds its recovery tool turn until Task admission finishes.
   for (let recovery = 0; recovery < 2; recovery++) {
     const parentAtRecovery = dependencies.attachedAgent(original.planner.sessionId)
-    const lease = await dependencies.recoverParent(original, {
-      signal: input.signal,
-      assertAuthority: () => { if (!authorized()) throw new Error('Native Task finalization authority changed') },
-    })
+    let lease: Awaited<ReturnType<NativeTaskFinalizationDependencies['recoverParent']>>
+    try {
+      lease = await dependencies.recoverParent(original, {
+        signal: input.signal,
+        assertAuthority: () => { if (!authorized()) throw new Error('Native Task finalization authority changed') },
+      })
+    } catch (error) {
+      // Recovery can finish without the model claiming its tool. The observed
+      // Task turn is already deduplicated, so record a stop instead of leaving
+      // that unchanged unfinished Task silently running with no next event.
+      try {
+        const latest = await inspect()
+        const current = latest === undefined ? undefined : inspectHistory(latest.persisted)
+        if (current !== undefined && !current.alreadyAccepted && !current.pending && authorized()) {
+          await dependencies.stopTask(dependencies.readRecord(original.id), {
+            code: 'planner-recovery-failed',
+            message: `Original Task ${task.id} remains unfinished because Planner recovery failed: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      } catch (stopError) {
+        throw new AggregateError([error, stopError], 'Native Task Planner recovery and durable stop failed')
+      }
+      throw error
+    }
     if (lease === undefined) return
     try {
       const parent = lease.parent
