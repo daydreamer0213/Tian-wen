@@ -38,6 +38,10 @@
 
 证据：`D:/DevData/tianwen-dev-paired-any-case-20261005`，`green-final-source-all.log`、`strict-final-source.log`、`evolution-build-result.json`、`published-build-result.json`、`published-profile.log`与`published-controls-2026-10-05T03-17-20.454Z-a7bc6e52-b391-4cf8-877c-af7a03fc0aad/receipt.json`。原RED和首次旧dist类型构建失败日志保留；发布临时目录已清理，十三源码/测试冻结哈希保持。此为新机制交付，不追改旧206次真实请求的rejected。
 
+实现提交`7e7f89ce04250a8da123ad232220c100e8265109`已推送原隔离分支。随后原CLI、原Web服务、规范DEV loader/public applyDevelopment零调用加载预检退出0，新选项被正确解析。证据`D:/DevData/tianwen-dev-paired-policy-cli-preflight-20261005-r2/first-result.json`与`final-audit.json`：0真实/0scripted/0Task/0study，不能据此声称真实启用或后续改善。首次预检操作员直接比较斜杠字符串造成的错误保存在原目录；仅修正为解析后的同一Windows路径，产品源码未改。冻结输入、消费者和三旧账本保持，没有依赖副本或Docker启动，D约17.1GiB。
+
+本次两个预检profile仅3,961字节生成文件；目录还包含共享依赖链接，未递归删除链接。批量清理及改为八个已核实普通文件的清理均被工具安全策略拒绝，仅返回`blocked by policy`，无更具体原因；未更换工具绕过。`file-cleanup.json`仍`deleted=false`，文件暂留，首结果与完整启动配置在独立证据目录保留。不将这4KB余项作为产品或目标阻塞。
+
 ## 全项目执行原则和下一步
 
 缺重复问题、反馈、后续任务、异常状态或恢复条件时，执行者主动设计并触发受控模拟；不要求自然发生，不将索题或用户评价作为独立开发前提。模拟直接进入产品原入口，事前写清输入、预期结果和来源，运行产品后核实实际产物与状态；失败由执行者修复场景或实现，保留首次结果。已证明的部分复用，不以重复跑旧样本填数量。

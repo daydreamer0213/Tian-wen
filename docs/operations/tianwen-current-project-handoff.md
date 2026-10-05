@@ -2,7 +2,7 @@
 
 ## 2026-10-05 当前：DEV任一固定案例改善规则已交付
 
-按所有者授权，缺条件主动模拟适用于全项目开发；不等待自然失败、重复问题、真人评价或后续任务。新显式 dev-paired-any-case.v1 允许五固定案例任一实际改善且候选全部通过，旧规则/历史保持。源码378、严格类型、Evolution原构建/Runtime原十五阶段、发布profile49通过/10原跳过；两公共Core/Loop控制92scripted/0real，旧3→5拒绝、新DEV持久化接受激活、普通区冷恢复可安全撤回。外层DEV入口/loader源码已覆盖，未声称完整外层CLI或新真实未来效果。[准确交付及后续](tianwen-controlled-learning-policy-gap-20261005.md)。
+按所有者授权，缺条件主动模拟适用于全项目开发；不等待自然失败、重复问题、真人评价或后续任务。新显式 dev-paired-any-case.v1 允许五固定案例任一实际改善且候选全部通过，旧规则/历史保持。源码378、严格类型、Evolution原构建/Runtime原十五阶段、发布profile49通过/10原跳过；两公共Core/Loop控制92scripted/0real，旧3→5拒绝、新DEV持久化接受激活、普通区冷恢复可安全撤回。随后原CLI/Web/规范DEV loader/public applyDevelopment加载预检退出0、0模型/Task/study，选项正确解析；未声称新真实未来效果。实现7e7f89ce已推送。[准确交付及后续](tianwen-controlled-learning-policy-gap-20261005.md)。
 
 旧206real研究3→5首结果仍rejected/0激活，不追改。下一新批事前选新policy，验证原生激活、主动设计后续任务、撤回及公共SDK模拟反馈；现有遗留代码环境已准备但未执行。完整目标active，不机械blocked；main/Daily NO-GO/R9及原正式门槛不新增。Docker保持停、旧账本与容器保持；临时发布目录清理、无依赖副本，D约17GiB>=15。
 

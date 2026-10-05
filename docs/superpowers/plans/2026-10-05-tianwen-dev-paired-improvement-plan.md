@@ -9,7 +9,7 @@
 - [x] RED：原source默认仍拒仅adjacent/holdout改善；DEV新policy语义+功能应允许任意固定角色改善、候选全过；无gain/退步/inconclusive/未知policy仍拒。
 - [x] 最小实现：新study-opened可选decisionPolicy，缺省不补字段且保原hash/回放；DEV显式guidanceDecisionPolicy传入loop、事前冻结研究身份；两谓词同规则。main新写入拒DEV研究，ordinary apply不采纳，replay看原字段；安全停止与撤回仍按原验证允许。
 - [x] 源码378、严格类型、限定复查、Evolution原构建/Runtime原十五构建通过；发布profile49通过/10原跳过；公共Core/Loop两控制92scripted/0real证明旧3→5拒绝、新DEV持久化接受激活、普通区冷恢复安全撤回。外层DEV入口/loader为源码覆盖，不冒充完整CLI或真实方法后效果。
-- [x] 提交当前隔离分支；推送结果以实际远端返回为准。
+- [x] 实现7e7f89ce提交并推送当前隔离分支；原CLI/Web/规范DEV loader/public applyDevelopment加载预检退出0、0模型/Task/study。原路径写法断言失败保留，修正操作员断言后新revision通过；三旧账本/冻结消费者保持。预检自建3,961字节文件清理被安全策略拒绝暂留，不影响D>=15或后续开发。
 - [ ] 新任务验证启用/真实未来/撤回和原SDK模拟反馈接缝，所有者不需再提供问题或许可。受控遗留环境主动供改善空间，不以初始坏程序充实际Worker基线；普通未来全通过只记无退步，不因此等待自然失败。
 
 **DEV决策：** 五候选全met且至少一对应baseline not-met→met；五候选独立verified且至少一对应baseline qualified rejected→verified；原完整十臂、inconclusive和全部来源/合同/证明检查保持。不额外强制counterexample baseline通过。
