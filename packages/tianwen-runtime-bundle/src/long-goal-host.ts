@@ -94,6 +94,8 @@ import {
 } from './learning-clue-status.js'
 import { GoalStatusNotFoundError, readGoalStatus } from './status.js'
 import { NativeLongGoalChild } from './native-long-goal-child.js'
+import { finalizeNativeLongGoalTask } from './native-task-finalization.js'
+export { finalizeNativeLongGoalTask } from './native-task-finalization.js'
 import { currentGoalCommandOrigin, GoalTaskAcceptanceChecks, type GoalTaskAcceptanceCheck } from './goal-task-acceptance.js'
 import {
   permissionLimitedEvidence,
@@ -314,6 +316,7 @@ export interface TianwenLongGoalRunDependencies {
   readonly attachedAgent: (sessionId: string) => Agent | undefined
   readonly recoverNativeTaskParent?: (
     record: GoalFirstLongGoalRecord,
+    authorization?: { readonly signal: AbortSignal, readonly assertAuthority: () => void },
   ) => Promise<NativePlannerRecoveryLease | undefined>
   readonly getGoal?: (agent: Agent) => GoalView | undefined
   readonly nativeGoalService?: Pick<Context['goals'], 'resume' | 'disarm'>
@@ -378,7 +381,10 @@ function installPlannerTaskAdmission(agentCtx: Context, admit: (planner: Agent) 
 export async function recoverNativeLongGoalPlannerParent(
   record: GoalFirstLongGoalRecord,
   dependencies: NativePlannerRecoveryDependencies,
+  authorization?: { readonly signal: AbortSignal, readonly assertAuthority: () => void },
 ): Promise<NativePlannerRecoveryLease | undefined> {
+  authorization?.signal.throwIfAborted()
+  authorization?.assertAuthority()
   if (record.schemaVersion !== 'tianwen.long-goal.v3') return undefined
   const existing = dependencies.attachedAgent(record.planner.sessionId)
   if (existing !== undefined) return { parent: existing, release: () => undefined }
@@ -386,6 +392,8 @@ export async function recoverNativeLongGoalPlannerParent(
   if (main === undefined || String(main.session.id) !== record.control.sessionId) return undefined
   const matches = (await dependencies.listSessions())
     .filter(session => session.sessionId === record.planner.sessionId)
+  authorization?.signal.throwIfAborted()
+  authorization?.assertAuthority()
   if (
     matches.length !== 1
     || matches[0]!.cwd !== record.workspaceRoot
@@ -402,6 +410,8 @@ export async function recoverNativeLongGoalPlannerParent(
     })
   })
   try {
+    authorization?.signal.throwIfAborted()
+    authorization?.assertAuthority()
     await dependencies.followupNativeChild(
       main,
       record.planner.sessionId,
@@ -409,7 +419,8 @@ export async function recoverNativeLongGoalPlannerParent(
         type: 'text',
         text: 'Recover only as the existing Long Goal Planner parent so Tianwen can continue the already-started Task after Host restart. Call recover_long_goal_task exactly once. Do not replan, start another Task, or modify the workspace.',
       }],
-      AbortSignal.timeout(30_000),
+      authorization === undefined ? AbortSignal.timeout(30_000)
+        : AbortSignal.any([authorization.signal, AbortSignal.timeout(30_000)]),
     )
   } catch (error) {
     released.resolve()
@@ -420,7 +431,9 @@ export async function recoverNativeLongGoalPlannerParent(
     recovered = await Promise.race([
       claimed.promise,
       new Promise<never>((_resolve, reject) => {
-        const signal = AbortSignal.timeout(30_000)
+        const signal = authorization === undefined ? AbortSignal.timeout(30_000)
+          : AbortSignal.any([authorization.signal, AbortSignal.timeout(30_000)])
+        if (signal.aborted) { reject(signal.reason); return }
         signal.addEventListener('abort', () => {
           reject(new LongGoalIntegrityError('Continuous Goal Planner recovery was not claimed'))
         }, { once: true })
@@ -2349,13 +2362,13 @@ export function mountTianwenLongGoalHost(
         nativeChild.followupTask(parent, SessionId(childId), prompt, signal),
       nativeAgentOptions: host.agentDefaultModel.currentSelection(),
       attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
-      recoverNativeTaskParent: record => recoverNativeLongGoalPlannerParent(record, {
+      recoverNativeTaskParent: (record, authorization) => recoverNativeLongGoalPlannerParent(record, {
         listSessions: runDependencies.listSessions,
         attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
         installNativeSetup: (sessionId, setup) => { nativeSetups.set(sessionId, setup) },
         followupNativeChild: (parent, childId, prompt, signal) =>
           nativeChild.followup(parent, SessionId(childId), prompt, signal),
-      }),
+      }, authorization),
       getGoal: agent => injected.goals.get(agent),
       nativeGoalService: injected.goals,
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
@@ -2680,6 +2693,32 @@ export function mountTianwenLongGoalHost(
       installBoundControls: installBoundContinuousGoalControls,
       handlePermissionEvent: permissionAttemptHost.handlePermissionEvent,
       reconcilePermissionAttempt: permissionAttemptHost.reconcilePermissionAttempt,
+      finalizeTask: input => finalizeNativeLongGoalTask(input, {
+        readRecord: id => {
+          const record = readLongGoal(roots.stateRoot, id)
+          if (record.schemaVersion !== 'tianwen.long-goal.v3') throw new LongGoalIntegrityError('Task finalization requires v3')
+          return record
+        },
+        readStatus: readContinuousStatus,
+        inspectSession: id => host.sessionPersistence.inspect(SessionId(id)),
+        attachedAgent: runDependencies.attachedAgent,
+        getGoal: agent => injected.goals.get(agent),
+        readGoalRef: runDependencies.readGoalRef,
+        readPermissionSnapshot: runDependencies.readPermissionSnapshot!,
+        reconcilePermissionAttempt: permissionAttemptHost.reconcilePermissionAttempt,
+        recoverParent: (record, authorization) => runDependencies.recoverNativeTaskParent!(record, authorization),
+        followupTask: (parent, childId, prompt, signal, assertAuthority) =>
+          nativeChild.followupTask(parent, SessionId(childId), prompt, signal, assertAuthority),
+        stopTask: async (record, reason) => {
+          const explained = appendContinuousGoalGuidance({
+            stateRoot: roots.stateRoot, longGoalId: record.id, expectedRevision: record.revision,
+            text: `${reason.code}: ${reason.message}`,
+          })
+          setContinuousGoalMode({
+            stateRoot: roots.stateRoot, longGoalId: explained.id, expectedRevision: explained.revision, mode: 'paused',
+          })
+        },
+      }),
     })
     if (typeof injected.effect === 'function') {
       injected.effect(function* () {

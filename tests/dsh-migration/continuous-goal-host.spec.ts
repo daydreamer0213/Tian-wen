@@ -535,6 +535,103 @@ async function liveTerminalGateFixture(input: {
 }
 
 describe('continuous Goal Host', () => {
+  it('serializes a genuine live completed Task turn into same-Task finalization once', async () => {
+    const subject = harness(record({ tianwenEvents: [{ type: 'attempt-started', taskId: TASK_1, attempt: {
+      epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+      permissionFingerprint: 'sha256:host-finalization', status: 'running', startedAt: '2026-10-05T00:00:00.000Z',
+    } }] }))
+    const events = [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    Object.assign(subject.first.session, { events })
+    const finalizeTask = vi.fn(async () => undefined)
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask } as never)
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    await unmount()
+    expect(finalizeTask).toHaveBeenCalledTimes(1)
+    expect(finalizeTask.mock.calls[0]?.[0]).toMatchObject({
+      longGoalId: GOAL_ID, sessionId: EXECUTION_1.sessionId, completedTurnSeq: 2,
+    })
+    expect(subject.continueProgress).not.toHaveBeenCalled()
+  })
+
+  it.each(['error', 'aborted', 'max-tokens'])('does not finalize a %s turn or an old cold Session', async reason => {
+    const subject = harness()
+    const event = { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: reason } } }
+    Object.assign(subject.first.session, { events: [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, event] })
+    const finalizeTask = vi.fn(async () => undefined)
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask } as never)
+    subject.sessionEvent(EXECUTION_1.sessionId, event)
+    await unmount()
+    expect(finalizeTask).not.toHaveBeenCalled()
+  })
+
+  it('does not automatically finalize an old completed turn when merely mounting the host', async () => {
+    const subject = harness()
+    Object.assign(subject.first.session, { events: [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ] })
+    const finalizeTask = vi.fn(async () => undefined)
+    await mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask })()
+    expect(finalizeTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['abort', 'permission'])('invalidates queued finalization immediately on %s before its lane dispatch', async change => {
+    const subject = harness(record({ tianwenEvents: [{ type: 'attempt-started', taskId: TASK_1, attempt: {
+      epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+      permissionFingerprint: 'sha256:host-finalization', status: 'running', startedAt: '2026-10-05T00:00:00.000Z',
+    } }] }))
+    const events = [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    Object.assign(subject.first.session, { events })
+    const finalizeTask = vi.fn(async () => undefined)
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask })
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    if (change === 'abort') subject.abort(EXECUTION_1.sessionId)
+    else subject.sessionEvent('control-session', { type: 'sandbox/mode', seq: 3, data: { mode: 'workspace-write' } })
+    await unmount()
+    expect(finalizeTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['pause', 'pause-and-replan'] as const)('invalidates asynchronous parent recovery before queued explicit %s control executes', async action => {
+    const source = record({ tianwenEvents: [{ type: 'attempt-started', taskId: TASK_1, attempt: {
+      epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+      permissionFingerprint: 'sha256:host-finalization', status: 'running', startedAt: '2026-10-05T00:00:00.000Z',
+    } }] })
+    const subject = harness(source)
+    const main = agent('control-session', 'main-goal')
+    subject.live.set('control-session', main)
+    const events = [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    Object.assign(subject.first.session, { events })
+    const restoring = Promise.withResolvers<AbortSignal>()
+    const recovered = Promise.withResolvers<void>()
+    const dispatch = vi.fn()
+    const finalizeTask = async (input: { readonly signal: AbortSignal }) => {
+      restoring.resolve(input.signal)
+      await recovered.promise
+      input.signal.throwIfAborted()
+      dispatch()
+    }
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask })
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    const signal = await restoring.promise
+    const paused = subject.control(main, action === 'pause' ? { action } : { action, text: 'New direction', resume: false })
+    recovered.resolve()
+    await paused
+    await unmount()
+    expect(signal.aborted).toBe(true)
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(subject.dependencies.control).toHaveBeenCalledTimes(1)
+  })
+
   it('public DSH publishes Task terminal capture before Planner settlement admission without a model-facing marker', async () => {
     const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-boundary-order')
     mkdirSync(base, { recursive: true })

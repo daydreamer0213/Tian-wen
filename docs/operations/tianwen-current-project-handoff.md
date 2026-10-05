@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 最新：Task 自动收尾发布机制已通过，转新真实学习批
+
+自动收尾实现及原共享三次续轮/显式暂停/合法 Planner 冷恢复已接入；最新源码 138/138、严格类型/差异检查、原十五实际构建命令、最终发布包 49 通过/10 原跳过。实际原 CLI success-r3、limit-r4、pause-r2 均退出/排空 0，同一任务原答保持：收尾成功、开场加三续轮暂停、暂停零追加分别核实；37 scripted/零真实模型，仅工程机制，不记学习效果。[准确交付与原失败](tianwen-native-task-finalization-delivery-20261005.md)。
+
+下一九项 cw-de 新身份[受控学习批](../superpowers/plans/2026-10-05-tianwen-finalization-learning-followup-plan.md)已准备，提交后冻结/零调用预检/唯一正式运行，首新未来任务兼短真实交付检查，原阶段和预算保持。缺场景自主模拟、实际效果核实，不自然等待、索题或机械 blocked。完整目标 active、main/Daily NO-GO/R9/原窗口保持；旧首结果不补评。旧三账本/84 容器保持、保护根不访问、无依赖副本，D 约17.2>=15；Docker本轮自启供下一批，终止后自停。
+
 ## 2026-10-05 最新：模拟批发现 Task 漏收尾，公共恢复入口已验证
 
 所有者确认主动模拟缺条件覆盖全部开发，不等待自然发生/索题/机械 blocked，不增加原验收要求。null-state 唯一批20真实请求/20完整轨迹，第一未来 Task complete/独立 rejected；第二答对但 native Goal 未 complete、无 acceptance，原30分钟结束/原排空成功。训练/来源/研究/激活/方法未来效果/反馈0。[准确结果与责任](tianwen-native-task-finalization-gap-20261005.md)。

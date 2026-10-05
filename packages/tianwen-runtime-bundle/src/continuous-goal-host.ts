@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GoalView } from '@deepseek-ai/dsh-goal'
-import type { Session } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 
 import type { ContinuousGoalAgentOperations } from './continuous-goal-agent.js'
 import { LongGoalIntegrityError, readTianwenTaskAttemptProjection } from './long-goal.js'
@@ -94,6 +94,15 @@ export interface ContinuousGoalHostDependencies {
   readonly reconcilePermissionAttempt?: (input: {
     readonly longGoalId: string
     readonly resume?: boolean
+  }) => Promise<void>
+  readonly finalizeTask?: (input: {
+    readonly longGoalId: string
+    readonly sessionId: string
+    readonly completedTurnSeq: number
+    readonly taskId: string
+    readonly goalId: string
+    readonly epoch: number
+    readonly signal: AbortSignal
   }) => Promise<void>
 }
 
@@ -246,6 +255,8 @@ export function mountContinuousGoalHost(
   const pendingDeliveries = new Map<string, ContinuousGoalDeliveryIntent[]>()
   const deliveryKeys = new Set<string>()
   const observedTaskTransitions = new Set<string>()
+  const observedCompletedTurns = new Set<string>()
+  const finalizations = new Map<string, AbortController>()
   const terminalEvidence = new Map<string, Promise<{
     readonly mainInboxBoundarySeq: number
     readonly terminalEventId: string
@@ -479,6 +490,9 @@ export function mountContinuousGoalHost(
       }
       const record = bindings[0] ?? allControlRecords(records, controlSessionId)[0]
       if (record === undefined) throw new Error('No active continuous Goal is bound to this Agent.')
+      if (action.action === 'pause' || action.action === 'pause-and-replan') {
+        finalizations.get(record.id)?.abort(new Error('Task finalization stopped by explicit control'))
+      }
       const execute = async () => {
         if (action.action === 'resume') {
           await dependencies.reconcilePermissionAttempt?.({ longGoalId: record.id })
@@ -699,6 +713,9 @@ export function mountContinuousGoalHost(
       ? (event as { readonly type?: unknown }).type
       : undefined
     const permissionEvent = eventType === 'tool/result' || eventType === 'sandbox/mode'
+    const completed = eventType === 'turn/end'
+      && (event as SessionEvent<'turn/end'>).data.reason.kind === 'completed'
+      ? event as SessionEvent<'turn/end'> : undefined
     const terminal = eventType === 'goal/change'
       ? event as unknown as {
           readonly seq: number
@@ -712,7 +729,7 @@ export function mountContinuousGoalHost(
     const terminalOperation = terminal?.data.operation === 'complete' || terminal?.data.operation === 'block'
       ? terminal.data.operation
       : undefined
-    if (!userAbort && !permissionEvent && terminalOperation === undefined) return
+    if (!userAbort && !permissionEvent && terminalOperation === undefined && completed === undefined) return
     const sessionId = String(session.id)
     for (const record of dependencies.listLongGoals()) {
       if (
@@ -720,6 +737,43 @@ export function mountContinuousGoalHost(
         || record.control.autoProgress !== 'running'
         || record.planner.phase === 'complete'
       ) continue
+      // Invalidate immediately: cancellation/permission reconciliation shares the
+      // lane, but an asynchronous cold restoration may already be in that lane.
+      if ((userAbort || eventType === 'sandbox/mode')
+        && (record.control.sessionId === sessionId || boundTask(record, sessionId) !== undefined)) {
+        finalizations.get(record.id)?.abort(new Error('Task finalization authority changed'))
+      }
+      if (completed !== undefined && dependencies.finalizeTask !== undefined
+        && Number.isSafeInteger(completed.seq) && boundTask(record, sessionId) !== undefined) {
+        const task = boundTask(record, sessionId)!
+        const attempt = readTianwenTaskAttemptProjection(record, task.id).attempts.at(-1)
+        if (attempt?.status !== 'running' || task.execution === null || task.execution === undefined) continue
+        const key = `${record.id}:${sessionId}:${completed.seq}`
+        if (!observedCompletedTurns.has(key)) {
+          observedCompletedTurns.add(key)
+          const controller = new AbortController()
+          // Capture before the continuable manager disposes the child's store.
+          const taskAgent = ctx.agents.get(sessionId as never)
+          const checkpoint = taskAgent === undefined ? Promise.resolve() : flush(taskAgent)
+          void checkpoint.catch(() => undefined)
+          finalizations.set(record.id, controller)
+          void append(record.id, async () => {
+            try {
+              await checkpoint
+              if (controller.signal.aborted) return
+              await dependencies.finalizeTask!({
+                longGoalId: record.id, sessionId, completedTurnSeq: completed.seq,
+                taskId: task.id, goalId: task.execution!.goalId, epoch: attempt.epoch,
+                signal: controller.signal,
+              })
+            } catch (error) {
+              if (!controller.signal.aborted) throw error
+            } finally {
+              if (finalizations.get(record.id) === controller) finalizations.delete(record.id)
+            }
+          }).catch(() => undefined)
+        }
+      }
       if (terminalOperation !== undefined) {
         const goalId = String(terminal!.data.ref?.id ?? terminal!.data.goal?.id)
         const task = boundTask(record, sessionId, goalId)
