@@ -31,6 +31,7 @@ import { conversationContext, conversationEvidenceTexts } from '../../packages/t
 import { recoverConversationCaseDesign } from '../../packages/tianwen-runtime-bundle/src/conversation-case-design.js'
 import { installDevelopmentNativeBatchBudget } from '../../scripts/development-native-batch-budget.mjs'
 import { installDevelopmentNativeAnalysisShutdown } from '../../scripts/development-native-analysis-shutdown.mjs'
+import { inspectDevelopmentNativePreflight } from '../../scripts/development-native-preflight.mjs'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 
@@ -54,6 +55,49 @@ it('tells the case designer the ledger accepted criteria range in both supported
 })
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const { disposeProfileContext } = await import(pathToFileURL(join(cliRequire.resolve('@deepseek-ai/dsh/package.json'), '..', 'lib', 'profile-boot-DG5t9aNs.js')).href)
+
+it.skipIf(process.platform !== 'win32').each(['dev-paired-any-case.v1', undefined] as const)('preflights a persisted native failure pair without waking or consuming its research attempt: %s', async policy => {
+  const base = 'D:/DevData/tianwen-development-runtime'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'preflight-test-'))
+  const script: ScriptEntry[] = [structured(admission), textResponse('全国需要 5 天。'), ...reviewPair(verdict(false, '全国')),
+    structured(admission), textResponse('公司整体增加 7%。'), ...reviewPair(verdict(false, '公司整体')),
+    structured(admission), textResponse('全公司降低 2%。'), ...reviewPair(verdict(true, '2%'))]
+  const warm = await mountFeedbackHarness(root, script)
+  try {
+    await warm.ctx.plugin(SubagentRuntime); await warm.ctx.plugin(spawn, { providerName: 'spawn' })
+    await applyRuntime(warm.ctx, { evolutionRoot: join(root, 'evolution') })
+    warm.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+    await warm.ctx.plugin(TianwenConversationObserverService); await warm.ctx.plugin(TianwenMessageFeedbackBridgeService)
+    const parent = await warm.ctx.agents.create({ sessionId: SessionId('preflight-native-pair'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    for (const message of ['概括：试点需要 5 天，不代表全国。', '概括：测试组增加 7%，不是公司整体。', '概括：全公司降低 2%。']) {
+      parent.agent.followup(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
+      await parent.agent.whenIdle(); await warm.ctx.tianwenConversationObserver.whenIdle()
+    }
+    expect(warm.ctx.tianwenEvolution.listConversationTasks().map(task => task.review?.verdict)).toEqual(['not-met', 'not-met', 'met'])
+    expect(warm.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toEqual([])
+    await parent.dispose(); await warm.ctx.fiber.dispose()
+    const before = readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')
+    const cold = await mountFeedbackHarness(root, [])
+    cold.ctx.baseUrl = pathToFileURL(root).href
+    await cold.ctx.plugin(SubagentRuntime); await cold.ctx.plugin(spawn, { providerName: 'spawn' })
+    let attempted = 0
+    cold.ctx.on('llm/stream', async function* () { attempted++; throw new Error('Read-only preflight must not begin model work') })
+    try {
+      const callConfig = await cold.ctx.llm.resolveCallConfig({ provider: 'tianwen-probe', model: 'scripted' })
+      const result = await inspectDevelopmentNativePreflight(cold.ctx, { developmentRoot: root, ...(policy === undefined ? {} : { guidanceDecisionPolicy: policy }), callConfig })
+      await disposeProfileContext(cold.ctx)
+      expect(readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')).toBe(before)
+      expect(attempted).toBe(0); expect(cold.adapter.requests).toHaveLength(0)
+      expect(result.tasks).toHaveLength(3); expect(result.studies).toEqual([]); expect(result.attempts).toEqual([])
+      expect(result.callConfig).toEqual(callConfig); expect(result.consent).toMatchObject({ revision: 1, enabled: true })
+      expect(cold.ctx.get('tianwenConversationGuidanceLoop')).toBeUndefined()
+    } finally { await cold.ctx.fiber.dispose() }
+  } finally {
+    await warm.ctx.fiber.dispose()
+    const child = relative(base, resolve(root)); if (isAbsolute(child) || child.includes(sep) || !child.startsWith('preflight-test-')) throw new Error('unsafe native preflight cleanup')
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output',
   'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const evidenceResponse = auditedEvidenceResponse

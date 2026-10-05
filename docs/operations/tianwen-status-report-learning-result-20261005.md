@@ -2,6 +2,14 @@
 
 完整自动学习目标 active；main/Daily NO-GO、R9 和原正式发布条件保持。允许主动设计缺失条件，不等待自然发生，不再向用户索题。
 
+## 2026-10-06 预检零模型消费研究尝试，已修复
+
+learning-r3源码2d2cbcb9：原CLI预检0/0模型，但原Runtime冷恢复写conversation-case-design-attempted，940bytes追加；正式启动因冻结账本hash不符CLI1/0模型。灯岸+青禾对消费保留，零新增Task/研究，不补跑。zero-provider-startup-audit.json核旧七Task/五研究/prefix/六其他账本/环境保持；52消费者当前仅新测试变化，其原提交字节核对，其他51不变。
+
+开发helper原目录边界/账本inspection/provider配置解析、逐字核账本，不挂研究服务；正式applyDevelopment和原DEV v1保持。旧原SDK预检RED为原attempt写入，显式/默认policy新控制GREEN。源码160通过，发布157通过/3仅源码装配跳过。共享profile只读原CLI0/0模型，七Task/五研究/六attempt、consent和账本字节保持，原before-exit及退出回执保存readonly-cli-proof-r2。首控制自行await插件dispose等待，零模型专属子进程停止并保留首bootstrap/错误；改用原appExit收尾通过。首源码整组因缺测试目录环境导致12失败保存，正确环境全通过，不是产品修复。限定复查无新有据P1/P2。
+
+下一新任务直接针对上一实际candidate凭空增加未来推进条件的错误，且区别“旧方法未来禁用”与“旧检查撤回”：公开历史错误承诺余项完成就自动获准发布。新来源原评审后与保存来源形成新组合，接受才方法后/未用任务/安全撤回/冷恢复。不重复旧停止组合，不新增门槛，目标active。
+
 ## 2026-10-06 新来源首结果：实际候选提前停止
 
 learning-r2原CLI源码6462674c，12actual/12完整轨迹，1明确模拟历史交付另存。新青禾Task1e7597e7…原独立not-met/source-fidelity，原Loop选择保存松渡+青禾，新studyf2725f58…候选已保存；source1 baseline inconclusive、candidate not-met，原candidate-failed停止，无decision/activation/after/rollback。CLI1由未接受断言产生，原排空成功。旧六Task/四研究/52消费者/六其他账本/环境/prefix均保持，未重跑旧普通任务。

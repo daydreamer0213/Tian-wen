@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：预检只读，主动新增审批臆测来源
+
+learning-r3完整Runtime预检意外消费灯岸+青禾原attempt，940bytes追加保留；正式启动CLI1/0模型、零新Task/研究，旧七Task/五研究/前缀/六其他账本/环境保持。该组合不删除或重试。新开发只读helper用原developmentRuntimeConfig、EvolutionLedger inspection与provider解析，正式入口不变。原SDK旧方式RED/新显式和默认policy GREEN，源码160、发布157通过/3仅源码装配跳过；实际共享profile原CLI0/0模型，七Task/五研究/六attempt及consent/账本字节保持。首控制插件dispose等待及首测试环境遗漏均保存，最终修正通过；限定复查无新有据P1/P2。
+
+下一主动构造新公开历史错误：不撤销旧交付/检查的未来方法禁用，被错误主答附加为无依据的未来自动发布承诺。原独立评审/研究裁决决定是否有效，不host代判。保护旧来源，接受后再核原方法注入、后续真实效果、未用任务与撤回；模拟不是自然provider错误。目标active，main/Daily NO-GO/R9和DEV v1保持，D>=15GiB，不自然等待/索题/机械blocked。
+
 ## 2026-10-06 当前：新模拟问题已入研究，候选事实退步原生提前停止
 
 6462674c新learning-r2为12actual/完整+1明确scripted，原not-met/source-fidelity，studyf2725f58…baseline inconclusive/candidate not-met后原candidate-failed/CLI1/正常排空。候选最新复核状态写对，但无来源地加未来发布前提，两检查均不通过；不因模型JSON诊断修好就当方法有效，不放宽baseline来接受失败候选。旧六Task/四研究/52消费者/六其他账本/环境/prefix保持。正常未abort且排空/无active后卸载guard，consent仍revision1，旧来源资格保留。

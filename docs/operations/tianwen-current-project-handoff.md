@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：只读预检修复通过，下一任务针对未来审批臆测
+
+2d2cbcb9的learning-r3预检原CLI0/0模型，却因完整Runtime冷加载恢复来源，追加940bytes原conversation-case-design-attempted；正式启动随后冻结账本校验CLI1/0模型，零新Task/研究。灯岸+青禾组合已消费，原attempt保留、不删除或补跑。原七Task/五研究/账本前缀/六其他账本/环境保持；52消费者仅本轮新增测试改变，原提交字节另核对，其他51未改。审计保存learning-r3/zero-provider-startup-audit.json，不虚称全账本未变。
+
+新增开发操作员scripts/development-native-preflight.mjs，沿用原目录边界、原账本inspection与原provider配置解析，不挂Runtime/Evolution/Loop；正式执行仍原applyDevelopment。原SDK控制旧预检确实消费attempt、RED保存；新显式/默认policy控制账本字节不变、零调用/attempt。源码160通过，发布157通过/3仅源码装配跳过，限定复查无新有据P1/P2。共享实际profile原CLI0/0模型，七Task/五研究/六attempt与consent/账本字节不变，原before-exit收尾通过。首控制错误自行await插件dispose造成等待，专属零模型子进程停止、首记录保持；修正用原appExit后通过。源码首整组因测试目录环境遗漏12失败保存，正确环境最终全通过，不改旧fixture掩盖。
+
+下一主动新增“只停止旧方法未来使用，但旧交付及检查仍有效；发布未审批”任务，明确模拟历史主答凭空承诺“余项完成即自动获批”。与保存来源形成新组合，核原研究/启用/新后续效果/安全撤回，旧组合不重跑；不只换名字重复状态任务。模拟输入与真实模型效果分别记录。目标active，main/Daily NO-GO/R9及原DEV v1保持，D约16.8GiB>=15，无依赖副本。
+
 ## 2026-10-06 当前：新状态研究提前发现候选退步，接续剩余对
 
 6462674c的state-transition learning-r2：12真实请求/12完整轨迹、1明确模拟历史主答，新Task1e7597e7…原not-met/source-fidelity。原Loop选择保存松渡+新青禾，studyf2725f58…候选保存；source1 baseline inconclusive、candidate not-met，原candidate-failed/CLI1/正常排空、无激活/后续/撤回。候选正确覆盖四个当前状态，但断言“等重新检查有了结果，这个问题才会再往前走一步”，两个检查均认为无来源的未来发布条件；不靠改baseline接受候选。baseline原答实际包含`</answer>`，不是host给答案添加的分隔符，两个检查不同意原保留。旧六Task/四研究/52消费者/六其他账本/环境/prefix保持；无旧普通交付重跑。[准确结果](tianwen-status-report-learning-result-20261005.md)。
