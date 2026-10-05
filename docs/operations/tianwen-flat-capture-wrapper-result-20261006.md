@@ -29,4 +29,4 @@
 
 独立audit-terminal原CLI0：149冻结文件、旧七Task/两study/两attempt/ledger prefix及共享9/8/9账本字节保持；现在九Task/四study/四attempt。证据D:/DevData/tianwen-flat-capture-learning-20261006/final-audit.json。限定原操作器与终态复查无P1/P2；没有产品路由丢失证据，不跨family注入或改旧分类。
 
-下一明确披露从接受后、操作器自动撤回前的历史DEV checkpoint隔离延续，原profile及旧撤回保持。只复制必需小ledger prefix/artifact；原历史session按原字节引用、零模型验证已接受研究，新的原JSONL backend须属于新profile派生路径。用未执行的明确摘要任务检查真实方法注入/效果，再撤回/无注入/零调用恢复；不重跑研究、不宣称新activation。完整目标仍active，main/Daily NO-GO/R9不变。
+下一明确模拟原accepted已落盘但activation未落盘时的隔离重启，原profile/原启用/旧撤回保持。只复制必需小ledger prefix/artifact；历史完成session按原字节硬链接到新profile派生原JSONL目录，不挂载旧Agent。原Loop完整恢复source/proposal/十臂双审，零模型后在分支原生启用已接受方法。用未执行的明确摘要任务核真实注入/效果，再撤回/无注入/零调用恢复；不重跑研究、不称新的研究接受。完整目标仍active，main/Daily NO-GO/R9不变。

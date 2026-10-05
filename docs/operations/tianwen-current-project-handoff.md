@@ -4,7 +4,7 @@
 
 5a68cb40实际87请求/1明确模拟历史交付，原study79366457失败后，新桥单Task ad5e1e61触发f1b0d12f完整十臂、五candidate met、来源1notmet→met、其余baseline未知/通过保留，原DEV策略自动accepted/activation。首future1-after实际met，但原请求前后summary/writing类别不同；scope/model/quality保持、候选快照已到新Task，summary方法未注入writing，操作器断言失败。原正常排空、consent2disabled/consent-disabled撤回/active0；CLI1，未称方法后效果或完整目标成功。
 
-独立终态audit0核149冻结、旧七Task两study两attempt/prefix和共享9/8/9原字节；现在九Task四study四attempt。下一从接受后、自动撤回前的历史DEV checkpoint隔离延续，旧profile/旧撤回不改；原JSONL恢复已接受研究零模型，新的明确摘要任务实际核注入/效果/撤回/冷恢复，不再重跑整个研究或跨family强行注入。详见tianwen-flat-capture-wrapper-result-20261006.md。目标active/main-Daily NO-GO/R9保持，D约16.68GiB>=15，无安装或环境副本。
+独立终态audit0核149冻结、旧七Task两study两attempt/prefix和共享9/8/9原字节；现在九Task四study四attempt。下一明确模拟原accepted已落盘、activation未落盘的隔离重启，旧profile/原启用撤回不改；新派生JSONL目录引用原历史完成Session，原Loop完整source/proposal/十臂双审零模型恢复后在分支启用。新明确摘要任务实际核注入/效果/撤回/冷恢复，不再重跑研究或跨family强行注入。详见tianwen-flat-capture-wrapper-result-20261006.md。目标active/main-Daily NO-GO/R9保持，D约16.68GiB>=15，无安装或环境副本。
 
 ## 2026-10-06 当前：实际研究定位包装误提交，继续补准确工具提示
 

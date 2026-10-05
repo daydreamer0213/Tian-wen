@@ -850,5 +850,3 @@ R9 已有真实原生 `accepted` 与 `guidance-activated`，U6–U9 也实际使
 learning-r3在8ba81be5完成42真实/42完整、0模拟、10原生臂。source1 not-met→met、source2 inconclusive→met、counter not-met→met、adjacent not-met→inconclusive、holdout met→not-met；原inconclusive/CLI1/排空，无激活/后续/撤回。旧四Task、两研究、52消费者、六其他旧账本、原环境/前缀保持。四次真实短引用成功；不重判旧停止或声称完整学习成功。
 
 候选把已执行复核重新说成建议，并超长；另有隔离评审看不到动作上下文的自证尾句。不能以放宽baseline规则掩盖候选失败；DEV判定版本未改。下一已冻结两个模拟“建议后来执行、旧通过后来撤回”的新任务/错误交付，原入题及研究模型实际运行。来源公开模拟、后续实际效果分开；旧四Task/三研究保持。原接受才启用/未来对比/未用任务/撤回/冷恢复，不等自然、不索题、不增正式门槛。目标active，main/Daily NO-GO/R9保持，D约16.8GiB>=15，无依赖副本。详见当前交接及状态汇报结果文档。
-
-
