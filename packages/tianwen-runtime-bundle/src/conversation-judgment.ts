@@ -137,6 +137,60 @@ function assertStructuredCapture(events: readonly SessionEvent[], expected: unkn
   return captures[0]!.seq
 }
 
+// Match the installed SDK's default repeat-tool-reminder transport. It is
+// auxiliary context, never another request or evidence returned to consumers.
+function nativeRepeatArguments(raw: string): string {
+  const sort = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sort)
+    if (value !== null && typeof value === 'object') {
+      const sorted: Record<string, unknown> = {}
+      for (const key of Object.keys(value).sort()) sorted[key] = sort((value as Record<string, unknown>)[key])
+      return sorted
+    }
+    return value
+  }
+  let value: unknown
+  try { value = raw ? JSON.parse(raw) : {} }
+  catch { value = raw } // SDK uses the raw string when argument JSON is malformed.
+  return JSON.stringify(sort(value))!
+}
+
+function assertNativeRepeatReminder(events: readonly SessionEvent[], reminder: Extract<SessionEvent, { type: 'user/message' }>, firstHeaderSeq: number, captureSeq: number): string {
+  const count = [3, 5, 8].find(count => sha256(reminder.data.source) === sha256({
+    kind: 'plugin', plugin: 'repeat-tool-reminder', form: 'notice', summary: `structured_output × ${count}`,
+  }))
+  if (count === undefined || reminder.seq >= captureSeq) throw new Error('invalid-judgment')
+  const insertions = events.filter(event => event.type === 'agent/inbox/spliced'
+    && event.seq > firstHeaderSeq && event.seq < reminder.seq && event.data.target === 'next-step'
+    && event.data.inserted.some(message => sha256(message) === sha256(reminder.data)))
+  if (insertions.length !== 1) throw new Error('invalid-judgment')
+  // The SDK counts post-execute attempts, including denials. Result order is
+  // the execution order even when a request contains several tool calls.
+  const completed = events.flatMap(event => {
+    if (event.type !== 'tool/result' || !isAppendSurfaceEvent(event)
+      || event.seq <= firstHeaderSeq || event.seq >= insertions[0]!.seq) return []
+    const call = events.find(candidate => candidate.type === 'tool/call'
+      && candidate.seq > firstHeaderSeq && candidate.seq < event.seq
+      && candidate.data.callId === event.data.message.source.callId)
+    if (call?.type !== 'tool/call' || event.data.message.content[0].toolCallId !== call.data.callId) throw new Error('invalid-judgment')
+    return [{ call, result: event, key: JSON.stringify([call.data.name, nativeRepeatArguments(call.data.arguments)]) }]
+  })
+  const last = completed.at(-1)
+  if (last?.call.data.name !== 'structured_output') throw new Error('invalid-judgment')
+  const boundary = completed.findLastIndex(entry => entry.key !== last.key)
+  const chain = completed.slice(boundary + 1)
+  if (chain.length !== count || new Set(chain.map(entry => entry.call.data.callId)).size !== count
+    || chain.some(entry => entry.result.data.message.content[0].isError !== true)) throw new Error('invalid-judgment')
+  const canonical = nativeRepeatArguments(last.call.data.arguments)
+  const preview = canonical.length <= 500 ? canonical : `${canonical.slice(0, 500)}… (+${canonical.length - 500} more chars)`
+  const text = count === 3
+    ? 'You are repeating the exact same tool call with identical arguments. Carefully analyze the previous result before calling again: if the task is not complete, try a different approach or different arguments instead of repeating the call.'
+    : `Repeated tool call detected:\n- tool: structured_output\n- consecutive_calls: ${count}\n- arguments: ${preview}\nThe repeated calls are not making progress. Do not call this tool with these exact arguments again. Inspect the latest result and choose a different action, different arguments, or finish the task if enough evidence has been gathered.`
+  if (reminder.data.content.length !== 1 || reminder.data.content[0]?.type !== 'text'
+    || reminder.data.content[0].text !== text) throw new Error('invalid-judgment')
+  return String(last.call.data.callId)
+}
+
 export async function verifyConversationReviewCheck(ctx: Context, check: ConversationReviewCheck): Promise<void> {
   const saved = await ctx.sessionPersistence.inspect(SessionId(check.proof.sessionId))
   if (saved.meta.origin !== 'subagent' || sha256({ meta: saved.meta, events: saved.events }) !== check.proof.sessionDigest) throw new Error('source-unavailable')
@@ -194,12 +248,20 @@ async function recoverNativeStructured(ctx: Context, proof: ConversationJudgment
   const captureSeq = assertStructuredCapture(saved.events.filter(event => event.seq >= start.seq && event.seq < end.seq), expectedValue)
   if (headers.length === 0 || requests[0]!.seq >= headers[0]!.seq || headers.some(event => event.seq < requests[0]!.seq || event.seq > captureSeq)
     || saved.events.some(event => event.type === 'request/header' && (event.seq < start.seq || event.seq >= end.seq))) throw new Error('invalid-judgment')
-  // Native prompt snapshots can precede the first model request. Only a
-  // specifically attributed capture reminder may enter after that request.
+  // Native prompt snapshots can precede the first model request. Later input
+  // must be a verified SDK transport notice or the one authorized host reminder.
   const subsequentMessages = saved.events.filter(event => event.seq > headers[0]!.seq && event.seq < end.seq
     && event.type === 'user/message' && isAppendSurfaceEvent(event)) as Extract<SessionEvent, { type: 'user/message' }>[]
-  if (subsequentMessages.length > 1 || (!allowCaptureReminder && subsequentMessages.length !== 0)) throw new Error('invalid-judgment')
-  const reminder = subsequentMessages[0]
+  const repeats = new Set<string>()
+  const captureReminders = subsequentMessages.filter(message => {
+    if (message.data.source.kind !== 'plugin' || message.data.source.plugin !== 'repeat-tool-reminder') return true
+    const trigger = assertNativeRepeatReminder(saved.events, message, headers[0]!.seq, captureSeq)
+    if (repeats.has(trigger)) throw new Error('invalid-judgment')
+    repeats.add(trigger)
+    return false
+  })
+  if (captureReminders.length > 1 || (!allowCaptureReminder && captureReminders.length !== 0)) throw new Error('invalid-judgment')
+  const reminder = captureReminders[0]
   const reminderSource = allowCaptureReminder === 'review' ? REVIEW_CAPTURE_REMINDER_SOURCE : persona === TRIAL_PERSONA ? TRIAL_CAPTURE_REMINDER_SOURCE : ADMISSION_CAPTURE_REMINDER_SOURCE
   const reminderText = allowCaptureReminder === 'review' ? REVIEW_CAPTURE_REMINDER : persona === TRIAL_PERSONA ? TRIAL_CAPTURE_REMINDER : ADMISSION_CAPTURE_REMINDER
   if (reminder !== undefined && (sha256(reminder.data.source) !== sha256(reminderSource)

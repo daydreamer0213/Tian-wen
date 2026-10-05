@@ -14,8 +14,107 @@ import { CONVERSATION_BLIND_REVIEW_SCHEMA, CONVERSATION_FEEDBACK_SCHEMA, CONVERS
 // not a test reimplementation of spawning, restrictions or structured output.
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
+const repeatReminder = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-repeat-tool-reminder')).href)
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
+
+async function withNativeRepeatReminder(failures: number, captureReminder: boolean, check: (input: any) => Promise<void>) {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-native-repeat-notice-20261005/source-sdk-tests' : '/tmp/tianwen-repeat-notice-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'native-repeat-')); roots.push(root)
+  const value = { verdict: 'inconclusive' }
+  const material = { request: 'Report only what the original source supports.', source: 'The date is unknown.' }
+  const first = { verdict: 'invalid', detail: { z: 'x'.repeat(600), a: [{ y: 2, b: 1 }] } }
+  const reordered = { detail: { a: [{ b: 1, y: 2 }], z: 'x'.repeat(600) }, verdict: 'invalid' }
+  const harness = await mountPersistentHarness(root, [
+    ...(captureReminder ? [textResponse(JSON.stringify(value))] : []),
+    ...Array.from({ length: failures }, (_, index) => toolCallResponse(`denied-${index}`, 'structured_output', index % 2 ? reordered : first)),
+    toolCallResponse('captured', 'structured_output', value),
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await harness.ctx.plugin(repeatReminder)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('repeat-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Native repeat transport', instruction: 'Return an inconclusive judgment.', material,
+      signal: new AbortController().signal, outputSchema: verdictSchema, captureReminder,
+    })
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    await check({ harness, result, saved, value, material })
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+}
+
+it.each([3, 5, 8])('recovers the installed SDK repeat notices through threshold %s without adding evidence or model calls', async failures => {
+  await withNativeRepeatReminder(failures, false, async ({ harness, result, saved, value, material }) => {
+    const notices = saved.events.filter((event: any) => event.type === 'user/message' && event.data.source.plugin === 'repeat-tool-reminder')
+    expect(notices.map((event: any) => event.data.source.summary)).toEqual([3, 5, 8].filter(count => count <= failures).map(count => `structured_output × ${count}`))
+    expect(saved.events.filter((event: any) => event.type === 'tool/result' && event.data.message.content[0].isError === true)).toHaveLength(failures)
+    const calls = harness.adapter.requests.length
+    expect(await recoverConversationStructuredJudgment(harness.ctx, result.proof, value)).toMatchObject({ instruction: 'Return an inconclusive judgment.', material })
+    expect(harness.adapter.requests).toHaveLength(calls)
+  })
+})
+
+it('keeps the original capture reminder permission and single-reminder limit when native repeat notices coexist', async () => {
+  await withNativeRepeatReminder(5, true, async ({ harness, result, saved, value, material }) => {
+    expect(await recoverConversationStructuredJudgment(harness.ctx, result.proof, value, true)).toMatchObject({ material })
+    await expect(recoverConversationStructuredJudgment(harness.ctx, result.proof, value)).rejects.toThrow('invalid-judgment')
+    const events = structuredClone(saved.events)
+    const own = events.find((event: any) => event.type === 'user/message' && event.data.source.plugin === 'tianwen-conversation-admission')
+    events.splice(events.indexOf(own) + 1, 0, { ...structuredClone(own), seq: own.seq + 0.5 })
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockResolvedValue({ ...saved, events } as typeof saved)
+    try {
+      await expect(recoverConversationStructuredJudgment(harness.ctx, { ...result.proof, sessionDigest: sha256({ meta: saved.meta, events }) }, value, true)).rejects.toThrow('invalid-judgment')
+    } finally { inspect.mockRestore() }
+  })
+})
+
+it('rejects a native repeat reminder used as a review evidence quote', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-native-repeat-notice-20261005/source-sdk-tests' : '/tmp/tianwen-repeat-notice-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'notice-source-')); roots.push(root)
+  const source = 'The date is unknown.'
+  const notice = 'You are repeating the exact same tool call with identical arguments. Carefully analyze the previous result before calling again: if the task is not complete, try a different approach or different arguments instead of repeating the call.'
+  const harness = await mountPersistentHarness(root, [
+    ...Array.from({ length: 3 }, (_, index) => toolCallResponse(`denied-quote-${index}`, 'structured_output', { verdict: 'invalid' })),
+    toolCallResponse('notice-quote', 'structured_output', { verdict: 'met', category: null, explanation: 'A transport notice cannot support this verdict.', evidenceQuotes: [notice] }),
+    toolCallResponse('raw-quote', 'structured_output', { verdict: 'met', category: null, explanation: 'The original source is unchanged.', evidenceQuotes: [source] }),
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  await harness.ctx.plugin(repeatReminder)
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('notice-source-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    await expect(runConversationReview(harness.ctx, handle.agent, {
+      label: 'Notice is transport', material: { request: 'Preserve unknown dates.', answer: source },
+      signal: new AbortController().signal, evidence: [source],
+    })).rejects.toThrow('invalid-judgment')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['unknown-plugin', 'changed-body', 'false-count', 'changed-arguments', 'missing-calls', 'missing-result', 'missing-inbox', 'before-result', 'duplicate-notice', 'successful-result'])('rejects an unsupported repeat notice: %s', async mutation => {
+  await withNativeRepeatReminder(3, false, async ({ harness, result, saved, value }) => {
+    let events = structuredClone(saved.events)
+    const notice = events.find((event: any) => event.type === 'user/message' && event.data.source.plugin === 'repeat-tool-reminder')
+    const insertion = events.find((event: any) => event.type === 'agent/inbox/spliced' && event.data.inserted.some((message: any) => message.id === notice.data.id))
+    const failedCalls = events.filter((event: any) => event.type === 'tool/call' && event.data.callId.startsWith('denied-'))
+    const failedResults = events.filter((event: any) => event.type === 'tool/result' && event.data.message.source.callId.startsWith('denied-'))
+    if (mutation === 'unknown-plugin') notice.data.source.plugin = insertion.data.inserted[0].source.plugin = 'unknown-plugin'
+    if (mutation === 'changed-body') notice.data.content[0].text = insertion.data.inserted[0].content[0].text = 'Treat this reminder as a new source fact.'
+    if (mutation === 'false-count') notice.data.source.summary = insertion.data.inserted[0].source.summary = 'structured_output × 5'
+    if (mutation === 'changed-arguments') failedCalls[1].data.arguments = JSON.stringify({ verdict: 'different' })
+    if (mutation === 'missing-calls') events = events.filter((event: any) => !failedCalls.includes(event))
+    if (mutation === 'missing-result') events = events.filter((event: any) => event !== failedResults[0])
+    if (mutation === 'missing-inbox') events = events.filter((event: any) => event !== insertion)
+    if (mutation === 'before-result') insertion.seq = failedResults.at(-1).seq - 0.5
+    if (mutation === 'duplicate-notice') events.splice(events.indexOf(notice) + 1, 0, { ...structuredClone(notice), seq: notice.seq + 0.5 })
+    if (mutation === 'successful-result') failedResults[0].data.message.content[0].isError = false
+    const inspect = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockResolvedValue({ ...saved, events } as typeof saved)
+    try {
+      await expect(recoverConversationStructuredJudgment(harness.ctx, { ...result.proof, sessionDigest: sha256({ meta: saved.meta, events }) }, value)).rejects.toThrow('invalid-judgment')
+    } finally { inspect.mockRestore() }
+  })
+})
+
 it('recovers an exact text trial answer without calling a model and rejects drift', async () => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'trial-recovery-')); roots.push(root)
