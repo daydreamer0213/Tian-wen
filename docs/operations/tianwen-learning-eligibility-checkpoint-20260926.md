@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：原要求提取过度细化，未来入题澄清
+
+writing-r2的16真实/完整+1明确模拟，原writing/not-met/source-fidelity及新study986afb0d…，首两臂met→not-met，原candidate-failed、零启用/后续/撤回。代码修改前旧八Task/五study/六attempt/53消费者/六其他账本/环境/prefix保持。原入题自行增加方法名称与补充说明禁令，复制到新研究，非真实feedbackStandard；原候选还实际包含`</answer>`，两评审却误当系统容器标记。不能因弱理由就把旧候选重判通过。
+
+只给新入题澄清不能新增/加严派生要求，原明确许可与禁令均保持；schema/质量v11/DEV v1/原发布标准不变，旧criteria和proof不改。源码122、原十五构建和发布检查完成，限定复查无新有据P1/P2。下一隔离真实许可/禁止控制，不冒充自动学习收益。当前九Task/六study/七attempt，目标active、main/Daily NO-GO/R9保持。
+
 ## 2026-10-06 当前：缺少同族来源，主动补写作任务
 
 future-approval首批6真实/完整+1明确模拟，槐序原not-met/source-fidelity但入题family=summarization；已有同category失败/正常反例均writing，原Loop零新study/attempt/activation，CLI1正常排空，旧七Task/五study/六attempt/53消费者/六其他账本/环境/prefix保持。只读预检0模型且未挂Runtime、账本不变。失败原因是组合缺同类来源，不是模型学习裁决失败；保留首Task与标签。下一独立创作产品进度口播文案任务补writing来源，分类/研究仍原流程，不向用户索题。目标active、NO-GO/R9和原DEV v1保持。

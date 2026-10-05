@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：真实研究发现要求提取加严，已澄清新入题
+
+e6d5af93的writing-r2：16actual/16完整+1明确模拟，溪帆Task54a87e78…原writing/not-met/source-fidelity；原Loop与保存青禾形成study986afb0d…，candidate保存，source1 baseline met/candidate not-met，原candidate-failed/CLI1/正常排空，零decision/activation/after/rollback。修改代码前旧八Task/五study/六attempt/53消费者/六其他账本/环境/prefix保持，当前九Task/六study/七attempt。候选核心状态事实正确，但其实际answer含`</answer>`；没有宿主清理该标记，不重判停止。[结果](tianwen-status-report-learning-result-20261005.md)。
+
+查到原青禾admission把“不讲技术细节”扩成方法名称禁令，把“自述收尾”扩成所有补充说明禁令；candidate评审packet原样带这些criteria，无feedbackStandard。对相关正文事实解释及一般权责说明的失败理由有过严风险，但不能因此断言整份候选应met，两个review忽略实际字面标记同样要保留事实。仅新ADMISSION_INSTRUCTION澄清派生要求不能加严、原许可及显式禁令都保留；不改schema/质量v11/裁决/旧criteria/发布门槛。旧admission恢复使用原冻结提示和digest，不比新模板。限定复查无新有据P1/P2；源码122、原十五构建及发布检查完成。下一隔离实际许可/显式禁止控制，模拟主答与真实入题/评审分开，不当方法效果。目标active，main/Daily NO-GO/R9/DEV v1保持，D约16.8GiB>=15，共享安装。
+
 ## 2026-10-06 当前：未来审批错误已被真实识别，补同类文案来源
 
 cacf4d93的future-approval批：6actual/6完整轨迹+1明确模拟历史主答，槐序Task19a9dc83…原not-met/source-fidelity；原入题归summarization，而保存三个source-fidelity和正常反例均writing，原Loop无兼容对、零新study/attempt/激活，CLI1/正常排空。旧七Task/五study/六attempt、53消费者/六其他账本/环境/prefix保持。模拟错误被识别不是实际方法改善。[结果](tianwen-status-report-learning-result-20261005.md)。

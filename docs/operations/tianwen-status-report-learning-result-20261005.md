@@ -2,6 +2,16 @@
 
 完整自动学习目标 active；main/Daily NO-GO、R9 和原正式发布条件保持。允许主动设计缺失条件，不等待自然发生，不再向用户索题。
 
+## 2026-10-06 文案配对首结果与要求提取澄清
+
+writing-r2源码e6d5af93，16actual/16完整请求、1明确模拟历史文案。新溪帆Task54a87e78…原writing/not-met/source-fidelity；原Loop与青禾1e7597e7…组成study986afb0d…，候选已保存，source1 baseline met/candidate not-met，原candidate-failed、CLI1正常排空，无decision/activation/after/rollback。修改产品前final-audit核旧八Task/五study/六attempt、53消费者/六其他账本/环境/prefix保持；原四终态控制0模型通过且临时目录清理。当前九Task/六study/七attempt。
+
+两评审对核心当前状态认可；失败理由有方法名称、同段“此外需要说明”草稿解释和“有权方另行决定”未来语句。原candidate-first-review-packet.json证明无feedbackStandard，旧admission.criteria新增“如检查方法名称等内部技术信息”和“额外…补充说明”，原request只说不讲技术细节、不写自述收尾。相关说明有来源且仍在正文内，不能仅据连接词确定违规；一般权责保留的解释有争议，暂不改变未来承诺判断。另原model structured_output.answer确有字面`</answer>`，native session 46ad4115…第32行tool/call与packet一致，两个review误说harness标记；宿主原返回值未附加或去除，不能把这份旧candidate重判met。
+
+只修改新ADMISSION_INSTRUCTION提示：保留权限和禁令，派生criteria不能自行加严，不把自举例子当新增禁令；明确用户禁止名称/说明时必须保留。质量合同v11、schema、研究/发布门槛和历史criteria/proof不变。恢复原admission仅核保存请求/会话/capture/digest，不比新模板，限定复查无新有据P1/P2。源码122通过、原十五构建和发布验证完成。下一隔离实际许可/禁止控制，固定回答显式scripted，真实入题/双评审另记；工程控制不称自动学习效果，完整目标active。
+
+最终发布相关122+原完整profile50=172通过、10原条件跳过，无失败。
+
 ## 2026-10-06 审批臆测首结果：已识别失败，尚无同族配对
 
 D:/DevData/tianwen-future-approval-learning-20261006，源码cacf4d93。6actual/6完整请求、1明确模拟历史主答，Task19a9dc835…原not-met/source-fidelity；两个检查均识别“13项完成后自动批准”无来源，另指出未说明13项未检查。原入题family=summarization，保存三source-fidelity及met反例均writing；因此无同族组合，原Loop未形成研究、零新attempt，原CLI1/正常排空。不是原方法未接受或无效。旧七Task/五研究/六attempt、53消费者、六其他账本、环境及前缀保持，consent仍enabled/revision1。原helper预检0调用、Runtime未挂载、原字节保持；四零模型终态解析控制通过且临时目录清理。
