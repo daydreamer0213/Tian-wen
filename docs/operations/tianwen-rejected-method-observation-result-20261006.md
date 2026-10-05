@@ -22,7 +22,20 @@
 - 首次发布整组因操作者遗漏 `TIANWEN_GOAL_ACCEPTANCE_PUBLISHED=1`，三个源码对象监听场景失败；原报告保留。正确原环境下只重跑原 profile，50/10；另外源码模式三项实际故障控制全部通过。源码实际执行合计 246 项通过，无需修改实现、fixture 或标准。
 - 限定复查此前 P2 已关闭，无新有据 P1/P2。仅认证这次改动，不冒充实际方法改善。
 
-## 下一实际验证
+## 本批实际结果（44f113bf）
+
+原 CLI 共 65 个真实模型请求，零脚本主答、零新来源 Task，原 Loop 自然完成两个原未尝试来源组合。实际请求 2 和 33 都收到来自旧 study986afb0d 的原方法、source1 原双审诊断及摘要，独立投影核对通过；信息流是真实进入模型，不只是 SDK 场景。
+
+1. study2cab6ab0：source1 inconclusive→met；source2 met→met；counterexample not-met→met；adjacent met→not-met。原 `candidate-failed` 提前停止。adjacent 两检查都核正文事实正确，但实际交付夹入 `</answer>`、`</invoke>`，违反既有纯正文要求；旧输出不清理、不重判。
+2. studyb950b45f：完整十臂，五个 candidate 全 met；baseline 依次为 not-met、met、not-met、inconclusive、inconclusive。两个明确失败有同案例改善，但原 v1 先检查任何 arm inconclusive，故原决策仍 inconclusive、零 activation。不能称完整目标完成或自动启用已验证。
+
+操作员错误假设 `whenIdle` 只完成一份研究，最后 `2 !== 1` 导致 CLI1；原 Loop 的两组合都在事前冻结允许集合内，不是重跑旧停止。原脚本和错误保留；独立 `audit-current-loop.mjs` 复用原终态审计，再核所有新组合及实际提案投影，不改裁决。`final-audit.json` 的原单研究工件未保存、计数 0 保留；`final-terminal-audit.json` 明确实际投影为 2。
+
+正常排空，consent enabled/revision1、零 active；原九 Task、六 study、七 attempt 及账本前缀、154 冻结文件均保持。当前九 Task、八 study、九 attempt；没有方法后普通任务、撤回或冷恢复效果。本批耗尽两个原可用 source-fidelity 组合，不再次调用它们。D 约 16.75 GiB，未复制依赖或全账本。
+
+下一处理的是两条具体问题：原生答案的多余协议标签；开发规则把其他 baseline 的未知作为整份候选 veto。先核对仅隔离开发的前瞻版本可否在 candidate 全部 met、至少一个确定同案例改善的情况下试用，未知仍如实保留，不改 v1/旧研究/正式 main/Daily 门槛；后续普通任务效果与安全撤回仍待实际验证。不是等待自然输入或再索取执行许可。
+
+## 原本实际验证安排及未执行部分
 
 开发操作员位于 `D:/DevData/tianwen-rejected-method-learning-20261006`，复用原共享安装与 status-report-baseline profile。只使用尚未尝试的来源组合，零新来源任务、零脚本主答、零旧来源交付重跑。先只读预检保护原九 Task、六 study、七 attempt 和原账本字节；正式运行允许追加新记录，旧前缀保持，不全量复制旧账本。
 

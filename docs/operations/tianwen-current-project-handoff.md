@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：信息流实际打通，完整候选五项合格但原裁决不确定
+
+44f113bf真实批65请求/0scripted/0新Task，原Loop自然执行剩余两未尝试组合，实际请求2/33均收到旧986afb0d来源失败方法及原诊断，独立投影/摘要匹配。study2cab6ab0…八臂：两source候选met、counter notmet→met，但adjacent met→notmet（事实正确、实际answer夹入</answer>/</invoke>），原candidate-failed。studyb950b45f…完整十臂五candidate全部met、baseline notmet/met/notmet/inc/inc，原DEV v1因为baseline未知仍inconclusive/0activation。两个同案例改善不等于已启用或完整目标完成，原结果不重判。
+
+操作员单study数量断言2!==1导致CLI1，原Loop两个组合均事前允许；原脚本和first error保留。独立audit-current-loop/final-terminal-audit核2 actual observations、所有新组合、原9Task/6study/7attempt/prefix及154冻结文件保持，normal drain、consent1 enabled、active0；当前9Task8study9attempt，原两剩余对已消费不重跑。零方法后/新Task效果/撤回/冷恢复。本批D約16.75GiB、无依赖或旧账本全量副本。详见tianwen-rejected-method-observation-result-20261006.md。
+
+下一核仅隔离开发的前瞻试用策略：候选全部独立met且有确定同案例改善，其他baseline未知原样保留；先审界限，不修改旧v1判定/旧记录/main-Daily原门槛。另处理原生答案协议标签说明及多研究操作员调度。目标active，不机械blocked/索题/等自然样本；main/Daily NO-GO/R9保留。
+
 ## 2026-10-06 当前：失败方法诊断信息流已实现，接续真实模型
 
 新普通文本提案可选读取同scope/config/quality/family/mode/consent的旧candidate-failed来源候选臂方法及原双审诊断；认证原提案、执行、双审与停止时间，绑定旧sourceObservations/clues，剔除旧答案/引用/审计/保留案例。冻结一次引用，冷恢复不选最新；无合法记录/容量不足保持原路径，无新账本schema/资格/发布条件。原SDK缺信息RED与合法proof替换旧输入的两项RED均保存，修复后完整学习156+相关评审87+三源码故障控制=246通过，原十五构建；发布相关240+原完整profile报告50=290通过，原条件10和源码装配3不运行。profile内两源码控制原early-return不算实际故障注入，已用源码三项单独核实。首发布组合因操作员漏设原published标志3失败保留，正确原环境仅重跑profile通过；限定复查P2关闭。

@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：两实际投影认证，候选五合格但基线未知仍阻止启用
+
+44f113bf批65actual/0scripted/0新Task，两原未尝试对都由原Loop自然消费。2cab…来源candidate都met/counter改善，但adjacent实际标签退步，原candidate-failed；b950…完整五candidate met、baseline两个notmet/一个met/两个inc，原v1 inconclusive/0activation。请求2/33旧986来源诊断/方法及摘要均进入实际provider并与原记录匹配。未知不改met，也不否认两个原conclusive同案例改善；完整目标未完成。
+
+单研究操作员数量假设错误导致CLI1，原脚本/first error保存；独立终态audit核所有新对均事前允许、原9Task/6study/7attempt/prefix与154文件保持，normal drain/consent1 enabled/active0，当前9Task8study9attempt。不补跑这两研究，无后续实际方法效果/撤回/冷恢复。下一评估仅DEV前瞻试用版本与原生答案边界，不重判v1或改正式发布门槛；目标active、NO-GO/R9保留，D>=15。
+
 ## 2026-10-06 当前：可选吸收失败方法诊断，不增新资格
 
 普通文本新proposal可选投影一个既有candidate-failed来源候选方法及原双审not-met诊断，原proposal/source执行/review proof及原sourceObservations/clues认证，旧停止早于新打开；同scope/model/quality/family/mode/currentconsent，旧答案和反例/adjacent/holdout不投影。冻结引用/摘要，冷恢复不选最新；无合法输入或容量不足仍原研究，旧无字段兼容，不新增schema/门槛。两个有据RED保留，最新源码实际246通过，原十五构建、发布相关240及完整profile报告50/原条件10，源码装配3仅源码执行。首published漏环境3失败保存，正确原环境profile通过、三源码故障实际控制另核；不冒充所有故障发布注入或实际方法效果。
