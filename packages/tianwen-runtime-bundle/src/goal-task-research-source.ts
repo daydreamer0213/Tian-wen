@@ -75,6 +75,17 @@ export async function recoverGoalTaskResearchSource(ctx: Context, stateRoot: str
   return recovered
 }
 
+/** Proposal-only historical observations; never add previous answers to trial inputs. */
+export function goalTaskProposalObservation(source: GoalTaskResearchSource, recovered: Awaited<ReturnType<typeof recoverGoalTaskResearchSource>>) {
+  const original = recovered.original, terminal = original.source.nativeGoal.delivery
+  const deliveries = terminal === undefined ? original.conversation : original.conversation.filter(message => message.id === terminal.messageId)
+  if (terminal !== undefined && deliveries.length !== 1) throw new Error('original proposal delivery unavailable')
+  return structuredClone({ sourceId: source.sourceId, sourceInputDigest: source.inputDigest,
+    reviewMaterialDigest: source.input.reviewMaterialDigest, deliveries,
+    acceptance: source.outcome.input.outcome, reviewChecks: source.input.checks,
+    ...(original.fileResult === undefined ? {} : { fileResult: original.fileResult }) })
+}
+
 /** The same frozen reference boundary for the original study owner and read-only packet. */
 export async function recoverGoalGuidanceSource(ctx: Context, stateRoot: string | undefined, opened: GuidanceStudyOpened, sourceId: string) {
   const reference = opened.nativeGoalSources?.find(item=>item.sourceId === sourceId)
