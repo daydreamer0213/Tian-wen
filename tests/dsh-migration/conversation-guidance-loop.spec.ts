@@ -614,7 +614,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   'support-withdrawn-during-review', 'explored-support-withdrawn-during-review',
   'candidate-failed-early', 'dev-candidate-failed-early',
   'accepted', 'dev-paired-any-case', 'old-paired-any-case', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
-  'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
+  'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal', 'repair-mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover-offline', 'recover-offline-missing-proof', 'recover-offline-disabled', 'recover-offline-quarantined',
   'recover', 'recover-formatting', 'short-study-quotes', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'case-provider-failure', 'case-design-fresh-source', 'case-attempt-write-failure', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
@@ -683,7 +683,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       if (scenario === 'blank-guidance') return structured({ guidance: ' \t' })
       if (scenario === 'oversize-reason') return structured({ insufficientEvidence: '甲'.repeat(1366) })
       if (scenario === 'empty-proposal') return structured({})
-      if (scenario === 'mixed-proposal') return structured({ guidance, insufficientEvidence: 'Uncertain.' })
+      if (scenario === 'mixed-proposal' || scenario === 'repair-mixed-proposal') return structured({ guidance, insufficientEvidence: 'Uncertain.' })
       explorationProposal = {
         sourceTaskId: scenario === 'outside-source' ? opened.counterexampleTaskId : opened.sourceTaskIds[0], hypothesis: 'The scope was overlooked.', alternative: 'The facts were misunderstood.', temporaryInstruction: 'TEMPORARY: Check the source scope.',
         expectedIfHypothesis: { control: 'not-met', treatment: 'met' }, expectedIfAlternative: { control: 'not-met', treatment: scenario === 'indistinguishable' ? 'met' : 'not-met' },
@@ -699,6 +699,15 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     },
   ]
   if (scenario === 'refusal') script.push(textResponse('No valid structured proposal is available.'))
+  if (scenario === 'repair-mixed-proposal') script.push(request => {
+    expect(JSON.stringify(request.messages)).toContain('Choose exactly one proposal action')
+    expect(capturedMaterial(request).sourceTaskIds).toEqual(initialMaterial.sourceTaskIds)
+    return toolCallResponse('proposal-repair', 'structured_output', { guidance })
+  })
+  if (scenario === 'mixed-proposal' || scenario === 'source-mixed') script.push(request => {
+    expect(JSON.stringify(request.messages)).toContain('Choose exactly one proposal action')
+    throw new Error('scripted provider unavailable after denied mixed proposal')
+  })
   if (withSource && !exploreFirst && scenario !== 'source-outside' && scenario !== 'source-mixed') script.push(request => {
     const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
     const material = capturedMaterial(request)
@@ -1248,7 +1257,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     if (withSource) {
       if (scenario === 'source-outside' || scenario === 'source-mixed') {
         expect(registryGet).not.toHaveBeenCalled(); expect(study?.sourceReference).toBeUndefined()
-        expect(study?.stopped?.reason).toBe('invalid-judgment'); return
+        expect(study?.stopped?.reason).toBe(scenario === 'source-mixed' ? 'model-unavailable' : 'invalid-judgment')
+        expect(study?.candidate).toBeUndefined(); expect(study?.arms).toHaveLength(0); return
       }
       expect(registryGet, JSON.stringify(warnings)).toHaveBeenCalledTimes(1)
       if (scenario === 'source-disabled-get' || scenario === 'source-support-get') {
@@ -1286,10 +1296,10 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       }
     }
     if (['insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal'].includes(scenario)) {
-      expect(study?.stopped?.reason).toBe(scenario === 'insufficient' ? 'insufficient-evidence' : 'invalid-judgment')
+      expect(study?.stopped?.reason).toBe(scenario === 'insufficient' ? 'insufficient-evidence' : scenario === 'mixed-proposal' ? 'model-unavailable' : 'invalid-judgment')
       expect(study?.candidate).toBeUndefined()
       expect(study?.arms).toHaveLength(0)
-      expect(harness.adapter.requests).toHaveLength(scenario === 'outside-source' || scenario === 'refusal' ? 15 : 14)
+      expect(harness.adapter.requests).toHaveLength(scenario === 'outside-source' || scenario === 'refusal' || scenario === 'mixed-proposal' ? 15 : 14)
       if (scenario === 'insufficient') expect(study?.stopped).toHaveProperty('proposalProof.sessionId')
       return
     }
@@ -1434,8 +1444,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     const tasks = harness.ctx.tianwenEvolution.listConversationTasks()
     expect(tasks.at(-1)?.source.behaviorVersion).not.toBe(tasks[0]?.source.behaviorVersion)
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(1)
-    expect(harness.adapter.requests).toHaveLength((explored ? 55 : 48) + (withSource ? 1 : 0))
-    if (scenario === 'recover' || scenario === 'recover-formatting') {
+    expect(harness.adapter.requests).toHaveLength((explored ? 55 : 48) + (withSource ? 1 : 0) + (scenario === 'repair-mixed-proposal' ? 1 : 0))
+    if (scenario === 'recover' || scenario === 'recover-formatting' || scenario === 'repair-mixed-proposal') {
       const candidate = study!.candidate!.candidateSnapshot
       const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
         .map(line => JSON.parse(line))

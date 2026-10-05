@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：候选提案与未来验证分开，保留新首停止
+
+learning-r2一新模拟格式失败原独立not-met/instruction-following，7实际/完整+1模拟，原study9b62…proposer混合guidance/insufficientEvidence导致invalid-judgment/CLI1/排空，0candidate/arms/activation/after/rollback；原三Task/首study/prefix/52消费者/六其他旧账本/环境保持。[结果与接续](tianwen-status-report-learning-result-20261005.md)。
+
+只对多主action原生提交给明确修正提示，不host选字段。未来效果未验证不阻止提出候选，仍由原研究裁决；sourceUse/原post-parser/十臂及启用/旧proof不改。SDK RED/GREEN同会话修正/完整研究/后续/两次零模型恢复，未修正仍零候选，源码138/原十五构建、发布相关135+原完整profile50通过（10原跳过/3装配只源码）、限定复查通过。实际模型是否能修正及实际收益仍待核。
+
+剩余future1+保存future3原未尝试对直接接续，不新增Task/注入或改写两停止研究。实际接受才原方法后及未用任务、注入/撤回/冷恢复，完整目标active、main/Daily NO-GO/R9保持，不机械blocked/自然等/索题/加正式门槛，D>=15，无依赖副本。
+
 ## 2026-10-05 当前：文字研究两配对改善，不冒充完整学习
 
 新状态汇报基线12实际/完整、0模拟，两原Task not-met/instruction-following；一个显式正确counter实际评审met。原Loop研究133真实/完整+1模拟，五臂两源not-met→met、counter baseline inconclusive，原source-unavailable/CLI1/排空，无十臂裁决、激活、后续或撤回。原52消费者/6旧账本/环境/prefix/两来源Task快照保持。[准确结果与计划](tianwen-status-report-learning-result-20261005.md)。

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：混合提案可原生纠正，接续现有剩余组合
+
+learning-r2只一新明确模拟多段source3、实际原入题/双评审not-met/instruction-following，7真实/完整+1模拟，原study9b62…提案同提交guidance/insufficientEvidence，原invalid-judgment/CLI1/排空，0candidate/arms/激活/后续/撤回；旧三Task/首study/52消费者/六其他旧账本/环境/prefix保持。[准确结果](tianwen-status-report-learning-result-20261005.md)。
+
+新提案门禁仅拒多主action，提示原模型同会话自行纠正：候选不是未来已验证效果，未来不确定性无需并列第二action；sourceUse及原后parser/十臂判定/启用/历史恢复保持。SDK RED/GREEN完整研究/后续与两次零模型冷恢复，未纠正仍0候选，源码138/原十五构建、发布相关135+原完整profile50通过（10原跳过/3装配只源码）、限定复查通过。旧首实际结果不改。
+
+下一只原future1+保存future3剩余未尝试对，零新增Task/注入；中立原SDK parent调度原Loop，原四Task/两停止研究不重跑或补判。实际接受才新普通会话效果/未用任务/原方法注入/撤回/冷恢复，目标active、不机械blocked/索题/等自然/加门槛。main/Daily NO-GO/R9保持，D约16.8GiB>=15，20偏好未达，无依赖副本。
+
 ## 2026-10-05 当前：两来源实际改善，文字研究短引用接续修复
 
 状态汇报基线12真实/完整、0模拟，两Task原not-met/instruction-following；第一形式不合规、第二另有无来源未来发布程序。一个显式模拟正确counter、实际原生met，原Loop研究133真实/完整+1模拟，五臂两来源均not-met→met、counter baseline inconclusive，原source-unavailable/CLI1/排空，无完整裁决/启用/方法后/撤回。修改前52消费者/6旧账本/旧环境/prefix/两源快照保持。[结果与接续](tianwen-status-report-learning-result-20261005.md)。
