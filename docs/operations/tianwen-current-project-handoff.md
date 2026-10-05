@@ -1,5 +1,9 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：字面格式控制通过，下一隔离格式学习
+
+fbe37946原CLI真实控制8actual/2明确scripted，允许XML原met、普通正文带标签原not-met/instruction-following，CLI0/零研究/旧共享学习账本逐字保持；只证明评审边界，非方法效果。下一新隔离写作格式来源与正常对照，先真实后续基线，再原研究/接受才自动启用、方法后/未用任务/撤回/冷恢复。旧九Task/六study/七attempt保护，旧研究不重判，不新增门槛；目标active、main/Daily NO-GO/R9/DEV v1保持，D>=15GiB。计划docs/superpowers/plans/2026-10-06-tianwen-format-learning-plan.md。
+
 ## 2026-10-06 当前：许可边界控制通过，接续字面格式控制
 
 17a5c5af的隔离控制共15actual/5明确scripted主答：首控制因口播语气/未检查说明未全通过；第二控制名称禁令只指泛称，原评审met，负例设计有歧义，首结果保留；第三使用明确名称，6actual/2scripted、原CLI0，许可名称及同段事实解释met，违反明确名称禁令not-met/instruction-following。三个控制共享学习账本字节保持，零研究，不称自动学习效果。证据D:/DevData/tianwen-future-approval-learning-20261006/criteria-scope-controls-final-audit.json。

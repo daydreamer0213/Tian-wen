@@ -1,5 +1,11 @@
 # 状态汇报实际学习试验与文字短引用修复
 
+## 2026-10-06 字面格式真实控制完成
+
+fbe37946隔离literal-answer-control：8actual/完整请求、2明确scripted主答、原CLI0。允许XML Task767decd5…两检查met；明确普通正文Task8e2a2211…两检查not-met/instruction-following，审计明确实际字面标签不可当harness忽略，当前事实仍supported。零study/activation，旧共享学习账本逐字保持；本批不是实际方法收益。此前15actual/5scripted名称控制与本批独立，不合并为学习效果。
+
+下一按2026-10-06-tianwen-format-learning-plan.md新隔离写作格式来源，减少原状态语义/语气混杂；先真实未来基线、再模拟历史来源、原研究裁决，通过才后续/撤回。旧停止不重判，不新增门槛，不索题。完整目标active。
+
 ## 2026-10-06 当前：许可边界通过，字面答案来源已澄清
 
 隔离许可控制三个批次15actual/5明确scripted；首语气控制未全通过、第二负例泛称有歧义，均保留首结果。第三明确名称正反控制6actual/2scripted、原CLI0：允许名称及同段事实解释met，违反明确名称禁令not-met。共享学习账本字节保持，零研究，不算方法效果。证据D:/DevData/tianwen-future-approval-learning-20261006/criteria-scope-controls-final-audit.json。
