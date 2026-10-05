@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：十臂研究未接受，转最新状态转换任务
+
+8ba81be5的learning-r3仅剩余原future1+保存future3来源对；42真实请求/42完整轨迹、0模拟、零新增普通Task。原十臂完整：source1 not-met→met、source2 inconclusive→met、counterexample not-met→met、adjacent not-met→inconclusive、holdout met→not-met，原裁决inconclusive/CLI1/排空，无激活、方法后、撤回或冷恢复。旧四Task/两研究/52消费者/六其他旧账本/原环境/账本前缀保持。四次实际原生短引用已成功保存；不称解决所有评审错误或降低调用成本。
+
+holdout真实退步：先正确说复核已开始，随后又说只是建议，且超长；adjacent的“没有执行任何行动”缺孤立评审可见的执行依据。候选自身不全通过，不能靠放宽baseline不确定规则接受，本次未新增判定版本或正式发布条件。[准确结果](tianwen-status-report-learning-result-20261005.md)。
+
+下一两个新模拟历史错误：更新的行动回执覆盖早先建议，明确撤回旧检查通过结论但保留交付回执。任务和注入错误事前冻结，原入题/独立评审/案例设计/候选/十臂裁决实际运行；旧四Task/三研究不重跑或补判。原接受才自动启用、旧失败文本的新普通会话对比、独立未用任务及安全撤回；模拟来源与真实效果分开。目标active，不等自然/索题/机械blocked。main/Daily NO-GO/R9保持；复用原安装，D约16.8GiB满足15下限，20偏好未达。
+
 ## 2026-10-05 当前：混合提案可原生纠正，接续现有剩余组合
 
 learning-r2只一新明确模拟多段source3、实际原入题/双评审not-met/instruction-following，7真实/完整+1模拟，原study9b62…提案同提交guidance/insufficientEvidence，原invalid-judgment/CLI1/排空，0candidate/arms/激活/后续/撤回；旧三Task/首study/52消费者/六其他旧账本/环境/prefix保持。[准确结果](tianwen-status-report-learning-result-20261005.md)。

@@ -39,3 +39,13 @@
 新原SDK控制旧代码RED，修复后同一会话纠正、完整研究/后续和两次零模型冷恢复通过；不纠正则工具拒绝、随后明确模拟provider失败仍零candidate/arms。首GREEN中fixture重复tool ID导致证明歧义，改为独立ID；请求数量因真实多一次修正而相应核对。源码相关138/原十五步运行包构建通过；发布适用相关135与原完整profile50通过，10原条件跳过、3源码装配项只计源码（共185通过/13未运行）。限定只读复查无有据P1/P2。只有确定性工程控制，不称实际模型已纠正或方法有效。
 
 接下来复用剩余的原未尝试来源对（实际旧future1与已保存的新future3），不再新增Task或注入交付、不续写两个停止研究。中立新原SDK parent只调度研究，不重复旧普通交付；有实际接受才按前述方法后/未用任务/撤回/冷恢复计划执行。零模型准备的首路径字符串/脚本引号错误保留在操作输出，不产生Task或研究证据。原四Task/两研究与原账本前缀、消费者及旧环境修改前均核对；目标active，正式门槛不新增。
+# 剩余来源对的完整首结果及状态转换接续
+
+8ba81be5的learning-r3，原CLI实际42请求/42完整轨迹、0模拟、没有新增普通Task；原study 964e37db134ca7160d260fede914ed277e60d704d9647529ffc40a0e2bcd4e52。十臂全部保存：source1 not-met→met、source2 inconclusive→met、counterexample not-met→met、adjacent not-met→inconclusive、holdout met→not-met。原裁决inconclusive，操作员断言未接受而CLI1，原排空完成。没有激活/方法后/撤回/冷恢复。原四Task/两研究/52消费者/六其他账本/原环境/前缀保持；证据在 D:/DevData/tianwen-status-report-learning-20261005/learning-r3/final-audit.json。
+
+source2 baseline的两原生检查不同意：要求检查不认可无来源的“再走发布申请”，来源检查认可，所以保留inconclusive。adjacent candidate闭尾“没有执行任何行动”被来源检查拒绝，孤立文本评审没有实际工具执行上下文，要求检查通过。holdout candidate两项都不通过：原记录已有两名人员开始重检，正文却另说“重检只是建议，不构成已定事项”，且约325字超过150–220字；不是单纯基线门槛阻塞，也不能把候选退步称学习有效。本次不实施新DEV判定策略、不重判旧研究、不增加正式条件。
+
+live-short-quote-proof.json只读核实四次新原生检查成功保存精确短原文、没有旧可选协议；这是实际引用兼容性证据，不是整体研究或调用成本改善。
+
+已零模型冻结 D:/DevData/tianwen-state-transition-learning-20261005/tasks.json：两个新来源的旧检查通过结论明确撤回、交付回执保留，早先复核建议随后已有执行回执；注入错误只把已执行复核说成建议，作为公开模拟历史失败。原入题/类别/独立检查及完整研究不由操作员写结果。复用原dev-paired-any-case.v1、公用安装及模型配置，保护旧四Task/三研究。原接受才两旧实际失败文本的新普通会话对比（此前已观察，不能称完全未见样本）及独立未用任务（没有同题方法前分数），随后安全撤回/零模型冷恢复。运行45分钟/150实际请求及15GiB下限；目标active，main/Daily NO-GO/R9保持。
+
