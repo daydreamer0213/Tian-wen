@@ -2,6 +2,18 @@
 
 完整自动学习目标 active；main/Daily NO-GO、R9 和原正式发布条件保持。允许主动设计缺失条件，不等待自然发生，不再向用户索题。
 
+## 2026-10-06 新来源首结果：实际候选提前停止
+
+learning-r2原CLI源码6462674c，12actual/12完整轨迹，1明确模拟历史交付另存。新青禾Task1e7597e7…原独立not-met/source-fidelity，原Loop选择保存松渡+青禾，新studyf2725f58…候选已保存；source1 baseline inconclusive、candidate not-met，原candidate-failed停止，无decision/activation/after/rollback。CLI1由未接受断言产生，原排空成功。旧六Task/四研究/52消费者/六其他账本/环境/prefix均保持，未重跑旧普通任务。
+
+candidate的当前四字段均正确，但末尾确定说“等重新检查有了结果，这个问题才会再往前走一步”。记录没有规定此未来发布推进条件，两个原检查均认为source-fidelity错误。方法并非完全无用，但当前仍有事实退步，不能靠改baseline未知规则接受。baseline一个检查met、另一个因实际原答含`</answer>`判not-met；该标记已在原material.original.answer里，不是host评审时加的分隔符，不追改原不确定结论。
+
+新的正常收尾路径实际验证：未abort、原排空、无本批active方法，卸载guard和释放预留parent，无模型增量，consent仍enabled/revision1。退出helper不是这轮停止的原因；没有实际激活，自然也没有实际撤回。
+
+原审计脚本保留，新增audit-terminal.mjs及revision摘要，只处理“实验断言完成后budget才触发”的记账边界：criteriaCompletedBeforeExit与真正正常CLI0成功分别记，emergency始终失败，不改研究裁决。四零模型控制normal/emergency有排空/emergency无普通排空/criteria后emergency均通过，临时控制目录已清理；首临时相对helper缺失错误保留。限定复查无有据P1/P2。实际final-audit.json为normal-drained/completed=false、12actual/1scripted，上述旧记录和消费者核对通过。
+
+下一仅现有灯岸+青禾未尝试来源对，零新Task/注入，保护七Task/五研究。实际接受并自动启用后才执行原两个失败文本的新普通会话、未用灯塔任务、实际方法原文注入及安全撤回/零模型冷恢复。目标active，不索题/机械blocked/等自然/新增正式门槛，D约16.8GiB>=15，所有安装共享。
+
 ## 最新：状态转换首结果与退出修复
 
 `D:/DevData/tianwen-state-transition-learning-20261005`，首运行源码f88e91b4。38真实请求/38完整原轨迹、2明确模拟历史主答；新Task e8da2e86…及44b1d453…原独立not-met/source-fidelity。原研究8ee1c36a…保存了模型方法，但只完成source1 baseline met/candidate met、source2 baseline inconclusive三个臂。source2的基线有无来源的发布前提断言，两个原检查不同意，原不确定结论保持。末评审未有效捕获，原source-unavailable/CLI1/排空。没有activation、方法后、撤回或冷恢复，不能称完整学习已成功。

@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：新状态研究提前发现候选退步，接续剩余对
+
+6462674c的state-transition learning-r2：12真实请求/12完整轨迹、1明确模拟历史主答，新Task1e7597e7…原not-met/source-fidelity。原Loop选择保存松渡+新青禾，studyf2725f58…候选保存；source1 baseline inconclusive、candidate not-met，原candidate-failed/CLI1/正常排空、无激活/后续/撤回。候选正确覆盖四个当前状态，但断言“等重新检查有了结果，这个问题才会再往前走一步”，两个检查均认为无来源的未来发布条件；不靠改baseline接受候选。baseline原答实际包含`</answer>`，不是host给答案添加的分隔符，两个检查不同意原保留。旧六Task/四研究/52消费者/六其他账本/环境/prefix保持；无旧普通交付重跑。[准确结果](tianwen-status-report-learning-result-20261005.md)。
+
+新操作员实际正常排空/未abort/无本批active后卸载guard、释放预留parent，consent仍enabled/revision1。审计追加独立audit-terminal脚本，保留原bootstrap、audit及摘要，区分实验断言完成和正常CLI成功；四个零模型解析控制含“断言完成后预算退出”，都通过，限定复查无有据P1/P2。不改实际研究裁决。下一只保存灯岸+青禾剩余未尝试来源对，零新增Task/注入；保护当前七Task/五研究。实际接受才核原方法注入、新普通会话实际改善、未用任务/撤回/冷恢复。目标active，main/Daily NO-GO/R9保持，D约16.8GiB>=15，无依赖副本。
+
 ## 2026-10-05 当前：状态转换首结果已停止，修复提交诊断和退出遗漏
 
 f88e91b4的新状态转换批实际38请求/38完整轨迹，两个历史错误交付明确模拟、另外保存；新增两Task原独立not-met/source-fidelity。原study8ee1c36a…候选保存，仅三臂source1 met→met、source2 baseline inconclusive，随后原source-unavailable/CLI1/排空，没有激活、后续效果或撤回。修改前旧四Task/三研究/52消费者/六其他账本/环境及原前缀保持。旧首研究不重判或补跑。[准确结果](tianwen-status-report-learning-result-20261005.md)。

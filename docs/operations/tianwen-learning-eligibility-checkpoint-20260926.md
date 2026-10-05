@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：新模拟问题已入研究，候选事实退步原生提前停止
+
+6462674c新learning-r2为12actual/完整+1明确scripted，原not-met/source-fidelity，studyf2725f58…baseline inconclusive/candidate not-met后原candidate-failed/CLI1/正常排空。候选最新复核状态写对，但无来源地加未来发布前提，两检查均不通过；不因模型JSON诊断修好就当方法有效，不放宽baseline来接受失败候选。旧六Task/四研究/52消费者/六其他账本/环境/prefix保持。正常未abort且排空/无active后卸载guard，consent仍revision1，旧来源资格保留。
+
+独立终态审计保留原脚本，区分criteria完成与normal/CLI0成功；四零模型控制含criteria后budget退出，限定复查通过。不重判首研究。下一保存灯岸+青禾唯一剩余未尝试对，保护当前七Task/五研究，零新增Task/注入、不重跑旧交付。目标active，main/Daily NO-GO/R9/正式条件保持，D>=15GiB。
+
 ## 2026-10-05 当前：模拟来源合法，首停止保留，处理原生提交和退出问题
 
 f88e91b4的新状态转换批38真实请求/38完整轨迹+2明确模拟历史交付；两原独立not-met/source-fidelity。候选保存，三臂source1 met/met、source2 baseline inconclusive，最后source-unavailable/CLI1/排空，零activation/after/rollback。模拟失败可以主动触发研究，但不能称自然模型错误，工程控制也不冒充实际效果。修改前旧四Task/三研究/52消费者/六其他账本/环境/prefix保持。[准确结果](tianwen-status-report-learning-result-20261005.md)。
