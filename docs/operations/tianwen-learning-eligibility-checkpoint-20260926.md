@@ -1,5 +1,12 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：具体模拟反馈真实归因，修复冷启动时序
+
+新原CLI三任务反馈计划已冻结。r2首批8真实/1显式主答注入，第一Task完成/双评审not-met，原SDK具体反馈真实归因为attributable-problem/source-fidelity，原确切答案/版本/独立proof保存。操作员摘要算法断言错误导致CLI1/原排空，尚未做另外两任务。接续原profile零调用冷预检发现Bridge读盘未完而Loader提前判pending；原Runtime等待原Bridge Fiber的窄修复，源码60、原十五实际构建、发布dist60、原发布profile49通过/10原跳过，限定复查无有据P1/P2/等待环。[准确首结果及冷启动修复](tianwen-native-feedback-cold-start-result-20261005.md)。
+
+下一同一原profile以新消费者冻结接续，仅核第一旧已settled材料/规范摘要，不重新答题或归因；执行原两未做任务、版本修订/撤回与冷回放。完整目标active，仍需新DEVpolicy原生激活及方法后任务效果；不索题/机械blocked。main/Daily NO-GO/R9与原正式门槛不新增；无Docker/依赖副本，D17.09>=15。
+
+
 ## 2026-10-05 当前：DEV任一固定案例改善规则已交付
 
 按所有者授权，缺条件主动模拟适用于全项目开发；不等待自然失败、重复问题、真人评价或后续任务。新显式 dev-paired-any-case.v1 允许五固定案例任一实际改善且候选全部通过，旧规则/历史保持。源码378、严格类型、Evolution原构建/Runtime原十五阶段、发布profile49通过/10原跳过；两公共Core/Loop控制92scripted/0real，旧3→5拒绝、新DEV持久化接受激活、普通区冷恢复可安全撤回。随后原CLI/Web/规范DEV loader/public applyDevelopment加载预检退出0、0模型/Task/study，选项正确解析；未声称新真实未来效果。实现7e7f89ce已推送。[准确交付及后续](tianwen-controlled-learning-policy-gap-20261005.md)。

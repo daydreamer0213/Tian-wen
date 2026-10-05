@@ -1,8 +1,8 @@
 import { mkdirSync, mkdtempSync, existsSync, rmSync, symlinkSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { afterEach, expect, it } from 'vitest'
-import { Context, mountAgentLoopTestDependencies } from '@tianwen/dsh-compat'
+import { afterEach, expect, it, vi } from 'vitest'
+import { Context, mountAgentLoopTestDependencies, mountFeedbackHarness } from '@tianwen/dsh-compat'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as runtime from '../../packages/tianwen-runtime-bundle/src/runtime.js'
@@ -10,6 +10,22 @@ import * as runtime from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 const base=resolve('D:/DevData/tianwen-development-runtime'),roots:string[]=[]
 afterEach(()=>{for(const root of roots.splice(0)){if(!root.startsWith(base+'\\'))throw new Error('owned DEV fixture escaped');rmSync(root,{recursive:true,force:true})}})
 function fixture(){mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'api-test-'));roots.push(root);const ctx=new Context();ctx.baseUrl=pathToFileURL(root).href;return{root,ctx}}
+it.each(['ordinary','DEV'] as const)('waits for persisted feedback reconciliation before declaring %s Runtime ready',async mode=>{
+ const f=fixture();await f.ctx.fiber.dispose()
+ const {ctx}=await mountFeedbackHarness(f.root,[]);ctx.baseUrl=pathToFileURL(f.root).href
+ let release!:()=>void,entered!:()=>void,settled=false
+ const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ const originalList=ctx.sessionPersistence.list.bind(ctx.sessionPersistence)
+ const delayed=vi.spyOn(ctx.sessionPersistence,'list').mockImplementationOnce(async()=>{entered();await gate;return originalList()})
+ const mounted=(mode==='DEV'?runtime.applyDevelopment(ctx,{developmentRoot:f.root}):runtime.apply(ctx,{evolutionRoot:join(f.root,'evolution')})).then(()=>{settled=true})
+ try{
+  await started;await new Promise<void>(resolve=>setImmediate(resolve))
+  expect(settled,'persisted feedback is still loading').toBe(false)
+  release();await mounted
+  expect(ctx.get('tianwenMessageFeedbackBridge')).toBeDefined()
+  expect(ctx.tianwenEvolution.listConversationFeedbackAssessments()).toEqual([])
+ }finally{release();await mounted;delayed.mockRestore();await ctx.fiber.dispose()}
+})
 it('provides an explicit development Runtime entry rather than exposing a default quarantine override',()=>{
   expect((runtime as any).applyDevelopment).toBeTypeOf('function')
 })

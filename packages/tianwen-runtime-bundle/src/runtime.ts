@@ -515,7 +515,7 @@ async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig,
   ctx.plugin(TianwenLearningConsentAgentService, config.learningSkillSources === undefined
     ? {}
     : { learningSkillSources: config.learningSkillSources })
-  ctx.plugin(TianwenMessageFeedbackBridgeService)
+  const feedbackBridge = ctx.plugin(TianwenMessageFeedbackBridgeService)
   ctx.plugin(TianwenNativeToolObservationService)
   ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
     externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
@@ -543,6 +543,9 @@ async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig,
     ? {}
     : { executor })
   mountTianwenLongGoalHost(ctx, config)
+  // A full Profile must finish disk reconciliation before Loader checks its
+  // consumers. Partial hosts without feedback storage keep deferred mounting.
+  if (ctx.get('messageFeedback') !== undefined && ctx.get('sessionPersistence') !== undefined) await feedbackBridge
 }
 export { readGoalTaskOutcomeMaterial } from './goal-task-material.js'
 export type { GoalTaskOutcomeMaterial } from './goal-task-material.js'
