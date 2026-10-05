@@ -245,6 +245,16 @@ it.each([false,true])('normal Loader imports DEV without a request under CLI pro
     '@deepseek-ai/dsh-tools','@deepseek-ai/dsh-agent','@deepseek-ai/dsh-agent-loop','@deepseek-ai/dsh-subagent']) {
    const module=await load(cli,name);await ctx.plugin(module.default??module,name.endsWith('agent-loop')?{agents:[]}: {})
   }
+  await ctx.loader.await()
+  // The original full DEV entry must not mount before its native feedback
+  // backend is available; cold disk reconciliation depends on that backend.
+  expect(ctx.get('tianwenEvolution')).toBeUndefined()
+  for(const [name,config] of [
+   ['@deepseek-ai/dsh-storage',{}],
+   ['@deepseek-ai/dsh-storage-json',{root:f.profile+'/feedback-storage'}],
+   ['@deepseek-ai/dsh-storage-domain',{backend:'json',routes:{}}],
+   ['@deepseek-ai/dsh-message-feedback',{maxNoteBytes:8192}],
+  ] as const){const module=await load(cli,name);await ctx.plugin(module.default??module,config)}
   ctx.on('llm/stream',async function*(request,next){requests.push(request);yield* next()})
   for(let pass=0;pass<8;pass++) {
    await Promise.all([...ctx.registry.values()].flatMap(r=>[...r.fibers].map(f=>f.await())))

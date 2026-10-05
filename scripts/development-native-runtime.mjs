@@ -12,7 +12,7 @@ const runtime=await import(new URL(manifest.exports['./runtime'].default,package
 export const name='tianwen-development-native-runtime'
 // Upstream Loader owns service readiness; the original DEV boundary requires
 // the already mounted original backend, not a replacement constructed here.
-export const inject=[...runtime.inject,'sessionPersistence']
+export const inject=[...runtime.inject,'sessionPersistence','messageFeedback']
 const key=path=>resolve(path).toLowerCase()
 const hash=bytes=>'sha256:'+createHash('sha256').update(bytes).digest('hex')
 const packetMaxBytes=8*1024*1024
