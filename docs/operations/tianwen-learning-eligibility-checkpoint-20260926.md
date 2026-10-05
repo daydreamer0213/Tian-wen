@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：提案真实有效，首试验因固定请求预算未完成
+
+r5一新source3 complete/检查rejected/双评审not-met，19真实/19完整轨迹、4root模拟；原七Task/旧study/两基线保持。原观察实际送达，原模型捕获有效方法/候选已保存；首baseline原合法九工具成功但超过8模型请求，分派前中止/terminal error/无receipt，原source-unavailable/0arms/激活/方法后/撤回/CLI1/排空保存，不能判方法无效或成功。预检首遗漏raw合同digest零模型失败及原冻结保持，按原字节修正后0调用CLI0。[准确范围](tianwen-ordinary-proposal-observation-result-20261005.md)。
+
+45消费者/三旧账本/原环境/prefix/七Task/旧study/84容器不变，Docker停。下一最小协调请求预算（原12工具+末尾交付候选13模型请求）、权限/验收不变，原8/无提示proof兼容及控制边界先验证；现有source1+source3未尝试对可接续，无需旧Task复跑或补判。完整目标active、main/Daily NO-GO/R9保持，不索题/机械blocked/加正式门槛，D约16.9>=15，无依赖副本。
+
 ## 2026-10-05 当前：两合格模拟文件失败自动建研究，原提案观察已补齐
 
 r4两新Task complete/检查rejected/双评审not-met，16真实/16完整轨迹、8显式历史root另记；自动原研究及五案例检查已准备，提案缺实际原交付/保存评审、空guidance混返，原invalid-judgment/0arms/激活/方法后/撤回、CLI1/排空保留。旧五Task/两基线不重跑，原41消费者/旧账本/环境/prefix/84容器保持、Docker停。[准确结果](tianwen-ordinary-proposal-observation-result-20261005.md)。

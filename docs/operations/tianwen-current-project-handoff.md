@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：真实方法提案已保存，试验被8请求预算中断
+
+07d10330修复已推送，r5只新增source3一显式失败、原七Task/首study/两基线保持；预检首raw合同digest遗漏零模型失败保留，按实际原字节纠正后0调用CLI0。实际19真实/19完整轨迹、4root模拟，source3 complete/rejected/双评审not-met；原Loop新study53659531…实际收到两原交付/检查/评审，真实proposer一次有效方法提案已捕获、候选保存。首baseline Worker九个合法read/edit工具全部成功，却超过原8模型请求预算，分派前中止；原terminal error/无receipt/source-unavailable/0arms、激活、方法后、撤回，原CLI1/排空保持。不是方法无效或新验收条件。[准确结果](tianwen-ordinary-proposal-observation-result-20261005.md)。
+
+修改前45消费者/三旧账本/原环境/profile前缀/七旧Task/旧study/84容器身份保持，Docker停。完整目标active，不标blocked/索题/重跑；下一先协调原请求预算与12工具上限及末尾交付（最小候选13请求、保留旧8/无提示proof），以受控控制验边界/冷恢复/清理，再绑定现有source1+source3未尝试对，不需重造Task。原main/Daily NO-GO/R9/正式条件保持，生成物D、无依赖副本、剩余约16.9GiB>=15；约0.4MB旧控制home删除自动审批拒绝保留不绕过。
+
 ## 2026-10-05 当前：普通文件任务已自动建研究，补齐交付观察与冷恢复
 
 r4新两显式失败Task completed/原检查rejected/双评审not-met，16真实/16完整轨迹、8root模拟另记；原Loop自动研究/五案例检查已准备，提案缺实际交付与评审且空guidance混返，原invalid-judgment/CLI1/排空/0arms、候选、激活、方法后、撤回保持。修改前41消费者/三旧账本/原环境/profile前缀/84容器不变，Docker停。[准确结果及范围](tianwen-ordinary-proposal-observation-result-20261005.md)。

@@ -1,5 +1,15 @@
 # 普通任务研究材料补齐：2026-10-05
 
+## 接续实际结果：已生成原生方法提案，查明试验预算中断
+
+07d10330已推送。新根`D:/DevData/tianwen-python-native-learning-r5-20261005`只追加source3一项显式模拟失败，复用原source2组成未尝试对；原七Task/首study/两未来基线逐项保持。首次零调用预检因操作员忘记更新新增合同的原raw digest而退出1，原首冻结压缩保存；核原账本前缀完全相同后，按实际原JSON字节更新digest，修订原CLI预检0、0模型/7旧Task/1旧study，没有修改检查器或学习规则。
+
+实际批19真实请求/19完整轨迹、4显式root注入另记。source3 completed/原检查rejected/双评审not-met，原Loop新建`guidance-study:536595315dc299ed69e3a1cb3fc896b267bb7c40ef6ef1d5bfb1c6b7c61a1ffd`；完整原交付和评审已实际进入proposer，原模型通过结构接口生成可复用文件维护方法、候选已保存。0正式arm、0激活、0方法后/撤回，原source-unavailable及CLI1/排空保持。
+
+确切原因已在原first baseline Worker原生session确认：它实际进行了9次合法read/edit，文件工具均成功；原执行器只允许8次模型请求，下一请求在分派前以`conversation file trial request limit exceeded`中止，terminal error，没有成功receipt。原工具总尝试上限12未达到，属于执行预算不足，不能归为方法无效，也不能把未完成baseline判成通过。第一次baseline使用父方法（无新候选），不将其称作候选执行结果。
+
+`final-audit.json`已核45消费者、三旧账本/旧环境、原profile前缀、旧七Task/旧study及84原容器身份保持，候选/首停止完整保存，Docker已停。下一优先把模型请求预算与已有12工具上限及末尾交付协调（最小候选13请求，工具上限/权限/验收不变），同时保留原8请求和无预算提示的旧proof恢复；用零真实受控边界先证完整交付/超限停止/自动清理，再接续现有source1+source3未尝试对，不额外重造或重跑八旧Task。完整目标active、main/Daily NO-GO/R9/原正式门槛不变。
+
 当前已走通两项显式模拟文件失败自动发起原生研究；研究缺少原交付的传递缺口及新观察的冷恢复缺口已修复。尚未取得本批真实研究接受、自动激活或新后续任务改善。完整目标保持 active，main/Daily NO-GO、R9 与原正式发布条件不变。
 
 ## 首次实际结果保持
