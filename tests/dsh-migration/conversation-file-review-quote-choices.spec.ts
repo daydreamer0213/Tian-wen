@@ -5,8 +5,8 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
-import { assertSupportedJsonSchema, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
-import { SessionId, mountPersistentHarness } from '@tianwen/dsh-compat'
+import { assertSupportedJsonSchema, validateJsonSchemaValue, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { CallId, SessionId, mountPersistentHarness } from '@tianwen/dsh-compat'
 import { sha256, type ConversationAuditedReviewCheck } from '../../packages/tianwen-evolution/src/index.js'
 import { projectClaimEvidence, runConversationClaimReview, verifyConversationOriginalReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { recoverConversationJudgmentRequest, runConversationJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
@@ -27,9 +27,9 @@ function files(content = 'Source fact.', outputContent = 'Source fact.') {
     criteria: ['DERIVED_CRITERION_CANARY'], files: { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: base, outputKind: 'files', entries, outputPaths: ['output.txt'] } },
     evaluationMode: 'local-files', conversation: [], toolEvidence: [], fileResult: { ...output, outputDigest: sha256(output) } }
 }
-async function review(material: unknown, inspect: (schema: ObjectJsonSchema) => void, purpose: 'original-result' | 'method-study' = 'original-result') {
+async function review(material: unknown, inspect: (schema: ObjectJsonSchema) => void, purpose: 'original-result' | 'method-study' = 'original-result', quotes = ['Source fact.']) {
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-quote-choices-')); roots.push(root)
-  const respond = auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Controlled schema fixture, not a real acceptance result.', evidenceQuotes: ['Source fact.'] })
+  const respond = auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Controlled schema fixture, not a real acceptance result.', evidenceQuotes: quotes })
   const schemas: ObjectJsonSchema[] = []
   const response = (request: GenerateOptions) => {
     const raw = request.tools?.find(tool => tool.name === 'structured_output')?.parameters
@@ -45,11 +45,13 @@ async function review(material: unknown, inspect: (schema: ObjectJsonSchema) => 
     const result = await runConversationClaimReview(h.ctx, handle.agent, { label: 'File quote choices', material, purpose,
       evidence: ['Source fact.'], signal: new AbortController().signal, callConfig: config })
     expect(result.verdict).toBe('met'); expect(h.adapter.requests).toHaveLength(2)
+    expect(result.reviewChecks.map(check => check.evidenceQuotes)).toEqual([quotes, quotes])
+    if (purpose === 'original-result') for (const check of result.reviewChecks) await verifyConversationOriginalReviewCheck(h.ctx, check, material, sha256(config))
     expect(schemas).toHaveLength(2); for (const schema of schemas) inspect(schema)
   } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
 }
 
-it.each(['original-result', 'method-study'] as const)('offers frozen single-item quotes before new %s full-file reviews', async purpose => {
+it.each(['original-result', 'method-study'] as const)('offers single-item quote examples while accepting a legal non-example in new %s full-file reviews', async purpose => {
   const original = files()
   const material = purpose === 'original-result' ? original : { task: { prompt, files: original.source.files, criteria: ['DERIVED_CRITERION_CANARY'],
     feedbackStandard: { criteria: ['FEEDBACK_STANDARD_CANARY'] } }, answer: '', fileResult: original.fileResult }
@@ -57,22 +59,74 @@ it.each(['original-result', 'method-study'] as const)('offers frozen single-item
   expect(prompt).toContain(crossing); expect(evidence.items.some(item => item.text.includes(crossing))).toBe(false)
   const expected = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : [item.text]))]
   await review(material, schema => {
-    expect(schema.properties?.evidenceQuotes?.items?.enum).toEqual(expected)
+    const quoteSchema = schema.properties!.evidenceQuotes!
+    expect(quoteSchema.items?.enum).toBeUndefined()
+    expect(quoteSchema.items?.examples).toEqual(expected)
+    expect(quoteSchema.items?.examples).not.toContain('Source')
+    expect(expected.every(quote => evidence.items.some(item => item.text.includes(quote)))).toBe(true)
+    expect(validateJsonSchemaValue(quoteSchema, ['Source'])).toEqual([])
     expect(schema.properties?.evidenceQuotes?.items?.description).toContain('one')
     expect(expected).not.toContain(crossing)
     expect(expected.some(text => text.includes('CANARY'))).toBe(false)
-  }, purpose)
+  }, purpose, ['Source'])
 })
 
-it('deduplicates choices without promoting empty answer units to quotations', async () => {
+it('deduplicates quote examples without promoting empty answer units to quotations', async () => {
   const material = files('Source fact.', '')
   const evidence = projectClaimEvidence(material, 'file-chunks-v1')
   expect(evidence.items.some(item => item.role === 'answer' && item.text === '')).toBe(true)
   await review(material, schema => {
-    const choices = schema.properties?.evidenceQuotes?.items?.enum
+    expect(schema.properties?.evidenceQuotes?.items?.enum).toBeUndefined()
+    const choices = schema.properties?.evidenceQuotes?.items?.examples
     expect(choices).toEqual([...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : [item.text]))])
     expect(choices).not.toContain('')
   })
+})
+
+it('rejects a cross-item quote with an example-only schema before accepting a legal non-example correction', async () => {
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-quote-example-repair-')); roots.push(root)
+  const material = files(), evidence = projectClaimEvidence(material, 'file-chunks-v1')
+  expect(evidence.items.some(item => item.text.includes(crossing))).toBe(false)
+  const response = (quote: string, callId: string) => (request: GenerateOptions) => auditedEvidenceResponse({
+    verdict: 'met', category: null, explanation: 'Controlled example-only quote boundary.', evidenceQuotes: [quote],
+  }, 'empty', false)(request).map(chunk => chunk.type === 'block-end' && chunk.block.type === 'tool-call'
+    ? { ...chunk, block: { ...chunk.block, id: CallId(callId) } } : chunk)
+  const h = await mountPersistentHarness(root, [
+    request => {
+      const quoteSchema = request.tools!.find(tool => tool.name === 'structured_output')!.parameters.properties!.evidenceQuotes!
+      expect(quoteSchema.items?.enum).toBeUndefined()
+      expect(quoteSchema.items?.examples).not.toContain('Source')
+      expect(validateJsonSchemaValue(quoteSchema, [crossing])).toEqual([])
+      return response(crossing, 'cross-item-example')(request)
+    },
+    request => {
+      expect(JSON.stringify(request.messages)).toContain('Invalid evidenceQuotes item 1')
+      return response('Source', 'corrected-non-example')(request)
+    },
+    response('Source', 'independent-non-example'),
+  ])
+  await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await h.ctx.agents.create({ sessionId: SessionId('file-quote-example-parent'), meta: { cwd: root }, agentOptions: config })
+  let checks: ConversationAuditedReviewCheck[] = []
+  try {
+    const reviewed = await runConversationClaimReview(h.ctx, handle.agent, { label: 'Example-only host quote boundary', material,
+      evidence: ['Source fact.'], signal: new AbortController().signal, callConfig: config })
+    expect(reviewed.verdict).toBe('met')
+    expect(reviewed.reviewChecks.map(check => check.evidenceQuotes)).toEqual([['Source'], ['Source']])
+    expect(h.adapter.requests).toHaveLength(3)
+    expect(String(h.adapter.requests[0]!.sessionId)).toBe(String(h.adapter.requests[1]!.sessionId))
+    expect(String(h.adapter.requests[2]!.sessionId)).not.toBe(String(h.adapter.requests[1]!.sessionId))
+    const saved = await h.ctx.sessionPersistence.inspect(SessionId(reviewed.reviewChecks[0]!.proof.sessionId))
+    const results = saved.events.filter(event => event.type === 'tool/result')
+    expect(results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError))).toHaveLength(1)
+    expect(results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && !block.isError))).toHaveLength(1)
+    checks = [...reviewed.reviewChecks]
+  } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
+  const cold = await mountPersistentHarness(root, [])
+  try {
+    for (const check of checks) await verifyConversationOriginalReviewCheck(cold.ctx, check, material, sha256(config))
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose() }
 })
 
 it('keeps the existing option budget and single-item instruction when full choices do not fit', async () => {

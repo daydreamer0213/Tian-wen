@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：第二批确认反馈归因和一项改善，实际标签缺口已修复
+
+3c479a06第二批56actual/2明确模拟历史答/1模拟用户纠正，新三Task后共六Task一study一attempt。原生用户纠正评估attributable-problem，随后真实修订met；study054c八臂source1 met→met、source2 not-met→met、counter met→met、adjacent met→not-met。两独立检查确认adjacent正文事实正确，失败是实际交付末尾</answer>；原candidate-failed/未接受或激活，CLI1但normal drain/consent1 enabled/active0。独立147冻结文件及旧记录/账本逐字保护，来源1/2对不补跑。首future1无效review另确认非法inference/supported组合晚拒绝。
+
+捕获前精确诊断和trial.answer字面边界说明已实现；原instruction/原proof/旧判定/标签不清洗、用户XML仍允许。源码相关169+47=216；打包核心150，原十五构建/私有导入通过；旧实际trial原CLI0/零模型/两ledger不变。详见 tianwen-native-capture-boundary-result-20261006.md。接续新来源组合及明确模拟但不入学习来源的未来错误检查，实际后任务走原模型/自动方法；unknown/pass保持与模拟故障改善分开。完整目标active，不索题/等自然样本/新增发布门槛；main/Daily NO-GO/R9保持，D16.7GiB>=15，无副本。
+
 ## 2026-10-06 当前：新策略首实际批完成，主动修正对照设计并接续未执行来源
 
 e776230e隔离批只读CLI0/0模型/0账本变化；正式16actual/1明确模拟主答，3新Task、0研究/attempt/激活，CLI1但normal drain/consent1 enabled/active0。未来基线inc（原评审invalid-judgment）/met。固定正常对照事实正确但漏了用户明确要求的预约状态，原双审not-met/instruction-following保留；native writing与未来summary不同，不改旧标签。独立final-audit核145冻结文件、旧共享9Task8study9attempt/账本字节保持，D16.74GiB/无副本。

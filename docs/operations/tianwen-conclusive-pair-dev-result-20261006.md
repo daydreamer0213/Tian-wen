@@ -34,3 +34,11 @@
 两真实未来基线分别为 inconclusive（原评审 invalid-judgment，无合格原生 review proof）与 met。预设正常对照原双审 not-met/instruction-following：用户明确要求覆盖预约状态，而操作员固定稿遗漏预约，只说了登记/批准/付款/履约/退款；事实本身正确不能代替完整要求。这是对照设计错误，不修改评审或重判原稿。其 native family 为 writing，两实际未来基线为 summarization，不能硬改旧分类配对。
 
 来源错误/用户纠正尚未执行。下一复用已有实际 met 的摘要作为正常对照；主动设计明确“压缩原始记录成当前状态摘要”的新来源请求，使原模型按真实用户转换要求分类。原三 Task/两基线/失败对照保留，不重跑；之前未执行原任务文件也保留。原 accepted 才后续/撤回/冷恢复。首基线评审无效另查原轨迹，不算模型交付确定失败，也不将未知→met伪称确定改善。目标 active，不等待用户或自然输入。
+
+## 3c479a06 第二批真实结果
+
+证据 `D:/DevData/tianwen-conclusive-pair-learning-20261006/learning-r2`。预检 CLI0/零模型/零账本改变；正式 56 actual、2 明确模拟历史主答、1 明确模拟用户纠正。原三 Task 不重跑；新增三 Task 后共六 Task、一 study、一 attempt。用户纠正的原生评估为 attributable-problem，随后真实模型修订交付 met；这是实际反馈归因链路，纠正内容的来源是模拟用户，不能称用户真实评价。
+
+原 study054c574c…八臂：source1 met→met、source2 not-met→met、counter met→met、adjacent met→not-met。source2 是实际成对改善；adjacent 正文事实均获两独立检查确认，但交付末尾夹入原用户禁止的 `</answer>`，原 candidate-failed，未执行 holdout、未裁决接受或激活。CLI1、normal drain、consent enabled/revision1、零 active；独立 final-audit 核 147 冻结文件、原三 Task/账本前缀及旧共享九 Task/八 study/九 attempt/账本字节保持，D 约16.73 GiB。
+
+首批 future1 无效评审另确认：模型将 inference 标为 supported，违反原已有字段关系；捕获工具未提前提示该非法组合，后置解析才 invalid-judgment。其答案不可直接当确定失败。第二批标签污染和首批字段问题均是实际缺口；按 `2026-10-06-tianwen-native-capture-boundary-plan.md` 修复已有捕获说明/诊断，不增加质量标准、不去掉旧标签或重判旧研究。来源1/2对已消费，下一只用新的来源组合。

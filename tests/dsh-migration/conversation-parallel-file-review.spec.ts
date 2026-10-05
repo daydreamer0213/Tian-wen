@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { SessionId } from '@deepseek-ai/dsh-session'
-import { createUserMessage, mountPersistentHarness, toolCallResponse } from '@tianwen/dsh-compat'
+import { createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { projectClaimEvidence, runConversationClaimReview } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
@@ -28,7 +28,7 @@ it.each(['met', 'disagree', 'quote-repair', 'invalid-requirements', 'invalid-gro
     const evidence = projectClaimEvidence(material, 'file-chunks-v1')
     const controller = new AbortController(), release = Promise.withResolvers<void>()
     const started: Array<{ request: any; focus: 'requirements' | 'grounding' }> = []
-    let active = 0, boundaryCalls = 0, requirementsCaptures = 0
+    let active = 0, boundaryCalls = 0, requirementsCaptures = 0, invalidTupleAttempts = 0
     const value = (focus: 'requirements' | 'grounding') => {
       const invalid = mode === `invalid-${focus}`
       const verdict = mode === 'disagree' && focus === 'requirements' ? 'not-met' : 'met'
@@ -44,9 +44,14 @@ it.each(['met', 'disagree', 'quote-repair', 'invalid-requirements', 'invalid-gro
       if (mode === 'quote-repair' && focus === 'requirements' && requirementsCaptures++ === 0) {
         result.audit.units[Object.keys(result.audit.units)[0]!]!.firstClaim.quote = 'outside-this-answer-unit'
       }
+      if (mode === `invalid-${focus}`) {
+        if (invalidTupleAttempts++ > 0) expect(JSON.stringify(request.messages)).toContain('Invalid claim kind/status in answer-1')
+        return toolCallResponse(`invalid-tuple-${invalidTupleAttempts}`, 'structured_output', result)
+      }
       return toolCallResponse(`capture-${focus}-${requirementsCaptures}`, 'structured_output', result)
     }
-    const h = await mountPersistentHarness(root, [response, response, ...(mode === 'quote-repair' ? [response] : [])])
+    const h = await mountPersistentHarness(root, [response, response, ...(mode === 'quote-repair' ? [response]
+      : mode.startsWith('invalid-') ? [textResponse('Cannot correct the invalid kind/status fields.')] : [])])
     await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
     const parent = await h.ctx.agents.create({ sessionId: SessionId('parallel-file-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
     const stream = h.adapter.stream.bind(h.adapter)
@@ -85,7 +90,24 @@ it.each(['met', 'disagree', 'quote-repair', 'invalid-requirements', 'invalid-gro
           .every((unit: any) => unit.properties.firstClaim.properties.quote.enum === undefined)).toBe(true)
         if (mode === 'cancelled') controller.abort(); else release.resolve()
         const result = await settled
-        if (mode === 'invalid-requirements' || mode === 'invalid-grounding') expect(result).toMatchObject({ error: { message: 'invalid-judgment' } })
+        if (mode === 'invalid-requirements' || mode === 'invalid-grounding') {
+          expect(result).toMatchObject({ error: { message: 'invalid-judgment' } })
+          expect('value' in result).toBe(false)
+          const failedFocus = mode === 'invalid-requirements' ? 'requirements' : 'grounding'
+          const failed = started.filter(item => item.focus === failedFocus), sibling = started.filter(item => item.focus !== failedFocus)
+          expect(failed).toHaveLength(3); expect(sibling).toHaveLength(1)
+          expect(new Set(failed.map(item => String(item.request.sessionId))).size).toBe(1)
+          expect(sibling[0]!.request.signal.aborted).toBe(true)
+          expect(h.adapter.requests).toHaveLength(3)
+          for (const item of [failed[0]!, sibling[0]!]) {
+            const saved = await h.ctx.sessionPersistence.inspect(SessionId(String(item.request.sessionId)))
+            const results = saved.events.filter(event => event.type === 'tool/result')
+            expect(results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && !block.isError))).toHaveLength(0)
+            const errors = results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError))
+            expect(errors).toHaveLength(item.focus === failedFocus ? 2 : 0)
+            if (item.focus === failedFocus) expect(JSON.stringify(errors)).toContain('Invalid claim kind/status in answer-1')
+          }
+        }
         else if (mode === 'provider') expect(result).toMatchObject({ error: { message: 'model-unavailable' } })
         else if (mode === 'cancelled') expect(result).toMatchObject({ error: { message: 'cancelled' } })
         else {
@@ -110,7 +132,7 @@ it.each(['met', 'disagree', 'quote-repair', 'invalid-requirements', 'invalid-gro
       }
       expect(active).toBe(0); expect(h.ctx.agents.list()).toHaveLength(1)
       expect(controller.signal.aborted).toBe(mode === 'cancelled')
-      expect(h.adapter.requests.length).toBeLessThanOrEqual(mode === 'quote-repair' ? 3 : 2)
+      expect(h.adapter.requests.length).toBeLessThanOrEqual(mode === 'quote-repair' || mode.startsWith('invalid-') ? 3 : 2)
     } finally {
       release.resolve(); controller.abort(); await run?.catch(() => {}); hook.mockRestore(); await parent.dispose(); await h.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true })
     }

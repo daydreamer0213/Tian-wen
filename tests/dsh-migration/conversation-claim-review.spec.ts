@@ -11,7 +11,7 @@ import { mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { CONVERSATION_MATERIAL_MAX_BYTES, recoverConversationJudgmentRequest, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
-import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { projectClaimEvidence, runConversationClaimReview, validateClaimAudit, verifyConversationClaimReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
@@ -23,7 +23,7 @@ const claim = (quote: string, kind: 'source-fact' | 'advice' | 'inference' | 'fi
 const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (text: string) => claim(text, 'source-fact', 'supported', ['request-1'])) => ({
   schemaVersion: 'tianwen.claim-audit.v2', evidenceDigest: evidence.evidenceDigest,
   units: Object.fromEntries(evidence.items.filter(item => item.role === 'answer').map(item => [item.id,
-    item.text.trim() === '' ? null : { firstClaim: make(item.text), additionalClaims: [] }])),
+    item.text.trim() === '' ? null : { firstClaim: make(item.text), additionalClaims: [] as ReturnType<typeof claim>[] }])),
 })
 
 it.each(['exact', 'cross-unit', 'invented', 'criterion'] as const)('captures short file evidence without weakening original-unit checks: %s', async mode => {
@@ -128,6 +128,103 @@ it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'strin
         await expect(recoverConversationJudgmentRequest({ sessionPersistence: { inspect: async () => changed } } as any, forged)).rejects.toThrow('invalid-judgment')
       }
     }
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each((['source-fact', 'advice', 'inference', 'fiction', 'general-knowledge', 'non-factual'] as const)
+  .flatMap(kind => (['firstClaim', 'additionalClaims'] as const).map(position => ({ kind, position }))))
+('repairs invalid kind/status before native capture: $kind in $position', async ({ kind, position }) => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-tuple-repair-')); roots.push(root)
+  const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [] }, answer: '原料已送达。' }
+  const evidence = projectClaimEvidence(material)
+  const correctedClaim = claim(material.answer, kind, kind === 'source-fact' ? 'supported' : 'permitted', ['request-1'])
+  const good = { verdict: 'met', category: null, explanation: 'The supplied content is preserved.',
+    evidenceQuotes: [material.answer], audit: auditFor(evidence) }
+  if (position === 'firstClaim') good.audit.units['answer-1']!.firstClaim = correctedClaim
+  else good.audit.units['answer-1']!.additionalClaims = [correctedClaim]
+  const bad = structuredClone(good)
+  const badClaim = position === 'firstClaim' ? bad.audit.units['answer-1']!.firstClaim : bad.audit.units['answer-1']!.additionalClaims[0]!
+  badClaim.status = kind === 'source-fact' ? 'permitted' : 'supported'
+  // Exercise correction in both independent reviewers, including the grounding
+  // boundary that rejected the original actual run after a successful capture.
+  const failedIndex = position === 'firstClaim' ? 0 : 1
+  const harness = await mountPersistentHarness(root, [
+    ...(failedIndex === 1 ? [toolCallResponse('independent-before', 'structured_output', good)] : []),
+    toolCallResponse('invalid-tuple', 'structured_output', bad),
+    request => {
+      const messages = JSON.stringify(request.messages)
+      expect(messages).toContain('Invalid claim kind/status in answer-1')
+      expect(messages).toContain('source-fact cannot use permitted')
+      expect(messages).toContain('non-factual cannot use supported')
+      expect(messages).toContain('original evidence and allowed statuses')
+      expect(messages).toContain('do not change the evidence or presume a passing verdict')
+      return toolCallResponse('corrected-tuple', 'structured_output', good)
+    },
+    ...(failedIndex === 0 ? [toolCallResponse('independent-after', 'structured_output', good)] : []),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-tuple-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const config = { provider: 'tianwen-probe', model: 'scripted', temperature: 0.25 }
+  let checks: Awaited<ReturnType<typeof runConversationClaimReview>>['reviewChecks']
+  try {
+    const review = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Claim tuple repair', material,
+      purpose: 'method-study', evidence: evidence.items.map(item => item.text), signal: new AbortController().signal, callConfig: config })
+    expect(review.verdict).toBe('met')
+    expect(review.reviewChecks.map(check => check.audit)).toEqual([good.audit, good.audit])
+    expect(harness.adapter.requests).toHaveLength(3)
+    const sessions = harness.adapter.requests.map(request => String(request.sessionId))
+    expect(sessions[failedIndex]).toBe(sessions[failedIndex + 1])
+    expect(sessions[failedIndex === 0 ? 2 : 0]).not.toBe(sessions[failedIndex])
+    for (const [index, check] of review.reviewChecks.entries()) {
+      const saved = await harness.ctx.sessionPersistence.inspect(SessionId(check.proof.sessionId))
+      expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+      const results = saved.events.filter(event => event.type === 'tool/result')
+      expect(results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && !block.isError))).toHaveLength(1)
+      const errors = results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError))
+      expect(errors).toHaveLength(index === failedIndex ? 1 : 0)
+      if (index === failedIndex) expect(JSON.stringify(errors)).toContain('Invalid claim kind/status in answer-1')
+    }
+    expect(badClaim.status).toBe(kind === 'source-fact' ? 'permitted' : 'supported')
+    checks = review.reviewChecks
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+  const cold = await mountPersistentHarness(root, [])
+  try {
+    const expected = { purpose: 'method-study' as const, materialDigest: sha256(material.task),
+      outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) }
+    for (const check of checks!) {
+      await verifyConversationReviewCheck(cold.ctx, check)
+      await verifyConversationClaimReviewCheck(cold.ctx, check, expected)
+      expect(await recoverConversationJudgmentRequest(cold.ctx, check)).toMatchObject({ material: { original: material, claimEvidence: evidence } })
+    }
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose() }
+})
+
+it.each([
+  ['source-fact', 'supported', 'met'], ['advice', 'permitted', 'met'], ['inference', 'permitted', 'met'],
+  ['fiction', 'permitted', 'met'], ['general-knowledge', 'permitted', 'met'], ['non-factual', 'permitted', 'met'],
+  ['source-fact', 'unsupported', 'not-met'], ['source-fact', 'contradicted', 'not-met'], ['source-fact', 'uncertain', 'inconclusive'],
+  ['inference', 'uncertain', 'inconclusive'],
+] as const)('captures a valid tuple without correction or verdict coercion: %s/%s/%s', async (kind, status, verdict) => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-valid-tuple-')); roots.push(root)
+  const material = { task: { prompt: '核对原料状态并保留不确定性。' }, answer: '原料已送达。' }
+  const evidence = projectClaimEvidence(material)
+  const value = { verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Assess the original evidence without assuming a passing verdict.',
+    evidenceQuotes: [material.answer], audit: auditFor(evidence, text => claim(text, kind, status, ['request-1'])) }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('valid-first', 'structured_output', value), toolCallResponse('valid-second', 'structured_output', value)])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-valid-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const review = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Valid claim tuple', material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal })
+    expect(review.verdict).toBe(verdict)
+    expect(review.reviewChecks.map(check => check.audit)).toEqual([value.audit, value.audit])
+    expect(harness.adapter.requests).toHaveLength(2)
+    for (const check of review.reviewChecks) await verifyConversationReviewCheck(harness.ctx, check)
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
@@ -454,6 +551,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
   const harness = await mountPersistentHarness(root, mode === 'provider' ? [new Error('provider failed')]
     : mode === 'invalid-quote' ? [scripted[0]!, textResponse('Cannot provide a valid quote.')]
     : mode === 'invalid-second-quote' ? [...scripted, textResponse('Cannot provide a valid quote.')]
+    : mode === 'invalid-status' ? [...scripted, textResponse('Cannot correct the invalid kind/status fields.')]
     : mode === 'invalid' || mode === 'missing' ? [scripted[0]!, textResponse('No valid structured result.')] : scripted)
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
@@ -475,7 +573,16 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(JSON.stringify(errors)).toContain(`Invalid evidenceQuotes item ${mode === 'invalid-quote' ? 1 : 2}`)
       expect(saved.events.filter(event => event.type === 'tool/result' && event.data.message.content[0]?.type === 'tool-result' && !event.data.message.content[0].isError)).toHaveLength(0)
     }
-    else if (mode === 'invalid' || mode === 'invalid-status' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
+    else if (mode === 'invalid-status') {
+      expect(result).toMatchObject({ message: 'invalid-judgment' })
+      const saved = await harness.ctx.sessionPersistence.inspect(SessionId(String(harness.adapter.requests[0]!.sessionId)))
+      const errors = saved.events.filter(event => event.type === 'tool/result' && event.data.message.content[0]?.type === 'tool-result' && event.data.message.content[0].isError)
+      expect(errors).toHaveLength(2)
+      expect(JSON.stringify(errors)).toContain('Invalid claim kind/status in answer-1')
+      expect(saved.events.filter(event => event.type === 'tool/result' && event.data.message.content[0]?.type === 'tool-result' && !event.data.message.content[0].isError)).toHaveLength(0)
+      expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    }
+    else if (mode === 'invalid' || mode === 'missing') expect(result).toMatchObject({ message: 'invalid-judgment' })
     else if (mode === 'provider' || mode === 'invalid-source') expect(result).toMatchObject({ message: 'model-unavailable' })
     else if (mode === 'cancelled') expect(result).toMatchObject({ message: 'cancelled' })
     else {
@@ -531,7 +638,7 @@ it.each(['met', 'not-met', 'disagree', 'contradictory', 'invalid', 'invalid-quot
       expect(supplied[0]).toEqual([{ original: material, claimEvidence: evidence }])
       expect(supplied[1]).toEqual(supplied[0])
     }
-    if (mode === 'invalid-status') expect(harness.adapter.requests).toHaveLength(1)
+    if (mode === 'invalid-status') expect(harness.adapter.requests).toHaveLength(3)
     if (mode === 'invalid-quote') expect(harness.adapter.requests).toHaveLength(2)
     if (mode === 'invalid-second-quote') expect(harness.adapter.requests).toHaveLength(3)
     if (mode === 'invalid-source') expect(harness.adapter.requests).toHaveLength(3)

@@ -23,9 +23,9 @@
 
 **Interfaces:** existing `validateCapture(value)` callback still returns only `string | undefined`. Existing final `validateClaimAudit`, native proof/cold recovery, schema and event formats remain unchanged.
 
-- [ ] Add original native same-child correction controls for `source-fact + permitted` and each known non-fact kind + `supported`, including additionalClaims. Reuse the existing repair harness; first malformed submission must produce a specific native error, next valid submission in the same Session must succeed, independent second focus remains a different Session. A valid source-fact/supported or inference/permitted must remain accepted, and uncorrected invalid fields must never form valid dual review. Cold recover corrected proof with zero new calls and one successful capture only.
-- [ ] Run and save actual RED JSON in `D:/DevData/tianwen-native-capture-boundary-engineering-20261006` before source changes.
-- [ ] Inside the existing unit/claim traversal after exact-quote checking, return a precise message for the original forbidden tuples only:
+- [x] Add original native same-child correction controls for `source-fact + permitted` and each known non-fact kind + `supported`, including additionalClaims. Reuse the existing repair harness; first malformed submission must produce a specific native error, next valid submission in the same Session must succeed, independent second focus remains a different Session. A valid source-fact/supported or inference/permitted must remain accepted, and uncorrected invalid fields must never form valid dual review. Cold recover corrected proof with zero new calls and one successful capture only.
+- [x] Run and save actual RED JSON in `D:/DevData/tianwen-native-capture-boundary-engineering-20261006` before source changes.
+- [x] Inside the existing unit/claim traversal after exact-quote checking, return a precise message for the original forbidden tuples only:
 
 ```ts
 if (record(claim) && (claim.kind === 'source-fact' && claim.status === 'permitted'
@@ -34,7 +34,7 @@ if (record(claim) && (claim.kind === 'source-fact' && claim.status === 'permitte
 }
 ```
 
-- [ ] Run full review/recovery/audit suites, save GREEN, review the scoped diff. Root owns other files, builds/docs/real operator; worker does not edit them or launch real provider.
+- [x] Run full review/recovery/audit suites, save GREEN, review the scoped diff. Root owns other files, builds/docs/real operator; worker does not edit them or launch real provider.
 
 ## Task 2: Explain literal trial answer boundary without sanitizing
 
@@ -42,10 +42,10 @@ if (record(claim) && (claim.kind === 'source-fact' && claim.status === 'permitte
 
 **Interfaces:** `runConversationTrial` returns its native `answer` exactly, and `recoverConversationTrial` restores its original native text/proof unchanged. No parser filter, automatic removal, new output restriction or instruction change.
 
-- [ ] Change only TRIAL_SCHEMA.answer description to clarify that the string is literal user-deliverable content. Tool envelopes/capture delimiters such as `</answer>`/`</invoke>` are not user content; when the user explicitly asks for XML/HTML/literal markup, include that requested markup normally.
-- [ ] Verify native requested XML/literal markup remains returned unchanged; current literal bad-tag answer is not host-normalized. Run existing meaningful trial tests, not a test that merely mirrors the description string.
-- [ ] Use the original CLI/read-only JSONL backend to recover the previously captured actual study054c adjacent candidate with zero model calls after rebuilding. Bind original output/material/model/guidance/proof digests; confirm old literal `</answer>` remains, original ledger byte-for-byte and no Runtime/Evolution/Loop mount. This confirms backward compatibility, not a new grade.
-- [ ] Run original Runtime build, relevant published suites and private import check after both source tasks; obtain scoped review and commit code/evidence/doc handoff.
+- [x] Change only TRIAL_SCHEMA.answer description to clarify that the string is literal user-deliverable content. Tool envelopes/capture delimiters such as `</answer>`/`</invoke>` are not user content; when the user explicitly asks for XML/HTML/literal markup, include that requested markup normally.
+- [x] Verify native requested XML/literal markup remains returned unchanged; current literal bad-tag answer is not host-normalized. Run existing meaningful trial tests, not a test that merely mirrors the description string.
+- [x] Use the original CLI/read-only JSONL backend to recover the previously captured actual study054c adjacent candidate with zero model calls after rebuilding. Bind original output/material/model/guidance/proof digests; confirm old literal `</answer>` remains, original ledger byte-for-byte and no Runtime/Evolution/Loop mount. This confirms backward compatibility, not a new grade.
+- [x] Run original Runtime build, relevant published suites and private import check after both source tasks; obtain scoped review and commit code/evidence/doc handoff.
 
 ## Task 3: Fresh prospective continuation
 
@@ -54,3 +54,5 @@ if (record(claim) && (claim.kind === 'source-fact' && claim.status === 'permitte
 - [ ] Preserve completed 16actual/1scripted and 56actual/2scripted/1simulated-feedback results and old shared ledger. Add a new distinct summary source, not the consumed source1/source2 pair; use saved met normal counter and original native loop.
 - [ ] Read-only zero-call preflight, then actual native proposal/arms/decision/activation. Accept only original native qualified method; do not treat the descriptor as guaranteed model compliance.
 - [ ] On actual acceptance, complete real ordinary future/new-task and semantic safety checks, original withdrawal/no-injection/zero-call cold recovery. Keep baseline unknown resolution separate from confirmed content improvement. Independently audit terminal state/old-record preservation/resources and clean reproducible residuals. No mechanical blocked or new user-task request on failure.
+
+Prospective effect clarification, before new execution: the saved ordinary future baseline is unknown/pass, so an after pass/pass cannot establish content improvement. Add a separately disclosed controlled future fault before learning: a new frozen request and deliberately wrong answer, assessed by the same original native dual claim review without admitting it as a learning source. After actual activation, run that same request as a new ordinary task using the actual provider and original method injection, and compare the native review verdicts. This demonstrates correction of that simulated fault only; preserve actual unknown resolution/pass maintenance separately. No manually forced review, source leakage into the proposal, retrospective regrading, or claim of natural model-population improvement.

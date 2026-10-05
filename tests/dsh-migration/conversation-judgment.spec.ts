@@ -115,11 +115,15 @@ it.each(['unknown-plugin', 'changed-body', 'false-count', 'changed-arguments', '
   })
 })
 
-it('recovers an exact text trial answer without calling a model and rejects drift', async () => {
+it.each([
+  { name: 'ordinary prose', answer: '完整答案：周五核对名单；排期仍待确认。', request: '说明名单和排期。' },
+  { name: 'requested XML', answer: '<answer><status>排期仍待确认。</status></answer>', request: '使用 answer 和 status 元素输出 XML，说明排期。' },
+  { name: 'requested literal closing tag', answer: '</invoke>', request: '只输出字面文本 </invoke>，不要添加说明。' },
+  { name: 'unsanitized native closing tag', answer: '排期仍待确认。</answer>', request: '说明排期，只要普通文本。' },
+])('recovers an exact text trial answer ($name) without calling a model and rejects drift', async ({ answer, request }) => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'trial-recovery-')); roots.push(root)
-  const answer = '完整答案：周五核对名单；排期仍待确认。'
-  const material = { request: '说明名单和排期。', context: ['周五核对名单，讲师排期未确认。'] }
+  const material = { request, context: ['周五核对名单，讲师排期未确认。'] }
   const config = { provider: 'tianwen-probe', model: 'scripted', temperature: 0.25, maxTokens: 512 }
   const harness = await mountPersistentHarness(root, [toolCallResponse('trial-answer', 'structured_output', { answer })])
   await harness.ctx.plugin(SubagentRuntime)
@@ -127,6 +131,7 @@ it('recovers an exact text trial answer without calling a model and rejects drif
   const handle = await harness.ctx.agents.create({ sessionId: SessionId('trial-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
   try {
     const trial = await runConversationTrial(harness.ctx, handle.agent, { label: 'Tianwen trial', material, signal: new AbortController().signal, callConfig: config, guidance: '保留未知状态。' })
+    expect(trial.answer).toBe(answer)
     const expected = { outputDigest: sha256(answer), materialDigest: sha256(material), modelConfigDigest: sha256(config), guidance: '保留未知状态。' }
     const requests = harness.adapter.requests.length
     expect(await recoverConversationTrial(harness.ctx, trial.proof, expected)).toEqual({ answer, material })

@@ -501,6 +501,10 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
                 && (claim.quote.trim() === '' || !answer.text.includes(claim.quote))) {
                 return `Invalid quote in ${answer.id}: copy a non-empty exact substring from that answer unit, preserving punctuation and whitespace.`
               }
+              if (record(claim) && (claim.kind === 'source-fact' && claim.status === 'permitted'
+                || ['advice', 'inference', 'fiction', 'general-knowledge', 'non-factual'].includes(String(claim.kind)) && claim.status === 'supported')) {
+                return `Invalid claim kind/status in ${answer.id}: source-fact cannot use permitted; advice, inference, fiction, general-knowledge and non-factual cannot use supported. Correct the fields according to the original evidence and allowed statuses; do not change the evidence or presume a passing verdict.`
+              }
             }
           }
         }
