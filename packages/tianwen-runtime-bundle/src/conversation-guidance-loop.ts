@@ -10,7 +10,7 @@ import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION
 import { guidanceRule, parseConversationFileMaterial, type ConversationFileMaterial, type GuidanceFileTrialTarget, type GuidanceStudy, type GuidanceArmRecord, type GuidanceExplorationArmRecord, type ConversationFileTrialOutput } from '@tianwen/evolution'
 import { runConversationFileTrial, recoverConversationFileTrial, recoverConversationFileTrialExecution, type RecoverConversationFileTrialInput } from './conversation-file-trial.js'
 import type { ConversationFileTrialExecutionEvidence } from './conversation-file-trial-evidence.js'
-import { METHOD_STUDY_QUOTE_PROTOCOL, runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
+import { runConversationClaimReview, verifyConversationClaimReviewCheck } from './conversation-claim-review.js'
 import { conversationReviewConsensus, parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceReferenceReadRecord, type GuidanceSourceUse } from '@tianwen/evolution'
 import { recoverConversationStructuredJudgment } from './conversation-judgment.js'
 import { recoverConversationCaseDesign } from './conversation-case-design.js'
@@ -981,7 +981,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         const judged = await runConversationClaimReview(this.ctx, agent, { purpose: 'method-study', evidence,
           beforeCall: () => this.assertCurrent(studyOpened, signal),
           label: `Tianwen blind ${fileMode ? 'file' : 'text'} review ${studyOpened.studyId}`, callConfig, signal, material: { task: material, answer: execution.answer,
-            ...(fileMode ? { trialExecution: execution.trialExecution } : { quoteProtocol: METHOD_STUDY_QUOTE_PROTOCOL }), ...(output === undefined ? {} : { fileResult: output }) } })
+            ...(fileMode ? { trialExecution: execution.trialExecution } : {}), ...(output === undefined ? {} : { fileResult: output }) } })
         await this.assertCurrent(studyOpened, signal)
         return { execution, judged, outputDigest: output?.outputDigest ?? sha256(execution.answer), output }
       }

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：两来源实际改善，文字研究短引用接续修复
+
+状态汇报基线12真实/完整、0模拟，两Task原not-met/instruction-following；第一形式不合规、第二另有无来源未来发布程序。一个显式模拟正确counter、实际原生met，原Loop研究133真实/完整+1模拟，五臂两来源均not-met→met、counter baseline inconclusive，原source-unavailable/CLI1/排空，无完整裁决/启用/方法后/撤回。修改前52消费者/6旧账本/旧环境/prefix/两源快照保持。[结果与接续](tianwen-status-report-learning-result-20261005.md)。
+
+实际66请求包含合法短原文但非完整单位名单。新文字Loop停止发射可选旧quoteProtocol，默认host精确单单位子串/标准排除/audit/旧显式协议与冷恢复保持；不称全部重试或最终停止已解决。原SDK RED、新十臂短引文/零模型恢复及criteria拒绝，源码206/原十五构建、发布原生范围203及原完整profile50+10原跳过通过；发布首次3源码类身份断言失败保留，3源码装配项只在源码计通过。限定只读复查无有据P1/P2。操作员原文本及插件来源检查修正JSON转义假阴性，旧首脚本未热改。
+
+完整目标active，下一一新明确模拟格式失败组成未尝试对；原三Task/首study不重跑或补判。原接受才启用、旧失败文本新普通会话对比及一未使用任务、实际注入/安全撤回/零模型冷恢复分别核实，不索题/等自然/机械blocked/加正式门槛。main/Daily NO-GO/R9保持，D约16.85GiB>=15，20偏好未达，无依赖副本。
+
 ## 2026-10-05 当前：新过期索引基线满分，不启动无改善空间的学习
 
 5db27a19新隔离环境，零模型原Python检查旧程序失败/参考和正常对照十二例通过；两个新真实未来Task功能均verified，内容inconclusive/met，22真实/22完整轨迹、0scripted，原CLI0/排空。模型自己修好旧程序，本批不启动训练/研究/激活/方法后或撤回，不以满分复跑冒充提高。首次操作员缺模型配置和修正首次预检旧developmentRoot均零调用失败、保存首记录；修改前52消费者/5旧账本/原环境/84容器保持，Docker停。[准确结果与下一步](tianwen-stale-index-baseline-result-20261005.md)。
