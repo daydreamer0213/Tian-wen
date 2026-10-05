@@ -20,3 +20,13 @@
 受控未来before使用上一实际两独立评审的原not-met proof，原native恢复验证但零新增评分调用，且不入学习来源。只有实际原接受/启用才运行普通未来/新任务/受控after：unknown→met与met→met单列，不称自然模型改善；模拟before/真实after只证明这项明确故障被解决。接着原撤回/无注入/零调用冷恢复和终态审计。实际结果追加；工程通过不能当模型学习效果完成。
 
 完整目标active，main/Daily NO-GO/R9及原两DEV/默认语义保持，不新增正式发布条件、不询问用户出题或等待自然重复。
+
+## 87 请求实际结果：原生采用已完成，后任务类别变化未注入
+
+5a68cb40 原CLI实际87请求/1明确模拟历史交付。新study79366457八臂candidate-failed；桥单新Task ad5e1e61原summary/not-met/source-fidelity触发study f1b0d12f。后者完整十臂，baseline分别not-met/met/met/inconclusive/met，五candidate全部met，原dev-conclusive-pair.v1自动accepted和activation。来源1确定改善、adjacent未知转通过、其余保持分开记录，未重判旧研究。
+
+首future1-after Task469fea01实际met，但同一请求原before被识别为summarization，本次为writing；scope、模型、quality v11一致，behaviorVersion已是候选版。原方法只有rules.summarization，因此原路由不注入writing。操作器方法注入断言如实失败，不称方法后效果成功；finally原consent2 disabled和consent-disabled撤回，normal drain/active0。CLI1，未执行其他future/controlled-after/fresh/冷恢复。
+
+独立audit-terminal原CLI0：149冻结文件、旧七Task/两study/两attempt/ledger prefix及共享9/8/9账本字节保持；现在九Task/四study/四attempt。证据D:/DevData/tianwen-flat-capture-learning-20261006/final-audit.json。限定原操作器与终态复查无P1/P2；没有产品路由丢失证据，不跨family注入或改旧分类。
+
+下一明确披露从接受后、操作器自动撤回前的历史DEV checkpoint隔离延续，原profile及旧撤回保持。只复制必需小ledger prefix/artifact；原历史session按原字节引用、零模型验证已接受研究，新的原JSONL backend须属于新profile派生路径。用未执行的明确摘要任务检查真实方法注入/效果，再撤回/无注入/零调用恢复；不重跑研究、不宣称新activation。完整目标仍active，main/Daily NO-GO/R9不变。

@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：真实自动采用已达成，继续匹配类别的后续任务
+
+5a68cb40实际87请求/1明确模拟历史交付，原study79366457失败后，新桥单Task ad5e1e61触发f1b0d12f完整十臂、五candidate met、来源1notmet→met、其余baseline未知/通过保留，原DEV策略自动accepted/activation。首future1-after实际met，但原请求前后summary/writing类别不同；scope/model/quality保持、候选快照已到新Task，summary方法未注入writing，操作器断言失败。原正常排空、consent2disabled/consent-disabled撤回/active0；CLI1，未称方法后效果或完整目标成功。
+
+独立终态audit0核149冻结、旧七Task两study两attempt/prefix和共享9/8/9原字节；现在九Task四study四attempt。下一从接受后、自动撤回前的历史DEV checkpoint隔离延续，旧profile/旧撤回不改；原JSONL恢复已接受研究零模型，新的明确摘要任务实际核注入/效果/撤回/冷恢复，不再重跑整个研究或跨family强行注入。详见tianwen-flat-capture-wrapper-result-20261006.md。目标active/main-Daily NO-GO/R9保持，D约16.68GiB>=15，无安装或环境副本。
+
 ## 2026-10-06 当前：实际研究定位包装误提交，继续补准确工具提示
 
 已完成捕获字段/字面答案修复：源码216/打包216、原十五构建及私有导入通过，旧实际trial原CLI0/零调用/标签和两账本原样。d6fbbc8a实际learning-r3 44actual/1明确模拟历史答；新受控未来错稿原双审not-met、未入学习来源，新df67806c摘要source-fidelity失败触发原study0f5527eb，两臂met/met后source2 baseline评审反复套{arguments:string}，通用value.arguments报错误导模型，原invalid-judgment停止；没有接受/启用/后任务，不改旧判定。
