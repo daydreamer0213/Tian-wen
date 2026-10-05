@@ -54,6 +54,53 @@ it('strictly loads only the explicit DEV decision option and preserves its absen
  for(const guidanceDecisionPolicy of ['unknown.v1',undefined]) expect(()=>loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy})).toThrow(/policy/i)
 })
 
+function pythonFixture() {
+ const f=fixture(), qualityContract=f.packet.studyContracts.qualityContract
+ const file=(original:any,index:number)=>({...original,entryPath:`task${index}.py`,outputPaths:[`task${index}.py`],
+  entries:[{path:`task${index}.py`,content:'import json,sys\nprint(json.dumps({}))\n'},{path:`contract${index}.md`,content:original.requiredCondition}]})
+ const study={...f.packet.studyContracts,originals:f.packet.studyContracts.originals.map(file),
+  adjacent:file(f.packet.studyContracts.adjacent,3),holdout:file(f.packet.studyContracts.holdout,4)}
+ const ordinaryContract=study.originals.map((row:any)=>({cwd:study.cwd,requestText:row.requestText,entryPath:row.entryPath,outputPaths:row.outputPaths,
+  referencePaths:row.entries.filter((entry:any)=>entry.path!==row.entryPath).map((entry:any)=>entry.path),cases:row.cases,requiredCondition:row.requiredCondition}))
+ const packet={schemaVersion:f.packet.schemaVersion,ordinaryContract,studyContracts:study}
+ const material=(index:number)=>{const original=study.originals[index]!;return {request:[createUserMessage({source:{kind:'user'},content:[{type:'text',text:original.requestText}]})],
+  context:[],objective:original.requestText,criteria:[original.requiredCondition],qualityContract,
+  files:{schemaVersion:'tianwen.conversation-file-material.v1',outputKind:'files',cwd:study.cwd,entries:original.entries,outputPaths:original.outputPaths}}}
+ return {...f,packet,material,qualityContract}
+}
+it('loads explicit Python file contracts through the canonical pinned DEV entry and preserves frozen five-role material',async()=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=pythonFixture()
+ const options=loadDevelopmentNativeRuntimeOptions({...f.write(f.packet as any),codeEngine:'python'})
+ const signal=new AbortController().signal,input={sources:[f.material(1),f.material(0)],counterexample:f.material(2),cwd:f.packet.studyContracts.cwd,
+  qualityContract:f.qualityContract,modelConfigDigest:sha256('python-file-model'),signal}
+ const expected=structuredClone(Object.fromEntries(['adjacent','holdout'].map(role=>{const row=(f.packet.studyContracts as any)[role];return [role,
+  {prompt:row.prompt,criteria:row.criteria,files:{entries:row.entries,outputPaths:row.outputPaths}}]})))
+ expect(await options.studyResultCheck.prepareIndependentCases(input)).toEqual(expected)
+ f.packet.studyContracts.adjacent.entries[0]!.content='Caller mutation'
+ expect(await options.studyResultCheck.prepareIndependentCases(input)).toEqual(expected)
+ input.sources[0]!.files.entries[0]!.content='Changed frozen input'
+ expect(await options.studyResultCheck.prepareIndependentCases(input)).toBeUndefined()
+ expect(await options.externalCodeCheck.prepare({request:[]})).toBeUndefined()
+ expect(options.goalTaskAcceptance).toBeUndefined();expect(options.answerStudyResultCheck).toBeUndefined()
+})
+it.each(['ordinary-multi','study-multi','entry','extension','aliases','ordinary-host','study-host','role-host','goal'])('rejects unsupported Python file contract: %s',async kind=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=pythonFixture(),row=f.packet.studyContracts.adjacent as any
+ if(kind==='ordinary-multi')f.packet.ordinaryContract[0]!.outputPaths.push('other.py')
+ if(kind==='study-multi'){row.outputPaths.push('other.py');row.entries.push({path:'other.py',content:null})}
+ if(kind==='entry')row.entryPath='contract3.md'
+ if(kind==='extension'){row.entryPath='task3.js';row.outputPaths[0]='task3.js';row.entries[0].path='task3.js'}
+ if(kind==='aliases')row.moduleAliases={}
+ if(kind==='ordinary-host')(f.packet.ordinaryContract[0] as any).isolated={}
+ if(kind==='study-host')(f.packet.studyContracts as any).isolated={}
+ if(kind==='role-host')row.isolated={}
+ if(kind==='goal')(f.packet as any).goalContract=[{...f.packet.ordinaryContract[0],goalCommand:'Unsupported Python Goal'}]
+ expect(()=>loadDevelopmentNativeRuntimeOptions({...f.write(f.packet as any),codeEngine:'python'})).toThrow()
+})
+it.each(['unknown',undefined,0])('rejects an explicitly invalid DEV code engine %s',async codeEngine=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture()
+ expect(()=>loadDevelopmentNativeRuntimeOptions({...f.config,codeEngine})).toThrow()
+})
+
 type TestAnswerMaterial={request?:ReturnType<typeof createUserMessage>[],context?:never[],objective?:string,prompt?:string,
  criteria:string[],qualityContract:ReturnType<typeof conversationQualityContract>,
  files?:{schemaVersion:'tianwen.conversation-file-material.v1',cwd:string,outputKind:'chat',outputPaths:string[],entries:{path:string,content:string}[]}}

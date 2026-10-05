@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：原DEV入口已接入Python文件任务，转真实代码学习
+
+新显式codeEngine=python接入原ordinary/五角色study工厂、原冻结matcher/固定Pythonhost；Node缺省保持，Python仅单.py输出=entryPath、无模块别名、不接受caller执行环境覆盖，Goalcode本次明确拒绝。源码31/发布31、原Node45通过；限定复查无有据P1/P2，Runtime发布产物未变不重复构建。新入口实跑原冻结环境此前未执行的source2 ordinary/adjacent study，各第一功能例拒绝后停止，0模型/Worker/学习收益，五角色绑定成功。[准确结果](tianwen-dev-python-file-entry-result-20261005.md)。
+
+下一新原native普通文件Task批：事前未来任务、两显式失败训练与正常对照，原研究/实际候选/方法后新文件输出/撤回逐项执行；不要求自然样本，不索题/机械blocked/增正式门槛。上一113实际研究4/5→4/5拒绝保留、不追改。完整目标active，main/Daily NO-GO/R9保持。原环境/消费者/三旧账本/84容器未变，Docker停，新空DEV根已核实删除、无依赖/环境副本，D约17.02>=15。
+
 ## 2026-10-05 当前：真实提案和十臂已完成，准备失败可接续
 
 新空串Task批26真实/26完整轨迹、5显式训练注入，Task complete/rejected；操作员冻结错误来源对，host准备不可用、设计模型0却消耗尝试，旧首记录保留。另一未尝试对接续113真实/113完整轨迹、0训练、原九Task不重跑；实际提案一次结构接口成功捕获、两原失败观察已送达，本批提醒未触发。原五例十臂无方法4/5、有方法4/5、共同holdout失败，原DEV规则rejected，0激活/方法后/撤回，CLI1/排空。[准确结果](tianwen-case-design-preparation-result-20261005.md)。

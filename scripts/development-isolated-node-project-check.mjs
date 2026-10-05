@@ -13,7 +13,22 @@ const require = createRequire(packageUrl)
 const { parseConversationFileMaterial, parseConversationQualityContract } = await import(pathToFileURL(require.resolve('@tianwen/evolution')).href)
 const { createConversationIsolatedNodeProjectCheck, createConversationStudyIsolatedNodeProjectCheck,
   createConversationStudyIsolatedNodeProjectCohortCheck, createGoalTaskIsolatedNodeProjectCheck,
-  createConversationStudyIsolatedPythonAnswerCheck, createGoalTaskIsolatedPythonAnswerCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
+  createConversationStudyIsolatedPythonAnswerCheck, createGoalTaskIsolatedPythonAnswerCheck,
+  createConversationIsolatedPythonCheck, createConversationStudyIsolatedPythonCheck,
+  createConversationStudyIsolatedPythonCohortCheck } = await import(new URL(manifest.exports['.'].default, packageUrl).href)
+
+function pythonFileConfig(config) {
+  assert(config !== null && typeof config === 'object' && !Array.isArray(config))
+  assert(!Object.hasOwn(config, 'isolated'), 'DEV isolated override is not permitted')
+  assert(!Object.hasOwn(config, 'moduleAliases'), 'Python file checks have no module aliases')
+  assert(Array.isArray(config.outputPaths) && config.outputPaths.length === 1
+    && config.outputPaths[0] === config.entryPath && /\.py$/u.test(config.entryPath), 'Python checks require one declared .py output equal to entryPath')
+  const { entryPath, outputPaths, ...rest } = config
+  return { ...rest, targetPath: entryPath, isolated: structuredClone(answerHost) }
+}
+function ordinaryFileFactory(engine) {
+  return engine === 'python' ? config => createConversationIsolatedPythonCheck(pythonFileConfig(config)) : createDevelopmentIsolatedNodeProjectCheck
+}
 
 function withFixedHost(config) {
   assert(config !== null && typeof config === 'object' && !Array.isArray(config))
@@ -39,15 +54,23 @@ export function createDevelopmentStudyIsolatedNodeProjectCohortCheck(config) {
 }
 
 /** Match frozen originals once; retain the SDK's closed cohort and fixed DEV host. */
-export function createDevelopmentFunctionalStudyCohortCheck(config, material) {
+export function createDevelopmentFunctionalStudyCohortCheck(config, material, codeEngine = 'node-project') {
   const cases = buildDevelopmentFunctionalStudyCases(config, material)
-  return cases === undefined ? undefined : createDevelopmentStudyIsolatedNodeProjectCohortCheck({
-    modelConfigDigest: material.modelConfigDigest, cases,
-  })
+  if (cases === undefined) return undefined
+  if (codeEngine === 'python') {
+    const pythonCases = Object.fromEntries(Object.entries(cases).map(([role, entry]) => {
+      const fixed = pythonFileConfig({ ...entry, outputPaths: entry.material.files.outputPaths })
+      const { targetPath, ...definition } = fixed
+      return [role, definition]
+    }))
+    return createConversationStudyIsolatedPythonCohortCheck({ modelConfigDigest: material.modelConfigDigest, cases: pythonCases })
+  }
+  assert.equal(codeEngine, 'node-project', 'DEV code engine is invalid')
+  return createDevelopmentStudyIsolatedNodeProjectCohortCheck({ modelConfigDigest: material.modelConfigDigest, cases })
 }
 
 /** Fail on broken frozen contracts before the Runtime can consume a study attempt. */
-function freezeStudyContracts(config) {
+function freezeStudyContracts(config, codeEngine) {
   assert(config !== null && typeof config === 'object' && !Array.isArray(config))
   assert(!Object.hasOwn(config, 'isolated'), 'DEV isolated override is not permitted')
   const frozen = structuredClone(config)
@@ -69,19 +92,22 @@ function freezeStudyContracts(config) {
     }
     assert(!Object.hasOwn(contract, 'isolated'), 'DEV isolated override is not permitted')
     // Constructor validation only: no environment preparation or invented task material.
-    createDevelopmentStudyIsolatedNodeProjectCheck({ cwd: frozen.cwd,
+    const constructorConfig = { cwd: frozen.cwd,
       requestText: contract.requestText ?? contract.prompt, entryPath: contract.entryPath,
       outputPaths: files.outputPaths, referencePaths: references.map(entry => entry.path),
       criteria: contract.criteria ?? [contract.requiredCondition], cases: contract.cases,
       requiredCondition: contract.requiredCondition,
-      ...(Object.hasOwn(contract,'moduleAliases') ? {moduleAliases:contract.moduleAliases} : {}) })
+      ...(Object.hasOwn(contract,'moduleAliases') ? {moduleAliases:contract.moduleAliases} : {}) }
+    if (codeEngine === 'python') createConversationStudyIsolatedPythonCheck(pythonFileConfig(constructorConfig))
+    else createDevelopmentStudyIsolatedNodeProjectCheck(constructorConfig)
   }
   return frozen
 }
 
 /** One frozen project scope; actual selected originals determine every closed cohort. */
-export function createDevelopmentFunctionalStudyResultCheck(config) {
-  const frozen = freezeStudyContracts(config)
+export function createDevelopmentFunctionalStudyResultCheck(config, codeEngine = 'node-project') {
+  assert(['node-project','python'].includes(codeEngine), 'DEV code engine is invalid')
+  const frozen = freezeStudyContracts(config, codeEngine)
   let cohort, generation = 0
   return {
     async prepareIndependentCases(material) {
@@ -89,7 +115,7 @@ export function createDevelopmentFunctionalStudyResultCheck(config) {
       cohort = undefined
       material.signal.throwIfAborted()
       try {
-        const next = createDevelopmentFunctionalStudyCohortCheck(frozen, material)
+        const next = createDevelopmentFunctionalStudyCohortCheck(frozen, material, codeEngine)
         if (next === undefined) return undefined
         const independent = await next.prepareIndependentCases(material)
         material.signal.throwIfAborted()
@@ -155,12 +181,14 @@ function goalAnswerChecks(raw, cwd) {
 }
 
 /** Spread these host-owned options into the actual DEV Runtime before tasks arrive. */
-export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract, answerStudyContracts, goalAnswerContracts) {
+export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContracts, goalContract, answerStudyContracts, goalAnswerContracts, codeEngine = 'node-project') {
+  assert(['node-project','python'].includes(codeEngine), 'DEV code engine is invalid')
+  assert(codeEngine !== 'python' || goalContract === undefined, 'Python file mode supports ordinary tasks, not Goal code contracts')
   assert(goalContract === undefined || goalAnswerContracts === undefined, 'DEV Goal code and answer checker modes are mutually exclusive')
   const ordinaryContracts = Array.isArray(ordinaryContract) ? ordinaryContract : [ordinaryContract]
   for (const contract of ordinaryContracts)
     assert.equal(contract?.cwd, studyContracts.cwd, 'DEV ordinary and study contracts must share the frozen cwd')
-  const studyResultCheck = createDevelopmentFunctionalStudyResultCheck(studyContracts)
+  const studyResultCheck = createDevelopmentFunctionalStudyResultCheck(studyContracts, codeEngine)
   if (goalContract !== undefined) for (const contract of Array.isArray(goalContract) ? goalContract : [goalContract])
     assert.equal(contract?.cwd, studyContracts.cwd, 'DEV Goal contract must share the frozen cwd')
   let answerStudyResultCheck
@@ -176,7 +204,7 @@ export function createDevelopmentNativeCheckOptions(ordinaryContract, studyContr
     // constructs the original factory, never prepares Docker or runs a check.
     answerStudyResultCheck = createConversationStudyIsolatedPythonAnswerCheck({ ...answerStudyContracts, isolated: structuredClone(answerHost) })
   }
-  return { externalCodeCheck: createDevelopmentOrdinaryTaskCheck(ordinaryContract, createDevelopmentIsolatedNodeProjectCheck), studyResultCheck,
+  return { externalCodeCheck: createDevelopmentOrdinaryTaskCheck(ordinaryContract, ordinaryFileFactory(codeEngine)), studyResultCheck,
     ...(answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck }),
     ...(goalContract === undefined ? {} : { goalTaskAcceptance: createDevelopmentGoalTaskCheck(goalContract, createDevelopmentGoalTaskIsolatedNodeProjectCheck) }),
     ...(goalAnswerContracts === undefined ? {} : { goalTaskAcceptance: goalAnswerChecks(goalAnswerContracts,studyContracts.cwd) }) }

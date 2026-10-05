@@ -60,8 +60,9 @@ export class DevelopmentNativeRuntimeContracts extends Service {
 
 /** Operator-owned JSON becomes only the original fixed-host factory options. */
 function readDevelopmentNativeRuntime(config) {
- closedDevelopmentData(config,['developmentRoot','contractPath','contractDigest'],['guidanceDecisionPolicy'])
+ closedDevelopmentData(config,['developmentRoot','contractPath','contractDigest'],['guidanceDecisionPolicy','codeEngine'])
  if(Object.hasOwn(config,'guidanceDecisionPolicy'))assert.equal(config.guidanceDecisionPolicy,'dev-paired-any-case.v1','DEV guidance decision policy is invalid')
+ if(Object.hasOwn(config,'codeEngine'))assert(['node-project','python'].includes(config.codeEngine),'DEV code engine is invalid')
  assert(process.platform==='win32','DEV loading requires Windows')
  const {developmentRoot,contractPath,contractDigest}=config
  const root=runtime.resolveDevelopmentRuntimeRoot(developmentRoot)
@@ -70,7 +71,7 @@ function readDevelopmentNativeRuntime(config) {
  assert.equal(packet.schemaVersion,'tianwen.development-native-contracts.v1')
  // The mutable task workspace cannot contain the operator's pinned contract.
  outsideDevelopmentWorkspace(contractPath,packet.studyContracts?.cwd)
- const options=createDevelopmentNativeCheckOptions(packet.ordinaryContract,packet.studyContracts,packet.goalContract,packet.answerStudyContracts,packet.goalAnswerContracts)
+ const options=createDevelopmentNativeCheckOptions(packet.ordinaryContract,packet.studyContracts,packet.goalContract,packet.answerStudyContracts,packet.goalAnswerContracts,config.codeEngine)
  const producer={id:'tianwen.development-native-file-policy.v1',digest:hash(readFileSync(new URL('./development-native-file-policy.mjs',import.meta.url)))}
  return {contracts:packet.ordinaryContract,options:{developmentRoot:root,captureExternalCodeArtifacts:true,exposeCapturedFileFacts:false,...options,
   ...(Object.hasOwn(config,'guidanceDecisionPolicy')?{guidanceDecisionPolicy:config.guidanceDecisionPolicy}:{}),
