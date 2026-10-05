@@ -1,5 +1,11 @@
 # 状态汇报实际学习试验与文字短引用修复
 
+## 2026-10-06 当前：新格式基线保存，继续未执行来源
+
+f58dce34隔离format-learning首批12actual/1明确scripted，原普通未来基线分别met/inconclusive，正常对照固定稿因操作者多写“方便查看”违反该批冻结的无额外效果要求，原双评审not-met/source-fidelity，CLI1/完整排空、零study/activation。不是研究方法失败，不重判或重做对照。原九Task/六study/七attempt共享账本字节保持，143冻结文件保持；新隔离profile三Task/零study/attempt，consent enabled/revision1。final-audit保存D:/DevData/tianwen-format-learning-20261006。
+
+接续同profile的两个已冻结但未执行格式失败来源，已有真实future1 met作原合法正常对照；复用真实基线，不重跑普通交付、旧组合或增加条件。新预检只读核三Task和原字节。接受才方法后/新任务/撤回/冷恢复。真实基线met到met不计改善，inconclusive到met须明确原不确定，不称已确认原失败。目标active，main/Daily NO-GO/R9/DEV v1保持。D约16.76GiB>=15；删除307MiB下载缓存被自动审批blocked by policy拒绝，未重试，不以其他操作绕过。
+
 ## 2026-10-06 字面格式真实控制完成
 
 fbe37946隔离literal-answer-control：8actual/完整请求、2明确scripted主答、原CLI0。允许XML Task767decd5…两检查met；明确普通正文Task8e2a2211…两检查not-met/instruction-following，审计明确实际字面标签不可当harness忽略，当前事实仍supported。零study/activation，旧共享学习账本逐字保持；本批不是实际方法收益。此前15actual/5scripted名称控制与本批独立，不合并为学习效果。

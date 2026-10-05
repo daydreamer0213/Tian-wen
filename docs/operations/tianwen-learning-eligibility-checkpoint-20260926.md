@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：新格式基线保存，继续未执行来源
+
+f58dce34隔离format-learning首批12actual/1明确scripted，原普通未来基线分别met/inconclusive，正常对照固定稿因操作者多写“方便查看”违反该批冻结的无额外效果要求，原双评审not-met/source-fidelity，CLI1/完整排空、零study/activation。不是研究方法失败，不重判或重做对照。原九Task/六study/七attempt共享账本字节保持，143冻结文件保持；新隔离profile三Task/零study/attempt，consent enabled/revision1。final-audit保存D:/DevData/tianwen-format-learning-20261006。
+
+接续同profile的两个已冻结但未执行格式失败来源，已有真实future1 met作原合法正常对照；复用真实基线，不重跑普通交付、旧组合或增加条件。新预检只读核三Task和原字节。接受才方法后/新任务/撤回/冷恢复。真实基线met到met不计改善，inconclusive到met须明确原不确定，不称已确认原失败。目标active，main/Daily NO-GO/R9/DEV v1保持。D约16.76GiB>=15；删除307MiB下载缓存被自动审批blocked by policy拒绝，未重试，不以其他操作绕过。
+
 ## 2026-10-06 当前：字面格式控制通过，下一隔离格式学习
 
 fbe37946原CLI真实控制8actual/2明确scripted，允许XML原met、普通正文带标签原not-met/instruction-following，CLI0/零研究/旧共享学习账本逐字保持；只证明评审边界，非方法效果。下一新隔离写作格式来源与正常对照，先真实后续基线，再原研究/接受才自动启用、方法后/未用任务/撤回/冷恢复。旧九Task/六study/七attempt保护，旧研究不重判，不新增门槛；目标active、main/Daily NO-GO/R9/DEV v1保持，D>=15GiB。计划docs/superpowers/plans/2026-10-06-tianwen-format-learning-plan.md。
