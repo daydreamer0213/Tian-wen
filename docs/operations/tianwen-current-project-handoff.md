@@ -1,5 +1,15 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 最新：受控 DEV 自动学习链路完成，正式发布仍 NO-GO
+
+87512b86新匿名摘要分支完成原CLI预检、原Loop恢复、实际任务、冷恢复及独立终态审计，全部退出0。复用f1b0d12f原accepted十臂与完整原生proof；明确模拟accepted已落盘/activation未落盘中断，在新分支零模型恢复并自动启用，不重跑研究、不改旧撤回。历史Session只链接原accepted-prefix实际引用的123项，不凑旧126项。
+
+本批13真实请求/0脚本主答：新冻结模拟错稿原双审not-met（2请求、非Task/来源）；同一冻结请求的真实后任务1eadaf7c双审met，方法进入原notice及实际provider输入（4请求）；另一全新任务21e65678同样实际注入、双审met（6请求，允许原子会话捕获纠正，不强求固定调用数）。这只证明公开模拟故障被合格交付纠正及新任务成功，不证明自然无方法基线、方法因果效应或总体提升。原f1研究明确改善是去除交付XML标签，事实基线本已正确；上一命名产品Task的inconclusive保持。
+
+原consent revision2关闭、consent-disabled撤回后真实普通任务无方法注入（1请求）、无新增分析Task；冷恢复0调用/账本和Task/study/attempt/feedback不变。149生产冻结文件、旧flat/上一失败分支、两旧账本和123历史Session原字节保护。实际研究新增0，前缀579853字节。独立复核无P1/P2；完整目标可按本已授权的受控DEV范围结束，不能据此发布main/Daily。原R9语义安全问题及NO-GO保持，不新增正式门槛。
+
+结果见[tianwen-summary-checkpoint-continuation-result-20261006.md](tianwen-summary-checkpoint-continuation-result-20261006.md)及D:/DevData/tianwen-summary-unambiguous-learning-20261006/final-audit.json。下一产品阶段是收束可使用预览和原R9语义安全修复，避免继续无限重复同类摘要实验。无依赖/运行时/全历史副本；本轮初始非硬链接文件1620066字节，D剩余约16.76GiB，满足15底线、未达20偏好；本轮没有新增大缓存或临时依赖残余。
+
 ## 2026-10-06 当前：已接受方法零模型恢复及真实后任务注入通过
 
 75f3adca隔离checkpoint明确模拟accepted落盘/activation未落盘中断，580KB prefix及必要artifact、126完成Session原字节硬链接，不复制环境。原CLI预检0/零模型；原Loop完整source/proposal/十臂双审恢复0/零模型、在分支原生启用。旧原接受/启用/撤回记录保持，不是新研究或重跑。

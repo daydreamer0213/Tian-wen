@@ -22,4 +22,24 @@
 
 存储：16份已结束实验原调用轨迹压缩归档，逐字解压SHA核对后删除重复raw，释放87153894字节；manifest D:/DevData/tianwen-flat-capture-wrapper-engineering-20261006/closed-traces-compaction.json，原Session/ledger/current flat结果不动。D约16.76GiB，满足15下限，未达到20偏好。
 
-完整目标active，main/Daily NO-GO/R9保持。
+上述为第一次失败时的历史状态。后续不同任务的完整结果如下。
+
+## 新匿名任务的完整实际闭环通过
+
+新工程D:/DevData/tianwen-summary-unambiguous-engineering-20261006；实际结果D:/DevData/tianwen-summary-unambiguous-learning-20261006，冻结HEAD87512b86a001a68143f1ed0b2bc0e613416a99ef。原CLI预检、恢复、实际运行、cold均退出0，独立audit-terminal退出0；final-audit.json为completed:true/chainValidated:true，限定证据复核无P1/P2。
+
+原accepted-prefix579853字节，原Loop完整来源/提案/十臂双审零模型恢复并在分支自动启用。历史Session仅链接实际引用完整闭包123项、24771280逻辑字节，实际初始复制591392字节，全部初始非链接生成文件1620066字节；无运行时、依赖或全历史副本。旧126包含旧named-product before会话，不为凑数量加入本批，也不嫁接旧before proof。
+
+| 阶段 | 实际请求 | 原结果及可确认内容 |
+| --- | ---: | --- |
+| 新事前冻结模拟错稿 | 2 | 原requirements/grounding均not-met；明确模拟，非普通Task/学习来源，自然模型失败:false |
+| 同请求真实后任务 | 4 | 新Task1eadaf7c890eae02a4d12a751862799a349f562e76475086e74ef4bc76d8d4d6，原summary/双met，原方法notice及实际provider输入均有方法 |
+| 另一全新真实摘要 | 6 | 新Task21e656787f478bdd71d24cbb1155753df868074843c55e7ab36096636c10ad80，同样实际注入与双met；原生捕获纠正计入，不要求provider调用恰好等于两检查 |
+| 关闭后普通真实任务 | 1 | 原consent revision2disabled、原consent-disabled撤回、无方法注入，无新增分析Task；没有独立内容复核，不宣称这项内容met |
+| 冷恢复 | 0 | 原CLI/Loop与新before原证明恢复，账本、Task/study/attempt/feedback不变，active0 |
+
+合计13真实请求、0脚本主答、0新增研究/研究重跑。新before与after使用同冻结请求；原proof恢复绑定原request、material、modelConfig，普通Task材料核原reviewIntent.materialDigest。两个真实后任务均原双met，但前错稿由宿主公开模拟，不能当作无方法自然基线、方法因果效应或总体提升。原f1研究paired改善是去除实际XML交付标签，事实原本已正确，不写成事实准确率提升。
+
+正常排空/非紧急退出、active0；149冻结生产文件、原flat根与ledger、上一失败根/profile、共享原ledger、123历史Session源及链接字节全部保持。原accepted十臂/决定、历史8Task4study4attempt与前缀保持，仅新分支原启用/两新Task/原撤回新增；旧漏产品名Task及inconclusive不改。审计不以任何旧失败或缺cold结果冒充本次通过。
+
+本已授权受控DEV完整学习目标达到；正式main/Daily仍NO-GO，原R9语义安全问题尚未因此解决，正式门槛不新增。下一阶段收束产品预览与原语义安全修复，不再无限重跑相同摘要场景。D终态17991839744字节空闲（约16.76GiB），满足15底线、未达20偏好；本轮无新大缓存/依赖/临时环境残余，保留小规模可追溯成果及已验证压缩的旧轨迹。

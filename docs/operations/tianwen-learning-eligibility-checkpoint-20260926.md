@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 最新：受控开发学习闭环通过，不替代正式语义安全资格
+
+87512b86新匿名任务分支四原CLI动作及独立终态审计均0：原f1 accepted十臂完整proof零模型恢复/自动启用；13真实请求分别为新公开模拟错稿原双审not-met 2、同冻结请求真实后任务双met且实际注入4、另一新任务双met且实际注入6、consent2关闭后真实普通任务无注入1。模拟错稿不进普通Task/学习来源，原子会话捕获纠正计真实调用，不设恰好2调用的人为门。原六份新评审proof/request/material/config均核验，冷恢复0模型/原账本不变，149生产文件/123实际引用历史Session/两旧账本及上一失败分支字节保持；新研究0。
+
+可确认受控故障纠正、方法实际应用、新任务交付、撤回与冷恢复；不宣称自然基线或总体因果效应。f1的实际paired改善为交付标签移除，事实原本正确；上一漏产品名inconclusive及历史语义风险保持。已授权受控DEV完整目标达到，main/Daily NO-GO与原R9发布要求不变，不继续等待自然来源或反复同类重跑。详细结果见tianwen-summary-checkpoint-continuation-result-20261006.md与D:/DevData/tianwen-summary-unambiguous-learning-20261006/final-audit.json。D约16.76GiB>=15，无新大缓存/依赖副本。
+
 ## 2026-10-06 当前：原研究零模型恢复和方法实际注入已核实
 
 75f3adca新隔离checkpoint明确模拟accepted落盘/activation未落盘，原CLI预检和原Loop完整source/proposal/十臂双审恢复均0/零模型，分支原生启用、旧原结果不改。实际4请求/0scripted summary方法真正注入，事实正确但漏产品名出现双审分歧，原inconclusive/CLI1/normal drain/consent2disabled/withdraw保持。独立失败终态审计0，149冻结、flat22文件、两旧账本/126历史文件/前缀/原记录保持，后fresh/noinject/cold未执行。下一新匿名明确摘要任务与新模拟错误一起冻结，原双审评分而不入来源；不嫁接旧before proof、不重评失败样本/研究。完整目标active/main-Daily NO-GO/R9保持。详见tianwen-summary-checkpoint-continuation-result-20261006.md。旧日志压缩验证释放87MB，D16.76GiB>=15/未20。

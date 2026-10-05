@@ -26,9 +26,11 @@ Task 2 first attempt stopped honestly: 4 actual requests, method genuinely injec
 
 ## Task 3: different unambiguous continuation
 
-- [ ] New bounded author/environment under D:/DevData/tianwen-summary-unambiguous-learning-20261006. Same original accepted-before-activation checkpoint and original zero-call restore, no new study/consumed pair/source delivery.
-- [ ] Freeze a new anonymous status-change summary request and wrong simulated delivery together, different facts and explicit output boundaries. Original native dual review of that fixed wrong delivery runs in the actual batch, never a Task/learning source or natural baseline. Do not bind the old named-product before proof to this new request.
-- [ ] Ordinary after uses the same new frozen request and original method injected into actual provider input; original two checks met. One additional different anonymous summary task with actual method and original two checks met, without a pre-method improvement claim.
-- [ ] Original consent withdrawal, actual no-injection/analysis-disabled task, zero-call cold proof/state recovery and independent terminal audit. Failed audit path must preserve incomplete/no-cold, never require missing cold as if it existed.
+- [x] New bounded author/environment under D:/DevData/tianwen-summary-unambiguous-learning-20261006. Same original accepted-before-activation checkpoint and original zero-call restore, no new study/consumed pair/source delivery.
+- [x] Freeze a new anonymous status-change summary request and wrong simulated delivery together, different facts and explicit output boundaries. Original native dual review of that fixed wrong delivery runs in the actual batch, never a Task/learning source or natural baseline. Do not bind the old named-product before proof to this new request.
+- [x] Ordinary after uses the same new frozen request and original method injected into actual provider input; original two checks met. One additional different anonymous summary task with actual method and original two checks met, without a pre-method improvement claim.
+- [x] Original consent withdrawal, actual no-injection/analysis-disabled task, zero-call cold proof/state recovery and independent terminal audit. Failed audit path must preserve incomplete/no-cold, never require missing cold as if it existed.
+
+Task 3 complete at frozen HEAD87512b86: original preflight/restore/run/cold CLI0 and independent terminal audit0; 13 actual requests (2 before, 4 controlled after, 6 fresh, 1 withdrawn), zero new studies. Dynamic 123 historical Session closure, 149 production files and both old branches preserved. Scoped operator/evidence reviews have no remaining P1/P2. Original Task2 first failure stays incomplete and is superseded by this different, frozen Task3 rather than rerated. Controlled DEV closure is established; simulated fault correction is not causal population benefit. main/Daily/R9 unchanged.
 
 All previous constraints and main/Daily NO-GO/R9 remain.
