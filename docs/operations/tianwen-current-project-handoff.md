@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：格式方法真实退步已停止，下一补失败方法信息流
+
+64d38193隔离format-learning learning-r2：21actual/2明确scripted、复用原两真实基线，新增source1 962cc9f4…及source2 cf8a9167…均writing/not-met/instruction-following；原Loop用真实met的future1对照，study1aa2ef75…候选保存，四臂source1 met→met、source2 met→not-met，原candidate-failed/CLI1，零decision/activation/after/rollback。候选自己要求不写标题却输出“箱册面向新用户的功能介绍：”；这是实际退步，不是放宽baseline即可接受，不重判旧停止。
+
+收尾因操作员复用format-shutdown-parent持久化ID，flush记录id collision；无normal-shutdown，不称正常排空成功。原退出helper完成零active收尾、consent disabled/revision2，原drained快照仍revision1。保留首audit.mjs及失败，独立audit-terminal核166冻结文件、首三Task账本prefix/旧共享九Task六study七attempt账本字节保持。随后新nonce原SDK冷加载控制CLI0/0模型、两个parent日志flush/dispose通过、原Task/study/两账本逐字不变，修复方向获验证，不修改旧记录。证据D:/DevData/tianwen-format-learning-20261006/learning-r2/final-audit.json及unique-parent-result.json。
+
+下一优先实现新提案可选读取同scope此前候选实际来源臂失败结果；目前proposal只有sourceObservations及用户proposalClues，不直接包含此前研究候选退步。限定不泄漏正常反例/泛化保留案例，不当成功或新标准，原proof/旧恢复/门槛保持。见2026-10-06-tianwen-rejected-method-observation-plan.md。目标active，main/Daily NO-GO/R9保持，D约16.76GiB>=15，无依赖/大环境/旧账本全量副本；下载缓存删除被自动审批blocked by policy拒绝，未绕过或重试。
+
 ## 2026-10-06 当前：新格式基线保存，继续未执行来源
 
 f58dce34隔离format-learning首批12actual/1明确scripted，原普通未来基线分别met/inconclusive，正常对照固定稿因操作者多写“方便查看”违反该批冻结的无额外效果要求，原双评审not-met/source-fidelity，CLI1/完整排空、零study/activation。不是研究方法失败，不重判或重做对照。原九Task/六study/七attempt共享账本字节保持，143冻结文件保持；新隔离profile三Task/零study/attempt，consent enabled/revision1。final-audit保存D:/DevData/tianwen-format-learning-20261006。

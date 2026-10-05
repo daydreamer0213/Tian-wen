@@ -1,0 +1,11 @@
+# 下一轮研究吸收已失败方法的来源臂结果
+
+真实缺口：format-learning-r2的候选是冗长自检清单，规定不写标题却实际增加标题；源任务baseline合格、candidate失败。当前提案只获得原来源交付与相关用户反馈，没有直接获得同scope此前失败候选的执行结果，因此换新来源仍可能重复无效清单。先补研究信息流，不靠降低评分或无限造同类样本。
+
+最小实现：在新提案packet可选加入一个有据failedMethodObservation，来自同scope、同原model/quality/family/输出模式及当前consent revision的旧candidate-failed研究，仅包含该方法原文本和一个已失败source1/source2臂的原独立评审结果。不读取或披露旧counterexample/adjacent/holdout，不把它当当前来源、当前标准、正向收益或执行指令；禁止携带旧个案答案作新交付模板。
+
+复用原账本/原native proof恢复，逐项核candidate、source-arm、原review proof与当时提案/执行输入。按新研究打开时间限定此前记录、绑定摘要与容量，排除无完整证据/不再获准使用/不同scope。不新增研究资格要求：无合法观察就保持旧路径。只给提案实际packet增加可选说明，先确认能沿用原sourceObservations的冻结恢复方式，不新增账本事件或大型历史副本。恢复旧无该字段的packet保持原行为；新packet有该字段时验证原已冻结观察，不能用未来增加的研究改写它。
+
+实现前原SDK RED：下一不同来源对的提案确实见不到此前方法退步；GREEN：仅来源失败结果进入新提案，能自行选择修正或不足，不host强选/修答案。另核篡改/外scope/旧consent/缺proof不作输入、正常反例和保留案例没有泄露，旧历史恢复不新增模型调用。相关源码/发布协议检查与原构建及原完整profile即可，不反复扩大验收。
+
+工程通过后新小实际研究验证提案是否吸收失败信息；新nonce绑定原生root/退出parent/冷恢复会话，防止再次复用已有持久化ID。旧format study1aa2ef75…与两个来源不重跑或重判；其consent因收尾失败已disabled/revision2，不能把它伪装为当前revision来源。真实改善、激活和撤回仍分别报告，工程模拟不冒充实际效果。目标active，main/Daily NO-GO及原发布门槛保持。
