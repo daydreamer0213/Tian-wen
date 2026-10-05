@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 最新：一实际问题不补评，下一显式模拟训练来源
+
+29414e97新cw-de批102真实请求/完整轨迹，七Task完成，基线3/4、训练一 rejected/not-met 两verified；三来源仅一原问题，原1!=2停，研究/激活/方法未来效果/反馈0、CLI1/排空成功。首结果和29消费者/三旧账本保持，不把实际成功改失败。[准确范围](tianwen-native-finalization-learning-result-20261005.md)。
+
+不自然等待、索题或机械blocked。下一[显式训练注入](../superpowers/specs/2026-10-05-tianwen-injected-training-design.md)将源错标为操作员scripted，原SDK与独立判断处理两错/一正常；研究/未知未来仍真实模型，同故障/权限/合同，不能把训练模拟充自然模型错误或真人反馈。原门槛和阶段不增加；完整目标active、main/Daily NO-GO/R9/原窗口保持。Docker已自停、旧84容器/保护根保持、重复清3.1MB，D17.22>=15。
+
 ## 2026-10-05 最新：自动收尾工程交付与新学习批责任
 
 Task 正常结束但 native Goal 未完成时，产品按原 lane/身份/权限/共享三次续轮通过公共 followupTask 自动处理，模型自己结束原 Goal，答案保持；显式暂停立即取消，正常 Planner 释放只允许有界公共冷恢复。最新源码138、发布包49/10原跳过、原十五实际构建命令过；原CLI成功/上限/暂停三新控制37 scripted、0真实调用、退出与排空0。[准确工程证据](tianwen-native-task-finalization-delivery-20261005.md)。这不是独立答案或学习效果验收，不重评旧null-state20请求首结果。
