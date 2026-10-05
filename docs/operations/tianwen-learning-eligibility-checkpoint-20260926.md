@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：许可边界通过，字面答案来源已澄清
+
+隔离许可控制三个批次15actual/5明确scripted；首语气控制未全通过、第二负例泛称有歧义，均保留首结果。第三明确名称正反控制6actual/2scripted、原CLI0：允许名称及同段事实解释met，违反明确名称禁令not-met。共享学习账本字节保持，零研究，不算方法效果。证据D:/DevData/tianwen-future-approval-learning-20261006/criteria-scope-controls-final-audit.json。
+
+未来普通及文件claim audit仅说明字面标签属于实际交付，不能臆测宿主添加；格式仍依用户要求，允许XML不新增禁令。旧schema/proof及host验证、质量v11/研究/发布门槛不变。限定复查通过；源码211、原十五构建、发布相关208+原完整profile50=258通过，13未运行=10原条件+3仅源码装配。接续全新允许XML/明确普通正文的原生正反控制，模拟主答和真实评审分别记录。完整目标active，main/Daily NO-GO/R9/DEV v1保持，D>=15GiB。
+
 ## 2026-10-06 当前：原要求提取过度细化，未来入题澄清
 
 writing-r2的16真实/完整+1明确模拟，原writing/not-met/source-fidelity及新study986afb0d…，首两臂met→not-met，原candidate-failed、零启用/后续/撤回。代码修改前旧八Task/五study/六attempt/53消费者/六其他账本/环境/prefix保持。原入题自行增加方法名称与补充说明禁令，复制到新研究，非真实feedbackStandard；原候选还实际包含`</answer>`，两评审却误当系统容器标记。不能因弱理由就把旧候选重判通过。

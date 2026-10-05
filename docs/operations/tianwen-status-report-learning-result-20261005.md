@@ -1,5 +1,11 @@
 # 状态汇报实际学习试验与文字短引用修复
 
+## 2026-10-06 当前：许可边界通过，字面答案来源已澄清
+
+隔离许可控制三个批次15actual/5明确scripted；首语气控制未全通过、第二负例泛称有歧义，均保留首结果。第三明确名称正反控制6actual/2scripted、原CLI0：允许名称及同段事实解释met，违反明确名称禁令not-met。共享学习账本字节保持，零研究，不算方法效果。证据D:/DevData/tianwen-future-approval-learning-20261006/criteria-scope-controls-final-audit.json。
+
+未来普通及文件claim audit仅说明字面标签属于实际交付，不能臆测宿主添加；格式仍依用户要求，允许XML不新增禁令。旧schema/proof及host验证、质量v11/研究/发布门槛不变。限定复查通过；源码211、原十五构建、发布相关208+原完整profile50=258通过，13未运行=10原条件+3仅源码装配。接续全新允许XML/明确普通正文的原生正反控制，模拟主答和真实评审分别记录。完整目标active，main/Daily NO-GO/R9/DEV v1保持，D>=15GiB。
+
 完整自动学习目标 active；main/Daily NO-GO、R9 和原正式发布条件保持。允许主动设计缺失条件，不等待自然发生，不再向用户索题。
 
 ## 2026-10-06 文案配对首结果与要求提取澄清

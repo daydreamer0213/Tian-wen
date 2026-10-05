@@ -328,7 +328,7 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
   }), description: 'Assess this complete nonblank answer unit with at least its required first claim.' }]))
   return object({
     schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]),
-    units: { ...object(unitProperties), description: 'Provide every listed answer ID exactly once; do not omit or add units.' },
+    units: { ...object(unitProperties), description: 'Provide every listed answer ID exactly once; do not omit or add units. Every answer unit is literal delivered content, including any tags in it. Do not assume such text was added by the host or harness. Judge its requested output form against the direct user instructions; tags may be valid when the user requests or permits them.' },
   })
 }
 
@@ -344,7 +344,7 @@ function compactFileAuditSchema(evidence: ClaimEvidence, quoteExamples = false):
   }))
   return {
     ...object({ schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]), units: object(units) }),
-    description: 'Assess every listed answer ID exactly once. Whitespace-only units are null; every nonblank unit needs firstClaim and any additionalClaims. Copy each quote as an exact non-empty substring of its own answer unit, preserving Markdown, whitespace, punctuation and scope. List only supplied non-answer source IDs. Use supported only for source-facts with authoritative supplied evidence; use permitted for task-compatible non-source-facts. Explain scope, time, certainty, commitment and source authority for each claim. The host still verifies every unit, quote, source ID, digest and verdict.',
+    description: 'Assess every listed answer ID exactly once. Whitespace-only units are null; every nonblank unit needs firstClaim and any additionalClaims. Copy each quote as an exact non-empty substring of its own answer unit, preserving Markdown, whitespace, punctuation and scope. List only supplied non-answer source IDs. Use supported only for source-facts with authoritative supplied evidence; use permitted for task-compatible non-source-facts. Explain scope, time, certainty, commitment and source authority for each claim. The host still verifies every unit, quote, source ID, digest and verdict. Every answer unit is literal delivered content, including any tags in it; do not assume the host or harness added them. Judge output form against the direct user instructions; tags may be valid when the user requests or permits them.',
   }
 }
 

@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：许可边界控制通过，接续字面格式控制
+
+17a5c5af的隔离控制共15actual/5明确scripted主答：首控制因口播语气/未检查说明未全通过；第二控制名称禁令只指泛称，原评审met，负例设计有歧义，首结果保留；第三使用明确名称，6actual/2scripted、原CLI0，许可名称及同段事实解释met，违反明确名称禁令not-met/instruction-following。三个控制共享学习账本字节保持，零研究，不称自动学习效果。证据D:/DevData/tianwen-future-approval-learning-20261006/criteria-scope-controls-final-audit.json。
+
+另仅未来claim audit工具说明澄清实际交付的字面标签属于答案，不能臆测宿主添加；用户明确允许XML等格式仍正常评审。不改字段、枚举、host验证、质量v11、旧冻结schema/proof或发布条件。限定复查无新有据P1/P2；源码相关211、原十五构建、发布相关208加原完整profile50合计258通过，13未运行=10原条件+3仅源码装配。接下来全新允许XML/明确普通正文的实际正反控制；固定主答明确模拟，真实评审另记，旧研究不重判。完整目标active，main/Daily NO-GO/R9/DEV v1保持，D约16.8GiB>=15。
+
 ## 2026-10-06 当前：真实研究发现要求提取加严，已澄清新入题
 
 e6d5af93的writing-r2：16actual/16完整+1明确模拟，溪帆Task54a87e78…原writing/not-met/source-fidelity；原Loop与保存青禾形成study986afb0d…，candidate保存，source1 baseline met/candidate not-met，原candidate-failed/CLI1/正常排空，零decision/activation/after/rollback。修改代码前旧八Task/五study/六attempt/53消费者/六其他账本/环境/prefix保持，当前九Task/六study/七attempt。候选核心状态事实正确，但其实际answer含`</answer>`；没有宿主清理该标记，不重判停止。[结果](tianwen-status-report-learning-result-20261005.md)。
