@@ -29,6 +29,7 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
   changedIndex?: number
   change?: Partial<Pick<GoalTaskOutcomeInput, 'checkerId' | 'checkerDigest' | 'requiredConditionDigest'>>
   answerMode?: 'text' | 'chat'
+  reviewCategories?: 'overlap' | 'disjoint'
 } = {}) {
   mkdirSync(BASE, { recursive: true }); const root = mkdtempSync(join(BASE, 'ledger-'))
   let tick=0
@@ -60,7 +61,10 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
       sessionLifecycleFingerprint: sha256('child-lifecycle-'+index), assistantMessageIds: ['answer-'+index],
       qualityContract: conversationQualityContract(), inputDigest: guidanceInputDigest('actual requirements-'+index),
       ...(aliasedInputs ? { inputIdentityDigest:sha256(index<3?'same canonical input':'separate counter input') } : {}),
-      materialDigest: options.answerMode !== undefined ? sha256(answerMaterial(index)) : sha256('study material-'+index), reviewMaterialDigest: sha256('original review-'+index), checks: checks('source-'+index, checkedCode || options.answerMode !== undefined || index===3) }
+      materialDigest: options.answerMode !== undefined ? sha256(answerMaterial(index)) : sha256('study material-'+index), reviewMaterialDigest: sha256('original review-'+index), checks: parseConversationAuditedReviewChecks(checks('source-'+index, checkedCode || options.answerMode !== undefined || index===3).map((check,focus)=>({ ...check,
+        ...(check.verdict === 'not-met' && options.reviewCategories !== undefined ? { category: options.reviewCategories === 'overlap'
+          ? (index === 1 ? ['source-fidelity','task-understanding'] : ['task-understanding','source-fidelity'])[focus]
+          : index === 1 ? 'source-fidelity' : 'tool-use' } : {}) }))) }
     ledger.recordGoalTaskResearchSource(input)
     return ledger.listGoalTaskResearchSources().find(item => item.sourceId === receipt.sourceId)!
   })
@@ -88,6 +92,49 @@ function fixture(checkedCode = false, quarantine = true, aliasedInputs = false, 
     modelConfigDigest:sha256('model'),qualityContract:conversationQualityContract(),nativeGoalSources,caseDesignProof:proof('case-design'),cases,...checkConfig }
   return {root,ledger,sources,attemptBody,body,remove(){if(!resolve(root).startsWith(BASE+sep))throw new Error('cleanup outside owned fixture');rmSync(root,{recursive:true,force:true})}}
 }
+
+it.each(['overlap','disjoint'] as const)('selects native problems by %s original negative categories without rewriting primary labels', async reviewCategories=>{
+  const f=fixture(false,true,false,{reviewCategories})
+  const recovery=vi.spyOn(goalSources,'recoverGoalTaskResearchSource').mockResolvedValue({} as never)
+  try {
+    const before=structuredClone(f.sources)
+    expect(f.sources.slice(0,2).map(goalTaskResearchProblem)).toEqual(reviewCategories === 'overlap'
+      ? [{category:'source-fidelity',checkedFailure:false},{category:'task-understanding',checkedFailure:false}]
+      : [{category:'source-fidelity',checkedFailure:false},{category:'tool-use',checkedFailure:false}])
+    const service=Object.create(TianwenConversationGuidanceLoopService.prototype)
+    Object.assign(service,{ctx:{tianwenEvolution:f.ledger},sourceConfig:{goalStateRoot:'controlled-state'}})
+    const selection=await service.scanGoal(scopeKey)
+    expect(selection.state).toBe(reviewCategories === 'overlap' ? 'ready-to-schedule' : 'awaiting-compatible-sources')
+    if(reviewCategories === 'overlap')expect(selection.group.category).toBe('task-understanding')
+    expect(f.ledger.listGoalTaskResearchSources()).toEqual(before)
+  }finally{recovery.mockRestore();f.remove()}
+})
+
+it('persists a native study using a shared secondary category and keeps cold original sources unchanged',()=>{
+  const f=fixture(false,true,false,{reviewCategories:'overlap'})
+  try {
+    const before=structuredClone(f.sources),attempt={...f.attemptBody,attemptId:caseDesignAttemptId(f.attemptBody as never)}
+    expect(f.ledger.recordConversationCaseDesignAttempt(attempt as never)).toEqual({duplicate:false})
+    const absentBody={...f.body,failureCategory:'tool-use'},absent={kind:'study-opened',...absentBody,studyId:guidanceStudyId(absentBody as never)}
+    expect(()=>f.ledger.recordConversationGuidance(absent as never)).toThrow(/scope|category|compatible/)
+    const body={...f.body,failureCategory:'task-understanding'},opened={kind:'study-opened',...body,studyId:guidanceStudyId(body as never)}
+    expect(f.ledger.recordConversationGuidance(opened as never)).toEqual({duplicate:false})
+    expect(f.ledger.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    const bytes=readFileSync(join(f.root,'ledger.jsonl')),cold=new EvolutionLedger(f.root,{guidanceActivationQuarantine:true})
+    expect(cold.listGoalTaskResearchSources()).toEqual(before)
+    expect(cold.listConversationGuidanceStudies()).toEqual(f.ledger.listConversationGuidanceStudies())
+    expect(cold.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    expect(readFileSync(join(f.root,'ledger.jsonl'))).toEqual(bytes)
+  }finally{f.remove()}
+})
+
+it('refuses a native attempt when conclusive negative categories are disjoint',()=>{
+  const f=fixture(false,true,false,{reviewCategories:'disjoint'})
+  try {
+    const attempt={...f.attemptBody,attemptId:caseDesignAttemptId(f.attemptBody as never)}
+    expect(()=>f.ledger.recordConversationCaseDesignAttempt(attempt as never)).toThrow(/compatible/)
+  }finally{f.remove()}
+})
 
 it.each(['text','chat'] as const)('admits bound original %s answer failures into an independently checked native study despite met reviews', mode=>{
   const f=fixture(false,true,false,{answerMode:mode,separateContracts:true})

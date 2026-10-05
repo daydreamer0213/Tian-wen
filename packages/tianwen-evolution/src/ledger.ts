@@ -3,7 +3,7 @@ import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, co
 import { conversationFileTaskInputDigest, conversationTaskFileInputs } from './conversation-files.js'
 import { conversationTaskInputDigest } from './conversation-learning.js'
 import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
-import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchCheckInputsMatch, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
+import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchCommonCategory, goalTaskResearchCheckInputsMatch, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
 import {
   closeSync,
   existsSync,
@@ -3412,8 +3412,9 @@ export class EvolutionLedger {
       && source.input.evaluationMode === first.input.evaluationMode && source.input.fileOutputKind === first.input.fileOutputKind
       && sha256(source.input.qualityContract) === sha256(first.input.qualityContract)
     const firstProblem = goalTaskResearchProblem(first), secondProblem = goalTaskResearchProblem(second)
+    const sharedCategory = goalTaskResearchCommonCategory(first, second, 'cases' in binding ? binding.failureCategory : undefined)
     if (!sources.every(compatible) || firstProblem === undefined || secondProblem === undefined
-      || firstProblem.category !== secondProblem.category || firstProblem.checkedFailure !== secondProblem.checkedFailure
+      || sharedCategory === undefined || firstProblem.checkedFailure !== secondProblem.checkedFailure
       || sameGoalTaskResearchInput(first,second) || !goalTaskResearchSuccess(counter)) {
       throw new LedgerIntegrityError('native Goal learning requires two distinct compatible original problems and a verified independent counterexample')
     }
@@ -3429,7 +3430,7 @@ export class EvolutionLedger {
     }
     if (!('cases' in binding)) return
     if (binding.family !== first.input.family || (binding.evaluationMode ?? 'text') !== first.input.evaluationMode
-      || binding.fileOutputKind !== first.input.fileOutputKind || binding.failureCategory !== firstProblem.category
+      || binding.fileOutputKind !== first.input.fileOutputKind || binding.failureCategory !== sharedCategory
       || sha256(binding.qualityContract) !== sha256(first.input.qualityContract)) throw new LedgerIntegrityError('native Goal study scope or original quality contract changed')
     for (const [index, source] of sources.entries()) {
       const item = binding.cases[index]

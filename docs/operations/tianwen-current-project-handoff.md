@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：七任务完成，修复同一失败的标签顺序分组
+
+新DEV批150真实/150完整轨迹、15显式训练注入另记；四后续基线4/4，两模拟问题独立rejected、正常对照verified，七Goal/Task complete。两失败共有source-fidelity/task-understanding但主要标签顺序相反，原分组零研究，CLI1/原排空成功；首结果保留。已修复Loop及Ledger按双方原始负评实际共有类别配对，主要标签/历史/资格保持。源码累计226、发布功能223、原构建15、实际发布profile49通过10原跳过；三发布构造类引用身份断言不适用打包、源码通过，首失败日志保留；限定复查无有据P1/P2。[准确范围和证据](tianwen-native-shared-category-result-20261005.md)。
+
+下一同一settled profile只接续未执行研究/激活、事前四后续与撤回，不重跑旧七任务。基线4/4无分数上升空间，研究改善/后续不退步/回滚分别如实记录，另设计有改善空间的受控环境。所有开发缺条件主动模拟，不自然等待/索题/机械blocked，不增正式门槛；完整目标未完成，main/Daily NO-GO/R9保持。原批变更前31消费者/三旧账本不变、84容器保持/Docker停；删七重复4,093,660bytes，D约17.06>=15，无依赖或环境副本。
+
 ## 2026-10-05 当前：模拟反馈接入、版本修改、撤回和冷回放已实际验证
 
 原三Task全部complete；r2/r6/r7/r8合计18真实请求/18完整轨迹、3显式root主答注入另记。具体负反馈attributable-problem、明确正反馈positive、第二项新版本requirement-change均有真实原生独立proof；具体负反馈撤回后原intake retracted、当前学习支持失效、历史保持。r8原CLI run/cold均0/排空，重启零模型、三Task/四归因历史及当前两SDK反馈逐项相等。仅旧bare negative原模型合理inconclusive却引用实际rating JSON被host误拒，原invalid-judgment/proof=null仍保存，不计语义成功。

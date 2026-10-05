@@ -135,6 +135,19 @@ export function goalTaskResearchProblem(source: GoalTaskResearchSource): { categ
   return (checkedCode || checkedAnswer) && review.verdict === 'met' && source.outcome.classification === 'checked-failure'
     ? { category: 'instruction-following', checkedFailure: true } : undefined
 }
+
+/** Pair only categories actually recorded by the conclusive original checks.
+ * Consensus and its historical primary category remain unchanged. */
+export function goalTaskResearchCommonCategory(first: GoalTaskResearchSource, second: GoalTaskResearchSource,
+  preferred?: ConversationFailure): ConversationFailure | undefined {
+  const a = goalTaskResearchProblem(first), b = goalTaskResearchProblem(second)
+  if (a === undefined || b === undefined || a.checkedFailure !== b.checkedFailure) return undefined
+  const categories = (source: GoalTaskResearchSource, problem: NonNullable<ReturnType<typeof goalTaskResearchProblem>>) =>
+    [...new Set([problem.category, ...(problem.checkedFailure ? [] : source.input.checks.flatMap(check =>
+      check.verdict === 'not-met' && check.category !== null ? [check.category] : []))])]
+  const other = categories(second, b), shared = categories(first, a).filter(category => other.includes(category))
+  return preferred === undefined ? shared[0] : shared.includes(preferred) ? preferred : undefined
+}
 export function goalTaskResearchSuccess(source: GoalTaskResearchSource): boolean {
   return conversationReviewConsensus(source.input.checks).verdict === 'met' && source.outcome.classification === 'checked-success'
 }
