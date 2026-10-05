@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：新策略首实际批完成，主动修正对照设计并接续未执行来源
+
+e776230e隔离批只读CLI0/0模型/0账本变化；正式16actual/1明确模拟主答，3新Task、0研究/attempt/激活，CLI1但normal drain/consent1 enabled/active0。未来基线inc（原评审invalid-judgment）/met。固定正常对照事实正确但漏了用户明确要求的预约状态，原双审not-met/instruction-following保留；native writing与未来summary不同，不改旧标签。独立final-audit核145冻结文件、旧共享9Task8study9attempt/账本字节保持，D16.74GiB/无副本。
+
+来源错误与纠正未执行。接续已保存实际met摘要作为counter，主动明确新来源的压缩记录转换要求，原模型分类，不重跑3旧Task或改原对照；首无效review另核原轨迹。新显式DEV规则工程430/427证据不等于实际启用，完整目标active/main-Daily NO-GO/R9保持。见tianwen-conclusive-pair-dev-result-20261006.md。
+
 ## 2026-10-06 当前：新 DEV 前瞻试用规则工程通过，接续全新实际研究
 
 新增显式 dev-conclusive-pair.v1：十臂完整、五 candidate 全 met、至少一个同case baseline明确not-met→candidate met才启用，其他baseline未知原样保留。默认/v1/旧b950与2cab结果不改，普通Runtime/正式ledger隔离、程序检查、原proof/consent/父版本/撤回/冷重放保持。源码五套件430/430，最终控制206为其中子集；打包同套件427/3原仅源码装配跳过。原evolution构建及Runtime十五命令、私有导入零违规通过；首次依赖声明未重建失败保存，按原顺序重建。限定复查无新P1/P2。
