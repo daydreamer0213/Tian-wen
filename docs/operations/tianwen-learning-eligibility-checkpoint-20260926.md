@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：模拟缺条件覆盖全部开发，提案捕获与冷启用接续修复
+
+开发可以主动设计失败、反馈、重复样本、后续任务和环境；不要求自然发生，不把可自己构造的输入交回用户，以实际效果推进，正式门槛不新增。唯一原未尝试对接续2真实/2完整轨迹、0训练，八Task不重跑，实际proposer含两个失败的原交付/验收/检查，模型产出草稿但无结构调用且文本JSON无效。首invalid-judgment/CLI1/排空/0候选记录/arms/激活/后续保留，旧停止不补判。[准确结果](tianwen-proposal-capture-reminder-result-20261005.md)。
+
+复用原一次captureReminder，原proposer及其候选/来源选择/探索proof恢复兼容严格exact hostnotice，同会话/原材料/唯一成功工具捕获核对保持。主动模拟accepted后启用前中断，RED重启缺activation；源码GREEN零模型自动启用、原候选/裁决/来源/旧账本前缀保持，不是provider运行或未来收益。边界源码48/发布48、原十五构建、最终完整发布profile50通过/10原条件跳过；限定复查原P2解决/无新有据P1/P2。
+
+下一主动代码环境或独立新任务构造可改善空间，核实际研究/方法启用/后续效果/撤回；旧三失败对已尝试，四满分基线不能作提高证据，不反复旧样本。完整目标未完成、main/Daily NO-GO/R9/原正式条件保持。实际批35消费者/三旧账本/原profile前缀/四来源及结论/84容器保持，Docker停；自建profile清理、无依赖或环境副本，D约17.04GiB>=15、20偏好未达。
+
 ## 2026-10-05 当前：原生提案有实际历史观察，模拟不再被误作不可学习
 
 新一null受控Task complete/rejected，21真实/5scripted；研究开启但缺原答/验收导致insufficientEvidence停止，首proof/0arms/激活/后续保留，旧七项不重跑。新proposer观察由原恢复闭包核对后取两个失败的原投递/验收/独立评审；terminal严格唯一、原capture/深拷贝，trial素材/历史哈希保持，counter/holdout不传；明确开发可学已披露模拟错误、新臂真实模型。源码46/发布46/原十五构建/最终原profile49通过10原跳过，限定复查无有据P1/P2。[准确范围](tianwen-native-proposal-observation-result-20261005.md)。

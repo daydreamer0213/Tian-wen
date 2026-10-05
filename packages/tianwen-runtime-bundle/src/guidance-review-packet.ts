@@ -263,7 +263,7 @@ async function recoverGuidanceStudyReviewPacket(ctx: Context, study: GuidanceStu
   const proposalGuidance = guidanceRule(study.candidate.candidateSnapshot, study.opened.family, study.opened.evaluationMode, study.opened.fileOutputKind)
   if (proposalGuidance === undefined) throw new Error('source-unavailable')
   const proposalValue = { guidance: proposalGuidance, ...(study.candidate.sourceUse === undefined ? {} : { sourceUse: study.candidate.sourceUse }) }
-  const proposal = await recoverConversationStructuredJudgment(ctx, study.candidate.proposalProof, proposalValue)
+  const proposal = await recoverConversationStructuredJudgment(ctx, study.candidate.proposalProof, proposalValue, true)
   if (!record(proposal.material)) throw new Error('source-unavailable:proposal-identity')
   const historicalProposal = study.activation !== undefined && proposal.material.studyId === undefined && proposal.material.sourceTaskIds === undefined
   if (!historicalProposal && proposal.material.studyId !== study.opened.studyId) throw new Error('source-unavailable:proposal-identity')
