@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：新过期索引基线满分，不启动无改善空间的学习
+
+5db27a19新隔离环境，零模型原Python检查旧程序失败/参考和正常对照十二例通过；两个新真实未来Task功能均verified，内容inconclusive/met，22真实/22完整轨迹、0scripted，原CLI0/排空。模型自己修好旧程序，本批不启动训练/研究/激活/方法后或撤回，不以满分复跑冒充提高。首次操作员缺模型配置和修正首次预检旧developmentRoot均零调用失败、保存首记录；修改前52消费者/5旧账本/原环境/84容器保持，Docker停。[准确结果与下一步](tianwen-stale-index-baseline-result-20261005.md)。
+
+实际文件评审完整单位enum拒绝短原文引句，默认file-v2 evidenceQuotes允许精确单单位子串并给受限示例；原host边界/标准排除/audit/显式quoteProtocol/历史冷恢复保持，不称解决独立firstClaim错误或已减少真实重试。四SDK RED/GREEN、源码相关89、原十五构建通过，构建后相关89+原完整profile50通过、10原跳过，限定只读复查无有据P1/P2。完整目标active，下一主动设计待定/已裁决、数量/完成率、建议/已决定的状态汇报任务；不重跑旧样本/等自然/索题/机械blocked/加正式门槛。main/Daily NO-GO/R9保持，D约16.9GiB>=15，20偏好未达，无依赖副本。
+
 ## 2026-10-05 当前：真实候选有事实退步，提前停止及整批退出已实现
 
 r6仅现有source1+source3，86真实/86完整、0模拟/新增训练；原提案和候选保存。五臂baseline三项met/verified，candidate两项verified但首说明事实错误not-met；原invalid-judgment/CLI1/排空，无十臂裁决、激活、方法后或撤回。修改前50消费者/八旧Task/两旧study/三旧账本/原环境/prefix/84容器保持，Docker停；前台0调用早快照不替代最终审计。[准确结果与后续](tianwen-candidate-early-stop-result-20261005.md)。

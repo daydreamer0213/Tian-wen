@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：新真实基线无功能提高空间，停止该批学习尝试
+
+公开模拟过期索引环境由原Python host零模型区分旧失败与正确十二例通过；两个新实际未来基线功能均verified，内容inconclusive/met，22真实/完整轨迹、0scripted，原CLI0/排空。模型自行修正旧程序，本批无训练/研究/激活/方法后/撤回，不能计学习改善；首次两操作员配置错误零模型，首Task/首记录保留。修改前52消费者/5旧账本/原环境/84容器保持，Docker停。[结果与限制](tianwen-stale-index-baseline-result-20261005.md)。
+
+默认file-v2短引文修复仅降低原提交摩擦，原host单单位精确匹配/事实来源/audit/原显式协议/旧证据冷恢复不变；不称独立firstClaim错误或真实效果已解决。四SDK RED/GREEN与源码相关89/原十五构建通过，构建后相关89和原完整profile50通过、10原跳过；限定只读复查无有据P1/P2。下一新的状态汇报任务检验权限来源与时间、待定/裁决、数量/完成率、建议/决定；允许明确模拟缺失条件，不重跑满分/等自然/索题/新增正式门槛。完整目标active，main/Daily NO-GO/R9保持，D>=15，无依赖副本。
+
 ## 2026-10-05 当前：候选失败不启用，部分证据可提前停止
 
 r6原未尝试source1+source3实际研究，86真实/完整轨迹、0scripted/新增训练，原候选保存；五臂baseline三met/verified，candidate两verified但首说明错述旧代码not-met，原invalid-judgment/CLI1/排空。无十臂裁决、激活、方法后或撤回，不称改善。[准确结果](tianwen-candidate-early-stop-result-20261005.md)。八旧Task/两旧study/50消费者/旧账本/环境/prefix/84容器修改前核对保持，Docker停。

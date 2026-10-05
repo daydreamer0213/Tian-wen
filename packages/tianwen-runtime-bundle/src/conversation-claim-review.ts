@@ -437,16 +437,16 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     } },
   }
   else if (evidence.schemaVersion === 'tianwen.claim-evidence.v2') {
-    // Give new complete-file reviews exactly quotable units. Raw original
-    // requests can span several units; a cross-unit quote still fails the
-    // unchanged host predicate and must not be repaired or concatenated.
-    const fileQuoteChoices = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : [item.text]))]
-    const bounded = Buffer.byteLength(JSON.stringify(fileQuoteChoices), 'utf8') <= 98_304
+    // Exact substrings already satisfy the host predicate. Examples help the
+    // native reviewer copy them without forcing an entire file chunk; quotes
+    // spanning units still fail the unchanged host check.
+    const quoteExamples = [...new Set(evidence.items.flatMap(item => item.text.trim() === '' ? [] : answerQuoteChoices(item.text)))]
+    const bounded = quoteExamples.length > 0 && Buffer.byteLength(JSON.stringify(quoteExamples), 'utf8') <= 16_384
     schema = { ...schema, properties: { ...schema.properties, evidenceQuotes: {
       ...schema.properties?.evidenceQuotes, type: 'array',
       items: bounded
-        ? { type: 'string', enum: fileQuoteChoices, description: 'Choose one complete supplied claimEvidence item, preserving its exact text.' }
-        : { type: 'string' },
+        ? { type: 'string', examples: quoteExamples, description: 'Copy an exact non-empty substring of one supplied claimEvidence item, preserving its text.' }
+        : { type: 'string', description: 'Copy an exact non-empty substring of one supplied claimEvidence item, preserving its text.' },
       description: 'Quote from one supplied claimEvidence item only. Do not join adjacent units, roles or files, even when the complete raw request contains that sentence. Criteria and feedback standards are requirements, not evidence.',
     } } }
   }

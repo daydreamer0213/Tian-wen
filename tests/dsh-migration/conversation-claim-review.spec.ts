@@ -26,6 +26,56 @@ const auditFor = (evidence: ReturnType<typeof projectClaimEvidence>, make = (tex
     item.text.trim() === '' ? null : { firstClaim: make(item.text), additionalClaims: [] }])),
 })
 
+it.each(['exact', 'cross-unit', 'invented', 'criterion'] as const)('captures short file evidence without weakening original-unit checks: %s', async mode => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-short-quote-')); roots.push(root)
+  const text = '原料已送达。' + '甲'.repeat(380) + '乙：后续状态未确认。'
+  const files = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: root, outputKind: 'files',
+    entries: [{ path: 'input.txt', content: text }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+  const output = { answer: '', files: [{ path: 'input.txt', content: text }, { path: 'output.txt', content: text }] }
+  const material = { task: { prompt: '照原文写入输出文件。', criteria: ['CRITERION_ONLY_CANARY'], files }, answer: '',
+    fileResult: { ...output, outputDigest: sha256(output) } }
+  const evidence = projectClaimEvidence(material, 'file-chunks-v1')
+  const answers = evidence.items.filter(item => item.role === 'answer')
+  expect(answers).toHaveLength(2)
+  const good = { verdict: 'met', category: null, explanation: 'The original file facts are preserved.',
+    evidenceQuotes: ['原料已送达。'], audit: auditFor(evidence, quote => claim(quote, 'source-fact', 'supported',
+      [evidence.items.find(item => item.role !== 'answer' && item.text === quote)!.id])) }
+  const bad = structuredClone(good)
+  bad.evidenceQuotes = [mode === 'cross-unit' ? answers[0]!.text.slice(-3) + answers[1]!.text.slice(0, 3)
+    : mode === 'criterion' ? 'CRITERION_ONLY_CANARY' : '原料已经完成验收。']
+  if (mode !== 'exact') expect(evidence.items.some(item => item.text.includes(bad.evidenceQuotes[0]!))).toBe(false)
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('initial-file-quote', 'structured_output', mode === 'exact' ? good : bad),
+    ...(mode === 'exact' ? [] : [(request: GenerateOptions) => {
+      expect(JSON.stringify(request.messages)).toContain('Invalid evidenceQuotes item 1')
+      return toolCallResponse('repaired-file-quote', 'structured_output', good)
+    }]),
+    toolCallResponse('independent-file-quote', 'structured_output', good),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('file-short-quote-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  let checks: Awaited<ReturnType<typeof runConversationClaimReview>>['reviewChecks']
+  try {
+    const result = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Short file quote', material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal })
+    expect(result.verdict).toBe('met'); expect(harness.adapter.requests).toHaveLength(mode === 'exact' ? 2 : 3)
+    const schema: any = harness.adapter.requests[0]!.tools!.find(tool => tool.name === 'structured_output')!.parameters
+    expect(schema.properties.evidenceQuotes.items.enum).toBeUndefined()
+    expect(schema.properties.evidenceQuotes.items.examples).toContain('原料已送达。')
+    checks = result.reviewChecks
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+  const cold = await mountPersistentHarness(root, [])
+  try {
+    for (const check of checks!) {
+      await verifyConversationReviewCheck(cold.ctx, check)
+      expect(await recoverConversationJudgmentRequest(cold.ctx, check)).toMatchObject({ material: { original: material, claimEvidence: evidence } })
+    }
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose() }
+})
+
 it.each(['plain-text', 'summary-quote', 'answer-quote'] as const)('repairs original review submission in the same native session: %s', async mode => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-repair-')); roots.push(root)
