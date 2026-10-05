@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：未来审批错误已被真实识别，补同类文案来源
+
+cacf4d93的future-approval批：6actual/6完整轨迹+1明确模拟历史主答，槐序Task19a9dc83…原not-met/source-fidelity；原入题归summarization，而保存三个source-fidelity和正常反例均writing，原Loop无兼容对、零新study/attempt/激活，CLI1/正常排空。旧七Task/五study/六attempt、53消费者/六其他账本/环境/prefix保持。模拟错误被识别不是实际方法改善。[结果](tianwen-status-report-learning-result-20261005.md)。
+
+下一主动补明确创作文案任务，同样针对无来源自动审批承诺，但交付目的明确为产品进度口播文案；原入题自己分类，不改槐序旧标签或绕过跨族保护，旧摘要仍保留。保护当前八Task/五study/六attempt；只读预检必须零模型/原字节保持。若原接受自动启用才方法后/未用任务/撤回/冷恢复，目标active、NO-GO/R9及原DEV v1保持，不把缺来源推回用户。
+
 ## 2026-10-06 当前：只读预检修复通过，下一任务针对未来审批臆测
 
 2d2cbcb9的learning-r3预检原CLI0/0模型，却因完整Runtime冷加载恢复来源，追加940bytes原conversation-case-design-attempted；正式启动随后冻结账本校验CLI1/0模型，零新Task/研究。灯岸+青禾组合已消费，原attempt保留、不删除或补跑。原七Task/五研究/账本前缀/六其他账本/环境保持；52消费者仅本轮新增测试改变，原提交字节另核对，其他51未改。审计保存learning-r3/zero-provider-startup-audit.json，不虚称全账本未变。

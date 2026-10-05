@@ -1,5 +1,9 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：缺少同族来源，主动补写作任务
+
+future-approval首批6真实/完整+1明确模拟，槐序原not-met/source-fidelity但入题family=summarization；已有同category失败/正常反例均writing，原Loop零新study/attempt/activation，CLI1正常排空，旧七Task/五study/六attempt/53消费者/六其他账本/环境/prefix保持。只读预检0模型且未挂Runtime、账本不变。失败原因是组合缺同类来源，不是模型学习裁决失败；保留首Task与标签。下一独立创作产品进度口播文案任务补writing来源，分类/研究仍原流程，不向用户索题。目标active、NO-GO/R9和原DEV v1保持。
+
 ## 2026-10-06 当前：预检只读，主动新增审批臆测来源
 
 learning-r3完整Runtime预检意外消费灯岸+青禾原attempt，940bytes追加保留；正式启动CLI1/0模型、零新Task/研究，旧七Task/五研究/前缀/六其他账本/环境保持。该组合不删除或重试。新开发只读helper用原developmentRuntimeConfig、EvolutionLedger inspection与provider解析，正式入口不变。原SDK旧方式RED/新显式和默认policy GREEN，源码160、发布157通过/3仅源码装配跳过；实际共享profile原CLI0/0模型，七Task/五研究/六attempt及consent/账本字节保持。首控制插件dispose等待及首测试环境遗漏均保存，最终修正通过；限定复查无新有据P1/P2。
