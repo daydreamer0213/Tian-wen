@@ -1,5 +1,24 @@
 # 原生模拟反馈已归因，修复实际CLI冷启动时序
 
+## 最终反馈接缝结果：旧判断保持，新版本与撤回已完成
+
+9610de82已推送。r7同一原r2 profile冷预检0，零新增调用恢复两旧Task/归因；只做第三positive任务，4真实/1scripted、Task complete/双评审met、真实positive归因有proof，并引用了实际rating `positive`，原引用修复生效。随后原SDK put已写第二项新修改反馈版本c05d1678-c024-4405-bb24-ca077a1496bc，Bridge active，但旧磁盘root没有当前live agent，scheduleForSession合法返回，不产新归因；操作员断言停止、CLI1/排空。不是需要再做任务或真人输入。
+
+r8使用安装SDK公开agents.resume({resumeSessionId,agentOptions})恢复同一旧root，不followup、不重新put版本、不替换司机。仅1真实请求正确归因requirement-change/类别null/补充标准空/原生独立proof；此前bare版支持失效。删除第一项确切原版本→SDK absent、Bridge retracted、原attributable-problem支持失效，原历史保留。三Task及原三个assessment记录不变，四归因历史；研究/激活/方法未来效果0。原run退出0/排空，随后原CLI冷回放退出0、0模型，三Task/四历史/当前SDK两反馈与intakes逐项一致。
+
+| 环节 | 实际结果 |
+|---|---|
+| 具体模拟纠错 | 真实原生attributable-problem/source-fidelity/proof |
+| 只有负评分 | 原模型inconclusive，host遗漏实际rating JSON→invalid-judgment/proof=null；旧失败不重判 |
+| 明确模拟认可 | 真实原生positive/proof，引用rating字段实际通过 |
+| 同一答案新增一次性修改 | 真实原生requirement-change/proof；未改原答案/评审 |
+| 原具体负反馈撤回 | SDK absent，支持失效，历史保留 |
+| 重启回放 | 零模型、三Task/四归因历史/当前两反馈完整相等 |
+
+r2/r6/r7/r8合计18真实/18完整实际轨迹、3显式root主答注入；不称自然模型错误、真人评价或全三初始归因语义通过。所有原首失败保持。最终证据`D:/DevData/tianwen-native-simulated-feedback-20261005-r8`的batch-first-result、updated-feedback、retracted-feedback、cold-result、drained-result、trace-counts及final-audit；各原批完整轨迹分列，不复制环境或回灌结论。
+
+29冻结消费者、三旧账本未变，Docker未启动且仍停；原r7成功case阶段文件与原batch-first-result逐项完全相等后删27,701bytes，回执保存。D17.095GiB>=15，20偏好未达。完整目标active、main/Daily NO-GO/R9/原门槛保持。下一新DEVpolicy原生研究/启用、事前未知后续任务效果和方法撤回；缺场景由执行者主动模拟，不索题或机械标blocked。
+
 ## r6 同一原profile冷启动通过，补遗漏的原反馈引用字段
 
 ae36845a后r6原CLI零模型预检退出0，原Task/具体反馈归因/同意完整恢复；随后只执行原第二项，5真实/1scripted、Task complete/双评审met。只有negative无说明的真实归因模型正确选择inconclusive，并通过原structured_output捕获；但引用了实际材料中的`"rating":"negative","note":""`。宿主的quote whitelist只含request/answer/note，漏了实际rating JSON字段，后置检查丢弃为invalid-judgment/proof=null。操作员原proof断言终止，CLI1/原排空，第一/第二Task和两历史原样保存。不能把安全fallback当语义有效归因成功。

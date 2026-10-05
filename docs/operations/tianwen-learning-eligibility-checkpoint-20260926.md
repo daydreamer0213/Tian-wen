@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：原生模拟反馈接缝已完成，完整学习仍继续
+
+18真实/18完整轨迹、3显式主答注入；三原Task完成，四历史归因。具体负反馈、明确正反馈、新版本一次性修订分别由真实模型原生proof证attributable-problem/positive/requirement-change；具体负反馈撤回后支持失效、历史不改。r8同一原profile原CLI run/cold0，冷回放零模型且三Task/四历史/当前SDK两反馈逐项一致。旧bare负评分inconclusive因遗漏原rating JSON引用被误拒，原invalid结果保留不计有效proof；窄修复9610de82源码58/发布58/原十五构建/原profile49通过10原跳过，后续真实positive引用rating已生效。[准确范围](tianwen-native-feedback-cold-start-result-20261005.md)。
+
+研究/激活/方法未来效果均0，此批不是完整学习完成或真人满意度。下一新DEVpolicy原生闭环及前瞻任务效果；主动模拟缺条件，不自然等待/索题/机械blocked、不加正式条件。目标active/main Daily NO-GO/R9保持。29消费者/三旧账本未变，Docker停；删一精确重复27,701bytes、D17.095>=15/20偏好未达、无依赖副本。原r2/r6/r7首失败及轨迹保留。
+
 ## 2026-10-05 当前：具体模拟反馈真实归因，修复冷启动时序
 
 新原CLI三任务反馈计划已冻结。r2首批8真实/1显式主答注入，第一Task完成/双评审not-met，原SDK具体反馈真实归因为attributable-problem/source-fidelity，原确切答案/版本/独立proof保存。操作员摘要算法断言错误导致CLI1/原排空，尚未做另外两任务。接续原profile零调用冷预检发现Bridge读盘未完而Loader提前判pending；原Runtime等待原Bridge Fiber的窄修复，源码60、原十五实际构建、发布dist60、原发布profile49通过/10原跳过，限定复查无有据P1/P2/等待环。[准确首结果及冷启动修复](tianwen-native-feedback-cold-start-result-20261005.md)。

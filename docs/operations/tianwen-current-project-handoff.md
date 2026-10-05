@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：模拟反馈接入、版本修改、撤回和冷回放已实际验证
+
+原三Task全部complete；r2/r6/r7/r8合计18真实请求/18完整轨迹、3显式root主答注入另记。具体负反馈attributable-problem、明确正反馈positive、第二项新版本requirement-change均有真实原生独立proof；具体负反馈撤回后原intake retracted、当前学习支持失效、历史保持。r8原CLI run/cold均0/排空，重启零模型、三Task/四归因历史及当前两SDK反馈逐项相等。仅旧bare negative原模型合理inconclusive却引用实际rating JSON被host误拒，原invalid-judgment/proof=null仍保存，不计语义成功。
+
+修复9610de82仅补原rating/note JSON引用白名单：真实控制RED→GREEN、伪造仍拒绝；源码58/发布dist58、原十五构建、原发布profile49通过/10原跳过，限定复查无有据P1/P2。r7实际positive引用rating字段已生效；更新旧磁盘会话时操作员遗漏加载live agent，未产生归因，r8使用原SDK agents.resume处理同一已保存的新版本，仅1真实归因、不重复put/Task/旧判断。[准确结果与范围](tianwen-native-feedback-cold-start-result-20261005.md)。
+
+反馈接缝完成可独立部分；完整学习目标active，下一缺口仍是新显式DEVpolicy原生研究/激活、事前设计的后续任务实际效果和方法撤回。已有代码遗留环境可作为后续任务，缺条件主动模拟；不自然等待/索题/机械blocked/增加正式门槛。main/Daily NO-GO/R9保持。29冻结消费者、三旧账本未变，Docker停、无环境/依赖副本；一精确重复已删27,701bytes，D17.095GiB>=15，20偏好尚未达到。证据`D:/DevData/tianwen-native-simulated-feedback-20261005-r8/final-audit.json`；旧首失败未重判。
+
 ## 2026-10-05 当前：具体模拟反馈真实归因，修复冷启动时序
 
 新原CLI三任务反馈计划已冻结。r2首批8真实/1显式主答注入，第一Task完成/双评审not-met，原SDK具体反馈真实归因为attributable-problem/source-fidelity，原确切答案/版本/独立proof保存。操作员摘要算法断言错误导致CLI1/原排空，尚未做另外两任务。接续原profile零调用冷预检发现Bridge读盘未完而Loader提前判pending；原Runtime等待原Bridge Fiber的窄修复，源码60、原十五实际构建、发布dist60、原发布profile49通过/10原跳过，限定复查无有据P1/P2/等待环。[准确首结果及冷启动修复](tianwen-native-feedback-cold-start-result-20261005.md)。
