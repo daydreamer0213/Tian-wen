@@ -802,9 +802,6 @@ export class TianwenConversationGuidanceLoopService extends Service {
       const attemptBody = { scopeKey: metadata.scopeKey, consentRevision: metadata.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), sourceTaskIds: [sourceId(group.sources[0]), sourceId(group.sources[1])] as const,
         counterexampleTaskId: sourceId(group.counterexample), modelConfigDigest: sha256(callConfig), materialDigest: sha256(designMaterial), ...checkedEvidence }
-      // Persist before spending the model call: a lost or invalid design must
-      // not turn unrelated wakeups or a restart into retries of this pair.
-      if (evolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(attemptBody), ...attemptBody }).duplicate) return
       let preparedChecks: PreparedStudyResultChecks | undefined
       let independentCases: Awaited<ReturnType<NonNullable<ConversationAnswerStudyResultCheck['prepareIndependentCases']>>> | undefined
       const assertPreparationCurrent = () => {
@@ -860,6 +857,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
           : await prepareConversationAnswerStudyResultChecks(this.answerStudyResultCheck!, frozenBody, materials, signal)
         assertPreparationCurrent()
       }
+      // Preparation is not a model attempt. Keep the same persisted sources
+      // eligible when a host checker is unavailable, then deduplicate before
+      // the first actual design call, including lost or invalid model results.
+      if (evolution.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(attemptBody), ...attemptBody }).duplicate) return
       const generated = await runConversationJudgment(this.ctx, agent, {
         outputSchema: fileMode ? CONVERSATION_FILE_CASES_SCHEMA : CONVERSATION_CASES_SCHEMA,
         label: `Tianwen independent case design ${sourceId(source)}`, callConfig, signal,

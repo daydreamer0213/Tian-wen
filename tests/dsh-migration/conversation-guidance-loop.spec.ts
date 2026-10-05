@@ -202,7 +202,7 @@ it('wakes a completed study source after its ordinary root agent has been releas
   } finally { await harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
 })
 
-it.each(['verified', 'rejected', 'unavailable', 'cold', 'pre-design-verified', 'pre-design-drift', 'pre-design-missing', 'pre-design-cancel', 'pre-design-cold'] as const)('checks real native text study outputs through a pre-proposal answer contract: %s', async outcome => {
+it.each(['verified', 'rejected', 'unavailable', 'cold', 'pre-design-verified', 'pre-design-drift', 'pre-design-missing', 'pre-design-retry', 'pre-design-cancel', 'pre-design-cold'] as const)('checks real native text study outputs through a pre-proposal answer contract: %s', async outcome => {
   const preDesign = outcome.startsWith('pre-design'), coldOutcome = outcome === 'cold' || outcome === 'pre-design-cold'
   const publishedCold = coldOutcome && process.env.TIANWEN_ANSWER_CHECK_PUBLISHED === '1'
   const publishedHot = outcome === 'pre-design-verified' && process.env.TIANWEN_ANSWER_CHECK_PUBLISHED_HOT === '1'
@@ -235,6 +235,7 @@ it.each(['verified', 'rejected', 'unavailable', 'cold', 'pre-design-verified', '
   const prepareIndependentCases = vi.fn(async () => {
     expect(prepare).not.toHaveBeenCalled()
     if (outcome === 'pre-design-missing') return undefined
+    if (outcome === 'pre-design-retry' && prepareIndependentCases.mock.calls.length === 1) return undefined
     if (outcome === 'pre-design-cancel') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
     return structuredClone(independentCases)
   })
@@ -266,10 +267,20 @@ it.each(['verified', 'rejected', 'unavailable', 'cold', 'pre-design-verified', '
     if (!publishedHot) await harness.ctx.plugin(TianwenConversationGuidanceLoopService, { evolutionRoot: join(root, 'evolution'), answerStudyResultCheck })
     await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
-    if (preDesign) expect(prepareIndependentCases).toHaveBeenCalledOnce()
+    if (outcome === 'pre-design-retry') {
+      expect(harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toEqual([])
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      const requests = harness.adapter.requests.length
+      harness.ctx.emit('tianwen/conversation-task-reviewed', before.at(-1)!.source.taskId)
+      await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)
+      expect(harness.adapter.requests.length).toBeGreaterThan(requests)
+    }
+    if (preDesign) expect(prepareIndependentCases).toHaveBeenCalledTimes(outcome === 'pre-design-retry' ? 2 : 1)
     if (['pre-design-missing', 'pre-design-cancel', 'pre-design-drift'].includes(outcome)) {
       expect(prepare).toHaveBeenCalledTimes(outcome === 'pre-design-drift' ? 5 : 0); expect(evaluate).not.toHaveBeenCalled()
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
+      expect(harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toHaveLength(outcome === 'pre-design-drift' ? 1 : 0)
     } else if (outcome === 'unavailable') {
       expect(prepare).toHaveBeenCalledOnce(); expect(evaluate).not.toHaveBeenCalled()
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
@@ -278,7 +289,7 @@ it.each(['verified', 'rejected', 'unavailable', 'cold', 'pre-design-verified', '
       expect(study.decision?.verdict).toBe('accepted')
       expect(study.arms).toHaveLength(10); expect(evaluate).toHaveBeenCalledTimes(10)
       expect(study.opened.resultChecks?.every(check => check.inputKind === 'text-material.v1')).toBe(true)
-      expect(study.activation !== undefined).toBe(outcome === 'verified' || outcome === 'pre-design-verified')
+      expect(study.activation !== undefined).toBe(outcome === 'verified' || outcome === 'pre-design-verified' || outcome === 'pre-design-retry')
       if (preDesign) {
         const recovered = await recoverConversationCaseDesign(harness.ctx, study.opened)
         expect(recovered?.material).toMatchObject({ independentCases, independentResultChecksDigest: sha256(study.opened.resultChecks) })
