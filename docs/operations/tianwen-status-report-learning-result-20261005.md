@@ -2,6 +2,20 @@
 
 完整自动学习目标 active；main/Daily NO-GO、R9 和原正式发布条件保持。允许主动设计缺失条件，不等待自然发生，不再向用户索题。
 
+## 最新：状态转换首结果与退出修复
+
+`D:/DevData/tianwen-state-transition-learning-20261005`，首运行源码f88e91b4。38真实请求/38完整原轨迹、2明确模拟历史主答；新Task e8da2e86…及44b1d453…原独立not-met/source-fidelity。原研究8ee1c36a…保存了模型方法，但只完成source1 baseline met/candidate met、source2 baseline inconclusive三个臂。source2的基线有无来源的发布前提断言，两个原检查不同意，原不确定结论保持。末评审未有效捕获，原source-unavailable/CLI1/排空。没有activation、方法后、撤回或冷恢复，不能称完整学习已成功。
+
+修改产品前final-audit.json核旧四Task/三研究/52消费者/六其他账本/环境/prefix保持；修改后的消费者当然会改变，不能重新要求旧摘要相同来伪造该审计。冻结文件sourcePair说明继承了上一批“没有新Task/注入”的旧文字，其说明有误；事前tasks.json、两个新Task和分开保存的2scripted/38actual轨迹才是实际依据。冻结首文件不追改；下一freezer修正说明。
+
+json-parser-diagnostic.json逐字解析证明最后子会话七次模型工具参数末尾多右花括号。原SDK把坏JSON保留为字符串，schema只报“value必须是对象”；随后模型尝试arguments包装和字符串null，仍失败。新pre-execute只在匹配的原生one-shot子会话提示原SyntaxError或对象/字符串差别，仍拒绝提交，要求模型自行按原schema重交；不截尾修复、解析文本成判断或改旧proof。原生两新修复case旧代码RED，同会话纠正及独立review GREEN；旧schema和host语义校验继续执行。
+
+退出helper只属于开发操作员。原SDK完整accepted状态控制先释放所有root，预留同scope无followup parent后由原预算触发原disposeProfileContext；原CLI另控制无新增模型、原consent-disabled撤回，首次约262ms，临时生成profile自动清理。审查指出零activation但研究仍在最后评审的遗漏，新SDK控制用另一个退出回调等待原Loop，旧helper确实写入guidance-activated（analysis-exit-late-activation-red.json）；修复后无condition地先关闭consent，原研究cancelled、9arms、无decision/activation，原parentSnapshot保持（analysis-exit-pending-green.json）。没有手写裁决或撤回记录。
+
+正常完整排空且无本批active方法的失败批，可卸载异常退出guard并释放预留parent，保留来源资格；预算或资源已abort、排空失败或有active方法不能卸载。原SDK新增正常排空控制已通过，consent revision1、原Task和ledger字节保持；操作员下一冻结批接入该分支。复杂旧激活链和多scope尚不在本轮证明范围内。所有工程控制零真实provider效果，不能计为自动学习收益。
+
+最终源码主组合259与新增正常控制1通过（260无重叠），原十五构建通过；发布相关257与原完整profile50通过，13未运行=10原条件跳过+3只源码装配。发布原CLI273ms/0新模型/原consent-disabled撤回，临时生成物自动清理，D约16.8GiB。限定只读复查解决零activation晚激活P2，没有新有据P1/P2。下一操作员审计须区分normal/emergency，合法预算退出即使没有普通收尾或drained文件，也按原shutdown回执保存失败审计，不虚称完整排空或成功。
+
 ## 实际完成与未完成
 
 `D:/DevData/tianwen-status-report-learning-20261005`，实际源码 641c9fc7。八个不同事实的模拟项目任务事前冻结；原普通文字入口、固定 deepseek-official/deepseek-v4-flash/high 配置、无工作工具权限。文字任务没有配置代码功能检查，不能称功能 verified。

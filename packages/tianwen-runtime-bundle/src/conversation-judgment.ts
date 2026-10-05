@@ -351,10 +351,21 @@ async function runNativeStructured(ctx: Context, parent: Agent, input: NativeStr
     && String(agent.session.header.parentSession) === String(parent.session.id)
     && agent.session.events.some(event => event.type === 'subagent/descriptor'
       && event.data.mode === 'one-shot' && event.data.label === label)
-  const offCapture = input.validateCapture === undefined ? () => {} : ctx.on('tools/pre-execute', async (exec, next) => {
+  const offCapture = ctx.on('tools/pre-execute', async (exec, next) => {
     const gate = await next()
     if (gate.kind !== 'allow' || exec.name !== 'structured_output' || exec.agent === undefined || !matchesChild(exec.agent)) return gate
-    const reason = input.validateCapture!(exec.arguments)
+    // Native argument parsing retains malformed JSON as a string. The scoped
+    // tool's generic object error hides the syntax fault and invites wrappers
+    // or stringified nulls. Explain it without repairing or capturing a value.
+    if (typeof exec.arguments === 'string') {
+      let reason = 'structured_output requires a JSON object as the tool arguments, not a string. Use the declared fields directly; do not wrap them in arguments or value or serialize the object into a string.'
+      try { JSON.parse(exec.arguments) }
+      catch (error) {
+        if (error instanceof SyntaxError) reason = `Invalid structured_output JSON arguments: ${error.message}. Correct the JSON syntax yourself and submit one object matching the declared schema, without an arguments or value wrapper. Keep the original evidence and host instructions; the host has not repaired or captured this submission.`
+      }
+      return { kind: 'deny' as const, reason }
+    }
+    const reason = input.validateCapture?.(exec.arguments)
     return reason === undefined ? gate : { kind: 'deny' as const, reason }
   }, { prepend: true })
   let reminded = false

@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：状态转换首结果已停止，修复提交诊断和退出遗漏
+
+f88e91b4的新状态转换批实际38请求/38完整轨迹，两个历史错误交付明确模拟、另外保存；新增两Task原独立not-met/source-fidelity。原study8ee1c36a…候选保存，仅三臂source1 met→met、source2 baseline inconclusive，随后原source-unavailable/CLI1/排空，没有激活、后续效果或撤回。修改前旧四Task/三研究/52消费者/六其他账本/环境及原前缀保持。旧首研究不重判或补跑。[准确结果](tianwen-status-report-learning-result-20261005.md)。
+
+原生最后评审七次参数JSON多一个右花括号，原“value必须是对象”提示不足，模型又尝试嵌套包装/字符串null。本轮仅给匹配原生子会话的错误参数明确语法诊断，模型自行重新提交，不自动修复或放宽schema/语义判断。另用原SDK实际模拟整批退出：旧操作员在零activation时跳过停止，独立退出回调等待期间确实写入晚activation；新before-exit helper先关闭原consent并排空原Loop，再核验撤回。异常退出使用事前预留的同scope无followup parent，不依赖退出时重新创建。工程控制不是实际学习改善。
+
+源码主组合259与新增正常排空控制1通过（合计260，无重叠），原十五构建通过，发布相关257加原完整profile50通过；13未运行=10原条件跳过+3装配仅源码检查。原CLI撤回273ms/0模型，限定只读复查P2解决、无新有据P1/P2。下一仅一新不同事实的模拟历史错误，原Loop与已保存来源形成未尝试对；保护现有六Task/四研究。正常结束且原服务完整排空、没有本批active方法时卸载异常退出guard并释放parent，保留未尝试来源资格，原SDK控制consent/旧Task/ledger不变；预算或资源退出必须原停止，审计分别核正常/异常回执。实际接受才验证方法后、未用任务、方法注入/撤回/冷恢复。目标active，不索题/等自然/机械blocked/新增正式条件；main/Daily NO-GO/R9保持，D约16.8GiB>=15、无依赖副本。
+
 ## 2026-10-05 当前：十臂研究未接受，转最新状态转换任务
 
 8ba81be5的learning-r3仅剩余原future1+保存future3来源对；42真实请求/42完整轨迹、0模拟、零新增普通Task。原十臂完整：source1 not-met→met、source2 inconclusive→met、counterexample not-met→met、adjacent not-met→inconclusive、holdout met→not-met，原裁决inconclusive/CLI1/排空，无激活、方法后、撤回或冷恢复。旧四Task/两研究/52消费者/六其他旧账本/原环境/账本前缀保持。四次实际原生短引用已成功保存；不称解决所有评审错误或降低调用成本。

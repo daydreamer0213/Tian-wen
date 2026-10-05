@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, symlinkSync, cpSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -28,6 +29,8 @@ import { CONVERSATION_CASES_SCHEMA, CONVERSATION_FILE_CASES_SCHEMA, CONVERSATION
 import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { conversationContext, conversationEvidenceTexts } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { recoverConversationCaseDesign } from '../../packages/tianwen-runtime-bundle/src/conversation-case-design.js'
+import { installDevelopmentNativeBatchBudget } from '../../scripts/development-native-batch-budget.mjs'
+import { installDevelopmentNativeAnalysisShutdown } from '../../scripts/development-native-analysis-shutdown.mjs'
 
 const cliRequire = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
 
@@ -50,6 +53,7 @@ it('tells the case designer the ledger accepted criteria range in both supported
   }
 })
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
+const { disposeProfileContext } = await import(pathToFileURL(join(cliRequire.resolve('@deepseek-ai/dsh/package.json'), '..', 'lib', 'profile-boot-DG5t9aNs.js')).href)
 const structured = (value: Record<string, unknown>) => toolCallResponse('result', 'structured_output',
   'kind' in value && 'evaluationMode' in value ? { decision: value } : value)
 const evidenceResponse = auditedEvidenceResponse
@@ -612,8 +616,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   ...(['recover-source-explored', 'recover-source-explored-first'] as const).flatMap(order =>
     (['sources', 'guidance', 'family', 'category'] as const).map(field => `${order}-frozen-${field}` as const)),
   'support-withdrawn-during-review', 'explored-support-withdrawn-during-review',
-  'candidate-failed-early', 'dev-candidate-failed-early',
-  'accepted', 'dev-paired-any-case', 'old-paired-any-case', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
+  'candidate-failed-early', 'dev-candidate-failed-early', 'drained-shutdown-candidate-failed-early',
+  'accepted', 'budget-exit-pending-study', 'budget-exit-withdrawal', 'budget-cli-exit-withdrawal', 'dev-paired-any-case', 'old-paired-any-case', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal', 'repair-mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover-offline', 'recover-offline-missing-proof', 'recover-offline-disabled', 'recover-offline-quarantined',
@@ -628,6 +632,11 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   const frozenSubstitution = scenario.includes('-frozen-')
   const withdrawDuringReview = scenario.endsWith('support-withdrawn-during-review')
   let groundingStarted = false
+  let finalReviewPending = false
+  let exitReceipt: { ownedActiveBefore: string[], ownedActiveAfter: string[], withdrawalRequired: boolean } | undefined
+  let budgetExit: Promise<void> | undefined
+  let startPendingExit: (() => void) | undefined
+  let drainedExit: { controller: AbortController, parent: { dispose(): Promise<void> }, off(): void } | undefined
   const withdrawSupport = async () => {
     const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
     await harness.ctx.messageFeedback.put({ sessionId: SessionId(target.source.sessionId), messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'positive', note: 'Original answer was correct.', ifVersion: null })
@@ -796,6 +805,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       if (scenario === 'derived-quote') {
         script.push(auditedEvidenceResponse(judgment, 'empty', false))
       } else for (let check = 0; check < 2; check++) script.push(request => {
+        if (scenario === 'budget-exit-pending-study' && index === 4 && role === 'candidate' && check === 1) finalReviewPending = true
         if (withdrawDuringReview && !explored && index === 0 && role === 'baseline' && check === 1) groundingStarted = true
         const prompt = request.messages.flatMap(message => message.content).find(block => block.type === 'text' && block.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))
         if (prompt?.type !== 'text') throw new Error('missing frozen blind review material')
@@ -831,6 +841,25 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     request => { expect(JSON.stringify(capturedMaterial(request))).toContain('新站测试组增加 9%'); throw new Error('simulated new-pair design failure') },
     request => { expect(JSON.stringify(capturedMaterial(request))).toContain('新站测试组增加 9%'); throw new Error('simulated new-pair design failure') })
   const harness = await mountFeedbackHarness(publishedRecovery?root:join(root, 'sessions'), script)
+  if (scenario === 'budget-exit-pending-study') {
+    const stream = harness.adapter.stream.bind(harness.adapter)
+    vi.spyOn(harness.adapter, 'stream').mockImplementation(async function* (request) {
+      for await (const chunk of stream(request)) {
+        if (finalReviewPending) {
+          finalReviewPending = false
+          startPendingExit!()
+          // A separate exit owner yields until the native study settles. This
+          // exposes a late activation if the shutdown guard only checks methods
+          // that were already active when before-exit started.
+          await new Promise<void>(release => harness.ctx.on('app/before-exit', async () => {
+            release()
+            await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+          }))
+        }
+        yield chunk
+      }
+    })
+  }
   if (withdrawDuringReview) {
     const stream = harness.adapter.stream.bind(harness.adapter)
     let withdrawn = false
@@ -913,10 +942,44 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   })
   if (explored) handle.agent.ctx.on('agent/request', async (_, next) => ({ ...await next(), temperature: 0.25 }))
   if (scenario === 'mixed-models') handle.agent.ctx.on('agent/request', async ({ turn }, next) => ({ ...await next(), temperature: turn === 2 ? 0.2 : 0.1 }))
+  if (scenario === 'budget-exit-pending-study') {
+    const controller = new AbortController()
+    budgetExit = new Promise<void>((settled, failed) => {
+      harness.ctx.provide('appExit', () => { void disposeProfileContext(harness.ctx).then(settled, failed) })
+    })
+    const parent = await harness.ctx.agents.create({ sessionId: SessionId('pending-study-exit-parent'), meta: { cwd: root },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    installDevelopmentNativeAnalysisShutdown(harness.ctx, { controller, priorStudyIds: [], parent,
+      onSettled: (value: typeof exitReceipt) => { exitReceipt = value } })
+    startPendingExit = () => {
+      expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]?.activation).toBeUndefined()
+      installDevelopmentNativeBatchBudget(harness.ctx, { controller, timeoutMs: 20 })
+    }
+  }
+  if (scenario === 'drained-shutdown-candidate-failed-early') {
+    const controller = new AbortController()
+    const parent = await harness.ctx.agents.create({ sessionId: SessionId('drained-study-exit-parent'), meta: { cwd: root },
+      agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    const off = installDevelopmentNativeAnalysisShutdown(harness.ctx, { controller, priorStudyIds: [], parent,
+      onSettled: () => { throw new Error('A drained, inactive normal exit must have disarmed the emergency owner') } })
+    drainedExit = { controller, parent, off }
+  }
   try {
     for (const message of ['概括：试点需要 5 天，不代表全国。', '概括：测试组增加 7%，不是公司整体。', '概括：全公司降低 2%。']) {
       handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: message }], source: { kind: 'user' } }))
       await handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    }
+    if (scenario === 'budget-exit-pending-study') {
+      await budgetExit
+      const ledger = new EvolutionLedger(join(root, 'evolution')), pendingStudy = ledger.listConversationGuidanceStudies()[0]!
+      expect(exitReceipt).toEqual({ ownedActiveBefore: [], ownedActiveAfter: [], withdrawalRequired: false })
+      expect(pendingStudy.activation).toBeUndefined()
+      expect(ledger.getLearningAnalysisConsent()?.enabled).toBe(false)
+      expect(pendingStudy.stopped?.reason).toBe('cancelled')
+      expect(pendingStudy.decision).toBeUndefined(); expect(pendingStudy.activation).toBeUndefined()
+      expect(pendingStudy.arms).toHaveLength(9)
+      expect(ledger.getConversationGuidance(pendingStudy.opened.scopeKey)).toEqual(pendingStudy.opened.parentSnapshot)
+      return
     }
     if (scenario === 'case-attempt-write-failure') {
       expect(harness.adapter.requests).toHaveLength(12)
@@ -1370,6 +1433,20 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
       await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
       expect(readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')).toBe(history)
+      if (drainedExit) {
+        const originalTasks = harness.ctx.tianwenEvolution.listConversationTasks()
+        await Promise.all(harness.ctx.agents.list().map(agent => agent.whenIdle()))
+        await harness.ctx.tianwenConversationObserver.whenIdle()
+        await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(drainedExit.controller.signal.aborted).toBe(false)
+        expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies().some(item => item.activation && !item.rollback)).toBe(false)
+        drainedExit.off(); await drainedExit.parent.dispose()
+        await disposeProfileContext(harness.ctx)
+        const ledger = new EvolutionLedger(join(root, 'evolution'))
+        expect(ledger.getLearningAnalysisConsent()).toMatchObject({ enabled: true, revision: 1 })
+        expect(ledger.listConversationTasks()).toEqual(originalTasks)
+        expect(readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')).toBe(history)
+      }
       return
     }
     expect(study?.arms).toHaveLength(10)
@@ -1437,6 +1514,65 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       return
     }
     expect(study?.activation).toBeDefined()
+    if (scenario === 'budget-cli-exit-withdrawal') {
+      const originalTasks = harness.ctx.tianwenEvolution.listConversationTasks(), before = harness.adapter.requests.length
+      await handle.dispose(); await harness.ctx.fiber.dispose()
+      const profile = join(root, 'profiles', 'analysis-exit-control'), receipt = join(root, 'exit-control-receipt.json'), trace = join(root, 'exit-control-trace.jsonl')
+      mkdirSync(profile, { recursive: true })
+      // Copy only this disposed SDK control's generated native evidence into
+      // the CLI's original derived paths. No runtime, credentials or installs.
+      cpSync(join(root, 'evolution'), join(profile, 'evolution'), { recursive: true })
+      cpSync(join(root, 'sessions'), join(profile, 'sessions'), { recursive: true })
+      symlinkSync(resolve('node_modules'), join(profile, 'node_modules'), 'junction')
+      writeFileSync(join(profile, 'package.json'), JSON.stringify({ name: 'analysis-exit-control', version: '0.0.0', private: true,
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'] } } }))
+      writeFileSync(join(profile, 'cordis.patch.yml'), JSON.stringify([
+        { id: 'tools', name: '@deepseek-ai/dsh-tools', disabled: true },
+        { insert: [{ id: 'operator-observed-tools', name: pathToFileURL(resolve('packages/tianwen-runtime-bundle/dist/native-tools-observer.js')).href, config: {} }] },
+        { id: 'session-persistence-jsonl', config: { root: join(profile, 'sessions'), compression: 'none' } },
+        { id: 'session-title-llm', disabled: true },
+        { insert: [{ id: 'native-analysis-exit-control', name: pathToFileURL(resolve('tests/fixtures/development-native-analysis-shutdown/control-plugin.mjs')).href,
+          config: { repo: resolve('.').replaceAll('\\', '/'), root: profile.replaceAll('\\', '/'), cwd: root, receipt, trace } }] },
+      ]))
+      const cli = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', join(cliRequire.resolve('@deepseek-ai/dsh/package.json'), '..', 'lib', 'bin.js'), '--profile', 'analysis-exit-control', '--host', '127.0.0.1', '--port', '0', '--no-open'],
+        { cwd: root, encoding: 'utf8', windowsHide: true, timeout: 25_000, env: { ...process.env, DSH_HOME: root, DSH_TELEMETRY_DISABLED: '1' } })
+      if (process.env.TIANWEN_NATIVE_EXIT_CONTROL_REPORT) writeFileSync(process.env.TIANWEN_NATIVE_EXIT_CONTROL_REPORT, JSON.stringify({ status: cli.status, signal: cli.signal, stdout: cli.stdout, stderr: cli.stderr, error: cli.error?.message, trace: existsSync(trace) ? readFileSync(trace, 'utf8') : undefined, receipt: existsSync(receipt) ? JSON.parse(readFileSync(receipt, 'utf8')) : undefined }, null, 2), { flag: 'wx' })
+      expect(cli.error, cli.stderr).toBeUndefined(); expect(cli.status, cli.stderr).toBe(1)
+      expect(existsSync(receipt), cli.stdout + cli.stderr).toBe(true)
+      const result = JSON.parse(readFileSync(receipt, 'utf8'))
+      expect(result.models).toBe(0); expect(result.rollback.reason).toBe('consent-disabled'); expect(result.shutdownMs).toBeLessThan(5000)
+      const ledger = new EvolutionLedger(join(profile, 'evolution'))
+      expect(ledger.listConversationGuidanceStudies()[0]?.rollback?.reason).toBe('consent-disabled')
+      expect(ledger.getConversationGuidance(study!.opened.scopeKey)).toEqual(study!.opened.parentSnapshot)
+      expect(ledger.listConversationTasks()).toEqual(originalTasks); expect(harness.adapter.requests).toHaveLength(before)
+      return
+    }
+    if (scenario === 'budget-exit-withdrawal') {
+      const before = harness.adapter.requests.length, originalTasks = harness.ctx.tianwenEvolution.listConversationTasks()
+      await handle.dispose(); expect(harness.ctx.agents.list()).toEqual([])
+      const controller = new AbortController()
+      const exited = new Promise<void>((settled, failed) => {
+        harness.ctx.provide('appExit', () => { void disposeProfileContext(harness.ctx).then(settled, failed) })
+      })
+      let receipt: { ownedActiveBefore: string[], ownedActiveAfter: string[], withdrawalRequired: boolean } | undefined
+      const exitParent = await harness.ctx.agents.create({ sessionId: SessionId('native-analysis-exit-parent'), meta: { cwd: root },
+        agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+      installDevelopmentNativeAnalysisShutdown(harness.ctx, { controller, priorStudyIds: [],
+        parent: exitParent,
+        onSettled: (value: typeof receipt) => { receipt = value },
+      })
+      installDevelopmentNativeBatchBudget(harness.ctx, { controller, timeoutMs: 20 })
+      await exited
+      const ledger = new EvolutionLedger(join(root, 'evolution'))
+      const withdrawn = ledger.listConversationGuidanceStudies()[0]!
+      expect(withdrawn.rollback?.reason).toBe('consent-disabled')
+      expect(ledger.getConversationGuidance(study!.opened.scopeKey)).toEqual(study!.opened.parentSnapshot)
+      expect(ledger.listConversationTasks()).toEqual(originalTasks)
+      expect(harness.adapter.requests).toHaveLength(before)
+      expect(controller.signal.aborted).toBe(true)
+      expect(receipt).toEqual({ ownedActiveBefore: [study!.opened.studyId], ownedActiveAfter: [], withdrawalRequired: true })
+      return
+    }
     const oldTasks = harness.ctx.tianwenEvolution.listConversationTasks()
     expect(new Set(oldTasks.map(task => task.source.behaviorVersion)).size).toBe(1)
     handle.agent.followup(createUserMessage({ content: [{ type: 'text', text: '概括：局部样本需要 4 天。' }], source: { kind: 'user' } }))

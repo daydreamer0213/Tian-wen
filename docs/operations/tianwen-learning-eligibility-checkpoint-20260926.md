@@ -1,5 +1,15 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：模拟来源合法，首停止保留，处理原生提交和退出问题
+
+f88e91b4的新状态转换批38真实请求/38完整轨迹+2明确模拟历史交付；两原独立not-met/source-fidelity。候选保存，三臂source1 met/met、source2 baseline inconclusive，最后source-unavailable/CLI1/排空，零activation/after/rollback。模拟失败可以主动触发研究，但不能称自然模型错误，工程控制也不冒充实际效果。修改前旧四Task/三研究/52消费者/六其他账本/环境/prefix保持。[准确结果](tianwen-status-report-learning-result-20261005.md)。
+
+最后原生参数多余右花括号被笼统“对象”提示误导；新host只说明语法错误或对象/字符串区别，拒绝仍由原schema执行，不补JSON或替模型裁决。异常退出零activation但研究仍运行的原SDK控制旧实现确实晚激活；helper无条件关闭原consent、原Loop撤回/取消并排空，旧研究不重判。正常完整排空的未激活失败批允许卸载guard、保留现有来源资格；预算/资源退出不允许跳过停止。原正式门槛及研究policy不改，完整目标active。
+
+下一只一新来源形成未尝试对，保护当前六Task/四研究；不重复旧普通交付或消费已尝试组合。真实接受后才核后续实际改善、独立未用Task及安全撤回，main/Daily NO-GO/R9保持，D>=15GiB。
+
+工程最终源码260通过（259主组合+1正常排空），原十五构建、发布相关257及原完整profile50通过，13未运行为10原条件与3仅源码装配；原CLI273ms/0新模型撤回。限定复查原P2已解决，无新有据P1/P2；复杂旧激活链和多scope不在证明范围。新操作员正常/异常退出审计分开，不能因合法预算退出缺普通收尾文件丢首失败审计。
+
 ## 2026-10-05 当前：候选提案与未来验证分开，保留新首停止
 
 learning-r2一新模拟格式失败原独立not-met/instruction-following，7实际/完整+1模拟，原study9b62…proposer混合guidance/insufficientEvidence导致invalid-judgment/CLI1/排空，0candidate/arms/activation/after/rollback；原三Task/首study/prefix/52消费者/六其他旧账本/环境保持。[结果与接续](tianwen-status-report-learning-result-20261005.md)。

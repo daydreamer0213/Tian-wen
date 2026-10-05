@@ -76,7 +76,7 @@ it.each(['exact', 'cross-unit', 'invented', 'criterion'] as const)('captures sho
   } finally { await cold.ctx.fiber.dispose() }
 })
 
-it.each(['plain-text', 'summary-quote', 'answer-quote'] as const)('repairs original review submission in the same native session: %s', async mode => {
+it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'string-object'] as const)('repairs original review submission in the same native session: %s', async mode => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-repair-')); roots.push(root)
   const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [] }, answer: '原料已送达。' }
@@ -85,11 +85,18 @@ it.each(['plain-text', 'summary-quote', 'answer-quote'] as const)('repairs origi
   const bad = structuredClone(good)
   if (mode === 'summary-quote') bad.evidenceQuotes = ['标签：原料已送达。']
   if (mode === 'answer-quote') bad.audit.units['answer-1']!.firstClaim.quote = '标签：原料已送达。'
+  const initial = toolCallResponse('bad-capture', 'structured_output', bad)
+  if (mode === 'malformed-json' || mode === 'string-object') {
+    const end = initial[1]!
+    if (end.type !== 'block-end' || end.block.type !== 'tool-call') throw new Error('expected native tool call')
+    end.block.arguments = mode === 'malformed-json' ? end.block.arguments + '}' : JSON.stringify(end.block.arguments)
+  }
   const harness = await mountPersistentHarness(root, [
-    mode === 'plain-text' ? textResponse(JSON.stringify(good)) : toolCallResponse('bad-capture', 'structured_output', bad),
+    mode === 'plain-text' ? textResponse(JSON.stringify(good)) : initial,
     request => {
       const messages = JSON.stringify(request.messages)
-      expect(messages).toContain(mode === 'plain-text' ? 'Your previous response was plain text' : mode === 'summary-quote' ? 'Invalid evidenceQuotes item 1' : 'Invalid quote in answer-1')
+      expect(messages).toContain(mode === 'plain-text' ? 'Your previous response was plain text' : mode === 'summary-quote' ? 'Invalid evidenceQuotes item 1'
+        : mode === 'malformed-json' ? 'Invalid structured_output JSON arguments' : mode === 'string-object' ? 'JSON object as the tool arguments, not a string' : 'Invalid quote in answer-1')
       return toolCallResponse('corrected-capture', 'structured_output', good)
     },
     toolCallResponse('independent-capture', 'structured_output', good),
