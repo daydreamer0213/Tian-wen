@@ -60,7 +60,8 @@ export class DevelopmentNativeRuntimeContracts extends Service {
 
 /** Operator-owned JSON becomes only the original fixed-host factory options. */
 function readDevelopmentNativeRuntime(config) {
- closedDevelopmentData(config,['developmentRoot','contractPath','contractDigest'])
+ closedDevelopmentData(config,['developmentRoot','contractPath','contractDigest'],['guidanceDecisionPolicy'])
+ if(Object.hasOwn(config,'guidanceDecisionPolicy'))assert.equal(config.guidanceDecisionPolicy,'dev-paired-any-case.v1','DEV guidance decision policy is invalid')
  assert(process.platform==='win32','DEV loading requires Windows')
  const {developmentRoot,contractPath,contractDigest}=config
  const root=runtime.resolveDevelopmentRuntimeRoot(developmentRoot)
@@ -72,6 +73,7 @@ function readDevelopmentNativeRuntime(config) {
  const options=createDevelopmentNativeCheckOptions(packet.ordinaryContract,packet.studyContracts,packet.goalContract,packet.answerStudyContracts,packet.goalAnswerContracts)
  const producer={id:'tianwen.development-native-file-policy.v1',digest:hash(readFileSync(new URL('./development-native-file-policy.mjs',import.meta.url)))}
  return {contracts:packet.ordinaryContract,options:{developmentRoot:root,captureExternalCodeArtifacts:true,exposeCapturedFileFacts:false,...options,
+  ...(Object.hasOwn(config,'guidanceDecisionPolicy')?{guidanceDecisionPolicy:config.guidanceDecisionPolicy}:{}),
   conversationReadDenialSources:[producer],conversationFileMutationDenialSources:[producer]}}
 }
 export function loadDevelopmentNativeRuntimeOptions(config) {return readDevelopmentNativeRuntime(config).options}

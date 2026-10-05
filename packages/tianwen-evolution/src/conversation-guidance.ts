@@ -77,6 +77,7 @@ export interface GuidanceProposalClue {
   readonly materialDigest: Sha256Digest
 }
 export interface GuidanceStudyBody {
+  readonly decisionPolicy?: 'dev-paired-any-case.v1'
   readonly nativeGoalSources?: GuidanceNativeGoalSources
   readonly resultChecks?: readonly GuidanceCaseResultCheck[]
   readonly checkedFailureSources?: ConversationCheckedFailureSources
@@ -306,7 +307,7 @@ function parseProposalClue(value: unknown): GuidanceProposalClue {
     assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
 }
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : []), ...(Object.hasOwn(input, 'resultChecks') ? ['resultChecks'] : []), ...(Object.hasOwn(input, 'nativeGoalSources') ? ['nativeGoalSources'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'decisionPolicy') ? ['decisionPolicy'] : []), ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : []), ...(Object.hasOwn(input, 'resultChecks') ? ['resultChecks'] : []), ...(Object.hasOwn(input, 'nativeGoalSources') ? ['nativeGoalSources'] : [])])
   const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
@@ -331,6 +332,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
   }
   if (!Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('guidance consent revision is invalid')
   const body: GuidanceStudyBody = {
+    ...(Object.hasOwn(input, 'decisionPolicy') ? { decisionPolicy: oneOf(input.decisionPolicy, ['dev-paired-any-case.v1']) } : {}),
     scopeKey: text(input.scopeKey, 512), family: oneOf(input.family, CONVERSATION_FAMILIES),
     failureCategory: oneOf(input.failureCategory, CONVERSATION_FAILURES), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), parentSnapshot: parseGuidanceSnapshot(input.parentSnapshot),
@@ -485,6 +487,9 @@ export class ConversationGuidanceState {
       return arm
     }))
     const verdict = arms.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
+      : study.opened.decisionPolicy === 'dev-paired-any-case.v1'
+        ? arms.filter(arm => arm.role === 'candidate').every(arm => arm.verdict === 'met')
+          && arms.some(arm => arm.role === 'baseline' && arm.verdict === 'not-met') ? 'accepted' : 'rejected'
       : arms.filter(arm => arm.role === 'candidate').every(arm => arm.verdict === 'met')
         && (arms[0]!.verdict === 'not-met' || arms[2]!.verdict === 'not-met')
         && arms[4]!.verdict === 'met' ? 'accepted' : 'rejected'

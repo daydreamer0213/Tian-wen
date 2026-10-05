@@ -4,6 +4,7 @@ import { ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDiges
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import type { ConversationExternalCheckOutcome } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
+import { hasSatisfiedGuidanceResultChecks } from '../../packages/tianwen-evolution/src/guidance-result-check.js'
 
 const ids = ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
@@ -24,8 +25,10 @@ function opening(configured = true): GuidanceStudyOpened {
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 const verified: ConversationExternalCheckOutcome = { status: 'verified', detail: 'Frozen check passed.' }
-function completed(options: { badCandidate?: ConversationExternalCheckOutcome, missingCandidate?: boolean, badBaseline?: ConversationExternalCheckOutcome, counterRejected?: boolean, configured?: boolean } = {}) {
-  const opened = opening(options.configured !== false), state = new ConversationGuidanceState()
+function completed(options: { badCandidate?: ConversationExternalCheckOutcome, missingCandidate?: boolean, badBaseline?: ConversationExternalCheckOutcome, counterRejected?: boolean, configured?: boolean, dev?: boolean, gain?: typeof ids[number] | 'none' } = {}) {
+  const { kind: _kind, studyId: _id, ...body } = opening(options.configured !== false)
+  const frozen = { ...body, ...(options.dev ? { decisionPolicy: 'dev-paired-any-case.v1' as const } : {}) }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }, state = new ConversationGuidanceState()
   const apply = (record: unknown) => { const parsed = parseConversationGuidanceRecord(record); state.validate(parsed); state.apply(parsed, '2026-10-01') }
   apply(opened)
   const snapshot = { ...opened.parentSnapshot, fileRules: { code: { files: 'Preserve the supplied field without alteration.' } } }
@@ -39,17 +42,32 @@ function completed(options: { badCandidate?: ConversationExternalCheckOutcome, m
     const check = checks().find(check => check.caseId === item.id)!
     const baselineFailure = { status: 'rejected' as const, detail: 'The original field was altered.', failedRequiredConditionDigest: sha256(check.requiredCondition) }
     const outcome = role === 'candidate' && item.kind === 'holdout' ? options.badCandidate ?? verified
-      : role === 'baseline' && item.kind === 'source1' ? options.badBaseline ?? baselineFailure
+      : role === 'baseline' && item.kind === (options.gain ?? 'source1') ? options.badBaseline ?? baselineFailure
         : role === 'baseline' && item.kind === 'counterexample' && options.counterRejected ? baselineFailure : verified
     const resultCheck = options.configured === false || options.missingCandidate && role === 'candidate' && item.kind === 'holdout' ? undefined
       : { preparationDigest: sha256({ check, materialDigest: item.materialDigest, modelConfigDigest: opened.modelConfigDigest }), outputDigest, ...outcome }
     apply({ kind: 'arm-recorded', studyId: opened.studyId, caseId: item.id, role, materialDigest: item.materialDigest,
       behaviorVersion: role === 'baseline' ? opened.parentVersion : guidanceVersion(snapshot), executionProof, judgeProof: proof(`${item.id}:${role}:judge`), outputDigest,
-      verdict: role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met', ...(resultCheck === undefined ? {} : { resultCheck }) })
+      verdict: role === 'baseline' && item.kind === (options.gain ?? 'source1') ? 'not-met' : 'met', ...(resultCheck === undefined ? {} : { resultCheck }) })
   }
   const decision = state.decision(opened.studyId); apply(decision)
   return { state, opened, decision, activation: { kind: 'guidance-activated' as const, studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) } }
 }
+
+it.each(ids)('requires independently qualified DEV paired gain in %s', gain => {
+  const study = completed({ dev: true, gain }).state.listStudies()[0]!
+  expect(hasSatisfiedGuidanceResultChecks(study)).toBe(true)
+  expect(hasSatisfiedGuidanceResultChecks(completed({ gain }).state.listStudies()[0]!)).toBe(['source1', 'source2'].includes(gain))
+})
+it.each(['none', 'unqualified', 'regression', 'unverifiable', 'missing'] as const)('refuses incomplete independent DEV gain: %s', scenario => {
+  const study = completed({ dev: true, gain: scenario === 'none' ? 'none' : 'holdout',
+    ...(scenario === 'unqualified' ? { badBaseline: { status: 'rejected' as const, detail: 'Unrelated diagnostic.' } } : {}),
+    ...(scenario === 'regression' ? { badCandidate: { status: 'rejected' as const, detail: 'Required field missing.' } } : {}),
+    ...(scenario === 'unverifiable' ? { badCandidate: { status: 'unverifiable' as const, detail: 'Cannot inspect.' } } : {}),
+    ...(scenario === 'missing' ? { missingCandidate: true } : {}),
+  }).state.listStudies()[0]!
+  expect(hasSatisfiedGuidanceResultChecks(study)).toBe(false)
+})
 
 it('keeps model accepted but refuses activation when the independent candidate check rejects', () => {
   const { state, decision, activation } = completed({ badCandidate: { status: 'rejected', detail: 'Required value missing.' } })

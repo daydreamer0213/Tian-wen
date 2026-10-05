@@ -499,14 +499,15 @@ export async function apply(
   ctx: Context,
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
+  if (Object.hasOwn(config, 'guidanceDecisionPolicy')) throw new Error('DEV guidance decision policy requires applyDevelopment')
   await applyConfigured(ctx, config, true)
 }
 /** Explicit trusted DEV host opt-in; ordinary apply and installed Profiles stay quarantined. */
 export async function applyDevelopment(ctx: Context, config: TianwenDevelopmentRuntimeConfig): Promise<void> {
   if (ctx.get('tianwenEvolution') !== undefined) throw new Error('Development Runtime requires a fresh Context without an existing Evolution service')
-  await applyConfigured(ctx, developmentRuntimeConfig(ctx.baseUrl, config, ctx.get('sessionPersistence')), false)
+  await applyConfigured(ctx, developmentRuntimeConfig(ctx.baseUrl, config, ctx.get('sessionPersistence')), false, config.guidanceDecisionPolicy)
 }
-async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig, guidanceActivationQuarantine: boolean): Promise<void> {
+async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig, guidanceActivationQuarantine: boolean, guidanceDecisionPolicy?: TianwenDevelopmentRuntimeConfig['guidanceDecisionPolicy']): Promise<void> {
   const evolutionRoot = config.evolutionRoot ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state', 'evolution'))
   await applyCore(ctx, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }), guidanceActivationQuarantine })
   ctx.plugin(controlledSessionArchive)
@@ -533,6 +534,7 @@ async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig,
     ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
     ...(config.answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck: config.answerStudyResultCheck }),
     guidanceActivationQuarantine,
+    ...(guidanceDecisionPolicy === undefined ? {} : { guidanceDecisionPolicy }),
   })
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)

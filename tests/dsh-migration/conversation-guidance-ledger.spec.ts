@@ -214,6 +214,56 @@ function fileOpening(tasks: readonly [ConversationTask, ConversationTask, Conver
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 
+it('quarantines new DEV policy mutations while retaining frozen DEV history on main replay', () => {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, decisionPolicy: 'dev-paired-any-case.v1' as const }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  const main = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => main.recordConversationGuidance(opened)).toThrow(/DEV.*policy|policy.*quarantined/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  ledger.recordConversationGuidance(opened)
+  const cold = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(cold.hasRecoveryFailure()).toBe(false)
+  expect(cold.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+  expect(cold.recordConversationGuidance(opened)).toEqual({ duplicate: true })
+  const proposed = { kind: 'candidate-recorded' as const, studyId: opened.studyId,
+    candidateSnapshot: { ...opened.parentSnapshot, rules: { summarization: 'Preserve source scope.' } }, proposalProof: proof('DEV-proposal') }
+  expect(() => cold.recordConversationGuidance(proposed)).toThrow(/DEV.*policy|policy.*quarantined/i)
+  expect(ledger.recordConversationGuidance(proposed)).toEqual({ duplicate: false })
+})
+
+it.each(['rollback', 'stop'] as const)('permits strictly validated main safety %s of frozen DEV history', safety => {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, decisionPolicy: 'dev-paired-any-case.v1' as const }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  if (safety === 'stop') ledger.recordConversationGuidance(opened)
+  else { const value = evaluated(ledger, opened); ledger.recordConversationGuidance(activation(value)) }
+  const main = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  const history = main.listEvents().map(sha256)
+  if (safety === 'stop') {
+    const record = { kind: 'study-stopped' as const, studyId: opened.studyId, reason: 'cancelled' as const }
+    expect(() => main.recordConversationGuidance({ ...record, reason: 'unknown' } as never)).toThrow()
+    expect(main.recordConversationGuidance(record)).toEqual({ duplicate: false })
+    expect(main.listConversationGuidanceStudies()[0]!.stopped).toEqual(record)
+  } else {
+    main.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    const record = { kind: 'guidance-rolled-back' as const, studyId: opened.studyId, expectedCurrentVersion: sha256('wrong parent'), reason: 'consent-disabled' as const, evidenceTaskIds: [] }
+    expect(() => main.recordConversationGuidance(record)).toThrow()
+    expect(() => main.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: 'cancelled' })).toThrow(/decided|terminal/i)
+    main.retireIncompatibleConversationGuidance(scope)
+    expect(main.listConversationGuidanceStudies()[0]!.rollback?.reason).toBe('consent-disabled')
+  }
+  expect(main.getConversationGuidance(scope)).toEqual(opened.parentSnapshot)
+  expect(main.listEvents().slice(0, history.length).map(sha256)).toEqual(history)
+  const { kind: _futureKind, studyId: _futureId, ...future } = opening(tasks, 'future-DEV')
+  const next = { ...future, decisionPolicy: 'dev-paired-any-case.v1' as const }
+  expect(() => main.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(next), ...next })).toThrow(/policy.*quarantined/i)
+  expect(new EvolutionLedger(root, { guidanceActivationQuarantine: true }).listConversationGuidanceStudies()).toEqual(main.listConversationGuidanceStudies())
+})
+
 function aliasedGeneratedFileOpening(ledger: EvolutionLedger, scenario: 'read-order' | 'path-case' | 'output-order' | 'different-content' = 'read-order') {
   const mode = scenario === 'output-order' ? 'files' : 'chat'
   const tasks = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, mode)) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]

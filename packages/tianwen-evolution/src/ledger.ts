@@ -3229,6 +3229,13 @@ export class EvolutionLedger {
       if (record.kind === 'study-decided') this.#ensureConversationGuidanceEvaluation(record)
       return { duplicate: true }
     }
+    const existingStudy = record.kind === 'study-opened' ? undefined
+      : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
+    const decisionPolicy = record.kind === 'study-opened' ? record.decisionPolicy : existingStudy?.opened.decisionPolicy
+    if (this.#guidanceActivationQuarantine && decisionPolicy === 'dev-paired-any-case.v1'
+      && record.kind !== 'guidance-rolled-back' && record.kind !== 'study-stopped') {
+      throw new LedgerIntegrityError('DEV guidance decision policy mutations are quarantined')
+    }
     if (record.kind === 'guidance-activated' && this.#guidanceActivationQuarantine) {
       throw new LedgerIntegrityError('conversation guidance activation is quarantined')
     }
@@ -3265,8 +3272,6 @@ export class EvolutionLedger {
         }
       }
     }
-    const existingStudy = record.kind === 'study-opened' ? undefined
-      : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
     if (record.kind === 'guidance-rolled-back' && record.reason === 'regression' && !['request-content.v1','native-goal-task-input.v1'].includes(record.evidenceInputPolicy ?? '')) {
       throw new LedgerIntegrityError('new regression requires request content input policy')
     }

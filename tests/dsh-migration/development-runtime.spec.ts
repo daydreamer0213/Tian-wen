@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it } from 'vitest'
 import { Context, mountAgentLoopTestDependencies } from '@tianwen/dsh-compat'
 import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import * as runtime from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 
 const base=resolve('D:/DevData/tianwen-development-runtime'),roots:string[]=[]
@@ -11,6 +12,29 @@ afterEach(()=>{for(const root of roots.splice(0)){if(!root.startsWith(base+'\\')
 function fixture(){mkdirSync(base,{recursive:true});const root=mkdtempSync(join(base,'api-test-'));roots.push(root);const ctx=new Context();ctx.baseUrl=pathToFileURL(root).href;return{root,ctx}}
 it('provides an explicit development Runtime entry rather than exposing a default quarantine override',()=>{
   expect((runtime as any).applyDevelopment).toBeTypeOf('function')
+})
+it('ordinary apply refuses the DEV decision option before mounting any ledger',async()=>{
+ const f=fixture()
+ try{
+  await expect(runtime.apply(f.ctx,{guidanceDecisionPolicy:'dev-paired-any-case.v1'} as never)).rejects.toThrow(/DEV|development/i)
+  expect(f.ctx.get('tianwenEvolution')).toBeUndefined()
+ }finally{await f.ctx.fiber.dispose()}
+})
+it.each(['dev-paired-any-case.v1','unknown.v1',undefined])('strictly admits an explicit development policy: %s',async policy=>{
+ const f=fixture()
+ try{
+  await mountAgentLoopTestDependencies(f.ctx)
+  await f.ctx.plugin(JsonlSessionPersistence,{root:join(f.root,'sessions'),compression:'none'})
+  await f.ctx.plugin(SubagentRuntime)
+  const mounted=runtime.applyDevelopment(f.ctx,{developmentRoot:f.root,guidanceDecisionPolicy:policy} as never)
+  if(policy==='dev-paired-any-case.v1'){
+   await mounted
+   expect((f.ctx.tianwenConversationGuidanceLoop as any).sourceConfig.guidanceDecisionPolicy).toBe(policy)
+  }else{
+   await expect(mounted).rejects.toThrow(/policy/i)
+   expect(f.ctx.get('tianwenEvolution')).toBeUndefined()
+  }
+ }finally{await f.ctx.fiber.dispose()}
 })
 it('mounts the original DEV Runtime in a dedicated canonical CLI Profile',async()=>{
   const f=fixture(),profile=join(f.root,'profiles','owned-dev');mkdirSync(profile,{recursive:true})

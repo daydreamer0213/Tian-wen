@@ -47,6 +47,13 @@ function fixture(cliProfile=false) {
  return {f,packet,profile,path,write,config:write()}
 }
 
+it('strictly loads only the explicit DEV decision option and preserves its absence by default',async()=>{
+ const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture()
+ expect(loadDevelopmentNativeRuntimeOptions(f.config)).not.toHaveProperty('guidanceDecisionPolicy')
+ expect(loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy:'dev-paired-any-case.v1'})).toHaveProperty('guidanceDecisionPolicy','dev-paired-any-case.v1')
+ for(const guidanceDecisionPolicy of ['unknown.v1',undefined]) expect(()=>loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy})).toThrow(/policy/i)
+})
+
 type TestAnswerMaterial={request?:ReturnType<typeof createUserMessage>[],context?:never[],objective?:string,prompt?:string,
  criteria:string[],qualityContract:ReturnType<typeof conversationQualityContract>,
  files?:{schemaVersion:'tianwen.conversation-file-material.v1',cwd:string,outputKind:'chat',outputPaths:string[],entries:{path:string,content:string}[]}}

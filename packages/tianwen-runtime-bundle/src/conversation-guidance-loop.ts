@@ -114,10 +114,10 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private readonly acceptedRecoveries = new Map<string, Promise<void>>()
   private accepting = true
 
-  private readonly sourceConfig: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean }
+  private readonly sourceConfig: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly guidanceDecisionPolicy?: GuidanceStudyBody['decisionPolicy'] }
   private readonly studyResultCheck: ConversationStudyResultCheck | undefined
   private readonly answerStudyResultCheck: ConversationAnswerStudyResultCheck | undefined
-  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly studyResultCheck?: ConversationStudyResultCheck, readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck } = {}) {
+  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly guidanceDecisionPolicy?: GuidanceStudyBody['decisionPolicy'], readonly studyResultCheck?: ConversationStudyResultCheck, readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck } = {}) {
     super(ctx, 'tianwenConversationGuidanceLoop')
     const { studyResultCheck, answerStudyResultCheck, ...sourceConfig } = config
     this.sourceConfig = structuredClone(sourceConfig)
@@ -845,6 +845,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
         validateIndependent(frozenIndependent)
         const frozenCases = [...cases, ...frozenIndependent]
         const frozenBody: GuidanceStudyBody = {
+          ...(this.sourceConfig.guidanceDecisionPolicy === undefined ? {} : { decisionPolicy: this.sourceConfig.guidanceDecisionPolicy }),
           scopeKey: metadata.scopeKey, family, failureCategory: group.category, consentRevision: metadata.consentRevision,
           parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: attemptBody.sourceTaskIds,
           counterexampleTaskId: sourceId(group.counterexample), cases: frozenCases, modelConfigDigest: sha256(callConfig),
@@ -884,6 +885,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
       let catalog = group.proposalClues.length === 0 ? undefined : await loadCatalog()
       if (catalog !== undefined && !catalog.complete) throw new Error('source-unavailable')
       const bodyFor = (proposalClues: readonly EvidenceGroup['proposalClues'][number][]): GuidanceStudyBody => ({
+        ...(this.sourceConfig.guidanceDecisionPolicy === undefined ? {} : { decisionPolicy: this.sourceConfig.guidanceDecisionPolicy }),
         scopeKey: metadata.scopeKey, family: family!, failureCategory: group.category, consentRevision: metadata.consentRevision,
         parentVersion: guidanceVersion(parentSnapshot), parentSnapshot, sourceTaskIds: [sourceId(group.sources[0]), sourceId(group.sources[1])], counterexampleTaskId: sourceId(group.counterexample),
         cases, modelConfigDigest: sha256(callConfig), caseDesignProof: generated.proof, qualityContract: qualityContract!, ...checkedEvidence,

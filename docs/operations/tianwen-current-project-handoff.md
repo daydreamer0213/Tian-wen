@@ -1,5 +1,18 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：DEV任一固定案例改善规则已交付
+
+按所有者授权，缺条件主动模拟适用于全项目开发；不等待自然失败、重复问题、真人评价或后续任务。新显式 dev-paired-any-case.v1 允许五固定案例任一实际改善且候选全部通过，旧规则/历史保持。源码378、严格类型、Evolution原构建/Runtime原十五阶段、发布profile49通过/10原跳过；两公共Core/Loop控制92scripted/0real，旧3→5拒绝、新DEV持久化接受激活、普通区冷恢复可安全撤回。外层DEV入口/loader源码已覆盖，未声称完整外层CLI或新真实未来效果。[准确交付及后续](tianwen-controlled-learning-policy-gap-20261005.md)。
+
+旧206real研究3→5首结果仍rejected/0激活，不追改。下一新批事前选新policy，验证原生激活、主动设计后续任务、撤回及公共SDK模拟反馈；现有遗留代码环境已准备但未执行。完整目标active，不机械blocked；main/Daily NO-GO/R9及原正式门槛不新增。Docker保持停、旧账本与容器保持；临时发布目录清理、无依赖副本，D约17GiB>=15。
+
+
+## 2026-10-05 当前：真实研究3/5→5/5，调整DEV过严角色规则
+
+38ca9c新dx-ef唯一批206真实/206完整轨迹、15scripted另记；七Task/Goal完成，未来基线4/4，三训练两拒绝一通过/三researchSource、一研究五例十臂。无方法3/5，有方法5/5；adjacent/holdout真实paired改善，但原source1/2专属两道规则判rejected、0激活，未进入方法后未来/撤回，反馈0。CLI1/原排空成功。[准确首结果和规则原因](tianwen-controlled-learning-policy-gap-20261005.md)。
+
+按所有者“主动模拟缺条件、以效果推进”的授权，执行[显式DEV成对改善计划](../superpowers/plans/2026-10-05-tianwen-dev-paired-improvement-plan.md)：新policy接受固定案例任一真实改善且候选全部通过，正常/历史规则缺省完整保留，不重判本批或补激活。另五角色遗留Python环境已准备/配置验证，未执行不称效果。完整目标active，不自然等待/索题/机械blocked；main/Daily当前NO-GO/R9/正式门槛保持。29消费者/三旧账本/84容器不变，自启Docker停、七重复清3,276,834bytes，D17.07>=15，无环境副本/保护根访问。
+
 ## 2026-10-05 最新：SDK运行提醒兼容修复已验证，转新受控学习批
 
 共享结构化判断现在识别已核实的SDK默认3/5/8提醒。67项相关源码检查、严格类型、原15实际构建、发布包49通过/10原跳过；发布dist使用安装SDK的四正控制全部通过，26 scripted/0真实请求、每组唯一成功捕获，恢复不新增模型请求，原自有提醒权限及事实/引用检查保持。限定只读复查无有据P1/P2。旧do-dw首结果不补评；研究/激活/后续效果仍待新批证实。[准确交付与旧失败](tianwen-readmitted-learning-sdk-notice-result-20261005.md)。

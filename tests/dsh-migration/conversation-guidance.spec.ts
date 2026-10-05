@@ -319,6 +319,46 @@ function activate(state: ConversationGuidanceState, value: ReturnType<typeof eva
     expectedParentVersion: value.opened.parentVersion, decisionDigest: sha256(value.decision) })
 }
 
+describe('explicit DEV paired-any-case decision policy', () => {
+  function configured(dev: boolean) {
+    const { kind: _kind, studyId: _id, ...body } = opening('paired-policy')
+    const frozen = { ...body, ...(dev ? { decisionPolicy: 'dev-paired-any-case.v1' as const } : {}) }
+    return { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  }
+  it.each([false, true])('keeps adjacent and holdout gains prospective: DEV=%s', dev => {
+    const state = new ConversationGuidanceState(), opened = configured(dev)
+    const value = evaluated(state, opened, records => {
+      for (let i = 0; i < records.length; i++) records[i] = { ...records[i]!, verdict: records[i]!.role === 'baseline' && i >= 6 ? 'not-met' : 'met' }
+    })
+    expect(value.decision.verdict).toBe(dev ? 'accepted' : 'rejected')
+    const cold = new ConversationGuidanceState()
+    for (const record of [opened, value.proposed, ...value.records, value.decision]) append(cold, record)
+    expect(cold.decision(opened.studyId)).toEqual(value.decision)
+    expect(Object.hasOwn(cold.listStudies()[0]!.opened, 'decisionPolicy')).toBe(dev)
+    if (!dev) expect(parseConversationGuidanceRecord(opened)).toEqual(opened)
+    expect(configured(true).studyId).not.toBe(configured(false).studyId)
+  })
+  it.each([0, 2, 4, 6, 8])('accepts genuine gain in any DEV role, baseline index %s', gain => {
+    const value = evaluated(new ConversationGuidanceState(), configured(true), records => {
+      for (let i = 0; i < records.length; i++) records[i] = { ...records[i]!, verdict: i === gain ? 'not-met' : 'met' }
+    })
+    expect(value.decision.verdict).toBe('accepted')
+  })
+  it.each(['no-gain', 'candidate-regression', 'inconclusive'] as const)('does not accept DEV %s', scenario => {
+    const value = evaluated(new ConversationGuidanceState(), configured(true), records => {
+      for (let i = 0; i < records.length; i++) records[i] = { ...records[i]!, verdict: scenario !== 'no-gain' && i === 6 ? 'not-met' : 'met' }
+      if (scenario !== 'no-gain') records[9] = { ...records[9]!, verdict: scenario === 'inconclusive' ? 'inconclusive' : 'not-met' }
+    })
+    expect(value.decision.verdict).toBe(scenario === 'inconclusive' ? 'inconclusive' : 'rejected')
+  })
+  it('rejects unknown or explicit undefined policy without changing legacy shapes', () => {
+    const original = configured(false)
+    expect(Object.hasOwn(original, 'decisionPolicy')).toBe(false)
+    expect(sha256(parseConversationGuidanceRecord(original))).toBe(sha256(original))
+    for (const decisionPolicy of ['unknown.v1', undefined]) expect(() => parseConversationGuidanceRecord({ ...original, decisionPolicy })).toThrow()
+  })
+})
+
 describe('natural guidance domain governance', () => {
   it('derives a bounded exploration observation only from two independent frozen review receipts', () => {
     const state = new ConversationGuidanceState()

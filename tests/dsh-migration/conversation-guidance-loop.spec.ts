@@ -20,7 +20,7 @@ import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runt
 import { conversationQualityContract } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import { sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
 import { EvolutionLedger } from '../../packages/tianwen-evolution/src/ledger.js'
-import { TianwenEvolutionService } from '../../packages/tianwen-evolution/dist/index.js'
+import { TianwenEvolutionService } from '@tianwen/evolution'
 import { ConversationGuidanceState, guidanceVersion, caseDesignAttemptId } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
 import { parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/conversation-learning.js'
@@ -576,7 +576,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   ...(['recover-source-explored', 'recover-source-explored-first'] as const).flatMap(order =>
     (['sources', 'guidance', 'family', 'category'] as const).map(field => `${order}-frozen-${field}` as const)),
   'support-withdrawn-during-review', 'explored-support-withdrawn-during-review',
-  'accepted', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
+  'accepted', 'dev-paired-any-case', 'old-paired-any-case', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover-offline', 'recover-offline-missing-proof', 'recover-offline-disabled', 'recover-offline-quarantined',
@@ -606,6 +606,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     : scenario === 'no-source-scope' ? { ...sourceAdmission, scopeKey: `conversation:${sha256('other-scope')}` } : sourceAdmission
   const loopConfig = { ...(scenario === 'no-source-root' ? {} : { evolutionRoot: scenario === 'no-source-relative-root' ? 'relative-root' : join(root, 'evolution') }),
     ...(scenario === 'activation-quarantined' ? { guidanceActivationQuarantine: true } : {}),
+    ...(scenario === 'dev-paired-any-case' ? { guidanceDecisionPolicy: 'dev-paired-any-case.v1' as const } : {}),
     skillSources: withSource || scenario.startsWith('no-source-') ? [configuredSource] : [] }
   const sourceUse = () => ({ readDigest: sha256(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.sourceReference!), status: scenario === 'source-not-used' ? 'not-used' : 'adapted', rationale: 'A bounded scope-checking reference.' })
   const capturedMaterial = (request: GenerateOptions) => {
@@ -743,7 +744,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
         if (scenario === 'disabled') harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
         return structured({ answer: `${role === 'candidate' ? '保留来源范围' : '任务回答'} ${index}${scenario === 'recover-formatting' ? '\r\n\r\n第二段仍保留范围。\n \t\u00a0\n' : invalidAudit && index === 1 && role === 'candidate' ? '\n第二段仍保留范围。' : ''}` })
       })
-      const judgment = { ...verdict(!(role === 'baseline' && index < 2) && !(scenario === 'regression' && role === 'candidate' && index === 4), scenario === 'derived-quote' ? 'Preserve source scope' : `${index}`) }
+      const judgment = { ...verdict(!(role === 'baseline' && (scenario.endsWith('paired-any-case') ? index >= 3 : index < 2)) && !(scenario === 'regression' && role === 'candidate' && index === 4), scenario === 'derived-quote' ? 'Preserve source scope' : `${index}`) }
       if (scenario === 'derived-quote') {
         script.push(auditedEvidenceResponse(judgment, 'empty', false))
       } else for (let check = 0; check < 2; check++) script.push(request => {
@@ -1298,12 +1299,14 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     expect(warnings).toEqual([])
     expect(study?.arms).toHaveLength(10)
     expect(study?.arms.every(arm => arm.reviewChecks?.every(check => 'audit' in check && check.audit.schemaVersion === 'tianwen.claim-audit.v2'))).toBe(true)
-    if (scenario === 'regression') {
+    if (scenario === 'regression' || scenario === 'old-paired-any-case') {
       expect(study?.decision?.verdict).toBe('rejected')
       expect(study?.activation).toBeUndefined()
       return
     }
     expect(study?.decision?.verdict).toBe('accepted')
+    if (scenario === 'dev-paired-any-case') expect(study?.opened).toHaveProperty('decisionPolicy','dev-paired-any-case.v1')
+    else expect(study?.opened).not.toHaveProperty('decisionPolicy')
     if (scenario === 'activation-quarantined') {
       expect(study.activation).toBeUndefined()
       const reviewRequests = harness.adapter.requests.length
