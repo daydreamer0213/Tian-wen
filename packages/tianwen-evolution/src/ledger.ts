@@ -3232,7 +3232,7 @@ export class EvolutionLedger {
     const existingStudy = record.kind === 'study-opened' ? undefined
       : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
     const decisionPolicy = record.kind === 'study-opened' ? record.decisionPolicy : existingStudy?.opened.decisionPolicy
-    if (this.#guidanceActivationQuarantine && decisionPolicy === 'dev-paired-any-case.v1'
+    if (this.#guidanceActivationQuarantine && (decisionPolicy === 'dev-paired-any-case.v1' || decisionPolicy === 'dev-conclusive-pair.v1')
       && record.kind !== 'guidance-rolled-back' && record.kind !== 'study-stopped') {
       throw new LedgerIntegrityError('DEV guidance decision policy mutations are quarantined')
     }

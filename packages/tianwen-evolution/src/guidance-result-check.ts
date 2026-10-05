@@ -95,7 +95,7 @@ export function hasSatisfiedGuidanceResultChecks(study: GuidanceStudy): boolean 
         const result = arm.resultCheck
         const rejectedCondition = result.status === 'rejected' && result.failedRequiredConditionDigest === sha256(check.requiredCondition)
         if (role === 'candidate' ? result.status !== 'verified' : result.status !== 'verified' && !rejectedCondition) return false
-        if (opened.decisionPolicy === 'dev-paired-any-case.v1') {
+        if (opened.decisionPolicy === 'dev-paired-any-case.v1' || opened.decisionPolicy === 'dev-conclusive-pair.v1') {
           if (role === 'baseline' && rejectedCondition) sourceImproved = true
         } else {
           if (role === 'baseline' && item.kind === 'counterexample' && result.status !== 'verified') return false

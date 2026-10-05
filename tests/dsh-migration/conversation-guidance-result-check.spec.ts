@@ -25,9 +25,9 @@ function opening(configured = true): GuidanceStudyOpened {
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 const verified: ConversationExternalCheckOutcome = { status: 'verified', detail: 'Frozen check passed.' }
-function completed(options: { badCandidate?: ConversationExternalCheckOutcome, badCandidateCase?: typeof ids[number], missingCandidate?: boolean, badBaseline?: ConversationExternalCheckOutcome, counterRejected?: boolean, configured?: boolean, dev?: boolean, gain?: typeof ids[number] | 'none' } = {}) {
+function completed(options: { badCandidate?: ConversationExternalCheckOutcome, badCandidateCase?: typeof ids[number], missingCandidate?: boolean, missingBaseline?: boolean, badBaseline?: ConversationExternalCheckOutcome, badBaselineCase?: typeof ids[number], baselineUnknownCase?: typeof ids[number], counterRejected?: boolean, configured?: boolean, dev?: boolean, policy?: GuidanceStudyBody['decisionPolicy'], gain?: typeof ids[number] | 'none' } = {}) {
   const { kind: _kind, studyId: _id, ...body } = opening(options.configured !== false)
-  const frozen = { ...body, ...(options.dev ? { decisionPolicy: 'dev-paired-any-case.v1' as const } : {}) }
+  const frozen = { ...body, ...(options.policy ? { decisionPolicy: options.policy } : options.dev ? { decisionPolicy: 'dev-paired-any-case.v1' as const } : {}) }
   const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }, state = new ConversationGuidanceState()
   const apply = (record: unknown) => { const parsed = parseConversationGuidanceRecord(record); state.validate(parsed); state.apply(parsed, '2026-10-01') }
   apply(opened)
@@ -42,31 +42,43 @@ function completed(options: { badCandidate?: ConversationExternalCheckOutcome, b
     const check = checks().find(check => check.caseId === item.id)!
     const baselineFailure = { status: 'rejected' as const, detail: 'The original field was altered.', failedRequiredConditionDigest: sha256(check.requiredCondition) }
     const outcome = role === 'candidate' && item.kind === (options.badCandidateCase ?? 'holdout') ? options.badCandidate ?? verified
-      : role === 'baseline' && item.kind === (options.gain ?? 'source1') ? options.badBaseline ?? baselineFailure
+      : role === 'baseline' && item.kind === (options.badBaselineCase ?? options.gain ?? 'source1') && options.badBaseline ? options.badBaseline
+        : role === 'baseline' && item.kind === (options.gain ?? 'source1') ? baselineFailure
         : role === 'baseline' && item.kind === 'counterexample' && options.counterRejected ? baselineFailure : verified
-    const resultCheck = options.configured === false || options.missingCandidate && role === 'candidate' && item.kind === 'holdout' ? undefined
+    const resultCheck = options.configured === false || options.missingCandidate && role === 'candidate' && item.kind === 'holdout' || options.missingBaseline && role === 'baseline' && item.kind === 'holdout' ? undefined
       : { preparationDigest: sha256({ check, materialDigest: item.materialDigest, modelConfigDigest: opened.modelConfigDigest }), outputDigest, ...outcome }
     apply({ kind: 'arm-recorded', studyId: opened.studyId, caseId: item.id, role, materialDigest: item.materialDigest,
       behaviorVersion: role === 'baseline' ? opened.parentVersion : guidanceVersion(snapshot), executionProof, judgeProof: proof(`${item.id}:${role}:judge`), outputDigest,
-      verdict: role === 'baseline' && item.kind === (options.gain ?? 'source1') ? 'not-met' : 'met', ...(resultCheck === undefined ? {} : { resultCheck }) })
+      verdict: role === 'baseline' && item.kind === options.baselineUnknownCase ? 'inconclusive' : role === 'baseline' && item.kind === (options.gain ?? 'source1') ? 'not-met' : 'met', ...(resultCheck === undefined ? {} : { resultCheck }) })
   }
   const decision = state.decision(opened.studyId); apply(decision)
   return { state, opened, decision, activation: { kind: 'guidance-activated' as const, studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) } }
 }
 
-it.each(ids)('requires independently qualified DEV paired gain in %s', gain => {
-  const study = completed({ dev: true, gain }).state.listStudies()[0]!
+it.each((['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const).flatMap(policy => ids.map(gain => ({ policy, gain }))))('requires independently qualified $policy paired gain in $gain', ({ policy, gain }) => {
+  const study = completed({ policy, gain }).state.listStudies()[0]!
   expect(hasSatisfiedGuidanceResultChecks(study)).toBe(true)
   expect(hasSatisfiedGuidanceResultChecks(completed({ gain }).state.listStudies()[0]!)).toBe(['source1', 'source2'].includes(gain))
 })
-it.each(['none', 'unqualified', 'regression', 'unverifiable', 'missing'] as const)('refuses incomplete independent DEV gain: %s', scenario => {
-  const study = completed({ dev: true, gain: scenario === 'none' ? 'none' : 'holdout',
+it.each((['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const).flatMap(policy => (['none', 'unqualified', 'regression', 'unverifiable', 'missing', 'baseline-unverifiable', 'baseline-missing'] as const).map(scenario => ({ policy, scenario }))))('refuses incomplete independent $policy gain: $scenario', ({ policy, scenario }) => {
+  const study = completed({ policy, gain: scenario === 'none' ? 'none' : scenario.startsWith('baseline-') ? 'source1' : 'holdout',
     ...(scenario === 'unqualified' ? { badBaseline: { status: 'rejected' as const, detail: 'Unrelated diagnostic.' } } : {}),
     ...(scenario === 'regression' ? { badCandidate: { status: 'rejected' as const, detail: 'Required field missing.' } } : {}),
     ...(scenario === 'unverifiable' ? { badCandidate: { status: 'unverifiable' as const, detail: 'Cannot inspect.' } } : {}),
     ...(scenario === 'missing' ? { missingCandidate: true } : {}),
+    ...(scenario === 'baseline-unverifiable' ? { badBaselineCase: 'holdout' as const, badBaseline: { status: 'unverifiable' as const, detail: 'Cannot inspect original baseline.' } } : {}),
+    ...(scenario === 'baseline-missing' ? { missingBaseline: true } : {}),
   }).state.listStudies()[0]!
   expect(hasSatisfiedGuidanceResultChecks(study)).toBe(false)
+})
+
+it.each(['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const)('preserves %s model uncertainty independently of verified program evidence', policy => {
+  const { state, decision, activation } = completed({ policy, baselineUnknownCase: 'holdout' })
+  expect(decision.verdict).toBe(policy === 'dev-conclusive-pair.v1' ? 'accepted' : 'inconclusive')
+  expect(state.listStudies()[0]!.arms.find(arm => arm.caseId === 'holdout' && arm.role === 'baseline')).toMatchObject({ verdict: 'inconclusive', resultCheck: { status: 'verified' } })
+  expect(hasSatisfiedGuidanceResultChecks(state.listStudies()[0]!)).toBe(true)
+  if (policy === 'dev-conclusive-pair.v1') expect(() => state.validate(activation)).not.toThrow()
+  else expect(() => state.validate(activation)).toThrow()
 })
 
 it('keeps model accepted but refuses activation when the independent candidate check rejects', () => {
@@ -96,8 +108,8 @@ it('does not use independently failed counter baseline as protected successful c
   expect(decision.verdict).toBe('accepted')
   expect(() => state.validate(activation)).toThrow(/result check/)
 })
-it.each(['preparation', 'output', 'condition'] as const)('rejects a switched independent arm %s binding', field => {
-  const study = completed().state.listStudies()[0]!, state = new ConversationGuidanceState()
+it.each(([undefined, 'dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const).flatMap(policy => (['preparation', 'output', 'condition'] as const).map(field => ({ policy, field }))))('rejects a switched independent arm $field binding for $policy', ({ policy, field }) => {
+  const study = completed({ policy }).state.listStudies()[0]!, state = new ConversationGuidanceState()
   const apply = (record: Parameters<typeof state.validate>[0]) => { state.validate(record); state.apply(record, '2026-10-01') }
   apply(study.opened); apply(study.candidate!)
   for (const receipt of study.fileTrials!) apply(receipt)

@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：新 DEV 前瞻试用规则工程通过，接续全新实际研究
+
+新增显式 dev-conclusive-pair.v1：十臂完整、五 candidate 全 met、至少一个同case baseline明确not-met→candidate met才启用，其他baseline未知原样保留。默认/v1/旧b950与2cab结果不改，普通Runtime/正式ledger隔离、程序检查、原proof/consent/父版本/撤回/冷重放保持。源码五套件430/430，最终控制206为其中子集；打包同套件427/3原仅源码装配跳过。原evolution构建及Runtime十五命令、私有导入零违规通过；首次依赖声明未重建失败保存，按原顺序重建。限定复查无新P1/P2。
+
+下一 D:/DevData/tianwen-conclusive-pair-learning-20261006 新隔离预约/付款/部分取消任务环境：实际未来基线、明确模拟历史错误/纠正、真实原生反馈评估和研究；允许多个新study，只原接受才自动启用及后续效果/撤回/冷恢复。未知转met与met保持不计确定改善。运行前操作器三P2均修：首请求模拟与后续真实分离、逐role真实改善归属、反馈正常/紧急队列排空。旧共享9Task8study9attempt/账本字节保护，无依赖/旧全账本副本。完整目标active，不等待自然样本或索题，main/Daily NO-GO/R9保留，D约16.7GiB>=15。详见 tianwen-conclusive-pair-dev-result-20261006.md。
+
 ## 2026-10-06 当前：两实际投影认证，候选五合格但基线未知仍阻止启用
 
 44f113bf批65actual/0scripted/0新Task，两原未尝试对都由原Loop自然消费。2cab…来源candidate都met/counter改善，但adjacent实际标签退步，原candidate-failed；b950…完整五candidate met、baseline两个notmet/一个met/两个inc，原v1 inconclusive/0activation。请求2/33旧986来源诊断/方法及摘要均进入实际provider并与原记录匹配。未知不改met，也不否认两个原conclusive同案例改善；完整目标未完成。

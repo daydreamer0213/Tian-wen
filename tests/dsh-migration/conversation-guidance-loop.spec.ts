@@ -837,7 +837,8 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   ...(['recover-source-explored', 'recover-source-explored-first'] as const).flatMap(order =>
     (['sources', 'guidance', 'family', 'category'] as const).map(field => `${order}-frozen-${field}` as const)),
   'support-withdrawn-during-review', 'explored-support-withdrawn-during-review',
-  'candidate-failed-early', 'dev-candidate-failed-early', 'drained-shutdown-candidate-failed-early',
+  'candidate-failed-early', 'dev-candidate-failed-early', 'dev-conclusive-candidate-failed-early', 'drained-shutdown-candidate-failed-early',
+  'dev-conclusive-pair-unknown-baselines', 'dev-old-pair-unknown-baselines', 'default-pair-unknown-baselines',
   'accepted', 'budget-exit-pending-study', 'budget-exit-withdrawal', 'budget-cli-exit-withdrawal', 'dev-paired-any-case', 'old-paired-any-case', 'activation-quarantined', 'case-design-missing', 'recover-case-design-missing', 'explored', 'explored-insufficient', 'explored-refusal', 'explored-second-pair', 'explored-disabled', 'explored-support-retracted', 'explored-interrupted', 'explored-provider-failure',
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal', 'repair-mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
@@ -874,6 +875,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   const loopConfig = { ...(scenario === 'no-source-root' ? {} : { evolutionRoot: scenario === 'no-source-relative-root' ? 'relative-root' : join(root, 'evolution') }),
     ...(scenario === 'activation-quarantined' ? { guidanceActivationQuarantine: true } : {}),
     ...(scenario === 'dev-paired-any-case' || scenario === 'dev-candidate-failed-early' ? { guidanceDecisionPolicy: 'dev-paired-any-case.v1' as const } : {}),
+    ...(scenario.startsWith('dev-conclusive-') ? { guidanceDecisionPolicy: 'dev-conclusive-pair.v1' as const } : scenario === 'dev-old-pair-unknown-baselines' ? { guidanceDecisionPolicy: 'dev-paired-any-case.v1' as const } : {}),
     skillSources: withSource || scenario.startsWith('no-source-') ? [configuredSource] : [] }
   const sourceUse = () => ({ readDigest: sha256(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.sourceReference!), status: scenario === 'source-not-used' ? 'not-used' : 'adapted', rationale: 'A bounded scope-checking reference.' })
   const capturedMaterial = (request: GenerateOptions) => {
@@ -1023,6 +1025,9 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
         return structured({ answer: `${role === 'candidate' ? '保留来源范围' : '任务回答'} ${index}${scenario === 'recover-formatting' ? '\r\n\r\n第二段仍保留范围。\n \t\u00a0\n' : invalidAudit && index === 1 && role === 'candidate' ? '\n第二段仍保留范围。' : ''}` })
       })
       const judgment = { ...verdict(!(role === 'baseline' && (scenario.endsWith('paired-any-case') ? index >= 3 : index < 2)) && !(role === 'candidate' && ((scenario === 'regression' && index === 4) || (scenario.endsWith('candidate-failed-early') && index === 0))), scenario === 'derived-quote' ? 'Preserve source scope' : `${index}`) }
+      if (scenario.endsWith('unknown-baselines') && role === 'baseline') {
+        Object.assign(judgment, index >= 3 ? { verdict: 'inconclusive', category: null, explanation: 'Frozen evidence does not establish this baseline result.' } : verdict(index === 1, `${index}`))
+      }
       if (scenario === 'derived-quote') {
         script.push(auditedEvidenceResponse(judgment, 'empty', false))
       } else for (let check = 0; check < 2; check++) script.push(request => {
@@ -1650,7 +1655,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       expect(study?.decision).toBeUndefined(); expect(study?.activation).toBeUndefined()
       expect(harness.adapter.requests.some(request => JSON.stringify(request.messages).includes('任务回答 1'))).toBe(false)
       const history = readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')
-      expect(new EvolutionLedger(join(root, 'evolution'), scenario.startsWith('dev-') ? { guidanceDecisionPolicy: 'dev-paired-any-case.v1' } : {}).listConversationGuidanceStudies()[0]).toEqual(study)
+      expect(new EvolutionLedger(join(root, 'evolution')).listConversationGuidanceStudies()[0]).toEqual(study)
       await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
       await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
       expect(readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')).toBe(history)
@@ -1680,13 +1685,28 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       expect(harness.adapter.requests).toHaveLength(calls)
     }
     expect(study?.arms.every(arm => arm.reviewChecks?.every(check => 'audit' in check && check.audit.schemaVersion === 'tianwen.claim-audit.v2'))).toBe(true)
+    if (scenario.endsWith('unknown-baselines')) {
+      expect(study!.arms.filter(arm => arm.role === 'baseline').map(arm => arm.verdict)).toEqual(['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'])
+      expect(study!.arms.filter(arm => arm.role === 'candidate').map(arm => arm.verdict)).toEqual(['met', 'met', 'met', 'met', 'met'])
+      if (scenario !== 'dev-conclusive-pair-unknown-baselines') {
+        expect(study?.decision?.verdict).toBe('inconclusive'); expect(study?.activation).toBeUndefined()
+        const history = readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')
+        const cold = new EvolutionLedger(join(root, 'evolution'), { guidanceActivationQuarantine: true })
+        expect(cold.hasRecoveryFailure()).toBe(false); expect(cold.listConversationGuidanceStudies()[0]).toEqual(study)
+        expect(cold.getConversationGuidance(study!.opened.scopeKey)).toEqual(study!.opened.parentSnapshot)
+        await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+        expect(readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8')).toBe(history)
+        return
+      }
+    }
     if (scenario === 'regression' || scenario === 'old-paired-any-case') {
       expect(study?.decision?.verdict).toBe('rejected')
       expect(study?.activation).toBeUndefined()
       return
     }
     expect(study?.decision?.verdict).toBe('accepted')
-    if (scenario === 'dev-paired-any-case') expect(study?.opened).toHaveProperty('decisionPolicy','dev-paired-any-case.v1')
+    if (scenario === 'dev-conclusive-pair-unknown-baselines') expect(study?.opened).toHaveProperty('decisionPolicy','dev-conclusive-pair.v1')
+    else if (scenario === 'dev-paired-any-case') expect(study?.opened).toHaveProperty('decisionPolicy','dev-paired-any-case.v1')
     else expect(study?.opened).not.toHaveProperty('decisionPolicy')
     if (scenario === 'activation-quarantined') {
       expect(study.activation).toBeUndefined()
@@ -1802,7 +1822,7 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
     expect(tasks.at(-1)?.source.behaviorVersion).not.toBe(tasks[0]?.source.behaviorVersion)
     expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toHaveLength(1)
     expect(harness.adapter.requests).toHaveLength((explored ? 55 : 48) + (withSource ? 1 : 0) + (scenario === 'repair-mixed-proposal' ? 1 : 0))
-    if (scenario === 'recover' || scenario === 'recover-formatting' || scenario === 'repair-mixed-proposal') {
+    if (scenario === 'recover' || scenario === 'recover-formatting' || scenario === 'repair-mixed-proposal' || scenario === 'dev-conclusive-pair-unknown-baselines') {
       const candidate = study!.candidate!.candidateSnapshot
       const activationCount = () => readFileSync(join(root, 'evolution', 'ledger.jsonl'), 'utf8').trim().split('\n')
         .map(line => JSON.parse(line))
@@ -1822,6 +1842,9 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
         await restarted.ctx.tianwenConversationGuidanceLoop.whenIdle()
         const recovered = restarted.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
         expect(recovered.opened.studyId).toBe(study.opened.studyId)
+        expect(recovered.opened.decisionPolicy).toBe(study.opened.decisionPolicy)
+        expect(recovered.decision).toEqual(study.decision)
+        expect(recovered.arms).toEqual(study.arms)
         expect(recovered.activation).toEqual(study.activation)
         expect(restarted.ctx.tianwenEvolution.getConversationGuidance(study.opened.scopeKey)).toEqual(candidate)
         expect(activationCount()).toBe(1)

@@ -29,21 +29,21 @@ it.each(['ordinary','DEV'] as const)('waits for persisted feedback reconciliatio
 it('provides an explicit development Runtime entry rather than exposing a default quarantine override',()=>{
   expect((runtime as any).applyDevelopment).toBeTypeOf('function')
 })
-it('ordinary apply refuses the DEV decision option before mounting any ledger',async()=>{
+it.each(['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'])('ordinary apply refuses the %s option before mounting any ledger',async guidanceDecisionPolicy=>{
  const f=fixture()
  try{
-  await expect(runtime.apply(f.ctx,{guidanceDecisionPolicy:'dev-paired-any-case.v1'} as never)).rejects.toThrow(/DEV|development/i)
+  await expect(runtime.apply(f.ctx,{guidanceDecisionPolicy} as never)).rejects.toThrow(/DEV|development/i)
   expect(f.ctx.get('tianwenEvolution')).toBeUndefined()
  }finally{await f.ctx.fiber.dispose()}
 })
-it.each(['dev-paired-any-case.v1','unknown.v1',undefined])('strictly admits an explicit development policy: %s',async policy=>{
+it.each(['dev-paired-any-case.v1','dev-conclusive-pair.v1','dev-conclusive-pair.v2','unknown.v1',undefined])('strictly admits an explicit development policy: %s',async policy=>{
  const f=fixture()
  try{
   await mountAgentLoopTestDependencies(f.ctx)
   await f.ctx.plugin(JsonlSessionPersistence,{root:join(f.root,'sessions'),compression:'none'})
   await f.ctx.plugin(SubagentRuntime)
   const mounted=runtime.applyDevelopment(f.ctx,{developmentRoot:f.root,guidanceDecisionPolicy:policy} as never)
-  if(policy==='dev-paired-any-case.v1'){
+  if(policy==='dev-paired-any-case.v1'||policy==='dev-conclusive-pair.v1'){
    await mounted
    expect((f.ctx.tianwenConversationGuidanceLoop as any).sourceConfig.guidanceDecisionPolicy).toBe(policy)
   }else{

@@ -6,7 +6,7 @@ import { SessionId, SESSION_FORMAT_VERSION } from '@deepseek-ai/dsh-session'
 import type { TianwenRuntimeBundleConfig } from './runtime.js'
 
 export interface TianwenDevelopmentRuntimeConfig extends TianwenRuntimeBundleConfig {
-  readonly guidanceDecisionPolicy?: 'dev-paired-any-case.v1'
+  readonly guidanceDecisionPolicy?: 'dev-paired-any-case.v1' | 'dev-conclusive-pair.v1'
   /** Trusted Windows DEV directory or original CLI Profile under a dedicated D home. */
   readonly developmentRoot: string
 }
@@ -29,7 +29,7 @@ export function developmentRuntimeConfig(baseUrl:string|undefined,config:Tianwen
   const fail=()=>{throw new Error('Development Runtime requires its separate canonical D root and original derived state/sessions/evolution paths')}
   const root=resolveDevelopmentRuntimeRoot(config.developmentRoot)
   try{if(baseUrl===undefined||key(fileURLToPath(baseUrl))!==key(root))return fail()}catch{return fail()}
-  if(Object.hasOwn(config,'guidanceDecisionPolicy')&&config.guidanceDecisionPolicy!=='dev-paired-any-case.v1') {
+  if(Object.hasOwn(config,'guidanceDecisionPolicy')&&config.guidanceDecisionPolicy!=='dev-paired-any-case.v1'&&config.guidanceDecisionPolicy!=='dev-conclusive-pair.v1') {
     throw new Error('Development Runtime guidance decision policy is invalid')
   }
   const {developmentRoot:_root,guidanceDecisionPolicy:_policy,...rest}=config

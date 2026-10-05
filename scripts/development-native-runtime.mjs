@@ -61,7 +61,7 @@ export class DevelopmentNativeRuntimeContracts extends Service {
 /** Operator-owned JSON becomes only the original fixed-host factory options. */
 function readDevelopmentNativeRuntime(config) {
  closedDevelopmentData(config,['developmentRoot','contractPath','contractDigest'],['guidanceDecisionPolicy','codeEngine'])
- if(Object.hasOwn(config,'guidanceDecisionPolicy'))assert.equal(config.guidanceDecisionPolicy,'dev-paired-any-case.v1','DEV guidance decision policy is invalid')
+ if(Object.hasOwn(config,'guidanceDecisionPolicy'))assert(['dev-paired-any-case.v1','dev-conclusive-pair.v1'].includes(config.guidanceDecisionPolicy),'DEV guidance decision policy is invalid')
  if(Object.hasOwn(config,'codeEngine'))assert(['node-project','python'].includes(config.codeEngine),'DEV code engine is invalid')
  assert(process.platform==='win32','DEV loading requires Windows')
  const {developmentRoot,contractPath,contractDigest}=config

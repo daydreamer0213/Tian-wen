@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：新 DEV 前瞻试用规则工程通过，接续全新实际研究
+
+新增显式 dev-conclusive-pair.v1：十臂完整、五 candidate 全 met、至少一个同case baseline明确not-met→candidate met才启用，其他baseline未知原样保留。默认/v1/旧b950与2cab结果不改，普通Runtime/正式ledger隔离、程序检查、原proof/consent/父版本/撤回/冷重放保持。源码五套件430/430，最终控制206为其中子集；打包同套件427/3原仅源码装配跳过。原evolution构建及Runtime十五命令、私有导入零违规通过；首次依赖声明未重建失败保存，按原顺序重建。限定复查无新P1/P2。
+
+下一 D:/DevData/tianwen-conclusive-pair-learning-20261006 新隔离预约/付款/部分取消任务环境：实际未来基线、明确模拟历史错误/纠正、真实原生反馈评估和研究；允许多个新study，只原接受才自动启用及后续效果/撤回/冷恢复。未知转met与met保持不计确定改善。运行前操作器三P2均修：首请求模拟与后续真实分离、逐role真实改善归属、反馈正常/紧急队列排空。旧共享9Task8study9attempt/账本字节保护，无依赖/旧全账本副本。完整目标active，不等待自然样本或索题，main/Daily NO-GO/R9保留，D约16.7GiB>=15。详见 tianwen-conclusive-pair-dev-result-20261006.md。
+
 ## 2026-10-06 当前：信息流实际打通，完整候选五项合格但原裁决不确定
 
 44f113bf真实批65请求/0scripted/0新Task，原Loop自然执行剩余两未尝试组合，实际请求2/33均收到旧986afb0d来源失败方法及原诊断，独立投影/摘要匹配。study2cab6ab0…八臂：两source候选met、counter notmet→met，但adjacent met→notmet（事实正确、实际answer夹入</answer>/</invoke>），原candidate-failed。studyb950b45f…完整十臂五candidate全部met、baseline notmet/met/notmet/inc/inc，原DEV v1因为baseline未知仍inconclusive/0activation。两个同案例改善不等于已启用或完整目标完成，原结果不重判。

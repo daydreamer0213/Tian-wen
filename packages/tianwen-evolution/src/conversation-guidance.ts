@@ -77,7 +77,7 @@ export interface GuidanceProposalClue {
   readonly materialDigest: Sha256Digest
 }
 export interface GuidanceStudyBody {
-  readonly decisionPolicy?: 'dev-paired-any-case.v1'
+  readonly decisionPolicy?: 'dev-paired-any-case.v1' | 'dev-conclusive-pair.v1'
   readonly nativeGoalSources?: GuidanceNativeGoalSources
   readonly resultChecks?: readonly GuidanceCaseResultCheck[]
   readonly checkedFailureSources?: ConversationCheckedFailureSources
@@ -337,7 +337,7 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
   }
   if (!Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('guidance consent revision is invalid')
   const body: GuidanceStudyBody = {
-    ...(Object.hasOwn(input, 'decisionPolicy') ? { decisionPolicy: oneOf(input.decisionPolicy, ['dev-paired-any-case.v1']) } : {}),
+    ...(Object.hasOwn(input, 'decisionPolicy') ? { decisionPolicy: oneOf(input.decisionPolicy, ['dev-paired-any-case.v1', 'dev-conclusive-pair.v1']) } : {}),
     scopeKey: text(input.scopeKey, 512), family: oneOf(input.family, CONVERSATION_FAMILIES),
     failureCategory: oneOf(input.failureCategory, CONVERSATION_FAILURES), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), parentSnapshot: parseGuidanceSnapshot(input.parentSnapshot),
@@ -491,6 +491,16 @@ export class ConversationGuidanceState {
       if (arm === undefined) throw new Error('guidance decision requires the complete arm set')
       return arm
     }))
+    if (study.opened.decisionPolicy === 'dev-conclusive-pair.v1') {
+      const candidates = arms.filter(arm => arm.role === 'candidate')
+      const baselines = arms.filter(arm => arm.role === 'baseline')
+      const verdict = candidates.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
+        : candidates.some(arm => arm.verdict !== 'met') ? 'rejected'
+        : baselines.some(arm => arm.verdict === 'not-met') ? 'accepted'
+        : baselines.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
+        : 'rejected'
+      return { kind: 'study-decided', studyId: study.opened.studyId, armsDigest: sha256(arms), verdict }
+    }
     const verdict = arms.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
       : study.opened.decisionPolicy === 'dev-paired-any-case.v1'
         ? arms.filter(arm => arm.role === 'candidate').every(arm => arm.verdict === 'met')

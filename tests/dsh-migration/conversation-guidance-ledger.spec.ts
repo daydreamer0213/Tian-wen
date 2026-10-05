@@ -214,10 +214,10 @@ function fileOpening(tasks: readonly [ConversationTask, ConversationTask, Conver
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 
-it('quarantines new DEV policy mutations while retaining frozen DEV history on main replay', () => {
+it.each(['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const)('quarantines new %s mutations while retaining frozen DEV history on main replay', decisionPolicy => {
   const { root, ledger, tasks } = seeded()
   const { kind: _kind, studyId: _id, ...body } = opening(tasks)
-  const frozen = { ...body, decisionPolicy: 'dev-paired-any-case.v1' as const }
+  const frozen = { ...body, decisionPolicy }
   const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
   const main = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
   const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
@@ -228,16 +228,26 @@ it('quarantines new DEV policy mutations while retaining frozen DEV history on m
   expect(cold.hasRecoveryFailure()).toBe(false)
   expect(cold.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
   expect(cold.recordConversationGuidance(opened)).toEqual({ duplicate: true })
-  const proposed = { kind: 'candidate-recorded' as const, studyId: opened.studyId,
-    candidateSnapshot: { ...opened.parentSnapshot, rules: { summarization: 'Preserve source scope.' } }, proposalProof: proof('DEV-proposal') }
+  const planned = proposalPlan(opened), proposed = planned.candidate
   expect(() => cold.recordConversationGuidance(proposed)).toThrow(/DEV.*policy|policy.*quarantined/i)
   expect(ledger.recordConversationGuidance(proposed)).toEqual({ duplicate: false })
+  for (const arm of planned.arms.slice(0, -1)) ledger.recordConversationGuidance(arm)
+  const pendingArm = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(() => pendingArm.recordConversationGuidance(planned.arms.at(-1)!)).toThrow(/policy.*quarantined/i)
+  ledger.recordConversationGuidance(planned.arms.at(-1)!)
+  const decision = ledger.conversationGuidanceDecision(opened.studyId)
+  const pendingDecision = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(() => pendingDecision.recordConversationGuidance(decision)).toThrow(/policy.*quarantined/i)
+  ledger.recordConversationGuidance(decision)
+  const pendingActivation = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(() => pendingActivation.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })).toThrow(/policy.*quarantined/i)
+  expect(pendingActivation.recordConversationGuidance(decision)).toEqual({ duplicate: true })
 })
 
-it.each(['rollback', 'stop'] as const)('permits strictly validated main safety %s of frozen DEV history', safety => {
+it.each((['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const).flatMap(decisionPolicy => (['rollback', 'stop'] as const).map(safety => ({ decisionPolicy, safety }))))('permits strictly validated main safety $safety of frozen $decisionPolicy history', ({ decisionPolicy, safety }) => {
   const { root, ledger, tasks } = seeded()
   const { kind: _kind, studyId: _id, ...body } = opening(tasks)
-  const frozen = { ...body, decisionPolicy: 'dev-paired-any-case.v1' as const }
+  const frozen = { ...body, decisionPolicy }
   const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
   if (safety === 'stop') ledger.recordConversationGuidance(opened)
   else { const value = evaluated(ledger, opened); ledger.recordConversationGuidance(activation(value)) }
@@ -259,7 +269,7 @@ it.each(['rollback', 'stop'] as const)('permits strictly validated main safety %
   expect(main.getConversationGuidance(scope)).toEqual(opened.parentSnapshot)
   expect(main.listEvents().slice(0, history.length).map(sha256)).toEqual(history)
   const { kind: _futureKind, studyId: _futureId, ...future } = opening(tasks, 'future-DEV')
-  const next = { ...future, decisionPolicy: 'dev-paired-any-case.v1' as const }
+  const next = { ...future, decisionPolicy }
   expect(() => main.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(next), ...next })).toThrow(/policy.*quarantined/i)
   expect(new EvolutionLedger(root, { guidanceActivationQuarantine: true }).listConversationGuidanceStudies()).toEqual(main.listConversationGuidanceStudies())
 })
@@ -683,6 +693,67 @@ function proposalPlan(opened: GuidanceStudyOpened) {
   })))
   return { opened, candidate, arms }
 }
+
+type ArmVerdict = GuidanceArmRecord['verdict']
+function conclusivePairStudy(decisionPolicy: GuidanceStudyBody['decisionPolicy'], baselines: readonly ArmVerdict[], candidates: readonly ArmVerdict[] = ['met', 'met', 'met', 'met', 'met'], count = 10) {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, ...(decisionPolicy === undefined ? {} : { decisionPolicy }) }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  const planned = proposalPlan(opened)
+  ledger.recordConversationGuidance(opened); ledger.recordConversationGuidance(planned.candidate)
+  for (const [index, original] of planned.arms.slice(0, count).entries()) {
+    const verdict = (original.role === 'baseline' ? baselines : candidates)[Math.floor(index / 2)]!
+    ledger.recordConversationGuidance({ ...original, verdict, reviewChecks: auditedChecks(`${opened.studyId}:${original.caseId}:${original.role}:judge`, verdict) })
+  }
+  return { root, ledger, opened }
+}
+
+it.each(['dev-conclusive-pair.v1', 'dev-paired-any-case.v1', undefined] as const)('derives prospective conclusive-pair eligibility and preserves unknown baselines for policy %s', decisionPolicy => {
+  const { root, ledger, opened } = conclusivePairStudy(decisionPolicy, ['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'])
+  const decision = ledger.conversationGuidanceDecision(opened.studyId)
+  expect(decision.verdict).toBe(decisionPolicy === 'dev-conclusive-pair.v1' ? 'accepted' : 'inconclusive')
+  ledger.recordConversationGuidance(decision)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  const cold = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  const study = cold.listConversationGuidanceStudies()[0]!
+  expect(cold.hasRecoveryFailure()).toBe(false)
+  expect(study.opened).toEqual(opened); expect(study.decision).toEqual(decision)
+  expect(study.arms.filter(arm => arm.role === 'baseline').map(arm => arm.verdict)).toEqual(['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'])
+  expect(cold.recordConversationGuidance(decision)).toEqual({ duplicate: true })
+  if (decisionPolicy !== undefined) expect(() => cold.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })).toThrow(/quarantined/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it.each([0, 1, 2, 3, 4].flatMap(position => (['not-met', 'inconclusive'] as const).map(verdict => ({ position, verdict }))))('never accepts conclusive-pair candidate $position with $verdict', ({ position, verdict }) => {
+  const candidates: ArmVerdict[] = ['met', 'met', 'met', 'met', 'met']; candidates[position] = verdict
+  const { ledger, opened } = conclusivePairStudy('dev-conclusive-pair.v1', ['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'], candidates)
+  expect(ledger.conversationGuidanceDecision(opened.studyId).verdict).toBe(verdict === 'inconclusive' ? 'inconclusive' : 'rejected')
+})
+
+it.each([
+  { baselines: ['met', 'met', 'met', 'met', 'met'], expected: 'rejected' },
+  { baselines: ['met', 'met', 'met', 'inconclusive', 'inconclusive'], expected: 'inconclusive' },
+  { baselines: ['inconclusive', 'inconclusive', 'inconclusive', 'inconclusive', 'inconclusive'], expected: 'inconclusive' },
+  { baselines: ['met', 'met', 'met', 'met', 'not-met'], expected: 'accepted' },
+] as const)('requires a same-case conclusive improvement: $baselines -> $expected', ({ baselines, expected }) => {
+  const { ledger, opened } = conclusivePairStudy('dev-conclusive-pair.v1', baselines)
+  expect(ledger.conversationGuidanceDecision(opened.studyId).verdict).toBe(expected)
+})
+
+it('still requires ten complete arms for conclusive-pair decisions', () => {
+  const { ledger, opened } = conclusivePairStudy('dev-conclusive-pair.v1', ['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'], undefined, 9)
+  expect(() => ledger.conversationGuidanceDecision(opened.studyId)).toThrow(/ten completed arms/)
+})
+
+it.each(['dev-conclusive-pair.v2', 'dev-conclusive-pair', 'unknown.v1', undefined])('rejects an explicitly invalid frozen policy %s before writing history', decisionPolicy => {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, decisionPolicy } as GuidanceStudyBody
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(frozen), ...frozen })).toThrow()
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
 
 function explorationIntent(opened: GuidanceStudyOpened): GuidanceExplorationIntentRecord {
   const source = opened.cases[0]!

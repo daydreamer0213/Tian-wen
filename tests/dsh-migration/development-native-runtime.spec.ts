@@ -50,8 +50,8 @@ function fixture(cliProfile=false) {
 it('strictly loads only the explicit DEV decision option and preserves its absence by default',async()=>{
  const {loadDevelopmentNativeRuntimeOptions}=await import(pluginUrl),f=fixture()
  expect(loadDevelopmentNativeRuntimeOptions(f.config)).not.toHaveProperty('guidanceDecisionPolicy')
- expect(loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy:'dev-paired-any-case.v1'})).toHaveProperty('guidanceDecisionPolicy','dev-paired-any-case.v1')
- for(const guidanceDecisionPolicy of ['unknown.v1',undefined]) expect(()=>loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy})).toThrow(/policy/i)
+ for(const guidanceDecisionPolicy of ['dev-paired-any-case.v1','dev-conclusive-pair.v1']) expect(loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy})).toHaveProperty('guidanceDecisionPolicy',guidanceDecisionPolicy)
+ for(const guidanceDecisionPolicy of ['dev-conclusive-pair.v2','dev-conclusive-pair','unknown.v1',undefined]) expect(()=>loadDevelopmentNativeRuntimeOptions({...f.config,guidanceDecisionPolicy})).toThrow(/policy/i)
 })
 
 function pythonFixture() {
@@ -276,9 +276,10 @@ it('keeps a legitimate ancestor alias when the pinned packet is physically outsi
  expect(typeof loadDevelopmentNativeRuntimeOptions(f.write()).externalCodeCheck.prepare).toBe('function')
 })
 
-it.each([false,true])('normal Loader imports DEV without a request under CLI profile=%s',async cliProfile=>{
+it.each([false,true].flatMap(cliProfile=>([undefined,'dev-paired-any-case.v1','dev-conclusive-pair.v1'] as const).map(policy=>({cliProfile,policy}))))('normal Loader imports DEV without a request under CLI profile=$cliProfile policy=$policy',async({cliProfile,policy})=>{
  const f=fixture(cliProfile),ctx=new Context(),requests:unknown[]=[]
  if(cliProfile)f.config=f.write({...f.packet,answerStudyContracts:answerContracts(f.packet.studyContracts.cwd,true)} as any)
+ if(policy!==undefined)f.config={...f.config,guidanceDecisionPolicy:policy} as typeof f.config
  try {
   await ctx.plugin(Loader,{baseUrl:pathToFileURL(f.profile).href})
   const id=await ctx.loader.create({name:pluginUrl,config:f.config})
@@ -310,6 +311,7 @@ it.each([false,true])('normal Loader imports DEV without a request under CLI pro
   }
   expect(ctx.loader.resolve(id).fiber?.state).toBe(2)
   expect(ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(false)
+  expect((ctx.tianwenConversationGuidanceLoop as any).sourceConfig.guidanceDecisionPolicy).toBe(policy)
   expect(ctx.tianwenEvolution.getLearningAnalysisConsent()).toBeUndefined()
   expect(ctx.tianwenEvolution.listConversationTasks()).toEqual([])
   expect(ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
