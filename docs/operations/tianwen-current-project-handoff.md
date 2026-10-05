@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：实际研究定位包装误提交，继续补准确工具提示
+
+已完成捕获字段/字面答案修复：源码216/打包216、原十五构建及私有导入通过，旧实际trial原CLI0/零调用/标签和两账本原样。d6fbbc8a实际learning-r3 44actual/1明确模拟历史答；新受控未来错稿原双审not-met、未入学习来源，新df67806c摘要source-fidelity失败触发原study0f5527eb，两臂met/met后source2 baseline评审反复套{arguments:string}，通用value.arguments报错误导模型，原invalid-judgment停止；没有接受/启用/后任务，不改旧判定。
+
+独立147冻结文件/旧六Task与study/attempt/prefix/共享9/8/9账本保护，CLI1但normal drain/consent1 enabled/active0，当前七Task两study两attempt。另learning-r2操作员服务声明缺失在零模型前停止，正常排空/审计0。单wrapper准确提示已实现，源码/打包相关171均通过、原十五构建/私有导入/限定复查通过；schema合法字段保持、不解包/改语义。接续只剩余未消费对或未执行桥单，不重跑受控未来评分。详见 tianwen-native-capture-boundary-result-20261006.md。目标active，main/Daily NO-GO/R9不变，D约16.72GiB>=15，无依赖/环境/全账本复制。
+
 ## 2026-10-06 当前：第二批确认反馈归因和一项改善，实际标签缺口已修复
 
 3c479a06第二批56actual/2明确模拟历史答/1模拟用户纠正，新三Task后共六Task一study一attempt。原生用户纠正评估attributable-problem，随后真实修订met；study054c八臂source1 met→met、source2 not-met→met、counter met→met、adjacent met→not-met。两独立检查确认adjacent正文事实正确，失败是实际交付末尾</answer>；原candidate-failed/未接受或激活，CLI1但normal drain/consent1 enabled/active0。独立147冻结文件及旧记录/账本逐字保护，来源1/2对不补跑。首future1无效review另确认非法inference/supported组合晚拒绝。

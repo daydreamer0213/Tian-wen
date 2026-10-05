@@ -23,3 +23,11 @@ claim-review 仅新增四行，拒绝原已有六种非法组合，模型须自�
 另冻结未被用于学习的新请求与明确模拟错误，仅用原独立双审确认错误，不入题或给提案读取；实际原接受/自动激活后，同一请求作为普通新任务走实际模型与原方法注入。其改善只称这项模拟错误被解决，不称自然基线或总体能力提升。接受后继续实际未用任务、语义检查、原consent撤回/无注入、零调用冷恢复及终态审计。失败则保留原证据并自主定位，不等待用户出题，不新增发布条件。
 
 完整目标 active；main/Daily NO-GO/R9保留。D约16.7GiB，高于15底线，未达20偏好；未复制依赖、环境或全量旧账本，测试自有目录按原cleanup清理。
+
+## d6fbbc8a 实际前瞻结果
+
+操作器初稿复查发现原验证函数误从 claim 模块导入，执行前修到原 judgment 公共导出；初只读预检保留，没有模型或Task变化。learning-r2 原预检0，正式因操作员未给直接原生双审调用声明 subagents 服务而在模型前停止：0actual/0scripted、旧六Task/一study/一attempt不变、CLI1/normal drain/active0，独立final-audit0。不重跑旧交付，使用新nonce、原服务声明在learning-r3接续。
+
+learning-r3 原预检0/零模型/零账本改变；正式44actual/1明确模拟历史主答。另一个故意错误的未来稿由原双审判not-met，记录明确模拟且不入学习来源。新Task df67806c…原summarization/not-met/source-fidelity；新study0f5527eb…使用旧3ec61946与新df67806c，两source1臂met/met，后续source2 baseline grounding子Session1ad3644d在两次JSON尾字符错误后反复提交 `{arguments:string}` 包装对象，SDK只提示value.arguments未声明/缺五字段，模型误解为需要外壳，最终invalid-judgment停止。不是完整候选被实际语义拒绝，不能从不完整研究称方法有效或无效；未裁决、未启用、无后任务/撤回/冷恢复。
+
+正式CLI1/normal drain/consent enabled1/active0；独立final-audit0核147冻结文件、旧六Task/一study/一attempt/prefix及共享9/8/9/账本逐字保持。当前七Task/两study/两attempt。新增单wrapper精确诊断计划 `2026-10-06-tianwen-flat-capture-wrapper-plan.md`：仅原schema不允许的包装，模型自行修正，不解包/代判；保留原invalid记录/消费对，接续剩余未尝试组合及未执行桥单来源。未来错误的原native双审proof原样复用，零新增评分调用。

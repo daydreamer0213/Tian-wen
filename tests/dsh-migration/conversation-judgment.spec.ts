@@ -18,6 +18,124 @@ const repeatReminder = await import(pathToFileURL(cliRequire.resolve('@deepseek-
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
 
+it.each([
+  { key: 'arguments', inner: '{"verdict":"inconclusive"}' },
+  { key: 'arguments', inner: { verdict: 'inconclusive' } },
+  { key: 'value', inner: '{"verdict":"inconclusive"}' },
+  { key: 'value', inner: { verdict: 'inconclusive' } },
+])('diagnoses an undeclared $key wrapper without unwrapping it before native self-correction', async ({ key, inner }) => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-flat-capture-wrapper-engineering-20261006/sdk-fixtures' : '/tmp/tianwen-flat-capture-wrapper-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'wrapper-correction-')); roots.push(root)
+  const value = { verdict: 'inconclusive' }
+  const material = { request: 'Preserve the unknown date.', source: 'The date is unknown.' }
+  const wrapper = { [key]: inner }
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('wrapped', 'structured_output', wrapper),
+    toolCallResponse('corrected', 'structured_output', value),
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('wrapper-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Native wrapper correction', instruction: 'Report uncertainty honestly.', material,
+      signal: new AbortController().signal, outputSchema: verdictSchema,
+    })
+    expect(result.value).toEqual(value)
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    const results = saved.events.filter(event => event.type === 'tool/result')
+    const failed = results.find(event => event.data.message.source.callId === 'wrapped')!
+    expect(JSON.stringify(failed.data.message.content)).toMatch(/root fields directly/)
+    expect(JSON.stringify(failed.data.message.content)).toContain('verdict')
+    expect(JSON.stringify(failed.data.message.content)).toMatch(/no arguments or value wrapper/)
+    expect(results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments)).toEqual([JSON.stringify(wrapper), JSON.stringify(value)])
+    const requests = harness.adapter.requests.length
+    expect(await recoverConversationStructuredJudgment(harness.ctx, result.proof, value)).toMatchObject({ material, instruction: 'Report uncertainty honestly.' })
+    expect(harness.adapter.requests).toHaveLength(requests)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['arguments', 'value'])('cannot form a judgment proof if an undeclared %s wrapper is never corrected', async key => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-flat-capture-wrapper-engineering-20261006/sdk-fixtures' : '/tmp/tianwen-flat-capture-wrapper-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'wrapper-uncorrected-')); roots.push(root)
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('wrapped', 'structured_output', { [key]: '{"verdict":"inconclusive"}' }),
+    textResponse('I cannot correct this submission.'),
+  ])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('wrapper-fail-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const outcome = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Uncorrected wrapper', instruction: 'Report uncertainty honestly.', material: { source: 'The date is unknown.' },
+      signal: new AbortController().signal, outputSchema: verdictSchema,
+    }).catch((error: unknown) => error)
+    expect(outcome).toMatchObject({ message: 'invalid-judgment' })
+    expect(outcome).not.toHaveProperty('proof')
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(String(harness.adapter.requests[0]!.sessionId)))
+    expect(saved.events.filter(event => event.type === 'tool/result' && event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(0)
+    expect(JSON.stringify(saved.events)).toMatch(/root fields directly/)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each([
+  { name: 'declared arguments', schema: { type: 'object', properties: { arguments: { type: 'string' } }, required: ['arguments'], additionalProperties: false }, value: { arguments: '{"verdict":"inconclusive"}' } },
+  { name: 'declared value', schema: { type: 'object', properties: { value: { type: 'object', properties: { verdict: { type: 'string' } }, additionalProperties: false } }, required: ['value'], additionalProperties: false }, value: { value: { verdict: 'inconclusive' } } },
+  { name: 'open arguments', schema: { type: 'object', properties: {}, additionalProperties: true }, value: { arguments: '{"verdict":"inconclusive"}' } },
+  { name: 'implicitly open value', schema: { type: 'object' }, value: { value: { verdict: 'inconclusive' } } },
+  { name: 'declared union value', schema: { type: 'object', properties: { value: { oneOf: [{ type: 'string' }, { type: 'object' }] } }, required: ['value'], additionalProperties: false }, value: { value: { verdict: 'inconclusive' } } },
+] as const)('retains a legal native root shape: $name', async ({ schema, value }) => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-flat-capture-wrapper-engineering-20261006/sdk-fixtures' : '/tmp/tianwen-flat-capture-wrapper-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'legal-root-')); roots.push(root)
+  const outputSchema = structuredClone(schema) as unknown as ObjectJsonSchema
+  const harness = await mountPersistentHarness(root, [toolCallResponse('legal-root', 'structured_output', value)])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('legal-root-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Legal root fields', instruction: 'Use the supplied schema.', material: { source: 'The date is unknown.' },
+      signal: new AbortController().signal, outputSchema,
+    })
+    expect(result.value).toEqual(value)
+    expect(harness.adapter.requests).toHaveLength(1)
+    const calls = harness.adapter.requests.length
+    expect(await recoverConversationStructuredJudgment(harness.ctx, result.proof, value)).toMatchObject({ instruction: 'Use the supplied schema.' })
+    expect(harness.adapter.requests).toHaveLength(calls)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each([
+  { name: 'declared field with wrong type', schema: { type: 'object', properties: { arguments: { type: 'string' } }, required: ['arguments'], additionalProperties: false }, invalid: { arguments: 42 }, corrected: { arguments: 'literal' } },
+  { name: 'open field with a missing required property', schema: { type: 'object', properties: { verdict: { type: 'string' } }, required: ['verdict'], additionalProperties: true }, invalid: { arguments: 'literal' }, corrected: { verdict: 'inconclusive' } },
+  { name: 'multiple undeclared properties', schema: verdictSchema, invalid: { arguments: 'literal', value: 'literal' }, corrected: { verdict: 'inconclusive' } },
+  { name: 'another undeclared property', schema: verdictSchema, invalid: { other: 'literal' }, corrected: { verdict: 'inconclusive' } },
+] as const)('retains the original native validation for $name', async ({ schema, invalid, corrected }) => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-flat-capture-wrapper-engineering-20261006/sdk-fixtures' : '/tmp/tianwen-flat-capture-wrapper-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'generic-validation-')); roots.push(root)
+  const outputSchema = structuredClone(schema) as unknown as ObjectJsonSchema
+  const harness = await mountPersistentHarness(root, [toolCallResponse('invalid', 'structured_output', invalid), toolCallResponse('corrected', 'structured_output', corrected)])
+  await harness.ctx.plugin(SubagentRuntime)
+  await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('generic-validation-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, {
+      label: 'Original validation', instruction: 'Use the supplied schema.', material: { source: 'The date is unknown.' },
+      signal: new AbortController().signal, outputSchema,
+    })
+    expect(result.value).toEqual(corrected)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    const failed = saved.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'invalid')!
+    expect(failed.type === 'tool/result' && failed.data.message.content.some(block => block.type === 'tool-result' && block.isError === true)).toBe(true)
+    expect(JSON.stringify(failed)).not.toContain('root fields directly')
+    expect(harness.adapter.requests).toHaveLength(2)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 async function withNativeRepeatReminder(failures: number, captureReminder: boolean, check: (input: any) => Promise<void>) {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-native-repeat-notice-20261005/source-sdk-tests' : '/tmp/tianwen-repeat-notice-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'native-repeat-')); roots.push(root)

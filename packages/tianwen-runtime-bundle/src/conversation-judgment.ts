@@ -4,7 +4,7 @@ import type {} from '@deepseek-ai/dsh-subagent'
 import { randomUUID } from 'node:crypto'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage, type LlmCallConfig } from '@deepseek-ai/dsh-llm'
-import type { JsonSchemaNode, ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
+import { validateJsonSchemaValue, type JsonSchemaNode, type ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, isAppendSurfaceEvent, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, sha256, parseConversationReviewChecks, conversationReviewConsensus, type Sha256Digest, type ConversationJudgmentProof, type ConversationReviewCheck } from '@tianwen/evolution/content-review'
 import { unpackConversationFileClaimPacket } from '@tianwen/evolution/file-claim-packet'
@@ -367,6 +367,16 @@ async function runNativeStructured(ctx: Context, parent: Agent, input: NativeStr
         if (error instanceof SyntaxError) reason = `Invalid structured_output JSON arguments: ${error.message}. Correct the JSON syntax yourself and submit one object matching the declared schema, without an arguments or value wrapper. Keep the original evidence and host instructions; the host has not repaired or captured this submission.`
       }
       return { kind: 'deny' as const, reason }
+    }
+    if (exec.arguments !== null && typeof exec.arguments === 'object' && !Array.isArray(exec.arguments)) {
+      const keys = Object.keys(exec.arguments)
+      const key = keys[0]
+      // Only explain an envelope that the original schema itself disallows.
+      // A declared or open arguments/value field remains native schema input.
+      if (keys.length === 1 && (key === 'arguments' || key === 'value')
+        && validateJsonSchemaValue(input.outputSchema, exec.arguments).includes(`"value.${key}" is not a declared property (additionalProperties: false)`)) {
+        return { kind: 'deny' as const, reason: `Submit the schema's root fields directly: ${JSON.stringify(Object.keys(input.outputSchema.properties ?? {}))}. Use no arguments or value wrapper and do not serialize an inner object into a string. Keep the original evidence and host instructions; the host has not unwrapped, repaired or captured this submission.` }
+      }
     }
     const reason = input.validateCapture?.(exec.arguments)
     return reason === undefined ? gate : { kind: 'deny' as const, reason }
