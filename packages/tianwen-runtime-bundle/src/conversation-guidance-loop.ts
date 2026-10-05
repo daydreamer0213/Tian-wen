@@ -1087,6 +1087,15 @@ export class TianwenConversationGuidanceLoopService extends Service {
               preparationDigest: guidanceResultCheckDigest(opened, preparedChecks.checks.find(check => check.caseId === item.id)!), outputDigest, ...outcome,
             } }))
           } else { signal.throwIfAborted(); evolution.recordConversationGuidance(parseConversationGuidanceRecord(arm)) }
+          // Both existing decision policies require every candidate to pass;
+          // a checked failure cannot be repaired by running the remaining cases.
+          // Keep partial evidence as a stop, never as a ten-arm decision.
+          const progress = evolution.listConversationGuidanceStudies().find(study => study.opened.studyId === opened!.studyId)!
+          if (progress.arms.length < opened.cases.length * 2 && progress.arms.some(result => result.role === 'candidate'
+            && (result.verdict === 'not-met' || result.resultCheck?.status === 'rejected'))) {
+            evolution.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: 'candidate-failed' })
+            return
+          }
         }
       }
       await this.assertCurrent(opened, signal)

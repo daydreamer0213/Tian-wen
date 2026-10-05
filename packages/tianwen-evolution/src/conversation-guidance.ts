@@ -192,7 +192,12 @@ export interface GuidanceInsufficientEvidenceStoppedRecord {
   readonly reason: 'insufficient-evidence'
   readonly proposalProof: GuidanceProof
 }
-export type GuidanceStoppedRecord = GuidanceHistoricalStoppedRecord | GuidanceInsufficientEvidenceStoppedRecord
+export interface GuidanceCandidateFailedStoppedRecord {
+  readonly kind: 'study-stopped'
+  readonly studyId: GuidanceStudyId
+  readonly reason: 'candidate-failed'
+}
+export type GuidanceStoppedRecord = GuidanceHistoricalStoppedRecord | GuidanceInsufficientEvidenceStoppedRecord | GuidanceCandidateFailedStoppedRecord
 export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceSourceReferenceReadRecord | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceFileTrialRecord | GuidanceExplorationIntentRecord | GuidanceExplorationArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
 export interface GuidanceExploration {
   readonly intent: GuidanceExplorationIntentRecord
@@ -423,7 +428,7 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
       return { kind: input.kind, studyId, reason: input.reason, proposalProof: proof(input.proposalProof) }
     }
     object(input, ['kind', 'studyId', 'reason'])
-    return { kind: input.kind, studyId, reason: oneOf(input.reason, ['cancelled', 'invalid-judgment', 'model-unavailable', 'source-unavailable', 'scope-changed']) }
+    return { kind: input.kind, studyId, reason: oneOf(input.reason, ['cancelled', 'invalid-judgment', 'model-unavailable', 'source-unavailable', 'scope-changed', 'candidate-failed']) }
   }
   throw new TypeError('unknown guidance record kind')
 }
@@ -509,6 +514,10 @@ export class ConversationGuidanceState {
       if (study.decision !== undefined || study.activation !== undefined) throw new Error('a decided guidance study cannot be stopped')
       if (record.reason === 'insufficient-evidence') {
         if (study.candidate !== undefined || this.nativeSessions.has(record.proposalProof.sessionId)) throw new Error('insufficient evidence requires an independent native proposal Session before any candidate')
+      }
+      if (record.reason === 'candidate-failed' && (study.arms.length >= study.opened.cases.length * 2
+        || !study.arms.some(arm => arm.role === 'candidate' && (arm.verdict === 'not-met' || arm.resultCheck?.status === 'rejected')))) {
+        throw new Error('candidate failure stop requires an incomplete study with a recorded failed candidate arm')
       }
       return
     }

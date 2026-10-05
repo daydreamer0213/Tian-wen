@@ -225,6 +225,7 @@ function conversationGuidanceStatus(studies: readonly GuidanceStudy[], activeVer
     stopped: stopped.length,
     stoppedReasons: {
       insufficientEvidence: stoppedCount('insufficient-evidence'),
+      candidateFailed: stoppedCount('candidate-failed'),
       cancelled: stoppedCount('cancelled'),
       invalidJudgment: stoppedCount('invalid-judgment'),
       modelUnavailable: stoppedCount('model-unavailable'),

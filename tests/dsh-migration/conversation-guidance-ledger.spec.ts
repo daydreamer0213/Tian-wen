@@ -722,6 +722,40 @@ function proposed(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
   return value
 }
 
+it('persists a grounded early candidate failure without inventing a complete decision', () => {
+  const { root, ledger, tasks } = seeded(), opened = opening(tasks, 'early-candidate-failure')
+  const plan = proposed(ledger, opened)
+  ledger.recordConversationGuidance(plan.arms[0]!)
+  const arm = plan.arms[1]!, id = `${opened.studyId}:${arm.caseId}:candidate:judge`
+  const failed = { ...arm, verdict: 'not-met' as const, reviewChecks: auditedChecks(id, 'not-met') }
+  ledger.recordConversationGuidance(failed)
+  const stopped = { kind: 'study-stopped' as const, studyId: opened.studyId, reason: 'candidate-failed' as const }
+  ledger.recordConversationGuidance(stopped)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8'), replay = new EvolutionLedger(root)
+  const study = replay.listConversationGuidanceStudies()[0]!
+  expect(study.arms).toEqual([plan.arms[0], failed]); expect(study.stopped).toEqual(stopped)
+  expect(study.decision).toBeUndefined(); expect(study.activation).toBeUndefined()
+  expect(replay.recordConversationGuidance(stopped)).toEqual({ duplicate: true })
+  expect(() => replay.conversationGuidanceDecision(opened.studyId)).toThrow(/stopped/)
+  expect(() => replay.recordConversationGuidance(plan.arms[2]!)).toThrow(/stopped/)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it.each(['empty', 'baseline-only', 'candidate-met', 'candidate-inconclusive', 'complete'] as const)('rejects ungrounded early stop: %s', scenario => {
+  const { root, ledger, tasks } = seeded(), opened = opening(tasks, `invalid-early-${scenario}`)
+  const plan = proposed(ledger, opened)
+  const count = scenario === 'empty' ? 0 : scenario === 'baseline-only' ? 1 : scenario === 'complete' ? 10 : 2
+  for (let i = 0; i < count; i++) {
+    const arm = plan.arms[i]!
+    ledger.recordConversationGuidance(scenario === 'candidate-inconclusive' && i === 1
+      ? { ...arm, verdict: 'inconclusive', reviewChecks: auditedChecks(`${opened.studyId}:${arm.caseId}:candidate:judge`, 'inconclusive') } : arm)
+  }
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: 'candidate-failed' })).toThrow(/candidate|incomplete/)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  expect(new EvolutionLedger(root).hasRecoveryFailure()).toBe(false)
+})
+
 /** Frozen old-writer fixture: emit historical records, then exercise current
  * disk replay. Never ask the current mutation API to authorize old policy. */
 function historicalStudy(root: string, ledger: EvolutionLedger, opened: GuidanceStudyOpened, activated: boolean) {

@@ -25,7 +25,7 @@ function opening(configured = true): GuidanceStudyOpened {
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 const verified: ConversationExternalCheckOutcome = { status: 'verified', detail: 'Frozen check passed.' }
-function completed(options: { badCandidate?: ConversationExternalCheckOutcome, missingCandidate?: boolean, badBaseline?: ConversationExternalCheckOutcome, counterRejected?: boolean, configured?: boolean, dev?: boolean, gain?: typeof ids[number] | 'none' } = {}) {
+function completed(options: { badCandidate?: ConversationExternalCheckOutcome, badCandidateCase?: typeof ids[number], missingCandidate?: boolean, badBaseline?: ConversationExternalCheckOutcome, counterRejected?: boolean, configured?: boolean, dev?: boolean, gain?: typeof ids[number] | 'none' } = {}) {
   const { kind: _kind, studyId: _id, ...body } = opening(options.configured !== false)
   const frozen = { ...body, ...(options.dev ? { decisionPolicy: 'dev-paired-any-case.v1' as const } : {}) }
   const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }, state = new ConversationGuidanceState()
@@ -41,7 +41,7 @@ function completed(options: { badCandidate?: ConversationExternalCheckOutcome, m
         workerMaterialDigest: 'prompt' in item ? sha256({ prompt: item.prompt, files: item.files }) : sha256(`worker material:${item.id}`) } })
     const check = checks().find(check => check.caseId === item.id)!
     const baselineFailure = { status: 'rejected' as const, detail: 'The original field was altered.', failedRequiredConditionDigest: sha256(check.requiredCondition) }
-    const outcome = role === 'candidate' && item.kind === 'holdout' ? options.badCandidate ?? verified
+    const outcome = role === 'candidate' && item.kind === (options.badCandidateCase ?? 'holdout') ? options.badCandidate ?? verified
       : role === 'baseline' && item.kind === (options.gain ?? 'source1') ? options.badBaseline ?? baselineFailure
         : role === 'baseline' && item.kind === 'counterexample' && options.counterRejected ? baselineFailure : verified
     const resultCheck = options.configured === false || options.missingCandidate && role === 'candidate' && item.kind === 'holdout' ? undefined
@@ -115,6 +115,18 @@ it('cold restores exact configured results and still refuses a contradictory acc
   for (const record of records) { cold.validate(record); cold.apply(record, '2026-10-01') }
   expect(cold.listStudies()[0]).toEqual(study)
   expect(() => cold.validate(original.activation)).toThrow(/result check/)
+})
+
+it('allows a partial stop for an original functional candidate failure despite met model reviews', () => {
+  const source = completed({ badCandidateCase: 'source1', badCandidate: { status: 'rejected', detail: 'Required value missing.' } }).state.listStudies()[0]!
+  const state = new ConversationGuidanceState(), records = [source.opened, source.candidate!, ...source.fileTrials!.slice(0, 2), ...source.arms.slice(0, 2)]
+  for (const record of records) { state.validate(record); state.apply(record, '2026-10-01') }
+  expect(state.listStudies()[0]!.arms[1]).toMatchObject({ verdict: 'met', resultCheck: { status: 'rejected' } })
+  const stop = parseConversationGuidanceRecord({ kind: 'study-stopped', studyId: source.opened.studyId, reason: 'candidate-failed' })
+  state.validate(stop); state.apply(stop, '2026-10-01')
+  expect(state.listStudies()[0]!.stopped).toEqual(stop)
+  expect(() => state.decision(source.opened.studyId)).toThrow(/stopped/)
+  expect(hasSatisfiedGuidanceResultChecks(state.listStudies()[0]!)).toBe(false)
 })
 it('refuses incomplete, duplicated and output-inapplicable preparation', () => {
   const opened = opening()

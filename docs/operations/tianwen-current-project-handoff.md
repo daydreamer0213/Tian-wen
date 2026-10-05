@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：真实候选有事实退步，提前停止及整批退出已实现
+
+r6仅现有source1+source3，86真实/86完整、0模拟/新增训练；原提案和候选保存。五臂baseline三项met/verified，candidate两项verified但首说明事实错误not-met；原invalid-judgment/CLI1/排空，无十臂裁决、激活、方法后或撤回。修改前50消费者/八旧Task/两旧study/三旧账本/原环境/prefix/84容器保持，Docker停；前台0调用早快照不替代最终审计。[准确结果与后续](tianwen-candidate-early-stop-result-20261005.md)。
+
+已实现失败候选提前停止：完整原臂保存、未满十臂才记有据candidate-failed，原账本验证/冷恢复/禁止续写/状态统计保持，不伪造完整裁决。操作员预算绑定整个原ctx生命周期，原appExit结束独立后台；原CLI零模型控制通过，首Windows路径加载错误保留。源码组合347/新增相关组合74有重叠，发布针对18、原完整profile50/10原跳过，evolution先构建/原十五runtime构建通过，首旧dist类型错误保留；限定复查无有据P1/P2。
+
+完整目标active，下一主动设计过期索引/最新原始事件环境和新后续任务，核源方法实际改善、正常对照及撤回；不旧满分复跑、不等自然问题、不索题/机械blocked/加正式门槛。原45分钟漏后台缺陷已定位，新批预算先于DEV加载，root在线直接get、离线resume。main/Daily NO-GO/R9保持，D约16.9GiB>=15/20偏好未达，无依赖副本。本轮两控制home清理自动审核blocked by policy拒绝，未删除/不绕过，临时目录保留。
+
 ## 2026-10-05 当前：文件试验预算已协调，接续现有未尝试来源对
 
 原12工具+末尾交付对应13模型请求，工具/路径/权限/原裁决保持；原8预算及无预算提示的精确proof恢复兼容，不重评r5原停止。旧代码四RED保持，源码38/原十五步构建/发布文件38与完整原profile50（10原跳过）通过，限定只读复查无有据P1/P2。[结果与限制](tianwen-file-trial-request-budget-result-20261005.md)。
