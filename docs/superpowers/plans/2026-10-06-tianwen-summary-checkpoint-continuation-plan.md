@@ -10,9 +10,9 @@
 
 ## Task 1: checkpoint and read-only preflight
 
-- [ ] Bind original full ledger digest, exact prefix offset/digest after accepted and before activation, accepted study/artifact, referenced historical session bytes and original shared ledger; preserve old activation and automatic withdrawal.
-- [ ] New profile derived evolution/state/sessions paths, original SDK CLI, same model and cwd, new nonce. No credentials printed or copied.
-- [ ] Read-only preflight: no Runtime, no model calls, no ledger changes. Separate original native recovery: the Loop verifies accepted proposal/trials/reviews, source material and parent snapshot with zero model calls, then appends native activation to the new ledger. Original profile bytes and the copied prefix remain unchanged. Mount success alone is not proof validation.
+- [x] Bind original full ledger digest, exact prefix offset/digest after accepted and before activation, accepted study/artifact, referenced historical session bytes and original shared ledger; preserve old activation and automatic withdrawal.
+- [x] New profile derived evolution/state/sessions paths, original SDK CLI, same model and cwd, new nonce. No credentials printed or copied.
+- [x] Read-only preflight: no Runtime, no model calls, no ledger changes. Separate original native recovery: the Loop verifies accepted proposal/trials/reviews, source material and parent snapshot with zero model calls, then appends native activation to the new ledger. Original profile bytes and the copied prefix remain unchanged. Mount success alone is not proof validation.
 
 ## Task 2: bounded real continuation
 
@@ -21,3 +21,14 @@
 - [ ] Freeze one different unexecuted explicit summary request. Original native family decision remains genuine; verify actual injection and independent met without claiming a pre-method natural baseline.
 - [ ] Original consent disable/rollback and actual ordinary no-injection task. Analysis-disabled means no new admitted Task; do not claim independent content review.
 - [ ] Original zero-call cold restore and independent terminal audit, including original profile/session byte protection and copy/link accounting. Failure is not completion; continue concrete implementation if required.
+
+Task 2 first attempt stopped honestly: 4 actual requests, method genuinely injected, requirements met / grounding not-met (missing product name) => original inconclusive. Normal drain, original consent withdrawal; fresh/withdrawn ordinary/cold not run. Success-only auditor missing cold error retained, independent failed-terminal auditor passed. See tianwen-summary-checkpoint-continuation-result-20261006.md. No old result rerating.
+
+## Task 3: different unambiguous continuation
+
+- [ ] New bounded author/environment under D:/DevData/tianwen-summary-unambiguous-learning-20261006. Same original accepted-before-activation checkpoint and original zero-call restore, no new study/consumed pair/source delivery.
+- [ ] Freeze a new anonymous status-change summary request and wrong simulated delivery together, different facts and explicit output boundaries. Original native dual review of that fixed wrong delivery runs in the actual batch, never a Task/learning source or natural baseline. Do not bind the old named-product before proof to this new request.
+- [ ] Ordinary after uses the same new frozen request and original method injected into actual provider input; original two checks met. One additional different anonymous summary task with actual method and original two checks met, without a pre-method improvement claim.
+- [ ] Original consent withdrawal, actual no-injection/analysis-disabled task, zero-call cold proof/state recovery and independent terminal audit. Failed audit path must preserve incomplete/no-cold, never require missing cold as if it existed.
+
+All previous constraints and main/Daily NO-GO/R9 remain.

@@ -1,5 +1,9 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：原研究零模型恢复和方法实际注入已核实
+
+75f3adca新隔离checkpoint明确模拟accepted落盘/activation未落盘，原CLI预检和原Loop完整source/proposal/十臂双审恢复均0/零模型，分支原生启用、旧原结果不改。实际4请求/0scripted summary方法真正注入，事实正确但漏产品名出现双审分歧，原inconclusive/CLI1/normal drain/consent2disabled/withdraw保持。独立失败终态审计0，149冻结、flat22文件、两旧账本/126历史文件/前缀/原记录保持，后fresh/noinject/cold未执行。下一新匿名明确摘要任务与新模拟错误一起冻结，原双审评分而不入来源；不嫁接旧before proof、不重评失败样本/研究。完整目标active/main-Daily NO-GO/R9保持。详见tianwen-summary-checkpoint-continuation-result-20261006.md。旧日志压缩验证释放87MB，D16.76GiB>=15/未20。
+
 ## 2026-10-06 最新：原生研究自动采用，后任务类别边界延续验证
 
 87actual/1明确模拟交付，f1b0d12f十臂五候选全部met、source1原notmet→met，原DEV accepted/activation。future1-after原模型met，但summary→writing导致原summary方法未注入，不称方法效果；原normal drain/consent2disabled/withdraw/active0、CLI1。独立149冻结/旧七Task两study两attempt/prefix/共享9/8/9字节核验通过，当前九Task四study四attempt。下一明确模拟原accepted已落盘但activation尚未落盘的隔离重启，原Loop完整proof零模型恢复并在分支启用，用新明确摘要任务核效果；不改旧类别/原启用撤回、不跨family注入、不重跑研究。完整目标active/main-Daily NO-GO/R9保持。详见tianwen-flat-capture-wrapper-result-20261006.md。
