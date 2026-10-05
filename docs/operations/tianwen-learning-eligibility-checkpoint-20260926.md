@@ -1,5 +1,9 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 最新：原生研究自动采用，后任务类别边界延续验证
+
+87actual/1明确模拟交付，f1b0d12f十臂五候选全部met、source1原notmet→met，原DEV accepted/activation。future1-after原模型met，但summary→writing导致原summary方法未注入，不称方法效果；原normal drain/consent2disabled/withdraw/active0、CLI1。独立149冻结/旧七Task两study两attempt/prefix/共享9/8/9字节核验通过，当前九Task四study四attempt。下一明确模拟原accepted已落盘但activation尚未落盘的隔离重启，原Loop完整proof零模型恢复并在分支启用，用新明确摘要任务核效果；不改旧类别/原启用撤回、不跨family注入、不重跑研究。完整目标active/main-Daily NO-GO/R9保持。详见tianwen-flat-capture-wrapper-result-20261006.md。
+
 ## 2026-10-06 当前：实际研究定位包装误提交，继续补准确工具提示
 
 已完成捕获字段/字面答案修复：源码216/打包216、原十五构建及私有导入通过，旧实际trial原CLI0/零调用/标签和两账本原样。d6fbbc8a实际learning-r3 44actual/1明确模拟历史答；新受控未来错稿原双审not-met、未入学习来源，新df67806c摘要source-fidelity失败触发原study0f5527eb，两臂met/met后source2 baseline评审反复套{arguments:string}，通用value.arguments报错误导模型，原invalid-judgment停止；没有接受/启用/后任务，不改旧判定。
@@ -847,7 +851,4 @@ learning-r3在8ba81be5完成42真实/42完整、0模拟、10原生臂。source1 
 
 候选把已执行复核重新说成建议，并超长；另有隔离评审看不到动作上下文的自证尾句。不能以放宽baseline规则掩盖候选失败；DEV判定版本未改。下一已冻结两个模拟“建议后来执行、旧通过后来撤回”的新任务/错误交付，原入题及研究模型实际运行。来源公开模拟、后续实际效果分开；旧四Task/三研究保持。原接受才启用/未来对比/未用任务/撤回/冷恢复，不等自然、不索题、不增正式门槛。目标active，main/Daily NO-GO/R9保持，D约16.8GiB>=15，无依赖副本。详见当前交接及状态汇报结果文档。
 
-# 2026-10-06 最新：原生研究自动采用，后任务分类边界待延续验证
-
-87actual/1明确模拟交付，f1b0d12f十臂五候选全部met、source1原notmet→met，原DEV accepted/activation。future1-after原模型met，但summary→writing导致原summary方法未注入，不称方法效果；原normal drain/consent2disabled/withdraw/active0、CLI1。独立149冻结/旧七Task两study两attempt/prefix/共享9/8/9字节核验通过，当前九Task四study四attempt。下一明确从接受后checkpoint隔离恢复，用新的明确摘要任务验证；不改旧类别/撤回、不跨family注入、不重跑研究。完整目标active/main-Daily NO-GO/R9保持。详见tianwen-flat-capture-wrapper-result-20261006.md。
 

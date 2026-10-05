@@ -4,15 +4,15 @@
 
 **Goal:** Continue the actually accepted summary method with unexecuted, unambiguous summary tasks; verify original method injection, disclosed simulated-fault correction, fresh delivery, withdrawal and zero-call recovery.
 
-**Architecture:** A new isolated DEV profile restores the exact ledger prefix immediately before the old operator's automatic consent withdrawal. It is a disclosed historical checkpoint branch, not a new activation or rollback reversal. Keep old profile bytes and results unchanged. Copy only the necessary small prefix and immutable guidance artifacts; mount the original JSONL backend under the new derived sessions root. Historical completed session files may be hardlinked at their original relative paths, with byte hashes protected and no historical session reattachment or writes. If canonical boundary validation refuses a link, retain that failure and use a bounded byte-exact copy instead, without bypassing validation.
+**Architecture:** A new isolated DEV profile restores the exact ledger prefix after the original durable accepted decision and before its guidance-activated event. This explicitly simulates interruption at that historical checkpoint; the original Loop must recover the full proof and activate in the branch without new model calls. It is not a new research result or reversal of the old rollback. Keep old profile bytes and results unchanged. Copy only the necessary small prefix and immutable guidance artifacts; mount the original JSONL backend under the new derived sessions root. Historical completed session files may be hardlinked at their original relative paths, with byte hashes protected and no historical session reattachment or writes. If canonical boundary validation refuses a link, retain that failure and use a bounded byte-exact copy instead, without bypassing validation.
 
 **Constraints:** Original accepted ten arms/policy/config/quality/proof unchanged. No consumed pair or source delivery replay. No cross-family injection, sanitized answer or claims of population benefit. No dependency/runtime copies. D>=15GiB; prefer20. main/Daily NO-GO/R9 unchanged.
 
 ## Task 1: checkpoint and read-only preflight
 
-- [ ] Bind original full ledger digest, exact prefix offset/digest, accepted study/artifact, referenced historical session bytes and original shared ledger; preserve old automatic withdrawal.
+- [ ] Bind original full ledger digest, exact prefix offset/digest after accepted and before activation, accepted study/artifact, referenced historical session bytes and original shared ledger; preserve old activation and automatic withdrawal.
 - [ ] New profile derived evolution/state/sessions paths, original SDK CLI, same model and cwd, new nonce. No credentials printed or copied.
-- [ ] Native zero-call recovery verifies accepted proposal/trials/reviews and source material plus current active snapshot; ledger and original bytes unchanged. Mount success alone is not proof validation.
+- [ ] Read-only preflight: no Runtime, no model calls, no ledger changes. Separate original native recovery: the Loop verifies accepted proposal/trials/reviews, source material and parent snapshot with zero model calls, then appends native activation to the new ledger. Original profile bytes and the copied prefix remain unchanged. Mount success alone is not proof validation.
 
 ## Task 2: bounded real continuation
 
