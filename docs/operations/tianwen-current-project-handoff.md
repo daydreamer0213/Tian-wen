@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：失败方法诊断信息流已实现，接续真实模型
+
+新普通文本提案可选读取同scope/config/quality/family/mode/consent的旧candidate-failed来源候选臂方法及原双审诊断；认证原提案、执行、双审与停止时间，绑定旧sourceObservations/clues，剔除旧答案/引用/审计/保留案例。冻结一次引用，冷恢复不选最新；无合法记录/容量不足保持原路径，无新账本schema/资格/发布条件。原SDK缺信息RED与合法proof替换旧输入的两项RED均保存，修复后完整学习156+相关评审87+三源码故障控制=246通过，原十五构建；发布相关240+原完整profile报告50=290通过，原条件10和源码装配3不运行。profile内两源码控制原early-return不算实际故障注入，已用源码三项单独核实。首发布组合因操作员漏设原published标志3失败保留，正确原环境仅重跑profile通过；限定复查P2关闭。
+
+下一 D:/DevData/tianwen-rejected-method-learning-20261006 原CLI：共享原status-report-baseline enabled/revision1九Task六study七attempt，仅未尝试来源对，零新sourceTask/脚本主答/旧交付重跑，先只读0模型预检，实际核新提案收到失败观察及原裁决，接受才自动激活/后续真实0/2对比/新未执行task/撤回/0模型冷恢复。新nonce原生ID，旧账本仅绑定prefix和原记录，不做全量副本；正常/紧急终态分开核，CLI1不能作成功。完整目标active，main/Daily NO-GO/R9/DEV v1保持，D约16.77GiB>=15，原测试临时目录已清理。详见tianwen-rejected-method-observation-result-20261006.md，工程通过不是实际改善。
+
 ## 2026-10-06 当前：格式方法真实退步已停止，下一补失败方法信息流
 
 64d38193隔离format-learning learning-r2：21actual/2明确scripted、复用原两真实基线，新增source1 962cc9f4…及source2 cf8a9167…均writing/not-met/instruction-following；原Loop用真实met的future1对照，study1aa2ef75…候选保存，四臂source1 met→met、source2 met→not-met，原candidate-failed/CLI1，零decision/activation/after/rollback。候选自己要求不写标题却输出“箱册面向新用户的功能介绍：”；这是实际退步，不是放宽baseline即可接受，不重判旧停止。

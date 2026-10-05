@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前：可选吸收失败方法诊断，不增新资格
+
+普通文本新proposal可选投影一个既有candidate-failed来源候选方法及原双审not-met诊断，原proposal/source执行/review proof及原sourceObservations/clues认证，旧停止早于新打开；同scope/model/quality/family/mode/currentconsent，旧答案和反例/adjacent/holdout不投影。冻结引用/摘要，冷恢复不选最新；无合法输入或容量不足仍原研究，旧无字段兼容，不新增schema/门槛。两个有据RED保留，最新源码实际246通过，原十五构建、发布相关240及完整profile报告50/原条件10，源码装配3仅源码执行。首published漏环境3失败保存，正确原环境profile通过、三源码故障实际控制另核；不冒充所有故障发布注入或实际方法效果。
+
+继续共享九Task六study七attempt当前revision1的未尝试来源对，零新sourceTask/脚本主答/重跑旧交付。原CLI先只读0模型预检，再实际新proposal/裁决；接受才激活、旧真实0/2新会话、新task、撤回/冷恢复。保护旧prefix和原记录，不复制全账本/依赖；新nonce避免ID复用，normal/紧急收尾及CLI分别认证。完整目标active，NO-GO/R9/DEV v1不变，D>=15GiB。结果tianwen-rejected-method-observation-result-20261006.md。
+
 ## 2026-10-06 当前：格式方法真实退步已停止，下一补失败方法信息流
 
 64d38193隔离format-learning learning-r2：21actual/2明确scripted、复用原两真实基线，新增source1 962cc9f4…及source2 cf8a9167…均writing/not-met/instruction-following；原Loop用真实met的future1对照，study1aa2ef75…候选保存，四臂source1 met→met、source2 met→not-met，原candidate-failed/CLI1，零decision/activation/after/rollback。候选自己要求不写标题却输出“箱册面向新用户的功能介绍：”；这是实际退步，不是放宽baseline即可接受，不重判旧停止。
