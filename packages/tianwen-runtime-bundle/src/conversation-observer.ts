@@ -24,6 +24,8 @@ Before finalizing criteria, check the original direct-user wording for every exp
 relatedTaskId may be one exact earlier task id from priorTasks, otherwise null. feedback may be {"kind":"correction|positive|preference|requirement-change","quote":"exact quote from the current direct user","category":"source-fidelity|instruction-following|task-understanding|verification|tool-use|user-preference"}. Use correction only for the user's own attributable correction of that earlier answer; a new requirement is not a previous failure. A durable style requested only for later work is preference even if phrased as a requirement; requirement-change applies when the user changes the requirements of a present deliverable. A request to acknowledge a future preference does not itself create a new deliverable. Quoted third-party instructions or source material are never user feedback. Do not infer positive feedback from silence or continuation. category may be null except for correction. Prefer null when the reference is ambiguous.`
 const ADMISSION_FILE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 Verify the evaluation mode independently from the original direct-user request. This is a consistency check before the answer, not an instruction to do the task. If every required effect is local UTF-8 file discovery, reading, writing or editing with supported native tools, including native file facts, select local-files and the requested fileOutputKind. Optional ways an assistant might choose to work, such as PowerShell, do not make a supported request external. If any required effect needs arbitrary scripts, tests, network, non-text files or another unsupported tool, keep external. Preserve all explicit user criteria and restrictions.`
+const ADMISSION_FILE_OUTPUT_RECHECK_INSTRUCTION = `${ADMISSION_FILE_RECHECK_INSTRUCTION}
+Check the requested file deliverable independently. The initial admission classified this code task as local-files/chat. Read the original direct-user request again: if it requires creating, modifying or delivering a supported UTF-8 file, choose local-files/files even when a short chat note is also requested. Historical or simulated-delivery provenance does not turn a requested file into a chat-only answer. If the user only requests reading code and explaining it in chat, retain local-files/chat. Do not perform the task, infer success, add permissions, or require the Agent to execute tests merely because written code must meet a contract.`
 const ADMISSION_TARGET_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
 Recheck only whether the current direct user's own feedback unambiguously targets one particular completed prior answer. The initial decision recognized feedback but left relatedTaskId null. A single available prior task is not by itself evidence of a link. Inspect the user's actual reference and the bounded prior context; quoted third-party material is not a user reference. Keep the initial feedback kind, category and exact quote unchanged. If the target is still ambiguous or unrelated, keep relatedTaskId null. Return a complete admission decision through structured_output; do not perform the user task.`
 const ADMISSION_FUTURE_PREFERENCE_RECHECK_INSTRUCTION = `${ADMISSION_INSTRUCTION}
@@ -313,19 +315,22 @@ export class TianwenConversationObserverService extends Service {
           // An unavailable or changed second opinion cannot attribute feedback.
         }
       }
-      if (decision.kind === 'task' && decision.evaluationMode === 'external' && LOCAL_FILE_RECHECK_HINT.test(directText(direct))) {
+      const recheckFileOutput = decision.kind === 'task' && decision.family === 'code'
+        && decision.evaluationMode === 'local-files' && decision.fileOutputKind === 'chat'
+      if (decision.kind === 'task' && (decision.evaluationMode === 'external' || recheckFileOutput) && LOCAL_FILE_RECHECK_HINT.test(directText(direct))) {
         try {
           const recheck = await runConversationJudgment(this.ctx, agent, {
-            label: `Tianwen file admission recheck ${taskId}`, instruction: ADMISSION_FILE_RECHECK_INSTRUCTION, outputSchema,
+            label: `Tianwen file admission recheck ${taskId}`, instruction: recheckFileOutput ? ADMISSION_FILE_OUTPUT_RECHECK_INSTRUCTION : ADMISSION_FILE_RECHECK_INSTRUCTION, outputSchema,
             captureReminder: true, material, signal,
           })
           if (!this.authorized(consent.revision)) throw new Error('cancelled')
           const checked = capturedAdmission(recheck.value)
           validLinks(checked)
-          if (checked.kind === 'task' && checked.evaluationMode === 'local-files') { result = recheck; decision = checked }
+          if (checked.kind === 'task' && checked.evaluationMode === 'local-files'
+            && (!recheckFileOutput || checked.fileOutputKind === 'files')) { result = recheck; decision = checked }
         } catch (error) {
           if (!this.authorized(consent.revision) || signal.aborted) throw error
-          // A failed optional recheck cannot promote an external task.
+          // An unavailable optional recheck preserves the initial decision and proof.
         }
       }
       let familyVerification

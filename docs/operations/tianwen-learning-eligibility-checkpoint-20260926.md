@@ -1,5 +1,13 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：实际文件基线已建立，训练接线与交付识别修复
+
+38真实/38完整请求轨迹、4显式历史root注入另记，两未来基线及正常对照功能verified，仅第一基线独立met；后置对照不重判，新研究绑定原picker选择的成功基线。r2早注入未经过原准备/请求核对，无功能结果，不计合格训练失败。独立零真实控制末端注入验证原准备/四root gate/功能rejected，显式入题和root scripted，末尾配置记录去重断言错误保持。r3原模型将修改交付.py判chat，原gate阻止root/无写入，0研究/激活/方法后/撤回，原首停止保持。[准确结果](tianwen-python-native-admission-result-20261005.md)。
+
+窄交付复核只对文件提示code/local-files/chat，独立明确files才替换判断/proof，其他/不可用保持、无权限扩张或旧重评。源码48/发布48、原15构建、正确原发布profile50/10原跳过，原源码三故障控制通过；首发布模式配置错误、HEAD原quote fixture四旧失败均保存，补齐终止/原1及6诊断、不改生产quote。最终复查无有据P1/P2。
+
+完整目标active，接续仅新两训练Task，复用原基线/成功反例，实际原研究与后续效果/撤回仍待完成；缺条件主动构造，不自然等/索题/机械blocked/增正式门槛，main/Daily NO-GO/R9保持。修改前39消费者/三旧账本/原输入/profile前缀/84容器保持，Docker停。两小临时控制home删除被自动审批拒绝，未执行不绕过、不阻塞开发；D约16.96>=15、20偏好未达，无依赖/环境副本。
+
 ## 2026-10-05 当前：普通Python文件任务进入原DEV链路
 
 原DEV loader显式Python单文件选项，沿原ordinary/五角色study工厂、固定host和冻结材料matcher，缺省Node保持；PythonGoalcode本次明确不支持。源码31/发布31/原Node45通过、限定复查无有据P1/P2，Runtime原发布产物未变。新入口实跑source2普通/adjacent研究首功能例正确拒绝预设旧程序，0模型/Worker/学习收益，不计训练失败来源，不称33例全跑。[准确结果](tianwen-dev-python-file-entry-result-20261005.md)。

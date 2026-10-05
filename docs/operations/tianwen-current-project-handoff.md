@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：复用实际文件基线，修复文件交付被识别为聊天
+
+原Python普通入口两批38真实/38完整请求轨迹、4显式历史注入另记；两无方法未来Task及正常对照功能verified，第一基线独立met，另两inconclusive。r2早注入绕过原准备/请求核对，第一历史Task无功能结果；独立零真实模型控制末端注入证明原准备/四root核对/功能rejected，一配置记录正确去重，控制末尾错误断言保留。r3只接续训练、复用旧基线，原模型将交付.py文件判chat，原gate阻止root/无写入，CLI1/原排空/0研究。首失败、已有五Task及原基线不重跑/重判。[准确结果](tianwen-python-native-admission-result-20261005.md)。
+
+窄修复对原文件提示的code/local-files/chat做一次原生独立交付复核，仅明确files替换判断/proof，只读/不可用保持，不扩大权限。新增RED、源码48/发布48、原15构建、最终正确发布profile50通过/10原条件跳过；三源码故障控制通过，发布首次缺原模式标志失败保留；四旧quote fixture在HEAD原源码也失败，补齐原拒绝后的终止及1/6诊断，生产quote代码未改。最终限定只读复查无有据P1/P2。
+
+完整目标active，下一冻结当前产物只执行两新显式训练/原研究，复用原成功基线作反例与两未来基线；实际接受才启用/方法后对比/撤回，不索题/自然等待/机械blocked/加正式条件。main/Daily NO-GO/R9保持。修改前39消费者/三旧账本/原输入/profile前缀/84容器保持，Docker已停。两临时控制home删除被自动审批拒绝、未执行、不绕过；仅395,338bytes，不阻塞开发，无依赖/大环境副本，D约16.96>=15、20偏好未达。
+
 ## 2026-10-05 当前：原DEV入口已接入Python文件任务，转真实代码学习
 
 新显式codeEngine=python接入原ordinary/五角色study工厂、原冻结matcher/固定Pythonhost；Node缺省保持，Python仅单.py输出=entryPath、无模块别名、不接受caller执行环境覆盖，Goalcode本次明确拒绝。源码31/发布31、原Node45通过；限定复查无有据P1/P2，Runtime发布产物未变不重复构建。新入口实跑原冻结环境此前未执行的source2 ordinary/adjacent study，各第一功能例拒绝后停止，0模型/Worker/学习收益，五角色绑定成功。[准确结果](tianwen-dev-python-file-entry-result-20261005.md)。

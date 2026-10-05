@@ -649,14 +649,44 @@ it('keeps an external file task external when the recheck is unavailable', async
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it('independently rechecks a code file delivery misclassified as chat before the native answer', async () => {
+  const chat = { ...admission, objective: 'Modify and deliver the Python file', family: 'code', evaluationMode: 'local-files', fileOutputKind: 'chat' }
+  const files = { ...chat, fileOutputKind: 'files' }
+  const harness = await mount([structured(chat), structured(files), textResponse('No tests were executed.')])
+  try {
+    harness.handle.agent.followup(direct('Add a module docstring to source1/scripts/summarize-functional-checks.py. Read the contract and target first. Deliver the modified file and a short factual note; do not execute tests.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.decision).toMatchObject({ family: 'code', evaluationMode: 'local-files', fileOutputKind: 'files' })
+    expect(task.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[1]?.sessionId))
+    const recovered = await recoverConversationAdmissionJudgment(harness.ctx, task.admission!.proof!, task.admission!.decision)
+    expect(recovered.instruction).toContain('requested file deliverable independently')
+    expect(harness.adapter.requests).toHaveLength(3)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['chat', 'unavailable'])('preserves code chat admission when the file-delivery recheck returns %s', async mode => {
+  const chat = { ...admission, objective: 'Explain local Python code without changing it', family: 'code', evaluationMode: 'local-files', fileOutputKind: 'chat' }
+  const harness = await mount([structured(chat), mode === 'chat' ? structured(chat) : new Error('recheck unavailable'), textResponse('No files were changed.')])
+  try {
+    harness.handle.agent.followup(direct('Read source1/scripts/summarize-functional-checks.py and explain its routing in chat. Do not modify or create files.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.admission?.decision).toMatchObject({ evaluationMode: 'local-files', fileOutputKind: 'chat' })
+    expect(task.admission?.proof?.sessionId).toBe(String(harness.adapter.requests[0]?.sessionId))
+    expect(harness.adapter.requests).toHaveLength(3)
+  } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each([admission.criteria[0], admission.objective, 'evaluationMode'])('rejects a review whose evidence quotes only derived task data: %s', async quote => {
   const harness = await mount([structured(admission), textResponse('预计 5 天完成。'), auditedEvidenceResponse({
     verdict: 'not-met', category: 'source-fidelity', explanation: 'The response omitted a required fact.', evidenceQuotes: [quote],
-  }, 'empty', false)])
+  }, 'empty', false), textResponse('No valid structured judgment is available.')])
   try {
     harness.handle.agent.followup(direct('概括：预计 5 天完成。'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
-    expect(harness.adapter.requests).toHaveLength(3)
+    expect(harness.adapter.requests).toHaveLength(4)
+    expect(JSON.stringify(harness.adapter.requests[3]?.messages)).toContain('Invalid evidenceQuotes item 1')
     const result = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review
     expect(result?.verdict).toBe('inconclusive')
     expect(result?.unavailableReason).toBe('invalid-judgment')
@@ -670,17 +700,17 @@ it.each([false, true])('records the second reviewer quote mismatch without accep
   harness = await mount([structured(admission), textResponse('5 天完成。'), evidenceResponse(review), request => {
     if (cancelled) harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
     return evidenceResponse({ ...review, evidenceQuotes: ['5 天', '5 天', '5 天', '5 天', '5 天', alteredQuote] }, 'empty', false)(request)
-  }])
+  }, textResponse('No valid structured judgment is available.')])
   let resumed: Awaited<ReturnType<typeof harness.ctx.agents.resume>> | undefined
   try {
     harness.handle.agent.followup(direct('分享自己最近做的项目，5 天完成。'))
     await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
-    expect(harness.adapter.requests).toHaveLength(4)
+    expect(harness.adapter.requests).toHaveLength(cancelled ? 4 : 5)
+    if (!cancelled) expect(JSON.stringify(harness.adapter.requests[4]?.messages)).toContain('Invalid evidenceQuotes item 6')
     const result = harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review
     expect(result).toMatchObject({ verdict: 'inconclusive', category: null, evidenceQuotes: [], proof: null,
       unavailableReason: cancelled ? 'cancelled' : 'invalid-judgment',
-      explanation: cancelled ? 'Automatic review could not establish the task result.'
-        : 'Automatic review could not establish the task result: the grounding reviewer returned an evidence quote not found in the frozen source or answer (quote 6).',
+      explanation: 'Automatic review could not establish the task result.',
     })
     expect(result?.explanation).not.toContain(alteredQuote)
     expect(result).not.toHaveProperty('reviewChecks')
@@ -688,7 +718,7 @@ it.each([false, true])('records the second reviewer quote mismatch without accep
     resumed = await harness.ctx.agents.resume({ resumeSessionId: SessionId('ordinary-chat'), agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
     await harness.ctx.tianwenConversationObserver.whenIdle()
     expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]?.review).toEqual(result)
-    expect(harness.adapter.requests).toHaveLength(4)
+    expect(harness.adapter.requests).toHaveLength(cancelled ? 4 : 5)
   } finally { await resumed?.dispose(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
