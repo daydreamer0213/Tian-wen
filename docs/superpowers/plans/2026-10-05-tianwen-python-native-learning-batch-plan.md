@@ -18,3 +18,5 @@
 2026-10-05 后续：r4两合格显式模拟Task自动原生研究；16真实/16完整轨迹、8root模拟另记，缺原交付与评审导致原提案invalid-judgment，0arms/候选/激活保持。普通提案观察/新字段冷恢复窄修复已通过源码累计192、原十五构建、发布14针对项、原完整发布profile50/10原条件跳过及只读复查；旧fixture/首错误保留，生产准备/提醒策略不变。r4已排空/修改前审计/Docker停，下一只一个新source3与原第二失败配未尝试对，不重跑旧七Task/首研究/两基线，未来2/2不伪称增益。详见operations/tianwen-ordinary-proposal-observation-result-20261005.md。
 
 2026-10-05 r5：一新source3已完成合格失败/原两观察实际送达/真实方法提案和候选捕获，19真实/19完整、4root模拟；首baseline九合法工具成功、8模型请求预算在分派前中止，原source-unavailable/0arms/激活/后续/撤回保持。45消费者/旧状态/84容器审计、排空/Docker停。下一先修资源预算相互不协调（12工具+末尾交付候选13请求、兼容原8/无提示proof），受控边界/恢复/清理验证后用现有source1+source3未尝试对，不追加Task或重跑八旧Task。原验收/权限/正式条件不变、完整目标active。
+
+2026-10-05 预算修复：原12工具配13模型请求，精确旧8/pre-budget恢复保持，四旧代码RED、源码38/原十五构建/发布38与原完整profile50和10原跳过、限定只读复查通过。下一冻结r6，仅现有source1+source3未尝试对与原未来1反例，通过原session恢复/Loop研究；无需新训练、八旧Task/两旧study不变，两个未来基线复用，实际接受再启用/新方法后/撤回。详见operations/tianwen-file-trial-request-budget-result-20261005.md。

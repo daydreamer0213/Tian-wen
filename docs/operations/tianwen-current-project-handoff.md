@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-05 当前：文件试验预算已协调，接续现有未尝试来源对
+
+原12工具+末尾交付对应13模型请求，工具/路径/权限/原裁决保持；原8预算及无预算提示的精确proof恢复兼容，不重评r5原停止。旧代码四RED保持，源码38/原十五步构建/发布文件38与完整原profile50（10原跳过）通过，限定只读复查无有据P1/P2。[结果与限制](tianwen-file-trial-request-budget-result-20261005.md)。
+
+完整目标active，下一仅用现有source1+source3未尝试对启动原Loop，不新增训练Task、不重跑八旧Task/两研究/两未来基线。实际方法接受、启用、新后续效果及撤回仍待完成；旧未来2/2不得虚称提高。main/Daily NO-GO/R9/原正式条件保持，生成物D，无依赖副本，D约16.95GiB>=15，20偏好未达。
+
 ## 2026-10-05 当前：真实方法提案已保存，试验被8请求预算中断
 
 07d10330修复已推送，r5只新增source3一显式失败、原七Task/首study/两基线保持；预检首raw合同digest遗漏零模型失败保留，按实际原字节纠正后0调用CLI0。实际19真实/19完整轨迹、4root模拟，source3 complete/rejected/双评审not-met；原Loop新study53659531…实际收到两原交付/检查/评审，真实proposer一次有效方法提案已捕获、候选保存。首baseline Worker九个合法read/edit工具全部成功，却超过原8模型请求预算，分派前中止；原terminal error/无receipt/source-unavailable/0arms、激活、方法后、撤回，原CLI1/排空保持。不是方法无效或新验收条件。[准确结果](tianwen-ordinary-proposal-observation-result-20261005.md)。

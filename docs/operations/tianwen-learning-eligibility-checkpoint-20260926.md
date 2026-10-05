@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-05 当前：请求预算修复通过控制，不计学习收益
+
+原12工具配13模型请求及末尾交付，超额仍拒绝/无partial receipt/副本清理，权限/材料/原检查/裁决保持。exact旧8和pre-budget证明兼容，原r5首停止不补判。旧代码四RED、源码38/原十五构建/发布38与完整原profile50（10原跳过）通过，限定复查无有据P1/P2。全部本轮验证零实际模型，[证据及限制](tianwen-file-trial-request-budget-result-20261005.md)。
+
+下一冻结现有source1+source3未尝试对，原八Task/两研究/两未来基线不复跑或补判，原生实际研究/启用/新后续/撤回仍未完成。目标active，不索题/自然等待/机械blocked/新增正式条件，main/Daily NO-GO/R9保持，D>=15，无依赖或环境副本。
+
 ## 2026-10-05 当前：提案真实有效，首试验因固定请求预算未完成
 
 r5一新source3 complete/检查rejected/双评审not-met，19真实/19完整轨迹、4root模拟；原七Task/旧study/两基线保持。原观察实际送达，原模型捕获有效方法/候选已保存；首baseline原合法九工具成功但超过8模型请求，分派前中止/terminal error/无receipt，原source-unavailable/0arms/激活/方法后/撤回/CLI1/排空保存，不能判方法无效或成功。预检首遗漏raw合同digest零模型失败及原冻结保持，按原字节修正后0调用CLI0。[准确范围](tianwen-ordinary-proposal-observation-result-20261005.md)。
