@@ -13,6 +13,7 @@ import { TianwenConversationObserverService } from '../../packages/tianwen-runti
 import type { ConversationExternalCodeCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-external-check.js'
 import { conversationCheckedFailureSource } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
+import { recoverConversationProposalObservation } from '../../packages/tianwen-runtime-bundle/src/conversation-proposal-observation.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { CONVERSATION_MATERIAL_MAX_BYTES, conversationProposalSchema, recoverConversationStructuredJudgment, runConversationJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
@@ -222,6 +223,19 @@ for (const scenario of ['answer-chat-pre-design-pass', 'answer-chat-pre-design-d
       expect(material.sources.every((source: Record<string, unknown>) => source.checkedFailureSources === undefined)).toBe(true)
     }
     expect(material.sources.every((source: { files?: unknown }) => source.files !== undefined)).toBe(true)
+    const originalTasks = harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(material.sourceObservations.map((item: { sourceId: string }) => item.sourceId)).toEqual(material.sourceTaskIds)
+    for (const observation of material.sourceObservations) {
+      const original = originalTasks.find(task => task.source.taskId === observation.sourceId)!
+      expect(observation.resultDigest).toBe(original.completion!.resultDigest)
+      expect(observation.review).toEqual(original.review)
+      expect(observation.acceptance).toEqual(original.externalCheckFinished ?? null)
+      expect(observation.deliveries.map((message: { id: string }) => message.id)).toEqual(original.completion!.assistantMessageIds)
+      expect(observation.fileResult.files).toEqual(original.externalCheckFinished?.projectOutputs ?? original.completion!.files!.entries)
+      expect(observation.fileResult.outputDigest).toBe(sha256({ answer: observation.fileResult.answer, files: observation.fileResult.files }))
+      expect(observation.fileResult.answer).toBe('pilot saved')
+    }
+    expect(material.sourceObservations.some((item: { sourceId: string }) => item.sourceId === originalTasks[2]!.source.taskId)).toBe(false)
     if (activeClue) {
       expect(material.proposalClues).toMatchObject([{ schemaVersion: 'tianwen.proposal-clue.v1', classification: 'attributable-problem', category: 'source-fidelity', supplementalCriteria: ['Retain pilot scope.'] }])
       expect(JSON.stringify(material.proposalClues)).not.toMatch(/toolEvidence|fileResult|files|ancillary|context/i)
@@ -236,6 +250,8 @@ for (const scenario of ['answer-chat-pre-design-pass', 'answer-chat-pre-design-d
   let checks = 0
   const trial = (label: string, verdict: 'met' | 'not-met' | 'inconclusive') => {
     script.push(request => {
+      expect(JSON.stringify(request.messages)).not.toContain('sourceObservations')
+      for (const task of harness.ctx.tianwenEvolution.listConversationTasks()) expect(JSON.stringify(request.messages)).not.toContain(task.completion!.resultDigest)
       if (checkedSources) expect(JSON.stringify(request.messages)).not.toContain('checkedFailureSources')
       return toolCallResponse(`read-${label}`, 'read', { file_path: 'input.md' })
     }, ...(chat ? [] : [toolCallResponse(`write-${label}`, 'write', { file_path: 'output.md', content: studyCheck && label !== '0-baseline' && !(scenario.includes('rejected') && label === '4-candidate') ? `pilot verified ${label}` : `pilot ${label}` })]), textResponse(chat ? `pilot ${label}` : 'pilot saved'))
@@ -300,6 +316,22 @@ for (const scenario of ['answer-chat-pre-design-pass', 'answer-chat-pre-design-d
     }
     expect(harness.ctx.tianwenEvolution.listConversationTasks().map(task => task.review?.verdict)).toEqual(checkedSources ? ['met', 'met', 'met'] : ['not-met', 'not-met', 'met'])
     if (checkedSources) expect(harness.ctx.tianwenEvolution.listConversationTasks().map(task => task.externalCheckFinished?.status)).toEqual(['rejected', 'rejected', 'verified'])
+    if (scenario === 'accepted') {
+      const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(task)
+      const observation = await recoverConversationProposalObservation(harness.ctx, task)
+      Object.assign(observation.fileResult!.files[0]!, { content: 'changed proposer copy' })
+      Object.assign(observation.deliveries[0]!, { content: [{ type: 'text', text: 'changed proposer copy' }] })
+      expect(task).toEqual(original)
+      const changedFiles = { ...task, fileInputs: task.fileInputs!.map(input => input.path === 'input.md' ? { ...input, content: 'substituted historical input' } : input) }
+      await expect(recoverConversationProposalObservation(harness.ctx, changedFiles)).rejects.toThrow('source-unavailable')
+      const inspect = harness.ctx.sessionPersistence.inspect.bind(harness.ctx.sessionPersistence)
+      const drift = vi.spyOn(harness.ctx.sessionPersistence, 'inspect').mockImplementation(async id => {
+        const saved = await inspect(id)
+        return String(id) === task.source.sessionId ? { ...saved, events: saved.events.filter(event => event.seq !== task.completion!.endSeq) } : saved
+      })
+      try { await expect(recoverConversationProposalObservation(harness.ctx, task)).rejects.toThrow('source-unavailable') } finally { drift.mockRestore() }
+    }
     if (scenario.startsWith('feedback')) {
       await harness.ctx.plugin(TianwenMessageFeedbackBridgeService); await harness.ctx.plugin(TianwenConversationFeedbackService)
       if (scenario.startsWith('feedback-clue')) {
@@ -390,14 +422,14 @@ for (const scenario of ['answer-chat-pre-design-pass', 'answer-chat-pre-design-d
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
       expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy + (scenario.endsWith('drift') ? 1 : 0))
       await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
-      expect(inputPreparations).toBe(1); return
+      expect(inputPreparations).toBe(scenario.endsWith('drift') ? 1 : 2); return
     }
     if (preDesign && !['pre-design-pass', 'pre-design-recover'].includes(scenario)) {
       expect(inputPreparations).toBe(1)
       expect(preparedCases).toBe(['pre-design-drift', 'pre-design-check-missing'].includes(scenario) ? 5 : 0)
       expect(evaluatedArms).toBe(0)
       expect(harness.ctx.tianwenEvolution.listConversationGuidanceStudies()).toEqual([])
-      expect(harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toHaveLength(1)
+      expect(harness.ctx.tianwenEvolution.listConversationCaseDesignAttempts()).toHaveLength(scenario === 'pre-design-drift' ? 1 : 0)
       expect(harness.adapter.requests).toHaveLength(requestsBeforeStudy + (scenario === 'pre-design-drift' ? 1 : 0))
       if (scenario === 'pre-design-late-cancel') {
         await lateDisposal
@@ -406,7 +438,7 @@ for (const scenario of ['answer-chat-pre-design-pass', 'answer-chat-pre-design-d
       }
       const requests = harness.adapter.requests.length
       await harness.ctx.tianwenConversationGuidanceLoop.schedule(handle.agent)
-      expect(harness.adapter.requests).toHaveLength(requests); expect(inputPreparations).toBe(1)
+      expect(harness.adapter.requests).toHaveLength(requests); expect(inputPreparations).toBe(scenario === 'pre-design-drift' || scenario === 'pre-design-cancel' ? 1 : 2)
       return
     }
     if (scenario === 'result-check-missing') {
