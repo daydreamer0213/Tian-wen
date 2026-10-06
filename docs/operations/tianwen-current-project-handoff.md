@@ -1,3 +1,9 @@
+## 2026-10-06 当前：新反馈分类误判已定位，转最窄分类指令修正
+
+目标 active。新空DEV环境在146fb75b完成24真实/0脚本，三新Task六原生票met；source1三项continuing，source2明示长期今后/本次不改却requirement-change，解释自己承认continuing preference，原票不改。study/attempt/activation/effect0，未来题/标准仍未消费；撤回后1请求无分析/方法，cold0。终态独立1914路径+19native校验通过，冻结已解除。
+
+原provider输入与源码/public bundle逐字一致，不是代码漏传。下一只修原ASSESSMENT_INSTRUCTION分类target优先/避免null空criteria示例误导，补长期未来与当前改稿两native对照、原public构建，再用新任务真实验证。不改schema/scope/原票/第三审/门槛，不索用户任务。main/Daily NO-GO保持，D约16.52GiB>=15。详见[tianwen-sentence-method-learning-result-20261006.md](tianwen-sentence-method-learning-result-20261006.md)。
+
 ## 2026-10-06 当前：两次完整研究未激活，继续明确句子边界的模拟反馈
 
 当前目标 active。e8a533c 当前版本完成100真实请求/0脚本，四新普通Task的八原生检查均met，含来源明确的采用/通知承诺。原生两研究20臂/40票均inconclusive，无方法激活/未来效果/无关任务；未消费的未来题与标准保留。一次性反馈无criteria、不进入学习；操作记录scope-only诊断标记错误已由只读终态whole-eligibility审计明确纠正，不改原票。withdraw关闭revision2，最后普通任务1请求无分析/方法，cold0，旧证据保持。

@@ -894,3 +894,9 @@ learning-r3在8ba81be5完成42真实/42完整、0模拟、10原生臂。source1 
 当前目标 active。e8a533c 当前版本完成100真实请求/0脚本，四新普通Task的八原生检查均met，含来源明确的采用/通知承诺。原生两研究20臂/40票均inconclusive，无方法激活/未来效果/无关任务；未消费的未来题与标准保留。一次性反馈无criteria、不进入学习；操作记录scope-only诊断标记错误已由只读终态whole-eligibility审计明确纠正，不改原票。withdraw关闭revision2，最后普通任务1请求无分析/方法，cold0，旧证据保持。
 
 独立审查已批准解除源码冻结，source-freeze-end收据已落盘。完整方法已到provider，失败集中在把一段与一句混淆，以及句号要求执行不稳，没有证实方法漏传。下一使用全新空DEV Profile、两个新真实模型任务及公开模拟的精确反馈（待定事项各以句号结束，一段允许多句），原自动研究/采用后才跑两未消费未来题与原标准。无重评/第三审/新门槛/人工激活，不等待用户出题。main/Daily仍NO-GO，D约16.53GiB>=15。详见[tianwen-shared-future-learning-result-20261006.md](tianwen-shared-future-learning-result-20261006.md)。
+
+## 2026-10-06 当前：新反馈分类误判已定位，转最窄分类指令修正
+
+目标 active。新空DEV环境在146fb75b完成24真实/0脚本，三新Task六原生票met；source1三项continuing，source2明示长期今后/本次不改却requirement-change，解释自己承认continuing preference，原票不改。study/attempt/activation/effect0，未来题/标准仍未消费；撤回后1请求无分析/方法，cold0。终态独立1914路径+19native校验通过，冻结已解除。
+
+原provider输入与源码/public bundle逐字一致，不是代码漏传。下一只修原ASSESSMENT_INSTRUCTION分类target优先/避免null空criteria示例误导，补长期未来与当前改稿两native对照、原public构建，再用新任务真实验证。不改schema/scope/原票/第三审/门槛，不索用户任务。main/Daily NO-GO保持，D约16.52GiB>=15。详见[tianwen-sentence-method-learning-result-20261006.md](tianwen-sentence-method-learning-result-20261006.md)。

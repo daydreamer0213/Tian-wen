@@ -209,6 +209,90 @@ describe('native feedback assessment adapter', () => {
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
+  it('delegates future-only classification before filling preference fields beside an original met task', async () => {
+    // Scripted responses verify instruction delivery and native proof mechanics, not model interpretation.
+    const note = 'For all future pilot summaries, always state the confirmed duration first. This completed answer needs no rewrite.'
+    const criterion = 'State the confirmed duration first in future pilot summaries.'
+    const preference = { classification: 'preference', category: 'user-preference', supplementalCriteria: [criterion],
+      explanation: 'The imperative applies to ongoing future summaries, with no requested present revision.',
+      evidenceQuotes: [note] }
+    const scope = { decisions: [{ criterion, scope: 'continuing', evidenceQuote: note }] }
+    let delegated = ''
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), request => {
+        delegated = JSON.stringify(request)
+        return structured(preference)
+      }, structured(scope)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      expect(original.review?.verdict).toBe('met')
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(delegated).toContain('Choose classification from the feedback target first, then fill category and supplementalCriteria')
+      expect(delegated).toContain('null and [] are not universal defaults')
+      expect(delegated).toContain('An original met review neither rules out a new continuing preference nor proves user satisfaction')
+      expect(delegated).toContain('Explicitly declining revision of the completed answer is not a reason for requirement-change')
+      expect(delegated).toContain(note)
+      expect(assessment.result).toMatchObject({ classification: 'preference', category: 'user-preference',
+        supplementalCriteria: [criterion], unavailableReason: null,
+        proof: { sessionId: expect.any(String) }, scopeReview: { decisions: scope.decisions, proof: { sessionId: expect.any(String) } } })
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, preference)
+      const scoped = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.scopeReview!.proof, scope)
+      expect(recovered.material).toEqual(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment))
+      expect(scoped.material).toMatchObject({ feedback: { rating: 'negative', note }, criteria: [criterion] })
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(true)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment))
+        .resolves.toMatchObject({ taskId: target.source.taskId, classification: 'preference', category: 'user-preference',
+          supplementalCriteria: [criterion], feedback: { rating: 'negative', note } })
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(harness.adapter.requests).toHaveLength(6)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it('delegates present revision classification without promoting a new requirement into a future clue', async () => {
+    // Scripted responses verify the contrasting native path, not real-provider classification quality.
+    const note = 'Rewrite this completed answer as two sentences. This request applies only to this answer.'
+    const revision = { classification: 'requirement-change', category: null, supplementalCriteria: [],
+      explanation: 'The user requests a different present deliverable, not an ongoing future preference.', evidenceQuotes: [note] }
+    let delegated = ''
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), request => {
+        delegated = JSON.stringify(request)
+        return structured(revision)
+      }])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      expect(original.review?.verdict).toBe('met')
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(delegated).toContain('First determine whether the direct feedback requests a change to the present deliverable or states a continuing preference for future similar tasks')
+      expect(delegated).toContain('A new instruction is not by itself a requirement-change')
+      expect(delegated).toContain('Choose classification from the feedback target first, then fill category and supplementalCriteria')
+      expect(delegated).toContain(note)
+      expect(assessment.result).toMatchObject({ classification: 'requirement-change', category: null,
+        supplementalCriteria: [], unavailableReason: null, proof: { sessionId: expect.any(String) } })
+      expect(assessment.result?.scopeReview).toBeUndefined()
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, revision)
+      expect(recovered.material).toEqual(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment))
+      expect(recovered.material).toMatchObject({ feedback: { rating: 'negative', note } })
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('not eligible')
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(harness.adapter.requests).toHaveLength(5)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('independently rechecks a requirement-change judgment that also supplies future criteria', async () => {
     const futureNote = 'For all future pilot summaries, use two sentences. Do not revise the earlier answer.'
     const contradictory = { classification: 'requirement-change', category: null,

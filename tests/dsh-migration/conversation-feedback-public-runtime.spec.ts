@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -88,6 +88,28 @@ async function putFeedback(harness: Awaited<ReturnType<typeof mountPublic>>) {
 }
 
 describe('public bundled Runtime native feedback scope capture', () => {
+  it('delegates the complete current assessment instruction through the deployable public entry', async () => {
+    // This checks deployable instruction transport, with disclosed fixture responses;
+    // it cannot establish that a real model will classify future preferences correctly.
+    const source = readFileSync(new URL('../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.ts', import.meta.url), 'utf8')
+    const instruction = source.match(/const ASSESSMENT_INSTRUCTION = `([\s\S]*?)`/)?.[1]
+    expect(instruction).toBeTruthy()
+    const harness = await mountPublic([corrected])
+    try {
+      const assessment = await putFeedback(harness)
+      const request = harness.adapter.requests.find(request =>
+        request.tools?.find(tool => tool.name === 'structured_output')?.parameters.properties?.classification !== undefined)
+      expect(request).toBeDefined()
+      expect(JSON.stringify(request)).toContain(JSON.stringify(instruction).slice(1, -1))
+      const result = assessment.result!
+      const { kind, assessmentId, taskId, proof, scopeReview, unavailableReason, ...value } = result
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, proof!, value)
+      expect(recovered.material).toMatchObject({ feedback: { rating: 'negative', note } })
+      expect(result).toMatchObject({ classification: 'preference', unavailableReason: null })
+      expect(harness.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('rejects an explicitly scripted nonliteral first quote before the same native child captures its correction', async () => {
     const invalid = { decisions: [corrected.decisions[0], { ...corrected.decisions[1],
       evidenceQuote: 'For all future neighborhood notices…with no title.' }] }
