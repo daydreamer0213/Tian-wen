@@ -1,5 +1,13 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 最新：当前语义八例检查完成，转普通产品预览
+
+冻结72b1fb3d/current v11，八份全新公开固定诊断答案首次原生双审17真实请求，CLI预检/运行0、正常排空。七例符合预期，一例虚构必要依赖的requirements met/grounding not-met→原inconclusive；没有错误met共识，不称八例全过或普遍安全。四正常对照均met，未把可选建议及来源明确的条件/承诺一律禁止。
+
+首次环境缺原SDK factory在0模型/0材料消费处失败；r2只接原agent-loop/tools并实际创建/关闭会话预检。同案例S04原生参数纠正导致2调用复用1header，首审计误记invalid；r3独立只读逐step请求还原、原verify/recover全保持，实际audit0确认十六原proof、7匹配/1分歧/0invalid。首失败、首invalid和全部原票保留，0重评/0新增模型。149生产/840旧保护文件执行时不变，未挂学习Runtime或写学习账本。限定复核无剩余P1/P2。
+
+本轮收口，不因一票分歧增加prompt/第三审/发布门槛，不重跑八例或已完成摘要学习；下一有限普通产品预览核当前入口身份、状态、交付整合，真实反馈沿原归因/后续回复，原关闭和冷恢复规则保持，不为凑消费者数量或强求研究再测。受控DEV完整目标已完成，main/Daily原R9 NO-GO保持。详见[tianwen-current-semantic-panel-result-20261006.md](tianwen-current-semantic-panel-result-20261006.md)。生成约18.8MiB，无依赖/运行时/旧状态副本或大缓存；D约16.70GiB>=15、未20。
+
 ## 2026-10-06 最新：受控 DEV 自动学习链路完成，正式发布仍 NO-GO
 
 87512b86新匿名摘要分支完成原CLI预检、原Loop恢复、实际任务、冷恢复及独立终态审计，全部退出0。复用f1b0d12f原accepted十臂与完整原生proof；明确模拟accepted已落盘/activation未落盘中断，在新分支零模型恢复并自动启用，不重跑研究、不改旧撤回。历史Session只链接原accepted-prefix实际引用的123项，不凑旧126项。
