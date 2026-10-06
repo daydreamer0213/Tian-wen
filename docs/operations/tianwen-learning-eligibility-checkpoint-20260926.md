@@ -888,3 +888,9 @@ R9 已有真实原生 `accepted` 与 `guidance-activated`，U6–U9 也实际使
 learning-r3在8ba81be5完成42真实/42完整、0模拟、10原生臂。source1 not-met→met、source2 inconclusive→met、counter not-met→met、adjacent not-met→inconclusive、holdout met→not-met；原inconclusive/CLI1/排空，无激活/后续/撤回。旧四Task、两研究、52消费者、六其他旧账本、原环境/前缀保持。四次真实短引用成功；不重判旧停止或声称完整学习成功。
 
 候选把已执行复核重新说成建议，并超长；另有隔离评审看不到动作上下文的自证尾句。不能以放宽baseline规则掩盖候选失败；DEV判定版本未改。下一已冻结两个模拟“建议后来执行、旧通过后来撤回”的新任务/错误交付，原入题及研究模型实际运行。来源公开模拟、后续实际效果分开；旧四Task/三研究保持。原接受才启用/未来对比/未用任务/撤回/冷恢复，不等自然、不索题、不增正式门槛。目标active，main/Daily NO-GO/R9保持，D约16.8GiB>=15，无依赖副本。详见当前交接及状态汇报结果文档。
+
+## 2026-10-06 当前：两次完整研究未激活，继续明确句子边界的模拟反馈
+
+当前目标 active。e8a533c 当前版本完成100真实请求/0脚本，四新普通Task的八原生检查均met，含来源明确的采用/通知承诺。原生两研究20臂/40票均inconclusive，无方法激活/未来效果/无关任务；未消费的未来题与标准保留。一次性反馈无criteria、不进入学习；操作记录scope-only诊断标记错误已由只读终态whole-eligibility审计明确纠正，不改原票。withdraw关闭revision2，最后普通任务1请求无分析/方法，cold0，旧证据保持。
+
+独立审查已批准解除源码冻结，source-freeze-end收据已落盘。完整方法已到provider，失败集中在把一段与一句混淆，以及句号要求执行不稳，没有证实方法漏传。下一使用全新空DEV Profile、两个新真实模型任务及公开模拟的精确反馈（待定事项各以句号结束，一段允许多句），原自动研究/采用后才跑两未消费未来题与原标准。无重评/第三审/新门槛/人工激活，不等待用户出题。main/Daily仍NO-GO，D约16.53GiB>=15。详见[tianwen-shared-future-learning-result-20261006.md](tianwen-shared-future-learning-result-20261006.md)。

@@ -1,3 +1,9 @@
+## 2026-10-06 当前：两次完整研究未激活，继续明确句子边界的模拟反馈
+
+当前目标 active。e8a533c 当前版本完成100真实请求/0脚本，四新普通Task的八原生检查均met，含来源明确的采用/通知承诺。原生两研究20臂/40票均inconclusive，无方法激活/未来效果/无关任务；未消费的未来题与标准保留。一次性反馈无criteria、不进入学习；操作记录scope-only诊断标记错误已由只读终态whole-eligibility审计明确纠正，不改原票。withdraw关闭revision2，最后普通任务1请求无分析/方法，cold0，旧证据保持。
+
+独立审查已批准解除源码冻结，source-freeze-end收据已落盘。完整方法已到provider，失败集中在把一段与一句混淆，以及句号要求执行不稳，没有证实方法漏传。下一使用全新空DEV Profile、两个新真实模型任务及公开模拟的精确反馈（待定事项各以句号结束，一段允许多句），原自动研究/采用后才跑两未消费未来题与原标准。无重评/第三审/新门槛/人工激活，不等待用户出题。main/Daily仍NO-GO，D约16.53GiB>=15。详见[tianwen-shared-future-learning-result-20261006.md](tianwen-shared-future-learning-result-20261006.md)。
+
 # Tianwen 当前项目权威交接
 
 ## 2026-10-06 当前：长期范围首次实测有效，原生研究已启动，完整目标仍 active
