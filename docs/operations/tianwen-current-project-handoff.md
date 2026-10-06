@@ -1,3 +1,9 @@
+## 2026-10-06 当前：新学习停止因审核解释超过原保存上限
+
+Task10原public16/public4/旧proof兼容、独立预检通过；65actual0script，三普通双met、两feedback各五continuing。原研究九已记录臂/18proof；holdoutcandidate实际#62生成+#63/#64双捕获met，但#63 explanation4314 UTF8超过原parser4096，TypeError被原catch归source-unavailable，第十臂/决策/激活未写。未消费future/效果标准不变，无后任务效果。原run/cold/audit0，2252保护+52SDK零差，撤回rev2，独立终态后freeze-end实际释放。
+
+blind与native区分：countercandidate实际0换行，却被grounding称3行，是确定审核事实错误；source2完整feedback已传，尚待登记归已确认/未定措辞存在范围歧义，不追加严格旧标准；adjacent禁止任何时间与原周五保留字面冲突。整体目标active/mainDailyNO-GO。下一仅capture早提示原4096解释字节上限，原同child自行修订、不改schema/finalparser/质量/裁决；新模拟反馈明确已完成/可借用与尚待办理/未确定分类。详见[tianwen-record-boundary-learning-result-20261006.md](tianwen-record-boundary-learning-result-20261006.md)。
+
 ## 2026-10-06 当前：自动出题要求已澄清，待新批前瞻
 
 Task9仅原text case-design一行说明：记录/介绍语范围明确，检查项具体相容，保留真实压缩与缺字段保留题，不暗加字数或句式要求。原schema/host/quality.v12/双审/DEV与正式门槛不变。原生机制RED2→GREEN2，最终完整162/162退出0；首次full160/162保留，分别是非canonical测试根与旧容量fixture固定开销失效。仅修正外部测试根及样本按实际开销至MAX-1，原拒绝/原文/两调用/无study断言未弱化。公开构建及真实新批尚待运行，不能称语义效果通过。

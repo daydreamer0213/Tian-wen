@@ -1,5 +1,9 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前记录边界前瞻资格
+
+2cc67c1c新65实际0script，三原Task六met、两模拟反馈五+五continuing，原研究九臂/18proof、无decision/activation/future。第十候选#62生成+#63/#64原capture met，#63 explanation4314字节被原4096后验parser拒绝，不可把未入账票补成第十臂。原run/cold/audit0、2252保护52SDK保持、freeze已释放。counter0换行却原票称3行；source2完整反馈已传但未定/已知未完成分类歧义保留，adjacent时间禁令与周五保留冲突不改票。整体active/mainNO-GO。下一capture只提前原4096拒绝、同child自己修复，新输入明确pending分类，不添门槛。详见[tianwen-record-boundary-learning-result-20261006.md](tianwen-record-boundary-learning-result-20261006.md)。
+
 ## 2026-10-06 当前自动出题实现资格
 
 Task9原text case-design范围与压缩要求说明已澄清，原schema/质量/双审/裁决不改。新增两脚本原生机制RED→GREEN，完整162/162；旧容量fixture动态校准并保留原拒绝断言，首次full两失败保留。机制测试只证明实际委托/原proof/Task不改，不证明真实语义独立或新方法效果。公开build及新记录条件式反馈前瞻尚待运行；旧70实际研究inconclusive不重判。完整目标active/main Daily NO-GO，见[tianwen-record-boundary-learning-implementation-20261006.md](tianwen-record-boundary-learning-implementation-20261006.md)。
