@@ -1,3 +1,9 @@
+## 2026-10-06 当前：自动出题要求已澄清，待新批前瞻
+
+Task9仅原text case-design一行说明：记录/介绍语范围明确，检查项具体相容，保留真实压缩与缺字段保留题，不暗加字数或句式要求。原schema/host/quality.v12/双审/DEV与正式门槛不变。原生机制RED2→GREEN2，最终完整162/162退出0；首次full160/162保留，分别是非canonical测试根与旧容量fixture固定开销失效。仅修正外部测试根及样本按实际开销至MAX-1，原拒绝/原文/两调用/无study断言未弱化。公开构建及真实新批尚待运行，不能称语义效果通过。
+
+新相机配件/线材记录和模拟持续反馈已经准备：只用授权记录事实，时间/地点有才写，未定事项各句号且一段。未消费future1/2/无关题及原六效果标准逐字保留，原激活后才评效果；无新门槛。完整目标active、main/Daily NO-GO，D约16.44GiB>=15，无全量环境复制。详见[tianwen-record-boundary-learning-implementation-20261006.md](tianwen-record-boundary-learning-implementation-20261006.md)。
+
 ## 2026-10-06 当前：标准提取实测修复，完整研究尚未采用
 
 e1734dac原构建16/196检查、11反馈+22审核旧proof零模型兼容通过；全新批70实际/0脚本，三普通Task六met，两反馈各三行为/scope全continuing，没有本次不改元标准。原一项完整10臂/20proof研究：两源baseline not-met/candidate met，counter双方met，adjacent候选压缩分歧、holdout候选依sheet-only限制not-met；原decision inconclusive，无activation/未来效果。独立盲审保留压缩及上下文地点范围解释，不称捏造地点。原退出/cold/audit0，2106路径+52SDK零差，freeze-end已释放。

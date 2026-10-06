@@ -1,5 +1,9 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前自动出题实现资格
+
+Task9原text case-design范围与压缩要求说明已澄清，原schema/质量/双审/裁决不改。新增两脚本原生机制RED→GREEN，完整162/162；旧容量fixture动态校准并保留原拒绝断言，首次full两失败保留。机制测试只证明实际委托/原proof/Task不改，不证明真实语义独立或新方法效果。公开build及新记录条件式反馈前瞻尚待运行；旧70实际研究inconclusive不重判。完整目标active/main Daily NO-GO，见[tianwen-record-boundary-learning-implementation-20261006.md](tianwen-record-boundary-learning-implementation-20261006.md)。
+
 ## 2026-10-06 当前可观察标准资格
 
 e1734dac当前公开build16/196回归/33旧proof零模型兼容通过。新空DEV两公开模拟反馈原preference，各三observable标准及scope全部continuing，whole资格true；“本次不改”未提取为标准。70actual/0script、三普通六met、一原新研究10臂20有效proof，两source paired not-met→met，counter无回退，adjacent候选inconclusive/holdout候选not-met，原研究inconclusive未激活。原未来题/六标准未消费；不能称后任务改善、完整自动学习或正式发布通过。
