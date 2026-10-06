@@ -377,6 +377,12 @@ async function runNativeStructured(ctx: Context, parent: Agent, input: NativeStr
         && validateJsonSchemaValue(input.outputSchema, exec.arguments).includes(`"value.${key}" is not a declared property (additionalProperties: false)`)) {
         return { kind: 'deny' as const, reason: `Submit the schema's root fields directly: ${JSON.stringify(Object.keys(input.outputSchema.properties ?? {}))}. Use no arguments or value wrapper and do not serialize an inner object into a string. Keep the original evidence and host instructions; the host has not unwrapped, repaired or captured this submission.` }
       }
+      const categorySchema = input.outputSchema.properties?.category
+      if ((exec.arguments as Record<string, unknown>).category === 'null' && categorySchema !== undefined
+        && validateJsonSchemaValue(categorySchema, null).length === 0
+        && validateJsonSchemaValue(categorySchema, 'null').length > 0) {
+        return { kind: 'deny' as const, reason: 'Invalid category type: the string "null" is not accepted by the declared category schema. If your judgment calls for null, submit JSON null without quotation marks; otherwise choose a category allowed by the original schema. Decide the category and verdict under the original evidence and instructions. The host has not replaced, repaired or captured this submission.' }
+      }
     }
     const reason = input.validateCapture?.(exec.arguments)
     return reason === undefined ? gate : { kind: 'deny' as const, reason }

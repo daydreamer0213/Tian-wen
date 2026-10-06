@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -17,6 +17,159 @@ const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-su
 const repeatReminder = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-repeat-tool-reminder')).href)
 const roots: string[] = []
 const verdictSchema: ObjectJsonSchema = { type: 'object', properties: { verdict: { type: 'string', enum: ['inconclusive'] } }, required: ['verdict'], additionalProperties: false }
+
+it.each(['met', 'inconclusive'] as const)('explains a null-token category type error before native self-correction for %s', async verdict => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-null-token-tests-20261006/task18/sdk-fixtures' : '/tmp/tianwen-null-token-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'null-correction-')); roots.push(root)
+  const material = { request: 'Report only supplied facts.', source: 'The date is unknown.' }
+  const instruction = 'Judge the original evidence honestly; do not presume a passing verdict.'
+  const value = { verdict, category: null, explanation: 'The source leaves the date unknown.', evidenceQuotes: [material.source] }
+  const invalid = { ...value, category: 'null' }
+  const schemaBefore = JSON.stringify(CONVERSATION_REVIEW_SCHEMA)
+  const harness = await mountPersistentHarness(root, [toolCallResponse('null-string', 'structured_output', invalid), request => {
+    expect(JSON.stringify(request.messages)).toContain('The date is unknown.')
+    expect(JSON.stringify(request.messages)).toContain(instruction)
+    return toolCallResponse('null-token', 'structured_output', value)
+  }])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('null-correction-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Null token correction', instruction, material,
+      signal: new AbortController().signal, outputSchema: CONVERSATION_REVIEW_SCHEMA })
+    expect(result.value).toEqual(value)
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    const results = saved.events.filter(event => event.type === 'tool/result')
+    const failed = results.find(event => event.data.message.source.callId === 'null-string')!
+    expect(failed.data.message.content.some(block => block.type === 'tool-result' && block.isError === true)).toBe(true)
+    expect(results.filter(event => event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments)).toEqual([JSON.stringify(invalid), JSON.stringify(value)])
+    expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(saved.meta.parentSession).toBe('null-correction-parent')
+    expect(JSON.stringify(CONVERSATION_REVIEW_SCHEMA)).toBe(schemaBefore)
+    const requests = harness.adapter.requests.length
+    expect(await recoverConversationStructuredJudgment(harness.ctx, result.proof, value)).toMatchObject({ material, instruction })
+    expect(harness.adapter.requests).toHaveLength(requests)
+    const evidenceRoot = process.env.TIANWEN_NULL_TOKEN_EVIDENCE_ROOT
+    if (evidenceRoot !== undefined) {
+      mkdirSync(evidenceRoot, { recursive: true })
+      const path = join(evidenceRoot, `${process.env.TIANWEN_NULL_TOKEN_STAGE ?? 'run'}-${verdict}.json`)
+      if (!existsSync(path)) writeFileSync(path, JSON.stringify({ scripted: true, actualProviderCalls: 0, result, saved, requestCount: requests }, null, 2), { flag: 'wx' })
+    }
+    expect(JSON.stringify(failed.data.message.content)).toContain('JSON null without quotation marks')
+    expect(JSON.stringify(failed.data.message.content)).toContain('original evidence and instructions')
+    expect(JSON.stringify(failed.data.message.content)).toContain('has not replaced, repaired or captured')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('cannot form a judgment proof from an uncorrected null-token category string', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-null-token-tests-20261006/task18/sdk-fixtures' : '/tmp/tianwen-null-token-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'null-uncorrected-')); roots.push(root)
+  const invalid = { verdict: 'inconclusive', category: 'null', explanation: 'The date is unknown.', evidenceQuotes: ['The date is unknown.'] }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('null-string-only', 'structured_output', invalid), textResponse('I cannot correct the field.')])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('null-uncorrected-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const outcome = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Uncorrected null token', instruction: 'Preserve uncertainty.',
+      material: { source: 'The date is unknown.' }, signal: new AbortController().signal, outputSchema: CONVERSATION_REVIEW_SCHEMA }).catch((error: unknown) => error)
+    expect(outcome).toMatchObject({ message: 'invalid-judgment' })
+    expect(outcome).not.toHaveProperty('proof')
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(String(harness.adapter.requests[0]!.sessionId)))
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments)).toEqual([JSON.stringify(invalid)])
+    expect(saved.events.filter(event => event.type === 'tool/result' && event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(0)
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(1)
+    expect(JSON.stringify(saved.events)).toContain('JSON null without quotation marks')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each([
+  { name: 'declared string null', schema: { type: 'object', properties: { category: { type: 'string', enum: ['null'] } }, required: ['category'], additionalProperties: false }, value: { category: 'null' } },
+  { name: 'both null types allowed', schema: { type: 'object', properties: { category: { oneOf: [{ type: 'string', enum: ['null'] }, { type: 'null' }] } }, required: ['category'], additionalProperties: false }, value: { category: 'null' } },
+  { name: 'open object without category property', schema: { type: 'object', additionalProperties: true }, value: { category: 'null' } },
+  { name: 'open category property', schema: { type: 'object', properties: { category: {} }, additionalProperties: false }, value: { category: 'null' } },
+  { name: 'normal JSON null', schema: CONVERSATION_REVIEW_SCHEMA, value: { verdict: 'inconclusive', category: null, explanation: 'Unknown date.', evidenceQuotes: [] } },
+  { name: 'normal failure category', schema: CONVERSATION_REVIEW_SCHEMA, value: { verdict: 'not-met', category: 'instruction-following', explanation: 'An original instruction was violated.', evidenceQuotes: [] } },
+] as const)('retains a legal native null-token control: $name', async ({ schema, value }) => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-null-token-tests-20261006/task18/sdk-fixtures' : '/tmp/tianwen-null-token-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'null-control-')); roots.push(root)
+  const outputSchema = structuredClone(schema) as ObjectJsonSchema
+  const harness = await mountPersistentHarness(root, [toolCallResponse('legal-category', 'structured_output', value)])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('null-control-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Null token control', instruction: 'Use the original schema and evidence.',
+      material: { source: 'The date is unknown.' }, signal: new AbortController().signal, outputSchema })
+    expect(result.value).toEqual(value)
+    expect(harness.adapter.requests).toHaveLength(1)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    expect(JSON.stringify(saved.events)).not.toContain('JSON null without quotation marks')
+    await recoverConversationStructuredJudgment(harness.ctx, result.proof, value)
+    expect(harness.adapter.requests).toHaveLength(1)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each([
+  { name: 'category schema rejects JSON null too', schema: { type: 'object', properties: { category: { type: 'string', enum: ['instruction-following'] } }, required: ['category'], additionalProperties: false }, invalid: { category: 'null' }, corrected: { category: 'instruction-following' } },
+  { name: 'a different nullable property', schema: { type: 'object', properties: { relatedTaskId: { oneOf: [{ type: 'string', enum: ['task-1'] }, { type: 'null' }] } }, required: ['relatedTaskId'], additionalProperties: false }, invalid: { relatedTaskId: 'null' }, corrected: { relatedTaskId: null } },
+] as const)('retains generic schema rejection for null-token control: $name', async ({ schema, invalid, corrected }) => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-null-token-tests-20261006/task18/sdk-fixtures' : '/tmp/tianwen-null-token-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'null-generic-')); roots.push(root)
+  const harness = await mountPersistentHarness(root, [toolCallResponse('invalid-category', 'structured_output', invalid), toolCallResponse('corrected-category', 'structured_output', corrected)])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('null-generic-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Generic null token control', instruction: 'Use the original schema.',
+      material: { source: 'The date is unknown.' }, signal: new AbortController().signal, outputSchema: structuredClone(schema) as ObjectJsonSchema })
+    expect(result.value).toEqual(corrected)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+    const failed = saved.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'invalid-category')!
+    expect(JSON.stringify(failed)).toContain('invalid arguments:')
+    expect(JSON.stringify(failed)).not.toContain('JSON null without quotation marks')
+    expect(harness.adapter.requests).toHaveLength(2)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.each(['same parent, other label', 'other parent, same label'] as const)('keeps the null-token hint scoped to its exact child: %s', async boundary => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-null-token-tests-20261006/task18/sdk-fixtures' : '/tmp/tianwen-null-token-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'null-scope-')); roots.push(root)
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>(resolve => { entered = resolve })
+  const held = new Promise<void>(resolve => { release = resolve })
+  const value = { verdict: 'inconclusive', category: null, explanation: 'Unknown date.', evidenceQuotes: [] }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('held-category', 'structured_output', value),
+    toolCallResponse('other-category', 'structured_output', { category: 'null' })])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const offHold = harness.ctx.on('tools/pre-execute', async (exec, next) => {
+    if (String(exec.callId) === 'held-category') { entered(); await held }
+    return next()
+  })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('null-scope-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const other = await harness.ctx.agents.create({ sessionId: SessionId('null-other-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const pending = runConversationJudgment(harness.ctx, handle.agent, { label: 'Held nullable category', instruction: 'Preserve uncertainty.',
+    material: { source: 'The date is unknown.' }, signal: new AbortController().signal, outputSchema: CONVERSATION_REVIEW_SCHEMA })
+  void pending.catch(() => {})
+  try {
+    await ready
+    const child = harness.ctx.agents.list().find(agent => String(agent.session.id) === String(harness.adapter.requests[0]!.sessionId))!
+    const descriptor = child.session.events.find(event => event.type === 'subagent/descriptor')!
+    if (descriptor.type !== 'subagent/descriptor') throw new Error('missing native descriptor')
+    const run = await harness.ctx.subagents.start('spawn', { label: boundary === 'other parent, same label' ? descriptor.data.label : 'Different native child label',
+      parent: boundary === 'other parent, same label' ? other.agent : handle.agent, prompt: [{ type: 'text', text: 'Submit the literal string category null.' }],
+      signal: new AbortController().signal, maxDepth: 1, toolFilter: { allow: [] },
+      outputSchema: { type: 'object', properties: { category: { type: 'string', enum: ['null'] } }, required: ['category'], additionalProperties: false } })
+    expect((await run.result).structured).toEqual({ category: 'null' })
+    expect(run.localAgent).toBeDefined()
+    expect(await harness.ctx.sessions.flush(run.localAgent!.session)).toBe(true)
+    const saved = await harness.ctx.sessionPersistence.inspect(run.id)
+    expect(JSON.stringify(saved.events)).not.toContain('JSON null without quotation marks')
+    release()
+    expect((await pending).value).toEqual(value)
+    expect(harness.adapter.requests).toHaveLength(2)
+    expect(new Set(harness.adapter.requests.map(request => String(request.sessionId))).size).toBe(2)
+  } finally { release(); await pending.catch(() => {}); offHold(); await other.dispose(); await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it.each([
   { key: 'arguments', inner: '{"verdict":"inconclusive"}' },

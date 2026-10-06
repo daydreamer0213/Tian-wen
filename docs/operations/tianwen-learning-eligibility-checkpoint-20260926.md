@@ -1,4 +1,8 @@
-## 2026-10-06 当前资格：普通公开接线通过，首次研究未完整采用
+## 2026-10-06 当前：null类型提示只具机制资格
+
+Task18原SDK scripted RED2→GREEN13及六原judgment/claim套件193/193、默认类型/diff0，独立spec/quality PASS。仅原parent/label scoped口按原schema解释错误字符串null，不代填/不改SDK/schema/质量/双审/裁决；0真实provider/安装/worker build。尚待公开原构建/入口/旧proof零模型兼容及全新Task19普通前瞻；prepared输入无多余标签，cold已明确inject，无actual profile/freeze。不能补Task17最后缺票或宣称其adjacent inc已修复，原future三对象/六标准不改。goal active/main Daily NO-GO。见[tianwen-null-token-implementation-20261006.md](tianwen-null-token-implementation-20261006.md)。
+
+## 2026-10-06 此前资格：普通公开接线通过，首次研究未完整采用
 
 63ab0eaa公开原16步、actual dist新4/旧feedback4、默认类型/imports与历史proof零调用兼容已完成。Task17空ordinary profile98真实/0脚本，三普通6checks met、两模拟反馈3/4 continuing完整资格，原新研究case/proposal/10真实trial输出成立；只有9正式arm/18完整proof，末grounding34原拒绝0capture后invalid-judgment，无decision/clearance/activation/未来效果。两源baseline not-met→candidate met与首盲相容；adjacent baseline inc原票保留，末candidate真实文本不是正式票。原future三对象/六标准未消费，不能说完整自动学习通过。
 

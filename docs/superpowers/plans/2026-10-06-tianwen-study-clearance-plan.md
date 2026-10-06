@@ -49,8 +49,8 @@ Task17完整研究/许可/效果未发生，不勾选第二项或整体完成。
 
 设计见../specs/2026-10-06-tianwen-null-token-design.md。复用investigate_actor_semantic_seam，ONLY conversation-judgment.ts 与 conversation-judgment.spec.ts；root文档/public/实际控制，review_shared_future_scope独立spec/quality。Workers not alone，不撤销他人改动。Task17实际freeze-end释放才编辑。
 
-- [ ] 原真实SDK scripted RED：category字符串null收到准确类型区别，模型自己在下一步交JSONnull；bad-only无proof，合法字符串null schema/正常enum/正常null沿原规则。原错误payload留存。
-- [ ] 仅原同parent/label pre-execute依据原schema拒绝错误类型并说明；不换值、不变schema/SDK/材料/旧票/最终parser/quality/双审/裁决。GREEN及完整原judgment/claim/type/diff，独立复核。
+- [x] 原真实SDK scripted RED：category字符串null收到准确类型区别，模型自己在下一步交JSONnull；bad-only无proof，合法字符串null schema/正常enum/正常null沿原规则。原错误payload留存。
+- [x] 仅原同parent/label pre-execute依据原schema拒绝错误类型并说明；不换值、不变schema/SDK/材料/旧票/最终parser/quality/双审/裁决。GREEN及完整原judgment/claim/type/diff，独立复核。新增13、原完整193、默认类型/diff0，独立spec/quality PASS。
 - [ ] 原公开构建与入口、旧证明零模型兼容后全新清楚业务任务首次前瞻；保留原future三对象/六标准。若未formal accepted/独立许可/真实采用，不消费后任务、不填成功。
 
 此项提示不保证模型成功，且不是原adjacent baseline inconclusive的修复；新任务无需多余标签歧义，不新增禁标签或更严格式要求。用户已经授权自主选择与模拟，不因设计/开发例行步骤再问执行许可。

@@ -1,4 +1,8 @@
-## 2026-10-06 当前：普通公开接线通过，新研究最后审核无效停止
+## 2026-10-06 当前：null类型提示机制通过，准备公开构建及全新前瞻
+
+Task18只原scoped preexecute新增6行schema-guided category字符串null类型提示，模型自行决定/纠正，原SDK/schema/proof/质量/双审/裁决不变。真实SDK scripted RED2/73skip→GREEN13/62skip，原六套193/193、默认类型/diff0，独立spec/quality PASS。首scope夹具async错误及四首SDK快照保留，0真实provider/0install/0worker build；public仍待root。原Task17九臂/无许可效果及adjacent inc不补票，原future三对象/六标准未消费保持。Task19新无多余标签记录/cold明确inject模板prepared-only，无actual profile/freeze。goal active/main Daily原NO-GO；下一原public/旧proof兼容→新普通首次真实学习，不加标准、不等用户。见[tianwen-null-token-implementation-20261006.md](tianwen-null-token-implementation-20261006.md)。
+
+## 2026-10-06 此前：普通公开接线通过，新研究最后审核无效停止
 
 63ab0eaa原public16/16、actual dist新4+旧feedback4、两包默认类型/private imports/旧11反馈22claim26原review零模型兼容均0；公开源码已推送。全新空ordinary Profile实际98真/0脚本，三普通六原checks met，两公开模拟preference各3/4 continuing完整eligible，同族原case/proposal与10次真实trial成立。账本9正式arm/18proof：两源not-met→met、反例met→met、adjacent baseline inc/candidate met、holdout baseline met；末candidate trial+requirements实际有，但grounding34机械拒绝/0capture，原invalid-judgment停止，无decision/许可/激活/后效果，原future三对象/六标准未消费。
 
