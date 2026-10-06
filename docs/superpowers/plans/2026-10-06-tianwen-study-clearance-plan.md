@@ -34,11 +34,23 @@ Root与现有worker按不重叠具体文件分工；待Task15接口及独立复�
 - [x] 新宿主guidanceIndependentReview回调和静态无原票投影，复用原完整packet验证；保存准确包与第一审查结果，AI身份由宿主配置提供，另存原票对照；没有回调保留待审状态。
 - [x] 原public apply默认隔离不变，三入口统一专用许可/activation，事件可唤醒已clear研究；重启已有结果不重复独立审查，拒绝不重评。
 - [x] 原native harness RED/GREEN：真实宿主调用路径、首次首盲材料无票/源反馈未失真、clear/reject/insufficient、不配置、许可写后中断冷恢复、撤回/直写拒绝。明确脚本机制，不伪称AI真实安全。
-- [ ] 原public完整build、相关source和实际public regressions、private imports与旧proof零调用兼容；独立code/preflight复核。
+- [x] 原public完整build、相关source和实际public regressions、private imports与旧proof零调用兼容；独立code/preflight复核。63ab原16步/actual4+4/default types/imports/旧proof均实际0，独立实际Task17 preflight PASS。
 
 ### Task17：全新普通产品首次前瞻及发布结论
 
-- [ ] 新空普通Profile、公开模拟故障/反馈、新有用任务，准确冻结source/public版本/材料。明确摘要任务语境避免本批分类歧义，但不强制模型family/decision。原未来任务及六标准未消费保持。
+- [x] 新空普通Profile、公开模拟故障/反馈、新有用任务，准确冻结source/public版本/材料。明确摘要任务语境避免本批分类歧义，但不强制模型family/decision。原未来任务及六标准未消费保持。
 - [ ] 原正式研究、独立受信审查、许可及采用实际发生后，检查后任务选择与原效果；无accepted则保留首次未采用，不重跑旧对或填成功。
-- [ ] 原撤回/冷恢复/逐实际请求/证据/首盲与终态复核。清理可再生重复空间，保留必要原生证明与首结果；更新handoff/checkpoint并给原门槛下明确发布判断。
+- [x] 原撤回/冷恢复/逐实际请求/证据/首盲与终态复核。清理可再生重复空间，保留必要原生证明与首结果；更新handoff/checkpoint并给原门槛下明确发布判断。98实际/9正式arm停止；首cold1保留、独立零模型operator恢复0，实际freeze-end已释放、整体active/mainDaily NO-GO。没有可据以宣称的空间释放。
 - [ ] 只有目标实际达到才complete；有限实现或单轮结束均不能代替整体目标完成，不将NO-GO泛化成无产品或再次等待用户输入。
+
+Task17完整研究/许可/效果未发生，不勾选第二项或整体完成。原始相邻baseline分歧与最后提交失败保留，不重开该pair。后续原未消费future任务继续保持。
+
+### Task18：原schema的null类型错误精确提示
+
+设计见../specs/2026-10-06-tianwen-null-token-design.md。复用investigate_actor_semantic_seam，ONLY conversation-judgment.ts 与 conversation-judgment.spec.ts；root文档/public/实际控制，review_shared_future_scope独立spec/quality。Workers not alone，不撤销他人改动。Task17实际freeze-end释放才编辑。
+
+- [ ] 原真实SDK scripted RED：category字符串null收到准确类型区别，模型自己在下一步交JSONnull；bad-only无proof，合法字符串null schema/正常enum/正常null沿原规则。原错误payload留存。
+- [ ] 仅原同parent/label pre-execute依据原schema拒绝错误类型并说明；不换值、不变schema/SDK/材料/旧票/最终parser/quality/双审/裁决。GREEN及完整原judgment/claim/type/diff，独立复核。
+- [ ] 原公开构建与入口、旧证明零模型兼容后全新清楚业务任务首次前瞻；保留原future三对象/六标准。若未formal accepted/独立许可/真实采用，不消费后任务、不填成功。
+
+此项提示不保证模型成功，且不是原adjacent baseline inconclusive的修复；新任务无需多余标签歧义，不新增禁标签或更严格式要求。用户已经授权自主选择与模拟，不因设计/开发例行步骤再问执行许可。
