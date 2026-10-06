@@ -1,4 +1,6 @@
 export const name = 'tianwen-runtime-bundle'
+export { createNativeGuidanceIndependentReview } from './guidance-independent-review.js'
+export type { GuidanceIndependentReviewConfig, NativeGuidanceIndependentReviewDescriptor, GuidanceIndependentReview, GuidanceIndependentReviewInput, GuidanceIndependentReviewBody, GuidanceIndependentReviewMaterial } from './guidance-independent-review.js'
 export function apply(): void {}
 export type { GoalTaskAcceptanceCheck, GoalTaskAcceptancePreparation, PreparedGoalTaskAcceptanceCheck } from './goal-task-acceptance.js'
 export type { GoalCommandOrigin, GoalTaskAcceptanceBinding, GoalTaskAcceptanceEvent, GoalTaskRequirementsSnapshot } from './goal-task-acceptance-contract.js'

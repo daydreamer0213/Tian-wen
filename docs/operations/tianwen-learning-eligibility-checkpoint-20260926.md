@@ -1,3 +1,9 @@
+## 2026-10-06 当前：普通产品接线源码通过，公开版本验证待构建
+
+Task16B六文件独立spec/quality PASS，原source SDK机制5文件379通过/4明确public skip退出0（273.68s）；四actual dist新项在旧包首RED保留，默认Runtime类型仍待原public graph刷新。新事件、三入口许可采用、无配置pending、只读cold不重审、撤权/支持/父/owner迟变及原DEV路线已核；owner内失败恢复抑制修正保留首371+8失败。379对应A旧3a2版本，不混称新cross修复。A两公开entry身份共享兼容已真实RED SDK前0请求→GREEN、25/87机制通过/source类型0，收据保存且独立差异spec/quality PASS，待原公开构建。无新provider/build/Task17正式profile/freeze；prepared-only作者与ordinary/cold模板独立PASS、原future三对象/六标准未消费保持。
+
+整体goal active/main Daily NO-GO；原正式研究为10臂明确、5候选met、source1/source2基线至少一个not-met、反例基线met（OR而非要求两基线均失败）。下一A差异复核→原public16及actual4/AS4/默认类型/旧proof零调用兼容→全新普通正式研究/原生首审许可/采用/原未来效果，不重评旧票或等待用户。D约16.36GiB>=15，无整套依赖/历史复制。详见[tianwen-ordinary-clearance-integration-implementation-20261006.md](tianwen-ordinary-clearance-integration-implementation-20261006.md)。
+
 ## 2026-10-06 当前：独立首审模块通过，继续普通产品接线
 
 Task16A最终spec/quality PASS，23新增与85相关检查／类型／差异0。保留首版349通过及独立发现的两个P2，修正反馈时间范围和首回执parent/attempt绑定后实际RED→GREEN；旧票不重评。完整无票投影、首结果证明保存与0模型冷恢复已实现，公开Runtime三入口／配置接线仍属Task16B；当前0真实provider/0新public build，不称真实效果或整体完成。Task17普通apply及实际冷加载模板、新源模拟任务已准备，原未来三对象／六标准不变未消费。goal active/main Daily NO-GO。详见[tianwen-independent-review-adapter-implementation-20261006.md](tianwen-independent-review-adapter-implementation-20261006.md)。

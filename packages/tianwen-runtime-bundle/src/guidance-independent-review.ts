@@ -72,7 +72,11 @@ Return only {verdict,sourceChecks,armChecks} through structured_output. sourceCh
 type Binding = Omit<ConversationGuidanceClearance, 'reviewer' | 'verdict' | 'sourceChecks' | 'armChecks'>
 interface Attempt { readonly schemaVersion: 'tianwen.guidance-independent-review-attempt.v1'; readonly attemptId: string; readonly parentSessionId: string; readonly executionKind: 'native' | 'programmatic'; readonly binding: Binding; readonly instruction: string; readonly materialDigest: string; readonly packetFile: string; readonly materialFile: string; readonly callConfig?: LlmCallConfig; readonly reviewerId?: string }
 interface Receipt { readonly attemptId: string; readonly executionKind: 'native' | 'programmatic'; readonly value: GuidanceIndependentReviewBody; readonly reviewer: { readonly id: string; readonly model: string }; readonly proof: ConversationJudgmentProof | null }
-const nativeCallbacks = new WeakMap<GuidanceIndependentReview, NativeGuidanceIndependentReviewDescriptor>()
+// Public index/runtime bundles evaluate separate copies in the same host process.
+// Share factory registration, never accept serialized or callback-authored markers.
+const nativeCallbacksKey = Symbol.for('tianwen.guidance-independent-review.native-callbacks.v1')
+const nativeCallbacks = (globalThis as unknown as Record<symbol, WeakMap<GuidanceIndependentReview, NativeGuidanceIndependentReviewDescriptor> | undefined>)[nativeCallbacksKey]
+  ??= new WeakMap<GuidanceIndependentReview, NativeGuidanceIndependentReviewDescriptor>()
 const placeholder = sha256('independent-review-validation')
 function parseBody(value: unknown, cases: readonly { readonly id: string; readonly kind: string }[]): GuidanceIndependentReviewBody {
   const v = record(value)

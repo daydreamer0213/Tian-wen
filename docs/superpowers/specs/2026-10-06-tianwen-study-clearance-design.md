@@ -43,3 +43,5 @@ Task15已通过独立审查。普通配置guidanceIndependentReview同时接受�
 实现按顺序交接：investigate_actor_semantic_seam仅拥有新guidance-independent-review.ts及对应新测试，先完成投影/首审/持久化/恢复接口；implement_scope_repair_operator随后只拥有loop/runtime/index及对应loop/runtime测试，接三入口和配置，不能修改前者文件。Root负责文档、原public构建、生成控制器和实际服务商验证；review_shared_future_scope独立只读审查。所有worker不独占仓库，不回退他人修改。共享接口需先明确后接线，暂无新provider调用或旧研究重审。
 
 共享reviewGuidanceStudy只保存和返回许可，由loop重查当前授权后记录并采用。已有许可的冷采用通过verifySavedGuidanceIndependentReview只读核本模块保存的准确包、首盲、首次结果、原native证明与冻结配置，逐字绑定许可；无需live parent或新模型。没有本模块attempt的可信外部许可沿Task15规则，不强加原生证明；已有模块文件损坏不静默降为外部许可。Evolution runtime-binding仅增typed clearance-recorded事件及成功新写后emit，loop经原串行队列合并唤醒，避免许可内部事件造成第二首审或自等待。
+
+公开工厂与配置回调的正常组合也须跨现有 index/runtime 两个入口可用。原 build 分别内联模块，因此只保存在单模块 WeakMap 的工厂身份会在另一入口丢失，把真实 native callback 错当 programmatic、漏传原冻结模型配置，导致工厂在 SDK 请求前失败。按原接口做最窄进程内共享工厂注册表，仅宿主工厂注册原函数，不从模型输出或任意函数属性接受原生身份；原独立证明、来源配置、parent/attempt 核验保持。先保留独立模块复现的 RED，再修复并核实际原 public 两入口组合；这属于既有接口兼容，不新增模型评分或发布标准。A owner仅改其原两文件，待B回归停止后再写，避免运行中源漂移。

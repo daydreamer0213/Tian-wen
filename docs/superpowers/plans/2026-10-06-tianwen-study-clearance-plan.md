@@ -31,9 +31,9 @@ Interfaces: export ConversationGuidanceClearance, parseConversationGuidanceClear
 
 Root与现有worker按不重叠具体文件分工；待Task15接口及独立复核通过才实现。
 
-- [ ] 新宿主guidanceIndependentReview回调和静态无原票投影，复用原完整packet验证；保存准确包与第一审查结果，AI身份由宿主配置提供，另存原票对照；没有回调保留待审状态。
-- [ ] 原public apply默认隔离不变，三入口统一专用许可/activation，事件可唤醒已clear研究；重启已有结果不重复独立审查，拒绝不重评。
-- [ ] 原native harness RED/GREEN：真实宿主调用路径、首次首盲材料无票/源反馈未失真、clear/reject/insufficient、不配置、许可写后中断冷恢复、撤回/直写拒绝。明确脚本机制，不伪称AI真实安全。
+- [x] 新宿主guidanceIndependentReview回调和静态无原票投影，复用原完整packet验证；保存准确包与第一审查结果，AI身份由宿主配置提供，另存原票对照；没有回调保留待审状态。
+- [x] 原public apply默认隔离不变，三入口统一专用许可/activation，事件可唤醒已clear研究；重启已有结果不重复独立审查，拒绝不重评。
+- [x] 原native harness RED/GREEN：真实宿主调用路径、首次首盲材料无票/源反馈未失真、clear/reject/insufficient、不配置、许可写后中断冷恢复、撤回/直写拒绝。明确脚本机制，不伪称AI真实安全。
 - [ ] 原public完整build、相关source和实际public regressions、private imports与旧proof零调用兼容；独立code/preflight复核。
 
 ### Task17：全新普通产品首次前瞻及发布结论

@@ -291,3 +291,71 @@ it.each(['wrong-parent', 'wrong-attempt'] as const)('rejects a genuine saved nat
     expect(h.adapter.requests).toHaveLength(count)
   } finally { await other.dispose(); await handle.dispose(); await h.ctx.fiber.dispose() }
 })
+
+it('recognizes a genuine native factory across two independently loaded module entries and restores its first proof', async () => {
+  const moduleA = await import('../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js')
+  vi.resetModules()
+  const moduleB = await import('../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js')
+  const packetB = await import('../../packages/tianwen-runtime-bundle/src/guidance-review-packet.js')
+  expect(moduleA.createNativeGuidanceIndependentReview).not.toBe(moduleB.createNativeGuidanceIndependentReview)
+  expect(moduleA.reviewGuidanceStudy).not.toBe(moduleB.reviewGuidanceStudy)
+  const r = root(), { study, packet } = fixture()
+  vi.spyOn(packetB, 'recoverTextGuidanceStudyReviewPacket').mockResolvedValue(packet)
+  const h = await mountPersistentHarness(r, [toolCallResponse('cross-entry-original', 'structured_output', body('clear'))])
+  await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await h.ctx.agents.create({ sessionId: SessionId('cross-entry-parent'), meta: { cwd: r }, agentOptions: config })
+  const callbackA = moduleA.createNativeGuidanceIndependentReview(h.ctx, { mode: 'native', reviewerId: 'cross-entry-scripted', callConfig: config })
+  const input = { study, parent: handle.agent, signal: new AbortController().signal, evolutionRoot: r, reviewer: callbackA }
+  const saveEvidence = (name: string, value: unknown) => {
+    const evidenceRoot = process.env.TIANWEN_CROSS_ENTRY_EVIDENCE_ROOT
+    if (evidenceRoot === undefined) return
+    mkdirSync(evidenceRoot, { recursive: true })
+    try { writeFileSync(join(evidenceRoot, name + '.json'), JSON.stringify(value), { flag: 'wx' }) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+  }
+  let first: any
+  try {
+    try { first = await moduleB.reviewGuidanceStudy(h.ctx, input) }
+    catch (error) {
+      // Save the genuine earliest failure, not a fabricated SDK proof.
+      saveEvidence('first-red-attempt', JSON.parse(readFileSync(join(paths(r, study), 'attempt.json'), 'utf8')))
+      saveEvidence('first-red-failure', { message: error instanceof Error ? error.message : String(error), sdkRequests: h.adapter.requests.length,
+        savedFiles: readdirSync(paths(r, study)), independentModuleFunctions: moduleA.reviewGuidanceStudy !== moduleB.reviewGuidanceStudy })
+      throw error
+    }
+    expect(first.reviewer).toMatchObject({ authority: 'independent-ai', id: 'cross-entry-scripted', model: 'tianwen-probe:scripted' })
+    const receipt = JSON.parse(readFileSync(join(paths(r, study), 'first-result.json'), 'utf8'))
+    expect(receipt.executionKind).toBe('native'); expect(receipt.proof.sessionId).toBe(String(h.adapter.requests[0]!.sessionId))
+    expect(h.adapter.requests).toHaveLength(1)
+    saveEvidence('first-green-attempt', JSON.parse(readFileSync(join(paths(r, study), 'attempt.json'), 'utf8')))
+    saveEvidence('first-green-receipt', receipt)
+    saveEvidence('first-green-native-session', await h.ctx.sessionPersistence.inspect(SessionId(receipt.proof.sessionId)))
+    expect(await moduleB.reviewGuidanceStudy(h.ctx, input)).toEqual(first)
+    expect(h.adapter.requests).toHaveLength(1)
+  } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
+  const cold = await mountPersistentHarness(r, [])
+  try {
+    expect(await moduleB.reviewGuidanceStudy(cold.ctx, { ...input, parent: {} as any })).toEqual(first)
+    expect(await moduleB.verifySavedGuidanceIndependentReview(cold.ctx, { study, evolutionRoot: r, clearance: first, signal: input.signal })).toBe(true)
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose(); vi.resetModules() }
+})
+
+it('does not promote an ordinary host wrapper that returns a genuine native proof', async () => {
+  const r = root(), { study, packet } = fixture(); packetMocks(packet)
+  const h = await mountPersistentHarness(r, [toolCallResponse('plain-wrapper-native', 'structured_output', body('clear'))])
+  await h.ctx.plugin(SubagentRuntime); await h.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await h.ctx.agents.create({ sessionId: SessionId('plain-wrapper-parent'), meta: { cwd: r }, agentOptions: config })
+  const native = createNativeGuidanceIndependentReview(h.ctx, { mode: 'native', reviewerId: 'wrapped-scripted', callConfig: config })
+  const ordinary = (input: Parameters<typeof native>[0]) => native({ ...input, callConfig: config })
+  const input = { study, parent: handle.agent, signal: new AbortController().signal, evolutionRoot: r, reviewer: ordinary }
+  try {
+    await expect(reviewGuidanceStudy(h.ctx, input)).rejects.toThrow('programmatic independent reviewer cannot claim native proof')
+    const receipt = JSON.parse(readFileSync(join(paths(r, study), 'first-result.json'), 'utf8'))
+    expect(receipt.executionKind).toBe('programmatic')
+    expect((await recoverConversationStructuredJudgment(h.ctx, receipt.proof, receipt.value)).material).toEqual(projectGuidanceIndependentReviewPacket(packet))
+    expect(h.adapter.requests).toHaveLength(1)
+    await expect(reviewGuidanceStudy(h.ctx, input)).rejects.toThrow('programmatic independent reviewer cannot claim native proof')
+    expect(h.adapter.requests).toHaveLength(1); expect(readdirSync(paths(r, study))).not.toContain('clearance.json')
+  } finally { await handle.dispose(); await h.ctx.fiber.dispose() }
+})

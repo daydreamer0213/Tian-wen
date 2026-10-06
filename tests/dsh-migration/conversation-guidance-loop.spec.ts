@@ -10,7 +10,7 @@ import { MessageId, type GenerateOptions } from '@deepseek-ai/dsh-llm'
 import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, SkillRegistry, createUserMessage, mountPersistentHarness, mountFeedbackHarness, textResponse, toolCallResponse, type ScriptEntry } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
-import { apply as applyBundle } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import { apply as applyBundle, applyDevelopment } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { TianwenConversationGuidanceLoopService, sharesCopiedQuantifiedFact } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
@@ -30,6 +30,8 @@ import { projectClaimEvidence } from '../../packages/tianwen-runtime-bundle/src/
 import { conversationContext, conversationEvidenceTexts, recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { recoverConversationProposalObservation } from '../../packages/tianwen-runtime-bundle/src/conversation-proposal-observation.js'
 import { recoverConversationCaseDesign } from '../../packages/tianwen-runtime-bundle/src/conversation-case-design.js'
+import { projectGuidanceIndependentReviewPacket, reviewGuidanceStudy, type GuidanceIndependentReviewConfig, type GuidanceIndependentReviewMaterial, type GuidanceIndependentReviewBody } from '../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js'
+import { conversationGuidanceClearanceEnvironmentDigest, conversationGuidanceClearanceStudyEvidenceDigest } from '../../packages/tianwen-evolution/src/conversation-guidance-clearance.js'
 import { installDevelopmentNativeBatchBudget } from '../../scripts/development-native-batch-budget.mjs'
 import { installDevelopmentNativeAnalysisShutdown } from '../../scripts/development-native-analysis-shutdown.mjs'
 import { inspectDevelopmentNativePreflight } from '../../scripts/development-native-preflight.mjs'
@@ -108,6 +110,251 @@ const plainEvidenceResponse = (value: Record<string, unknown> & { evidenceQuotes
 const reviewPair = (value: ReturnType<typeof verdict>) => [evidenceResponse(value), evidenceResponse(value)]
 const admission = { kind: 'task', objective: 'Summarize supplied facts', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const verdict = (met: boolean, quote: string) => ({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: met ? 'Source scope preserved.' : 'Scope expanded beyond source.', evidenceQuotes: [quote] })
+
+function independentBody(material: GuidanceIndependentReviewMaterial, result: GuidanceIndependentReviewBody['verdict'] = 'clear'): GuidanceIndependentReviewBody {
+  return { verdict: result,
+    sourceChecks: material.cases.filter(c => ['source1','source2','counterexample'].includes(c.kind)).map(c => ({ caseId: c.id, kind: c.kind as 'source1'|'source2'|'counterexample', verdict: 'clear', reason: 'Scripted mechanism: the frozen source-scope criterion preserves the supplied original request.' })),
+    armChecks: material.cases.flatMap(c => (['baseline','candidate'] as const).map(role => ({ caseId: c.id, role,
+      verdict: role === 'candidate' ? result : c.kind === 'source1' ? 'reject' : 'clear',
+      boundary: 'Scripted source-scope boundary check, not a claim of real-provider semantic efficacy.',
+      reason: role === 'baseline' && c.kind === 'source1' ? 'The baseline expands the pilot scope to the whole country.' : 'The fixture preserves the supplied scope and does not introduce a new status or promise.' }))) }
+}
+async function clearanceHarness(root: string, reviewer?: GuidanceIndependentReviewConfig, nativeResult?: GuidanceIndependentReviewBody['verdict'], development = false) {
+  const generated = { adjacent: { prompt: '概括：西站样本耗时 13 秒，仅限本站。', criteria: ['Preserve source scope'] }, holdout: { prompt: '概括：全区耗时 17 秒。', criteria: ['Preserve source scope'] } }
+  const script: ScriptEntry[] = [
+    structured(admission), textResponse('全国需要 5 天。'), ...reviewPair(verdict(false, '全国')),
+    structured(admission), textResponse('公司整体增加 7%。'), ...reviewPair(verdict(false, '公司整体')),
+    structured(admission), textResponse('全公司降低 2%。'), ...reviewPair(verdict(true, '2%')),
+    structured(generated), structured({ guidance: 'Identify the source scope before summarizing; preserve every scope qualification.' }),
+  ]
+  const answers = ['试点需要 5 天，不代表全国。','测试组增加 7%，不是公司整体。','全公司降低 2%。','西站样本耗时 13 秒，仅限本站。','全区耗时 17 秒。']
+  for (let i = 0; i < 5; i++) for (const role of ['baseline','candidate']) {
+    const bad = i === 0 && role === 'baseline', answer = bad ? '全国需要 5 天。' : answers[i]!
+    script.push(structured({ answer }), ...reviewPair(verdict(!bad, bad ? '全国' : answer)))
+  }
+  if (nativeResult !== undefined) script.push(request => {
+    const block = request.messages.flatMap(m => m.content).find(b => b.type === 'text' && b.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))
+    if (block?.type !== 'text') throw new Error('missing actual independent native material')
+    const material = JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!) as GuidanceIndependentReviewMaterial
+    expect(material.cases).toHaveLength(5)
+    expect(JSON.stringify(material)).not.toContain('reviewChecks')
+    return structured(independentBody(material, nativeResult))
+  })
+  script.push(structured(admission), request => {
+    expect(JSON.stringify(request.messages)).toContain('Identify the source scope before summarizing')
+    return textResponse('局部样本需要 4 天。')
+  }, ...reviewPair(verdict(true, '局部样本')))
+  const harness = await mountFeedbackHarness(development ? root : join(root, 'sessions'), script)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  if (development) {
+    await harness.ctx.plugin(Loader, { baseUrl: pathToFileURL(root).href })
+    harness.ctx.loader.builtins['clearance-development'] = { apply: applyDevelopment }
+    await harness.ctx.loader.create({ name: 'cordis:clearance-development', config: { developmentRoot: root, guidanceIndependentReview: reviewer } })
+    await harness.ctx.loader.await()
+  } else await applyBundle(harness.ctx, { evolutionRoot: join(root, 'evolution'), ...(reviewer === undefined ? {} : { guidanceIndependentReview: reviewer }) })
+  harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const parent = await harness.ctx.agents.create({ sessionId: SessionId('clearance-integration-parent'), meta: { cwd: root }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  const run = async () => {
+    for (const message of ['概括：试点需要 5 天，不代表全国。','概括：测试组增加 7%，不是公司整体。','概括：全公司降低 2%。']) {
+      parent.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: message }] }))
+      await parent.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    }
+    return (harness.ctx.get('tianwenEvolution') ?? new EvolutionLedger(join(root, 'evolution'))).listConversationGuidanceStudies()[0]!
+  }
+  return { harness, parent, run }
+}
+
+it('study clearance integration preserves original DEV direct adoption without invoking a configured reviewer or creating permission', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-development-'))
+  const reviewer = vi.fn(async () => { throw new Error('DEV must not enter independent clearance') })
+  const f = await clearanceHarness(root, reviewer, undefined, true)
+  try {
+    const study = await f.run()
+    expect(study.decision?.verdict).toBe('accepted'); expect(study.activation).toBeDefined()
+    expect(f.harness.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(false)
+    expect(f.harness.ctx.tianwenEvolution.listConversationGuidanceClearances()).toEqual([])
+    expect(reviewer).not.toHaveBeenCalled(); expect(existsSync(join(root, 'evolution', 'independent-review'))).toBe(false)
+  } finally { await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it.each(['programmatic','native'] as const)('study clearance integration uses ordinary source Runtime and one %s first review before adoption', async mode => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-integration-')); let calls = 0
+  const callback: GuidanceIndependentReviewConfig = async input => {
+    calls++; expect((input.material as GuidanceIndependentReviewMaterial).cases).toHaveLength(5)
+    expect(JSON.stringify(input.material)).not.toContain('reviewChecks')
+    return { value: independentBody(input.material as GuidanceIndependentReviewMaterial), reviewer: { id: 'scripted-host-review', model: 'explicit-programmatic-fixture' } }
+  }
+  const f = await clearanceHarness(root, mode === 'native' ? { mode: 'native', reviewerId: 'scripted-native-review' } : callback, mode === 'native' ? 'clear' : undefined)
+  const events: string[] = []
+  const off = f.harness.ctx.on('tianwen/conversation-guidance-clearance-recorded', (id: string) => { events.push(id) })
+  try {
+    const study = await f.run()
+    expect(study.decision?.verdict).toBe('accepted')
+    expect(study.activation).toBeDefined()
+    expect(f.harness.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true)
+    expect(f.harness.ctx.tianwenEvolution.listConversationGuidanceClearances()[0]).toMatchObject({ studyId: study.opened.studyId, verdict: 'clear', reviewer: { authority: 'independent-ai' } })
+    expect(events).toEqual([study.opened.studyId]); expect(calls).toBe(mode === 'native' ? 0 : 1)
+    const records = new EvolutionLedger(join(root, 'evolution')).listEvents()
+    expect(records.findIndex(e => e.type === 'conversation-guidance-clearance-recorded')).toBeLessThan(records.findIndex(e => e.type === 'conversation-guidance-recorded' && e.record.kind === 'guidance-activated'))
+    const originals = structuredClone(f.harness.ctx.tianwenEvolution.listConversationTasks())
+    f.parent.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '概括：新组需要 4 天，只限局部样本。' }] }))
+    await f.parent.agent.whenIdle(); await f.harness.ctx.tianwenConversationObserver.whenIdle(); await f.harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(f.harness.ctx.tianwenEvolution.listConversationTasks().slice(0, 3)).toEqual(originals)
+    expect(f.harness.ctx.tianwenEvolution.listConversationTasks()[3]!.source.behaviorVersion).toBe(guidanceVersion(study.candidate!.candidateSnapshot))
+    expect(events).toHaveLength(1); expect(calls).toBe(mode === 'native' ? 0 : 1)
+  } finally { off(); await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it.each(['clear','reject','insufficient'] as const)('study clearance integration preserves first %s and cold-recovers without another reviewer or parent', async result => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-cold-'))
+  const f = await clearanceHarness(root, { mode: 'native', reviewerId: 'scripted-native-review' }, result)
+  const hold = vi.spyOn(f.harness.ctx.tianwenEvolution, 'recordReviewedConversationGuidanceActivation').mockImplementation(() => { throw new Error('scripted gap after saved permission') })
+  try {
+    const accepted = await f.run(), tasks = f.harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(accepted.decision?.verdict).toBe('accepted'); expect(accepted.activation).toBeUndefined()
+    const permit = f.harness.ctx.tianwenEvolution.listConversationGuidanceClearances()[0]!
+    expect(permit.verdict).toBe(result)
+    const warmRequests = f.harness.adapter.requests.length
+    await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); hold.mockRestore()
+    const cold = await mountFeedbackHarness(join(root, 'sessions'), [])
+    const reviewer = vi.fn(async () => { throw new Error('saved permission must not rejudge') })
+    const resume = vi.spyOn(cold.ctx.agents, 'resume'), create = vi.spyOn(cold.ctx.agents, 'create')
+    try {
+      await cold.ctx.plugin(SubagentRuntime); await cold.ctx.plugin(spawn, { providerName: 'spawn' })
+      await applyBundle(cold.ctx, { evolutionRoot: join(root, 'evolution'), guidanceIndependentReview: reviewer })
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const final = cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(final.activation !== undefined).toBe(result === 'clear')
+      expect(final.decision).toEqual(accepted.decision)
+      expect(cold.ctx.tianwenEvolution.listConversationGuidanceClearances()).toEqual([permit])
+      expect(cold.ctx.tianwenEvolution.listConversationTasks()).toEqual(tasks)
+      expect(cold.adapter.requests).toHaveLength(0); expect(f.harness.adapter.requests).toHaveLength(warmRequests)
+      expect(reviewer).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled()
+    } finally { await cold.ctx.fiber.dispose() }
+  } finally { hold.mockRestore(); await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it.each(['receipt-drift','native-proof-missing'] as const)('study clearance integration retains managed %s pending without rejudge', async scenario => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-proof-')), f = await clearanceHarness(root, { mode: 'native', reviewerId: 'scripted-native-review' }, 'clear')
+  const hold = vi.spyOn(f.harness.ctx.tianwenEvolution, 'recordReviewedConversationGuidanceActivation').mockImplementation(() => { throw new Error('scripted permission gap') })
+  try {
+    const study = await f.run(), dir = join(root, 'evolution', 'independent-review', sha256(study.opened.studyId).slice(7))
+    const path = join(dir, 'first-result.json'), receipt = JSON.parse(readFileSync(path, 'utf8'))
+    const proofId = receipt.proof.sessionId
+    await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); hold.mockRestore()
+    if (scenario === 'receipt-drift') { receipt.reviewer.id = 'changed first reviewer'; writeFileSync(path, JSON.stringify(receipt)) }
+    const cold = await mountFeedbackHarness(join(root, 'sessions'), []), reviewer = vi.fn(async () => { throw new Error('must retain first result') })
+    const inspect = cold.ctx.sessionPersistence.inspect.bind(cold.ctx.sessionPersistence)
+    const fault = scenario === 'native-proof-missing' ? vi.spyOn(cold.ctx.sessionPersistence, 'inspect').mockImplementation(id => String(id) === proofId ? Promise.reject(new Error('scripted missing first native proof')) : inspect(id)) : undefined
+    try {
+      await cold.ctx.plugin(SubagentRuntime); await cold.ctx.plugin(spawn, { providerName: 'spawn' })
+      await applyBundle(cold.ctx, { evolutionRoot: join(root, 'evolution'), guidanceIndependentReview: reviewer })
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.activation).toBeUndefined()
+      expect(cold.ctx.tianwenEvolution.listConversationGuidanceClearances()[0]!.verdict).toBe('clear')
+      expect((cold.ctx.tianwenConversationGuidanceLoop as unknown as { recoverable: Set<string> }).recoverable.has(study.opened.studyId)).toBe(true)
+      expect(reviewer).not.toHaveBeenCalled(); expect(cold.adapter.requests).toHaveLength(0)
+    } finally { fault?.mockRestore(); await cold.ctx.fiber.dispose() }
+  } finally { hold.mockRestore(); await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it('study clearance integration keeps no-config pending and adopts on real service clearance event after its source is released', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-event-')), f = await clearanceHarness(root)
+  try {
+    const study = await f.run()
+    expect(study.activation).toBeUndefined(); expect(study.decision?.verdict).toBe('accepted')
+    expect(f.harness.ctx.tianwenEvolution.listConversationGuidanceClearances()).toEqual([])
+    expect((f.harness.ctx.tianwenConversationGuidanceLoop as unknown as { recoverable: Set<string> }).recoverable.has(study.opened.studyId)).toBe(true)
+    expect(() => f.harness.ctx.tianwenEvolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId, expectedParentVersion: study.opened.parentVersion, decisionDigest: sha256(study.decision) })).toThrow(/quarantin/i)
+    const reviewer = vi.fn(async input => ({ value: independentBody(input.material), reviewer: { id: 'trusted-scripted-external', model: 'explicit-programmatic-fixture' } }))
+    const permit = await reviewGuidanceStudy(f.harness.ctx, { study, parent: f.parent.agent, signal: new AbortController().signal, evolutionRoot: join(root, 'evolution'), reviewer })
+    await f.parent.dispose()
+    const resume = vi.spyOn(f.harness.ctx.agents, 'resume'), calls = f.harness.adapter.requests.length, events: string[] = []
+    const off = f.harness.ctx.on('tianwen/conversation-guidance-clearance-recorded', id => { events.push(id) })
+    try {
+      expect(f.harness.ctx.tianwenEvolution.recordConversationGuidanceClearance(permit)).toEqual({ duplicate: false })
+      await f.harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      expect(f.harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.activation).toBeDefined()
+      expect(f.harness.ctx.tianwenEvolution.recordConversationGuidanceClearance(permit)).toEqual({ duplicate: true })
+      expect(events).toEqual([study.opened.studyId]); expect(reviewer).toHaveBeenCalledTimes(1)
+      expect(resume).not.toHaveBeenCalled(); expect(f.harness.adapter.requests).toHaveLength(calls)
+    } finally { off(); resume.mockRestore() }
+  } finally { await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it('study clearance integration accepts a separately trusted human fixture permission without requiring managed native proof', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-external-')), f = await clearanceHarness(root)
+  try {
+    const study = await f.run(), packet = JSON.parse(JSON.stringify(await recoverTextGuidanceStudyReviewPacket(f.harness.ctx, study)))
+    const permit = { ...independentBody(projectGuidanceIndependentReviewPacket(packet)), studyId: study.opened.studyId, scopeKey: study.opened.scopeKey,
+      environmentDigest: conversationGuidanceClearanceEnvironmentDigest(join(root, 'evolution')), parentVersion: study.opened.parentVersion,
+      candidateVersion: guidanceVersion(study.candidate!.candidateSnapshot), decisionDigest: sha256(study.decision), armsDigest: study.decision!.armsDigest,
+      studyEvidenceDigest: conversationGuidanceClearanceStudyEvidenceDigest(study), packetDigest: sha256(packet), consentRevision: study.opened.consentRevision,
+      reviewer: { authority: 'human' as const, id: 'explicit-scripted-human-record-fixture', promptDigest: sha256('Synthetic trusted permission mechanism; no actual human review is claimed.') } }
+    expect(existsSync(join(root, 'evolution', 'independent-review'))).toBe(false)
+    f.harness.ctx.tianwenEvolution.recordConversationGuidanceClearance(permit)
+    await f.harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    expect(f.harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!.activation).toBeDefined()
+    expect(existsSync(join(root, 'evolution', 'independent-review'))).toBe(false)
+  } finally { await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it('study clearance integration first-reviews a cold pending accepted study without rerunning sources or arms', async () => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-first-cold-')), f = await clearanceHarness(root)
+  try {
+    const accepted = await f.run(), tasks = f.harness.ctx.tianwenEvolution.listConversationTasks()
+    expect(accepted.activation).toBeUndefined()
+    await f.parent.dispose(); await f.harness.ctx.fiber.dispose()
+    const cold = await mountFeedbackHarness(join(root, 'sessions'), [request => {
+      const block = request.messages.flatMap(m => m.content).find(b => b.type === 'text' && b.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))
+      if (block?.type !== 'text') throw new Error('missing cold first native review')
+      return structured(independentBody(JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!)))
+    }])
+    try {
+      await cold.ctx.plugin(SubagentRuntime); await cold.ctx.plugin(spawn, { providerName: 'spawn' })
+      await applyBundle(cold.ctx, { evolutionRoot: join(root, 'evolution'), guidanceIndependentReview: { mode: 'native', reviewerId: 'scripted-cold-first-review' } })
+      await cold.ctx.tianwenConversationGuidanceLoop.whenIdle()
+      const final = cold.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+      expect(final.activation).toBeDefined(); expect(final.decision).toEqual(accepted.decision); expect(final.arms).toEqual(accepted.arms)
+      expect(cold.ctx.tianwenEvolution.listConversationTasks()).toEqual(tasks)
+      expect(cold.adapter.requests).toHaveLength(1); expect(cold.ctx.agents.list()).toEqual([])
+    } finally { await cold.ctx.fiber.dispose() }
+  } finally { await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
+
+it.each(['consent','support','parent','dispose'] as const)('study clearance integration blocks late %s change after first review starts', async change => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const root = mkdtempSync(join(base, 'clearance-late-')); let f: Awaited<ReturnType<typeof clearanceHarness>>
+  let calls = 0, disposeStarted: Promise<void> | undefined
+  const reviewer: GuidanceIndependentReviewConfig = async input => {
+    calls++
+    if (change === 'consent') f.harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    if (change === 'support') {
+      const task = f.harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      await f.harness.ctx.messageFeedback.put({ sessionId: SessionId(task.source.sessionId), messageId: MessageId(task.completion!.assistantMessageIds[0]!), rating: 'positive', note: 'Original answer is correct.', ifVersion: null })
+      await f.harness.ctx.tianwenMessageFeedbackBridge.reconcileSession(task.source.sessionId)
+    }
+    if (change === 'parent') {
+      const original = f.harness.ctx.tianwenEvolution.getConversationGuidance.bind(f.harness.ctx.tianwenEvolution)
+      vi.spyOn(f.harness.ctx.tianwenEvolution, 'getConversationGuidance').mockImplementation(scope => ({ ...original(scope), rules: { summarization: 'scripted competing parent' } }))
+    }
+    if (change === 'dispose') disposeStarted = (f.harness.ctx.tianwenConversationGuidanceLoop as unknown as { ctx: { fiber: { dispose(): Promise<void> } } }).ctx.fiber.dispose()
+    return { value: independentBody(input.material as GuidanceIndependentReviewMaterial), reviewer: { id: 'scripted-late-review', model: 'explicit-programmatic-fixture' } }
+  }
+  f = await clearanceHarness(root, reviewer)
+  try {
+    const study = await f.run(); await disposeStarted
+    expect(study.decision?.verdict).toBe('accepted'); expect(study.activation).toBeUndefined()
+    expect((f.harness.ctx.get('tianwenEvolution') ?? new EvolutionLedger(join(root, 'evolution'))).listConversationGuidanceClearances()).toEqual([]); expect(calls).toBe(1)
+  } finally { vi.restoreAllMocks(); await f.parent.dispose(); await f.harness.ctx.fiber.dispose(); rmSync(root, { recursive: true, force: true }) }
+})
 
 it.each([
   {
@@ -471,7 +718,7 @@ it('waits for offline accepted recovery before a fresh root can select new resea
   const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
   const fresh={session:{id:SessionId('fresh-recovery-root'),header:{cwd}},whenIdle:async()=>{}}
   const service=Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
-  Object.assign(service,{accepting:true,sourceConfig:{},recoverable:new Set(['accepted-study']),acceptedRecoveries:new Map(),controllers:new Set(),
+  Object.assign(service,{accepting:true,sourceConfig:{},recoverable:new Set(['accepted-study']),failedRecoveries:new Set(),acceptedRecoveries:new Map(),controllers:new Set(),
     lanes:new Map(),laneAgents:new Map(),laneInterrupts:new Map(),dirty:new Set(),persistedWakes:new Map(),persistedWakeDirty:new Set(),
     ctx:{agents:{get:(id:string)=>live&&id===String(fresh.session.id)?fresh:undefined,list:()=>live?[fresh]:[]},
       tianwenEvolution:{listConversationGuidanceStudies:()=>[study]}}})
@@ -492,7 +739,7 @@ it('waits for offline accepted recovery before a fresh root can select new resea
 
 it('does not start deferred accepted recovery after its owner has stopped', async () => {
   const service=Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
-  Object.assign(service,{accepting:true,sourceConfig:{},acceptedRecoveries:new Map(),recoverable:new Set(['stopped-study']),controllers:new Set(),
+  Object.assign(service,{accepting:true,sourceConfig:{},acceptedRecoveries:new Map(),recoverable:new Set(['stopped-study']),failedRecoveries:new Set(),controllers:new Set(),
     ctx:{tianwenEvolution:{listConversationGuidanceStudies:()=>[{opened:{studyId:'stopped-study'},candidate:{},decision:{verdict:'accepted'},arms:[]}]}}})
   vi.spyOn(service as never,'warn' as never).mockImplementation(()=>{})
   const inspect=vi.spyOn(service as never,'assertCurrent' as never).mockRejectedValue(new Error('engineering recovery unavailable'))

@@ -49,6 +49,9 @@ import type { ConversationExternalCodeCheck } from './conversation-external-chec
 import type { ConversationStudyResultCheck, ConversationAnswerStudyResultCheck } from './conversation-study-result-check.js'
 import { TianwenNativeToolObservationService } from './native-tool-observation.js'
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
+import type { GuidanceIndependentReviewConfig } from './guidance-independent-review.js'
+export { createNativeGuidanceIndependentReview } from './guidance-independent-review.js'
+export type { GuidanceIndependentReviewConfig, NativeGuidanceIndependentReviewDescriptor, GuidanceIndependentReview, GuidanceIndependentReviewInput, GuidanceIndependentReviewBody, GuidanceIndependentReviewMaterial } from './guidance-independent-review.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
 import * as controlledSessionArchive from './controlled-session-archive.js'
 import { developmentRuntimeConfig, type TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
@@ -62,6 +65,8 @@ export { withConversationObservationCancellation } from './observation-cancellat
 
 export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string
+  /** Trusted first-blind permission for one formal study; absent keeps accepted guidance pending. */
+  readonly guidanceIndependentReview?: GuidanceIndependentReviewConfig
   /** Experimental prospective admission policy; old sessions retain their original family. */
   readonly familyVerification?: boolean
   /** Default-off capture of external code task file artifacts; no effect verdict or learning permission. */
@@ -533,6 +538,7 @@ async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig,
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
     ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
     ...(config.answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck: config.answerStudyResultCheck }),
+    ...(config.guidanceIndependentReview === undefined ? {} : { guidanceIndependentReview: config.guidanceIndependentReview }),
     guidanceActivationQuarantine,
     ...(guidanceDecisionPolicy === undefined ? {} : { guidanceDecisionPolicy }),
   })

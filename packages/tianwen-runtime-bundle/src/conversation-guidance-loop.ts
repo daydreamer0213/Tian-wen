@@ -24,6 +24,7 @@ import { SOURCE_EXCLUSION_KEYS, type ConversationSourceExclusion, type Conversat
 import { goalTaskResearchProblem, goalTaskResearchCommonCategory, goalTaskResearchCheckInputsMatch, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSource, type GuidanceNativeGoalSources } from '@tianwen/evolution/goal-task-research'
 import { recoverGoalTaskResearchSource, recoverGoalGuidanceSource, goalTaskProposalObservation, type NativeGoalTaskStudyMaterial } from './goal-task-research-source.js'
 import { recoverConversationProposalObservation } from './conversation-proposal-observation.js'
+import { reviewGuidanceStudy, verifySavedGuidanceIndependentReview, type GuidanceIndependentReviewConfig } from './guidance-independent-review.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context { tianwenConversationGuidanceLoop: TianwenConversationGuidanceLoopService }
@@ -120,18 +121,21 @@ export class TianwenConversationGuidanceLoopService extends Service {
   private readonly dirty = new Set<string>()
   private readonly controllers = new Set<AbortController>()
   private readonly recoverable = new Set<string>()
+  private readonly failedRecoveries = new Set<string>()
   private readonly acceptedRecoveries = new Map<string, Promise<void>>()
   private accepting = true
 
   private readonly sourceConfig: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly guidanceDecisionPolicy?: GuidanceStudyBody['decisionPolicy'] }
   private readonly studyResultCheck: ConversationStudyResultCheck | undefined
   private readonly answerStudyResultCheck: ConversationAnswerStudyResultCheck | undefined
-  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly guidanceDecisionPolicy?: GuidanceStudyBody['decisionPolicy'], readonly studyResultCheck?: ConversationStudyResultCheck, readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck } = {}) {
+  private readonly guidanceIndependentReview: GuidanceIndependentReviewConfig | undefined
+  constructor(ctx: Context, config: { readonly evolutionRoot?: string, readonly goalStateRoot?: string, readonly skillSources?: readonly ConversationSkillAdmission[], readonly guidanceActivationQuarantine?: boolean, readonly guidanceDecisionPolicy?: GuidanceStudyBody['decisionPolicy'], readonly studyResultCheck?: ConversationStudyResultCheck, readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck, readonly guidanceIndependentReview?: GuidanceIndependentReviewConfig } = {}) {
     super(ctx, 'tianwenConversationGuidanceLoop')
-    const { studyResultCheck, answerStudyResultCheck, ...sourceConfig } = config
+    const { studyResultCheck, answerStudyResultCheck, guidanceIndependentReview, ...sourceConfig } = config
     this.sourceConfig = structuredClone(sourceConfig)
     this.studyResultCheck = studyResultCheck
     this.answerStudyResultCheck = answerStudyResultCheck
+    this.guidanceIndependentReview = guidanceIndependentReview
   }
   private sourceEnvironment(): string | undefined {
     const evolutionRoot = this.sourceConfig.evolutionRoot
@@ -151,7 +155,8 @@ export class TianwenConversationGuidanceLoopService extends Service {
     // it passes. Retain interrupted studies; fresh evidence can open a new one.
     for (const study of this.ctx.tianwenEvolution.listConversationGuidanceStudies()) {
       if (study.decision === undefined && study.stopped === undefined) this.ctx.tianwenEvolution.recordConversationGuidance({ kind: 'study-stopped', studyId: study.opened.studyId, reason: 'cancelled' })
-      if (this.sourceConfig.guidanceActivationQuarantine !== true && study.decision?.verdict === 'accepted' && study.activation === undefined && hasCurrentConversationQuality(study.opened.qualityContract)) this.recoverable.add(study.opened.studyId)
+      if (study.decision?.verdict === 'accepted' && study.activation === undefined && study.rollback === undefined && hasCurrentConversationQuality(study.opened.qualityContract)
+        && (this.sourceConfig.guidanceActivationQuarantine !== true || study.opened.decisionPolicy === undefined)) this.recoverable.add(study.opened.studyId)
     }
     const wakeTask = (taskId: string) => {
       const task = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === taskId)
@@ -163,6 +168,19 @@ export class TianwenConversationGuidanceLoopService extends Service {
     const offGoalSource = this.ctx.on('tianwen/goal-task-research-source-recorded', sourceId => {
       const source=this.ctx.tianwenEvolution.listGoalTaskResearchSources().find(item=>item.sourceId===sourceId)
       if(source !== undefined) void this.wakeGoalSource(source).catch(error=>this.warn(error))
+    })
+    const offClearance = this.ctx.on('tianwen/conversation-guidance-clearance-recorded', studyId => {
+      const study = this.ctx.tianwenEvolution.listConversationGuidanceStudies().find(item => item.opened.studyId === studyId)
+      if (!this.accepting || study?.decision?.verdict !== 'accepted' || study.activation !== undefined || study.opened.decisionPolicy !== undefined) return
+      this.recoverable.add(studyId)
+      this.failedRecoveries.delete(studyId)
+      if (study.opened.nativeGoalSources !== undefined) {
+        const source = this.ctx.tianwenEvolution.listGoalTaskResearchSources().find(item => item.sourceId === study.opened.sourceTaskIds[0])
+        if (source !== undefined) void this.wakeGoalSource(source).catch(error => this.warn(error))
+      } else {
+        const source = this.ctx.tianwenEvolution.listConversationTasks().find(item => item.source.taskId === study.opened.sourceTaskIds[0])
+        if (source !== undefined) void this.wakeTask(source).catch(error => this.warn(error))
+      }
     })
     const wakeSession = (sessionId: string) => {
       const agent = this.ctx.agents.get(SessionId(sessionId))
@@ -196,7 +214,7 @@ export class TianwenConversationGuidanceLoopService extends Service {
     if(this.sourceConfig.goalStateRoot !== undefined) for (const source of this.ctx.tianwenEvolution.listGoalTaskResearchSources())
       void this.wakeGoalSource(source).catch(error=>this.warn(error))
     this.ctx.effect(() => async () => {
-      this.accepting = false; offReview(); offCheck(); offInvalidation(); offGoalSource(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
+      this.accepting = false; offReview(); offCheck(); offInvalidation(); offGoalSource(); offClearance(); offCreated(); offDisposed(); offConsent(); offFeedback(); offAssessment()
       for (const interrupt of this.laneInterrupts.values()) interrupt()
       for (const controller of this.controllers) controller.abort()
       await this.whenIdle()
@@ -548,10 +566,15 @@ export class TianwenConversationGuidanceLoopService extends Service {
     return work
   }
   private async restoreAccepted(scopeKey: string): Promise<void> {
-    if (!this.accepting || this.sourceConfig.guidanceActivationQuarantine === true) return
+    if (!this.accepting) return
     const evolution = this.ctx.tianwenEvolution
     for (const study of evolution.listConversationGuidanceStudies(scopeKey)) {
-      if (!this.recoverable.delete(study.opened.studyId) || study.decision?.verdict !== 'accepted' || study.candidate === undefined || study.activation !== undefined || !hasSatisfiedGuidanceResultChecks(study)) continue
+      if (!this.recoverable.has(study.opened.studyId) || this.failedRecoveries.has(study.opened.studyId) || study.decision?.verdict !== 'accepted' || study.candidate === undefined || study.activation !== undefined || !hasSatisfiedGuidanceResultChecks(study)) continue
+      if (this.sourceConfig.guidanceActivationQuarantine === true) {
+        const clearance = evolution.listConversationGuidanceClearances(scopeKey).find(item => item.studyId === study.opened.studyId)
+        if (clearance !== undefined && clearance.verdict !== 'clear') { this.recoverable.delete(study.opened.studyId); continue }
+        if (clearance === undefined && this.guidanceIndependentReview === undefined) continue
+      }
       const controller = new AbortController(); this.controllers.add(controller)
       try {
         await this.assertCurrent(study.opened, controller.signal)
@@ -693,8 +716,13 @@ export class TianwenConversationGuidanceLoopService extends Service {
         await this.assertCurrent(study.opened, controller.signal)
         controller.signal.throwIfAborted()
         evolution.recordConversationGuidance(study.decision)
-        evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId, expectedParentVersion: study.opened.parentVersion, decisionDigest: sha256(study.decision) })
-      } catch (error) { this.warn(error) }
+        if (await this.adoptAccepted(study, controller.signal)) this.recoverable.delete(study.opened.studyId)
+      } catch (error) {
+        // Retain pending evidence for cold recovery or a new clearance event,
+        // without retrying the same failed recovery on another queued wake.
+        this.failedRecoveries.add(study.opened.studyId)
+        this.warn(error)
+      }
       finally { this.controllers.delete(controller) }
     }
   }
@@ -1206,17 +1234,74 @@ export class TianwenConversationGuidanceLoopService extends Service {
       signal.throwIfAborted()
       const decision = evolution.conversationGuidanceDecision(opened.studyId)
       evolution.recordConversationGuidance(decision)
-      if (decision.verdict === 'accepted' && this.sourceConfig.guidanceActivationQuarantine !== true
-        && hasSatisfiedGuidanceResultChecks(evolution.listConversationGuidanceStudies().find(study => study.opened.studyId === opened!.studyId)!)) evolution.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
+      const accepted = evolution.listConversationGuidanceStudies().find(study => study.opened.studyId === opened!.studyId)!
+      if (decision.verdict === 'accepted' && hasSatisfiedGuidanceResultChecks(accepted)) {
+        this.recoverable.add(opened.studyId)
+        if (await this.adoptAccepted(accepted, signal, agent)) this.recoverable.delete(opened.studyId)
+      }
     } catch (error) {
       if (opened !== undefined) {
         const study = evolution.listConversationGuidanceStudies().find(item => item.opened.studyId === opened!.studyId)
+        if (study?.decision?.verdict === 'accepted' && study.activation === undefined) this.failedRecoveries.add(opened.studyId)
         const reason = error instanceof Error && ['invalid-judgment', 'model-unavailable', 'scope-changed'].includes(error.message) ? error.message as 'invalid-judgment' | 'model-unavailable' | 'scope-changed' : 'source-unavailable'
         if (study !== undefined && study.decision === undefined && study.stopped === undefined) evolution.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: signal.aborted ? 'cancelled' : reason })
       }
       this.warn(error)
     } finally { this.controllers.delete(controller) }
   }
+  private async adoptAccepted(study: GuidanceStudy, signal: AbortSignal, parent?: Agent): Promise<boolean> {
+    if (!this.accepting) return false
+    signal.throwIfAborted()
+    const evolution = this.ctx.tianwenEvolution
+    const current = evolution.listConversationGuidanceStudies(study.opened.scopeKey).find(item => item.opened.studyId === study.opened.studyId)
+    if (current?.activation !== undefined || current?.rollback !== undefined) return true
+    if (current?.decision?.verdict !== 'accepted' || current.candidate === undefined || !hasSatisfiedGuidanceResultChecks(current)) return false
+    const activation = { kind: 'guidance-activated' as const, studyId: current.opened.studyId, expectedParentVersion: current.opened.parentVersion, decisionDigest: sha256(current.decision) }
+    if (this.sourceConfig.guidanceActivationQuarantine !== true) {
+      await this.assertCurrent(current.opened, signal)
+      evolution.recordConversationGuidance(activation)
+      return true
+    }
+    if (current.opened.decisionPolicy !== undefined) return false
+    let clearance = evolution.listConversationGuidanceClearances(current.opened.scopeKey).find(item => item.studyId === current.opened.studyId)
+    if (clearance !== undefined && clearance.verdict !== 'clear') return true
+    const evolutionRoot = this.sourceConfig.evolutionRoot
+    if (evolutionRoot === undefined || !isAbsolute(evolutionRoot)) return false
+    if (clearance === undefined) {
+      if (this.guidanceIndependentReview === undefined) return false
+      await this.assertCurrent(current.opened, signal)
+      let owned: Awaited<ReturnType<Context['agents']['resume']>> | undefined
+      try {
+        if (parent === undefined) {
+          const source = current.opened.nativeGoalSources === undefined
+            ? evolution.listConversationTasks().find(item => item.source.taskId === current.opened.sourceTaskIds[0])
+            : evolution.listGoalTaskResearchSources().find(item => item.sourceId === current.opened.sourceTaskIds[0])
+          if (source === undefined) throw new Error('source-unavailable')
+          const id = 'input' in source ? source.outcome.input.origin.sessionId : source.source.sessionId
+          parent = this.ctx.agents.get(SessionId(id))
+          if (parent === undefined) {
+            const config = await this.sourceModel(source)
+            owned = await this.ctx.agents.resume({ resumeSessionId: SessionId(id), agentOptions: { provider: config.provider, model: config.model,
+              ...(config.maxTokens === undefined ? {} : { maxTokens: config.maxTokens }) } })
+            parent = owned.agent
+          }
+        }
+        signal.throwIfAborted()
+        clearance = await reviewGuidanceStudy(this.ctx, { study: current, parent, signal, evolutionRoot, reviewer: this.guidanceIndependentReview,
+          ...(this.nativeGoalStateRoot === undefined ? {} : { goalStateRoot: this.nativeGoalStateRoot }) })
+        await this.assertCurrent(current.opened, signal)
+        evolution.recordConversationGuidanceClearance(clearance)
+      } finally { await owned?.dispose() }
+    }
+    if (clearance.verdict !== 'clear') return true
+    await verifySavedGuidanceIndependentReview(this.ctx, { study: current, evolutionRoot, clearance, signal })
+    await this.assertCurrent(current.opened, signal)
+    if (!this.accepting) return false
+    signal.throwIfAborted()
+    evolution.recordReviewedConversationGuidanceActivation(activation)
+    return true
+  }
+
   private async recoverProposalClues(study: GuidanceStudyOpened): Promise<readonly ConversationProposalClueMaterial[]> {
     const references = study.proposalClues ?? []
     if (references.length === 0) return []

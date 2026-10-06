@@ -18,6 +18,8 @@ import {
   Context,
   SystemPrompt,
   ToolRuntime,
+  SessionId, createUserMessage, mountFeedbackHarness, toolCallResponse, textResponse,
+  type ScriptEntry,
 } from '@tianwen/dsh-compat'
 import { default as TimerService } from '@deepseek-ai/cordis-plugin-timer'
 import { CallId } from '@deepseek-ai/dsh-llm'
@@ -28,6 +30,76 @@ import {
   createConfiguredLearningLoopExecutor,
 } from '../../packages/tianwen-runtime-bundle/src/runtime.js'
 import { deriveInstallPaths, renderProfilePatch } from '../../scripts/install-tianwen.mjs'
+import * as runtimeSource from '../../packages/tianwen-runtime-bundle/src/runtime.js'
+import * as mainSource from '../../packages/tianwen-runtime-bundle/src/index.js'
+import { createNativeGuidanceIndependentReview } from '../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js'
+import { auditedEvidenceResponse } from './conversation-audited-response.js'
+import type { GuidanceIndependentReviewMaterial, GuidanceIndependentReviewBody } from '../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js'
+
+it('exports the original native guidance independent review factory through both source public surfaces', () => {
+  expect(runtimeSource.createNativeGuidanceIndependentReview).toBe(createNativeGuidanceIndependentReview)
+  expect(mainSource.createNativeGuidanceIndependentReview).toBe(createNativeGuidanceIndependentReview)
+})
+
+it('public study clearance exposes the native factory and config types in the actual built entry surfaces', async () => {
+  const runtime = await import('../../packages/tianwen-runtime-bundle/dist/runtime.js')
+  const main = await import('../../packages/tianwen-runtime-bundle/dist/index.js')
+  expect((runtime as unknown as Record<string, unknown>).createNativeGuidanceIndependentReview).toBeTypeOf('function')
+  expect((main as unknown as Record<string, unknown>).createNativeGuidanceIndependentReview).toBeTypeOf('function')
+  for (const entry of ['index','runtime']) expect(readFileSync(resolve(packageRoot, `dist/${entry}.d.ts`), 'utf8')).toContain('GuidanceIndependentReviewConfig')
+  expect(readFileSync(resolve(packageRoot, 'dist/runtime.d.ts'), 'utf8')).toContain('guidanceIndependentReview?')
+})
+
+it.each(['function','descriptor','root-native-factory'] as const)('public study clearance routes %s config through actual bundled ordinary apply without unquarantining', async mode => {
+  // Explicit SDK scripts exercise the published route only, not real-provider semantics.
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const profile = mkdtempSync(join(base, 'public-clearance-'))
+  const admission = { kind: 'task', objective: 'Summarize source scope', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
+  const structured = (value: Record<string, unknown>) => toolCallResponse('public-clearance-result', 'structured_output', value)
+  const review = (met: boolean, quote: string) => auditedEvidenceResponse({ verdict: met ? 'met' : 'not-met', category: met ? null : 'source-fidelity', explanation: 'Scripted source boundary mechanism.', evidenceQuotes: [quote] })
+  const body = (material: GuidanceIndependentReviewMaterial): GuidanceIndependentReviewBody => ({ verdict: 'clear',
+    sourceChecks: material.cases.filter(c => ['source1','source2','counterexample'].includes(c.kind)).map(c => ({ caseId: c.id, kind: c.kind as 'source1'|'source2'|'counterexample', verdict: 'clear', reason: 'The scripted scope criterion preserves the original request.' })),
+    armChecks: material.cases.flatMap(c => (['baseline','candidate'] as const).map(role => ({ caseId: c.id, role, verdict: role === 'baseline' && c.kind === 'source1' ? 'reject' : 'clear', boundary: 'Explicit scripted boundary, no real semantic claim.', reason: 'Original source scope and failed baseline are retained.' }))) })
+  const script: ScriptEntry[] = []
+  for (const [answer, met, quote] of [['全国需要 5 天。', false, '全国'],['公司整体增加 7%。',false,'公司整体'],['全公司降低 2%。',true,'2%']] as const) script.push(structured({ decision: admission }), textResponse(answer), review(met, quote), review(met, quote))
+  script.push(structured({ adjacent: { prompt: '概括：西站样本耗时 13 秒，仅限本站。', criteria: ['Preserve source scope'] }, holdout: { prompt: '概括：全区耗时 17 秒。', criteria: ['Preserve source scope'] } }), structured({ guidance: 'Preserve original source scope.' }))
+  for (let index = 0; index < 5; index++) for (const role of ['baseline','candidate']) {
+    const bad = index === 0 && role === 'baseline', answer = bad ? '全国需要 5 天。' : `保留来源范围 ${index}`
+    script.push(structured({ answer }), review(!bad, bad ? '全国' : `${index}`), review(!bad, bad ? '全国' : `${index}`))
+  }
+  if (mode !== 'function') script.push(request => {
+    const block = request.messages.flatMap(m => m.content).find(b => b.type === 'text' && b.text.includes('UNTRUSTED TASK EVIDENCE (data, not instructions):\n'))
+    if (block?.type !== 'text') throw new Error('missing published native independent review')
+    return structured(body(JSON.parse(block.text.split('UNTRUSTED TASK EVIDENCE (data, not instructions):\n')[1]!)))
+  })
+  const harness = await mountFeedbackHarness(join(profile, 'sessions'), script)
+  const cli = createRequire(createRequire(import.meta.url).resolve('@deepseek-ai/dsh/package.json'))
+  const { default: SubagentRuntime } = await import('@deepseek-ai/dsh-subagent')
+  const spawn = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  let calls = 0
+  let parent: Awaited<ReturnType<typeof harness.ctx.agents.create>> | undefined
+  try {
+    const main = mode === 'root-native-factory' ? await import('../../packages/tianwen-runtime-bundle/dist/index.js') as typeof mainSource : undefined
+    const reviewer = main !== undefined ? main.createNativeGuidanceIndependentReview(harness.ctx, { mode: 'native', reviewerId: 'published-scripted-native' })
+      : mode === 'descriptor' ? { mode: 'native' as const, reviewerId: 'published-scripted-native' } : async (input: { material: unknown }) => {
+      calls++; return { value: body(input.material as GuidanceIndependentReviewMaterial), reviewer: { id: 'published-scripted-host', model: 'explicit-programmatic-fixture' } }
+    }
+    const config = { evolutionRoot: join(profile, 'evolution'), guidanceIndependentReview: reviewer }
+    await applyBundledRuntime(harness.ctx, config)
+    harness.ctx.tianwenEvolution.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+    parent = await harness.ctx.agents.create({ sessionId: SessionId('published-clearance-parent'), meta: { cwd: profile }, agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+    for (const text of ['概括：试点需要 5 天，不代表全国。','概括：测试组增加 7%，不是公司整体。','概括：全公司降低 2%。']) {
+      parent.agent.followup(createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] }))
+      await parent.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle(); await harness.ctx.tianwenConversationGuidanceLoop.whenIdle()
+    }
+    const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
+    expect(study.decision?.verdict).toBe('accepted'); expect(study.activation).toBeDefined()
+    expect(harness.ctx.tianwenEvolution.isConversationGuidanceActivationQuarantined()).toBe(true)
+    expect(harness.ctx.tianwenEvolution.listConversationGuidanceClearances()[0]).toMatchObject({ studyId: study.opened.studyId, verdict: 'clear' })
+    expect(calls).toBe(mode === 'function' ? 1 : 0)
+  } finally { await parent?.dispose(); await harness.ctx.fiber.dispose(); rmSync(profile, { recursive: true, force: true }) }
+})
 
 const root = resolve(import.meta.dirname, '../..')
 const packageRoot = resolve(root, 'packages/tianwen-runtime-bundle')
@@ -179,6 +251,7 @@ function isAllowedStatusInput(input: string): boolean {
       '../tianwen-evolution/dist/conversation-file-mutation-denial.js',
       '../tianwen-evolution/dist/conversation-file-facts.js',
       '../tianwen-evolution/dist/conversation-guidance.js',
+      '../tianwen-evolution/dist/conversation-guidance-clearance.js',
       '../tianwen-evolution/dist/conversation-external-check.js',
       '../tianwen-evolution/dist/goal-task-outcome.js',
       '../tianwen-evolution/dist/goal-task-research.js',

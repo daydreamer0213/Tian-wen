@@ -224,6 +224,7 @@ declare module '@deepseek-ai/cordis' {
     'tianwen/conversation-admission-recorded'(taskId: string): void
     'tianwen/conversation-feedback-reconciled'(sessionId: string): void
     'tianwen/conversation-feedback-assessed'(assessmentId: string): void
+    'tianwen/conversation-guidance-clearance-recorded'(studyId: string): void
   }
 }
 
@@ -532,7 +533,9 @@ export class TianwenEvolutionService extends Service {
   }
 
   recordConversationGuidanceClearance(input: ConversationGuidanceClearance): { readonly duplicate: boolean } {
-    return this.formalWrite(() => this.state().ledger.recordConversationGuidanceClearance(input))
+    const receipt = this.formalWrite(() => this.state().ledger.recordConversationGuidanceClearance(input))
+    if (!receipt.duplicate) this.ctx.emit('tianwen/conversation-guidance-clearance-recorded', input.studyId)
+    return receipt
   }
 
   listConversationGuidanceClearances(scopeKey?: string): readonly ConversationGuidanceClearance[] {
