@@ -5,6 +5,9 @@
         learningLoop:
           enabled: true
           workspaceRoot: !!js process.env.TIANWEN_LEARNING_LOOP_ROOT
+        guidanceIndependentReview:
+          mode: native
+          reviewerId: tianwen-native-guidance-review
 
     - id: tianwen-web-bridge
       name: '@tianwen/runtime-bundle'

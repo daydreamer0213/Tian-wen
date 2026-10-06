@@ -1,4 +1,10 @@
-## 2026-10-07 当前：单段多句不再误拒，处理摘要引文晚校验
+## 2026-10-07 当前：真实引文纠正完成，转原打包与安装入口
+
+Task33 a324fa8c首次两例5真实0脚本/四合法check皆met；Q1纯换行quote被当前capture拒，同child下一step真实纠正成功。首只读audit按header数数request误列invalid保留，新v2逐step原SDK绑定5envelope/四proof、2匹配/invalid0；独立终审PASS及actual close-v2退出0释放4250冻结。旧P5 typed-invalid、Task31 ordinary future2 INC保持，原正式研究/许可/激活/两个effect不重开。见[真实结果](tianwen-nonblank-summary-quote-result-20261007.md)。
+
+Task34原完整包首75pass/3fail(78)保留，最窄补精确公共根/两已审src清单及两个dts peer；普通bundle和tracked Profile配置既有native首审。新原SDK两profile模式先RED2 accepted但未激活→完整80/80实际0且全局quarantine仍true；是模拟provider机制，未安装Daily。原pnpm锁仅更新bundle importer，原packages/snapshots逐字保持，frozen/lock-only/offline实际0，无依赖安装/下载。下一独立源码复核，原0.1.25准确受管配置/版本、CI/打包/安装/数据保护；不追加同类模型面板、不等天然反馈。整体goal active/mainDaily暂NO-GO，Daily0.1.24/preview.25不动。D约16GiB>=15未20，拒绝scratch清理未执行未绕过。
+
+## 2026-10-07 此前：单段多句不再误拒，处理摘要引文晚校验
 
 Task32源015a9424：原SDK242/242、public16/入口8/types/imports0、旧190审核/57trial及Task31原研究/效果/许可证明零模型恢复通过。新六例首次12真实，单段多句和待办独立句双met、真实分段/明确一句话/标题列表违约双not-met，共5有效匹配；P5允许两段，两raw输出met，但一个summary quote只有换行，native先记录、原最后parser拒绝，故typed-invalid，不算第六通过或语义false-NOT。原audit invalid1保持；失败补审全12SDK绑定/19会话/4162冻行不变，终审结构PASS及actual失败close0已释放。见[tianwen-paragraph-boundary-result-20261007.md](tianwen-paragraph-boundary-result-20261007.md)。
 

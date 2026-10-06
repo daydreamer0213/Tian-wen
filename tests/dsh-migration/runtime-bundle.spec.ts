@@ -34,7 +34,7 @@ import * as runtimeSource from '../../packages/tianwen-runtime-bundle/src/runtim
 import * as mainSource from '../../packages/tianwen-runtime-bundle/src/index.js'
 import { createNativeGuidanceIndependentReview } from '../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
-import type { GuidanceIndependentReviewMaterial, GuidanceIndependentReviewBody } from '../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js'
+import type { GuidanceIndependentReviewMaterial, GuidanceIndependentReviewBody, NativeGuidanceIndependentReviewDescriptor } from '../../packages/tianwen-runtime-bundle/src/guidance-independent-review.js'
 
 it('exports the original native guidance independent review factory through both source public surfaces', () => {
   expect(runtimeSource.createNativeGuidanceIndependentReview).toBe(createNativeGuidanceIndependentReview)
@@ -50,7 +50,7 @@ it('public study clearance exposes the native factory and config types in the ac
   expect(readFileSync(resolve(packageRoot, 'dist/runtime.d.ts'), 'utf8')).toContain('guidanceIndependentReview?')
 })
 
-it.each(['function','descriptor','root-native-factory'] as const)('public study clearance routes %s config through actual bundled ordinary apply without unquarantining', async mode => {
+it.each(['function','descriptor','root-native-factory','bundle-profile','repository-profile'] as const)('public study clearance routes %s config through actual bundled ordinary apply without unquarantining', async mode => {
   // Explicit SDK scripts exercise the published route only, not real-provider semantics.
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
   const profile = mkdtempSync(join(base, 'public-clearance-'))
@@ -80,8 +80,21 @@ it.each(['function','descriptor','root-native-factory'] as const)('public study 
   let calls = 0
   let parent: Awaited<ReturnType<typeof harness.ctx.agents.create>> | undefined
   try {
+    let profileReviewer: NativeGuidanceIndependentReviewDescriptor | undefined
+    if (mode === 'bundle-profile' || mode === 'repository-profile') {
+      // Read the effective ordinary product entry via the original DSH composition;
+      // a later Profile config replaces the bundle config as a whole.
+      const boot = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-app-boot')).href)
+      const loader = await import(pathToFileURL(cli.resolve('@deepseek-ai/cordis-plugin-loader')).href)
+      const patches = [boot.loadOverlayPatches('tianwen-test', resolve(packageRoot, 'cordis.patch.yml'))]
+      if (mode === 'repository-profile') patches.push(boot.loadOverlayPatches('tianwen-test', resolve(root, 'profiles/tianwen/cordis.patch.yml')))
+      const entry = (boot.composeEntries(patches) as Array<{ id: string; config?: unknown }>).find(row => row.id === 'tianwen-runtime')
+      const effective = loader.interpolate({ process }, entry?.config) as { guidanceIndependentReview?: NativeGuidanceIndependentReviewDescriptor }
+      profileReviewer = effective.guidanceIndependentReview
+    }
     const main = mode === 'root-native-factory' ? await import('../../packages/tianwen-runtime-bundle/dist/index.js') as typeof mainSource : undefined
-    const reviewer = main !== undefined ? main.createNativeGuidanceIndependentReview(harness.ctx, { mode: 'native', reviewerId: 'published-scripted-native' })
+    const reviewer = mode === 'bundle-profile' || mode === 'repository-profile' ? profileReviewer
+      : main !== undefined ? main.createNativeGuidanceIndependentReview(harness.ctx, { mode: 'native', reviewerId: 'published-scripted-native' })
       : mode === 'descriptor' ? { mode: 'native' as const, reviewerId: 'published-scripted-native' } : async (input: { material: unknown }) => {
       calls++; return { value: body(input.material as GuidanceIndependentReviewMaterial), reviewer: { id: 'published-scripted-host', model: 'explicit-programmatic-fixture' } }
     }
@@ -118,6 +131,8 @@ const serverPeerDependencies = {
   '@deepseek-ai/dsh-shell': '0.1.1-rc.2',
   '@deepseek-ai/cordis': '4.0.1',
   '@deepseek-ai/dsh-agent': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-agent-loop': '0.1.1-rc.2',
+  '@deepseek-ai/dsh-cordis-host-runner': '0.1.1-rc.2',
   '@deepseek-ai/dsh-agent-presets': '0.1.1-rc.2',
   '@deepseek-ai/dsh-commands': '0.1.1-rc.2',
   '@deepseek-ai/dsh-credentials': '0.1.1-rc.2',
@@ -182,6 +197,8 @@ function isAllowedRuntimeInput(input: string): boolean {
     'src/conversation-source-readiness.ts',
     'src/conversation-study-result-check.ts',
     'src/conversation-guidance-loop.ts',
+    'src/guidance-review-packet.ts',
+    'src/guidance-independent-review.ts',
     'src/conversation-proposal-observation.ts',
     'src/conversation-feedback-assessment.ts',
     'src/conversation-claim-review.ts',
@@ -693,7 +710,7 @@ describe('@tianwen/runtime-bundle', () => {
     for (const engine of ['Python', 'Node']) expect(compile(producerConsumer.replaceAll('IsolatedPython', `Isolated${engine}`))).toEqual([])
   }, 30_000)
 
-  it('bundles the package root through the narrow research-summary entry', () => {
+  it('bundles the public package helpers through exact declared DSH roots', () => {
     const source = readFileSync(resolve(packageRoot, 'dist/index.js'), 'utf8')
     const metafile = json(resolve(packageRoot, 'dist/index.meta.json')) as {
       inputs: Record<string, unknown>
@@ -706,9 +723,14 @@ describe('@tianwen/runtime-bundle', () => {
     expect(externalPackages(output!.imports)).toEqual([
       '@deepseek-ai/cordis',
       '@deepseek-ai/dsh-agent',
+      '@deepseek-ai/dsh-commands',
+      '@deepseek-ai/dsh-goal',
       '@deepseek-ai/dsh-llm',
+      '@deepseek-ai/dsh-sandbox',
       '@deepseek-ai/dsh-session',
+      '@deepseek-ai/dsh-session-persistence-jsonl',
       '@deepseek-ai/dsh-skill',
+      '@deepseek-ai/dsh-subagent',
       '@deepseek-ai/dsh-tools',
     ])
     expect(Object.keys(metafile.inputs)).toContain('../tianwen-runtime/dist/research-summary.js')
@@ -884,6 +906,9 @@ describe('@tianwen/runtime-bundle', () => {
         learningLoop:
           enabled: true
           workspaceRoot: !!js process.env.TIANWEN_LEARNING_LOOP_ROOT
+        guidanceIndependentReview:
+          mode: native
+          reviewerId: tianwen-native-guidance-review
 
     - id: tianwen-web-bridge
       name: '@tianwen/runtime-bundle'

@@ -1,4 +1,10 @@
-## 2026-10-07 当前：单段多句不再误拒，处理摘要引文晚校验
+## 2026-10-07 当前：真实前置引文纠正与正常入口机制通过
+
+Task33 a324fa8c原SDK246/public16/入口4+4/types/import0，旧190/57、Task31完整原链及Task32valid10/invalid1零模型恢复。两新首次5actual/0script、四合法check均met，Q1首纯换行quote真实先拒后同child纠正；首audit错误数header保留，新v2按step核5请求/四proof，2匹配/invalid0，独立终审及actual close-v2退出0/4250冻结释放。旧Task31普通future2 INC/Task32 P5 typed-invalid不改。见[本轮原证据](tianwen-nonblank-summary-quote-result-20261007.md)。
+
+Task34原完整package首75pass/3fail(78)，补两个声明peer和精确清单后、新正常bundle/项目Profile模式RED2→完整80/80实际0；全为SDK模拟provider机制，默认apply隔离保持，许可后采用，未证明新自然长期收益。原pnpm packages/snapshots不变，仅importer准确补两SDK；frozen/lock-only/offline实际0，无下载/重装。剩原准确升级版本/受管配置、CI/打包/安装与数据保护，不默认新模型面板或重开已成立研究。mainDaily暂NO-GO/整体goal active。
+
+## 2026-10-07 此前：单段多句不再误拒，处理摘要引文晚校验
 
 Task32源015a9424：原SDK242/242、public16/入口8/types/imports0、旧190审核/57trial及Task31原研究/效果/许可证明零模型恢复通过。新六例首次12真实，单段多句和待办独立句双met、真实分段/明确一句话/标题列表违约双not-met，共5有效匹配；P5允许两段，两raw输出met，但一个summary quote只有换行，native先记录、原最后parser拒绝，故typed-invalid，不算第六通过或语义false-NOT。原audit invalid1保持；失败补审全12SDK绑定/19会话/4162冻行不变，终审结构PASS及actual失败close0已释放。见[tianwen-paragraph-boundary-result-20261007.md](tianwen-paragraph-boundary-result-20261007.md)。
 
