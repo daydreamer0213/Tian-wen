@@ -900,3 +900,9 @@ learning-r3在8ba81be5完成42真实/42完整、0模拟、10原生臂。source1 
 目标 active。新空DEV环境在146fb75b完成24真实/0脚本，三新Task六原生票met；source1三项continuing，source2明示长期今后/本次不改却requirement-change，解释自己承认continuing preference，原票不改。study/attempt/activation/effect0，未来题/标准仍未消费；撤回后1请求无分析/方法，cold0。终态独立1914路径+19native校验通过，冻结已解除。
 
 原provider输入与源码/public bundle逐字一致，不是代码漏传。下一只修原ASSESSMENT_INSTRUCTION分类target优先/避免null空criteria示例误导，补长期未来与当前改稿两native对照、原public构建，再用新任务真实验证。不改schema/scope/原票/第三审/门槛，不索用户任务。main/Daily NO-GO保持，D约16.52GiB>=15。详见[tianwen-sentence-method-learning-result-20261006.md](tianwen-sentence-method-learning-result-20261006.md)。
+
+## 2026-10-06 当前：分类修正有真实效果，转提取元话语与哈希纠错提示
+
+完整目标 active。c59695cd原public build16/相关98/legacy6proof恢复通过；39真实/0script新批run/cold/audit0，四普通Task八票met。currentRevision正确require-change[]，两未来feedback正确preference；但均把本次不改/范围解释抽成第4criterion，source1另unclear、source2第4one-off，whole资格false，study/activation/effect0。原结果不改，未来题仍未消费。source2审核编号抄错/JSON尾字符七次拒绝后第8次原捕获成功，无host修值。
+
+独立终态1999路径/26native通过，freeze-end已落盘。blind无明确无源事实/条件/角色/状态/承诺，source1正文prefix标题形式保留不确定，不新加gate。下一最窄AS提取行为标准与范围/本次改稿说明分开，保留真正持续futureworkflow；另原validateCapture坏digest提示首差位+长度+exactexpected，同child自纠、schema/SDK/原gate不变。两独立worker原nativeRED/GREEN后原public build+新实际验证，不重评/手工采用/新通过数。main/Daily NO-GO，D约16.50GiB>=15。详见[tianwen-feedback-target-result-20261006.md](tianwen-feedback-target-result-20261006.md)。
