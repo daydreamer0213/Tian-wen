@@ -1,5 +1,7 @@
 # 产品构建与逐项断言范围修复
 
+> 本文保留实现阶段的先验检查；随后真实执行和有限收口见 [tianwen-product-closeout-result-20261006.md](tianwen-product-closeout-result-20261006.md)。下面“尚待验证/下一”是实现时状态，不代表当前仍未执行。
+
 ## 实现结论
 
 本轮完成代码和产品运行文件修复，真实模型效果尚待全新任务首次验证。没有改动已安装 Daily 0.1.24 / Desktop preview.25，main/Daily 原 R9 NO-GO 保留。已完成受控学习和普通 Web 阶段不重开。

@@ -1,6 +1,10 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
-## 2026-10-06 当前实现检查：v12 新断言资格，旧证据不改票
+## 2026-10-06 最新收口资格
+
+7b07332b/current v12 公开 Runtime 新 F3 真正提前拒错引用并同 child 真实纠正，19真+1明确模拟，原 proof/SDK step/退出/cold0成立；F3四unclear、N3两continuing两unclear，双方不具原继续学习资格。引用有效不等于范围通过或新方法效果。N3主答新增手续完成/通知承诺被原双审指出，不改原票。首F2模拟接口400与首八例20预算CLI1/D1取消/D2未消费完整保存；新E1/E2仅补边界4真，E1notmet/E2分歧。八完整新语义结果6匹配/2分歧，原16新proof/全24实际绑定；不回判、不加第三审、不重开旧accepted学习或把旧v11效果当v12。独立收口无P1/P2、main/Daily原NO-GO保持。见[当前收口](tianwen-product-closeout-result-20261006.md)。
+
+## 2026-10-06 此前实现检查：v12 新断言资格，旧证据不改票
 
 公开 apply 实际旧 bundle 已按原 pipeline 重建，脚本反馈回归 3 / 3；当前 v12 沿原 audit v2/双审逐项核必要角色、保证、依赖、承诺，保留建议和来源明确的正常对照。八相关套件 390 / 390、编译/构建/私有导入退出 0、完整包 73 / 73。旧 v11 精确指令/schema 和原 16 项真实证明零模型恢复保持。历史已完成研究不重开；新资格仍按原当前版本规则，不能把旧 v11 结果称 v12 新效果。真实 F2/N2 和新八例尚待首次检查，main/Daily 原 NO-GO 保留。见[tianwen-public-build-assertion-scope-implementation-20261006.md](tianwen-public-build-assertion-scope-implementation-20261006.md)。
 
