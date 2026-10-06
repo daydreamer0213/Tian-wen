@@ -1,6 +1,14 @@
 # 天问产品与自动学习的固定范围（2026-09-28）
 
-## 2026-10-06 当前范围修正：继承模拟授权和已完成闭环
+## 2026-10-06 当前产品收口范围
+
+公开旧运行文件已重建；v12 只澄清既有 R9 的逐项来源，保持原双审、建议允许和旧证明，没有新增验收门槛。机制/兼容/编译/原构建/包检查通过，真实新效果待 F2/N2 与八例四对一次验证，不能把脚本成功称真实提升。已完成受控学习和普通 Web 不重开，原 Daily/preview 安装不变、main/Daily NO-GO 保留。详见[tianwen-public-build-assertion-scope-implementation-20261006.md](tianwen-public-build-assertion-scope-implementation-20261006.md)。
+
+## 2026-10-06 最新：有限反馈批收口，继续具体产品缺口
+
+全新F1/N1原Runtime/public nativefeedback18actual+1fake，正常N1三continuing成立；F1被late拒绝、前置纠错未生效，原无proof/无后续纠正保持，详见[结果](tianwen-scope-repair-prospective-result-20261006.md)。确切原因是原公开bundle陈旧、独立tsc更新未执行原esbuild整合步骤；执行者补公开apply行为回归及原构建再全新前瞻，不改SDKguard、不索题/等待自然/标泛化blocked，也不将失败改通过。当前原受控学习、普通Web与已有Daily交付不重开；既有R9角色/保证误读沿原两审作最窄新版本修正，不加新评审或词禁/次数标准。main/Daily完整自动学习发布原NO-GO保持。
+
+## 2026-10-06 此前范围修正：继承模拟授权和已完成闭环
 
 下文是9月范围与当时证据，不再要求等待自然问题或用户另出任务。所有者已明确允许主动模拟故障、反馈、环境和全新后续任务，由真实产品/模型实际执行；模拟来源与真实效果分别记录，不能捏造结果或回判历史。现有日常研究预览0.1.24/preview.25的交付保持；完整开发分支的main/Daily发布仍NO-GO，并不表示没有可用产品。
 

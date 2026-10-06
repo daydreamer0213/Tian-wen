@@ -18,12 +18,16 @@ function root() {
 }
 afterEach(() => { for (const directory of roots.splice(0)) rmSync(directory, { recursive: true, force: true }) })
 
-it('keeps the exact v10 quality contract readable while v11 is current', () => {
+it('keeps the exact v10 and v11 quality contracts readable while v12 is current', () => {
   const current = conversationQualityContract()
-  const historical = { ...current, schemaVersion: 'tianwen.conversation-quality.v10' as const }
-  expect(current.schemaVersion).toBe('tianwen.conversation-quality.v11')
-  expect(parseConversationQualityContract(historical)).toEqual(historical)
-  expect(hasCurrentConversationQuality(historical)).toBe(false)
+  const criterion = current.criterion.split(' Check each independent assertion')[0]!
+  expect(sha256(criterion)).toBe('sha256:cb0e44a1d77e446d31270996c43436eacb7b4b9424d73b514aa2a1d1c76927d8')
+  expect(current.schemaVersion).toBe('tianwen.conversation-quality.v12')
+  for (const schemaVersion of ['tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11'] as const) {
+    const historical = { schemaVersion, source: 'host' as const, criterion }
+    expect(parseConversationQualityContract(historical)).toEqual(historical)
+    expect(hasCurrentConversationQuality(historical)).toBe(false)
+  }
   expect(hasCurrentConversationQuality(current)).toBe(true)
 })
 

@@ -1,6 +1,18 @@
 # Tianwen 当前项目权威交接
 
-## 2026-10-06 最新：当前普通 Web 流程完成，转具体反馈捕获修复
+## 2026-10-06 当前：公开产品构建和逐项断言修复完成，接续全新真实验证
+
+已将原公开 runtime 的旧内联代码重新生成，原公开 apply 回归从 1 失败 / 2 通过变为 3 / 3。当前 v12 最窄澄清角色、保证、必要依赖、承诺的逐项来源，原双审/audit v2/旧版指令及证明保持；原八顶层编译 0，相关 390 / 390，原完整构建剩余 14 步全 0、私有导入 0、完整包 73 / 73。完整包首两清单漏项失败及精确三条补齐保留，独立只读无 P1/P2。新校验器零模型恢复原 v11 16 项真实证明，原七匹配/一分歧不改。
+
+真实新效果尚未验证。下一全新 F2/N2 模拟反馈及八例四对语义任务首次真实原生检查，不重发 F1/N1 或旧八例、不增加发布标准、不等用户出题。详见[实现和有限验证边界](tianwen-public-build-assertion-scope-implementation-20261006.md)。目标 active，旧已完成学习/普通 Web 不重开；已安装 Daily/preview 不改，main/Daily 原 R9 NO-GO 保留。D 约 16.67 GiB，无安装/完整环境副本。
+
+## 2026-10-06 最新：新反馈首次前瞻发现捕获检查的集成缺口
+
+目标模式active。67975e3c全新F1/N1原普通Runtime/public native feedback首次完成，18真实调用+1明确脚本scope故障；两原Task双met/四proof恢复，N1原preference/三continuing及两proof成立。F1无效引文在原工具seq17先捕获、late拒绝→invalid-judgment/inconclusive/proofnull、0实际后续纠正请求，不能称90本地回归已证明真实集成生效。预检/运行/冷CLI0、原关闭revision2/quarantine/正常drain/cold0/stateledger不变；149生产/960保护/Daily169原字节保持。首环境目录服务缺失CLI1/0调用/未消费和原auditor首答lastID假设CLI1均保留；新独立只读audit0/0新模型与复核完成。详见[新反馈结果](tianwen-scope-repair-prospective-result-20261006.md)。
+
+本批已收口，F1/N1不重发、不改票。确切原因是原公开dist/runtime.js内联bundle没有新validateCapture，独立tsc模块有修复却不会被公开apply加载；不是SDK/context过滤问题。旧public产物/metadata按冻结hash压缩留存。下一原public apply红回归→原esbuild构建→绿回归→全新反馈真实纠正，并做既有R9角色/保证新版本最窄修正及新正负对照，按[有限计划](../superpowers/plans/2026-10-06-tianwen-public-build-and-assertion-scope-plan.md)。终态重复snapshot无损压缩释放约7.8MiB；原native/provider/票保持，D约16.67GiB>=15。原受控学习和普通Web完成状态不重开，不等待用户出题/自然问题、不加第三审/词禁/通过数。原main/Daily NO-GO及已有Daily0.1.24/preview.25安装保持。
+
+## 2026-10-06 此前：当前普通 Web 流程完成，转具体反馈捕获修复
 
 干净 fd683bf4/current Runtime 普通 apply/default quarantine，独立 Profile 原 Web 实际发送四条新冻结消息，23 真实请求/0脚本主答。U0 同意 revision1、U1介绍/U2模拟表达偏好改写均原双met；U2独立反馈的范围子会话引用插入省略号，原迟校验拒绝→invalid-judgment/inconclusive/proofnull，未采用持续标准。U3 原工具关闭 revision2/quarantine仍true；关闭前已识别的控制任务原review cancelled，不算审查成功。study/activation0。本轮普通入口/任务/关闭/正常退出/零模型冷恢复完成，不称反馈有效归因、学习效果或全面语义安全。
 

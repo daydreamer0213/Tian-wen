@@ -714,10 +714,12 @@ it('keeps the exact historical v9 review instruction without v10 output-form add
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
-it('replays the v10 output-form reviewer instruction under a v11 current contract', async () => {
+it('replays the v10 output-form reviewer instruction under a v12 current contract', async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-v10-instruction-')); roots.push(root)
-  const old = { ...conversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v10' as const }
+  const criterion = conversationQualityContract().criterion.split(' Check each independent assertion')[0]!
+  expect(sha256(criterion)).toBe('sha256:cb0e44a1d77e446d31270996c43436eacb7b4b9424d73b514aa2a1d1c76927d8')
+  const old = { schemaVersion: 'tianwen.conversation-quality.v10' as const, source: 'host' as const, criterion }
   const material = { source: { context: [], request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: '请用一段话复述原料已送达。' }] })], qualityContract: old },
     conversation: [{ id: 'answer', role: 'assistant', content: [{ type: 'text', text: '原料已送达。' }] }], toolEvidence: [] }
   const harness = await mountPersistentHarness(root, [new Error('capture historical request')])

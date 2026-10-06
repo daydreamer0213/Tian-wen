@@ -1,6 +1,14 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
-## 2026-10-06 最新：普通 Web 原生链已检查，模拟反馈未获有效采用
+## 2026-10-06 当前实现检查：v12 新断言资格，旧证据不改票
+
+公开 apply 实际旧 bundle 已按原 pipeline 重建，脚本反馈回归 3 / 3；当前 v12 沿原 audit v2/双审逐项核必要角色、保证、依赖、承诺，保留建议和来源明确的正常对照。八相关套件 390 / 390、编译/构建/私有导入退出 0、完整包 73 / 73。旧 v11 精确指令/schema 和原 16 项真实证明零模型恢复保持。历史已完成研究不重开；新资格仍按原当前版本规则，不能把旧 v11 结果称 v12 新效果。真实 F2/N2 和新八例尚待首次检查，main/Daily 原 NO-GO 保留。见[tianwen-public-build-assertion-scope-implementation-20261006.md](tianwen-public-build-assertion-scope-implementation-20261006.md)。
+
+## 2026-10-06 最新：新原生反馈的正常资格与故障结果分开
+
+67975e3c全新F1/N1，原Runtime/public nativefeedback，18actual+1明确fake。N1模拟持续表达偏好原classification preference/三continuing，两原证明与active material恢复，资格为受控原生反馈，不称用户真实读后判断或方法收益。F1原工具捕获无效引文后late invalid-judgment/inconclusive/proofnull，scope无proof/0实际纠正；其持续标准仍无资格。两普通Task原双met不证明全面语义安全。运行及coldCLI0/关闭revision2/quarantine/零请求stateledger不变；独立只读audit0，无重评/重发/强制启用。详见[新反馈首次结果](tianwen-scope-repair-prospective-result-20261006.md)。确切原因是原公开bundle陈旧、内联caller缺新callback，独立tsc模块更新不代表公开apply生效；下一原公开入口回归和原esbuild构建后用全新输入，不改SDKguard；原已完成受控学习不重开，main/Daily原NO-GO保持。
+
+## 2026-10-06 此前：普通 Web 原生链已检查，模拟反馈未获有效采用
 
 fd683bf4当前普通apply/默认暂停新激活，原Web独立配置四原UI消息、23actual、正常原CLI退出和cold0成立；U1/U2原Task各双met，模拟偏好实际关联U1且独立首assessor判preference，但scope首引用加省略号被原晚校验拒绝，最终invalid-judgment/inconclusive/proofnull。三continuing/两unclear不是持续标准已接受，本轮不能宣称反馈归因成功、方法改善或自然长期证据。U3关闭后原控制Task review cancelled、consent2disabled/quarantine true、study/activation0，cold账本/状态不变。
 

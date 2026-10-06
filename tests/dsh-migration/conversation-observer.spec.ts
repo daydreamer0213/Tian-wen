@@ -142,7 +142,7 @@ it('captures ordinary requests in two native turns before each answer and review
     }
     const tasks = harness.ctx.tianwenEvolution.listConversationTasks('ordinary-chat')
     expect(boundBeforeAnswer).toBe(true)
-    expect(firstTaskQuality).toBe('tianwen.conversation-quality.v11')
+    expect(firstTaskQuality).toBe('tianwen.conversation-quality.v12')
     expect(firstReminderCount).toBe(1)
     expect(firstReminder).toContain('original direct user request')
     expect(firstReminder).toContain('heading, bullets, divider, or extra addendum')
@@ -157,12 +157,12 @@ it('captures ordinary requests in two native turns before each answer and review
     const recovered = await recoverConversationTaskMaterial(harness.ctx, tasks[0]!)
     expect(recovered).toHaveProperty('qualityContract', tasks[0]!.admission!.qualityContract)
     expect(recovered.criteria).toEqual(admission.criteria)
-    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v11')
+    expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen.conversation-quality.v12')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('self-contained summaries, translations and rewrites')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('Writing is not automatically subjective')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('tianwen_captured_file_facts')
     expect(JSON.stringify(harness.adapter.requests[0]?.messages)).toContain('inspect, count or hash local files and answer in chat is local-files/chat')
-    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v11')
+    expect(JSON.stringify(harness.adapter.requests[2]?.messages)).toContain('tianwen.conversation-quality.v12')
     expect(tasks[0]?.source.taskId).not.toBe(tasks[1]?.source.taskId)
     expect(harness.adapter.requests).toHaveLength(8)
     expect(harness.adapter.requests[0]?.tools?.[0]?.parameters).toMatchObject({

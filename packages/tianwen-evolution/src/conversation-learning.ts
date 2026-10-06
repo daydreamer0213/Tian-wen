@@ -14,7 +14,7 @@ export type ConversationUnavailable = 'model-unavailable' | 'material-too-large'
 
 /** Host policy, not a model-authored criterion or a reinterpretation of old proof. */
 export interface ConversationQualityContract {
-  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3' | 'tianwen.conversation-quality.v4' | 'tianwen.conversation-quality.v5' | 'tianwen.conversation-quality.v6' | 'tianwen.conversation-quality.v7' | 'tianwen.conversation-quality.v8' | 'tianwen.conversation-quality.v9' | 'tianwen.conversation-quality.v10' | 'tianwen.conversation-quality.v11'
+  readonly schemaVersion: 'tianwen.conversation-quality.v1' | 'tianwen.conversation-quality.v2' | 'tianwen.conversation-quality.v3' | 'tianwen.conversation-quality.v4' | 'tianwen.conversation-quality.v5' | 'tianwen.conversation-quality.v6' | 'tianwen.conversation-quality.v7' | 'tianwen.conversation-quality.v8' | 'tianwen.conversation-quality.v9' | 'tianwen.conversation-quality.v10' | 'tianwen.conversation-quality.v11' | 'tianwen.conversation-quality.v12'
   readonly source: 'host'
   readonly criterion: string
 }
@@ -48,8 +48,11 @@ function legacyV9ConversationQualityContract(): ConversationQualityContract {
 function legacyV10ConversationQualityContract(): ConversationQualityContract {
   return { ...legacyV9ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v10', criterion: `${legacyV9ConversationQualityContract().criterion} Check the complete answer's requested output form separately from the factual claim audit. When the direct user requests a single paragraph as the deliverable, a heading, bullet list, divider or extra addendum can violate that form even if its individual units make no unsupported factual claim. Treat natural wording such as "write a paragraph" or "写一段" as a single-paragraph form when that is what the user asks to produce; do not infer that form merely from a request for short text, quoted source content, or an unrelated use of those words. Respect explicit permission for headings, lists or multiple sections. A non-factual or source-supported audit status does not itself establish instruction-following.` }
 }
-export function conversationQualityContract(): ConversationQualityContract {
+function legacyV11ConversationQualityContract(): ConversationQualityContract {
   return { ...legacyV10ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v11' }
+}
+export function conversationQualityContract(): ConversationQualityContract {
+  return { ...legacyV11ConversationQualityContract(), schemaVersion: 'tianwen.conversation-quality.v12', criterion: `${legacyV11ConversationQualityContract().criterion} Check each independent assertion against authority for its own added actor, necessary condition, causal dependency or commitment; support for another clause does not support that addition. An ability to submit preferences does not establish guaranteed compliance on the next task. Paused automatic adoption or a need for evaluation does not establish a necessary human or named reviewer. Prior assistant statements and a user not withdrawing supplied facts do not authorize a new product mechanism or promise. Preserve complete optional advice, faithful paraphrases and task-compatible fallible inference; explicitly sourced conditions and commitments remain allowed.` }
 }
 export function parseConversationQualityContract(value: unknown): ConversationQualityContract {
   const input = object(value, ['schemaVersion', 'source', 'criterion'])
@@ -62,7 +65,8 @@ export function parseConversationQualityContract(value: unknown): ConversationQu
               : input.schemaVersion === 'tianwen.conversation-quality.v7' ? legacyV7ConversationQualityContract()
                 : input.schemaVersion === 'tianwen.conversation-quality.v8' ? legacyV8ConversationQualityContract()
                   : input.schemaVersion === 'tianwen.conversation-quality.v9' ? legacyV9ConversationQualityContract()
-                    : input.schemaVersion === 'tianwen.conversation-quality.v10' ? legacyV10ConversationQualityContract() : conversationQualityContract()
+                    : input.schemaVersion === 'tianwen.conversation-quality.v10' ? legacyV10ConversationQualityContract()
+                      : input.schemaVersion === 'tianwen.conversation-quality.v11' ? legacyV11ConversationQualityContract() : conversationQualityContract()
   if (input.schemaVersion !== contract.schemaVersion || input.source !== contract.source || input.criterion !== contract.criterion) throw new TypeError('conversation quality contract is invalid')
   return contract
 }
@@ -128,7 +132,7 @@ export function parseStoredConversationReviewChecks(value: unknown): Conversatio
 }
 
 export function parseConversationQualityReviewChecks(value: unknown, quality: ConversationQualityContract | undefined): ConversationStoredReviewChecks {
-  if (quality?.schemaVersion !== 'tianwen.conversation-quality.v4' && quality?.schemaVersion !== 'tianwen.conversation-quality.v5' && quality?.schemaVersion !== 'tianwen.conversation-quality.v6' && quality?.schemaVersion !== 'tianwen.conversation-quality.v7' && quality?.schemaVersion !== 'tianwen.conversation-quality.v8' && quality?.schemaVersion !== 'tianwen.conversation-quality.v9' && quality?.schemaVersion !== 'tianwen.conversation-quality.v10' && quality?.schemaVersion !== 'tianwen.conversation-quality.v11') return parseConversationReviewChecks(value)
+  if (quality?.schemaVersion !== 'tianwen.conversation-quality.v4' && quality?.schemaVersion !== 'tianwen.conversation-quality.v5' && quality?.schemaVersion !== 'tianwen.conversation-quality.v6' && quality?.schemaVersion !== 'tianwen.conversation-quality.v7' && quality?.schemaVersion !== 'tianwen.conversation-quality.v8' && quality?.schemaVersion !== 'tianwen.conversation-quality.v9' && quality?.schemaVersion !== 'tianwen.conversation-quality.v10' && quality?.schemaVersion !== 'tianwen.conversation-quality.v11' && quality?.schemaVersion !== 'tianwen.conversation-quality.v12') return parseConversationReviewChecks(value)
   const checks = parseConversationAuditedReviewChecks(value)
   const version = quality.schemaVersion === 'tianwen.conversation-quality.v4' ? 'tianwen.claim-audit.v1' : 'tianwen.claim-audit.v2'
   if (checks.some(check => check.audit.schemaVersion !== version)) throw new TypeError('review audit version does not match its quality contract')
@@ -605,9 +609,9 @@ export class ConversationLearningState {
     if (record.verdict !== 'inconclusive' && (task.admission.decision?.kind !== 'task' || task.completion.status !== 'completed')) throw new Error('incomplete task cannot establish a conclusive review')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'subjective') throw new Error('a subjective review cannot establish user satisfaction')
     if (record.verdict === 'met' && task.admission.decision?.evaluationMode === 'external') throw new Error('external effects require an independent external evaluator, not a text judgment')
-    if (['tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11'].includes(task.admission.qualityContract?.schemaVersion ?? '') && task.admission.decision?.kind === 'task'
+    if (['tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(task.admission.qualityContract?.schemaVersion ?? '') && task.admission.decision?.kind === 'task'
       && task.completion.status === 'completed' && record.proof === null && record.unavailableReason === null) throw new Error('a completed audited task review requires proof or an explicit unavailable reason')
-    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('versioned task reviews require two independent review checks')
+    if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(task.admission.qualityContract?.schemaVersion ?? '') && record.proof !== null && record.reviewChecks === undefined) throw new Error('versioned task reviews require two independent review checks')
     if (record.reviewChecks !== undefined) {
       parseConversationQualityReviewChecks(record.reviewChecks, task.admission.qualityContract)
       const expected = conversationReviewConsensus(record.reviewChecks)

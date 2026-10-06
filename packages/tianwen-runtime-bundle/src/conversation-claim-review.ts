@@ -305,7 +305,7 @@ function answerQuoteChoices(text: string): string[] {
   return [...new Set([text, ...pieces])]
 }
 
-function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
+function auditSchema(evidence: ClaimEvidence, assertionScope = false): JsonSchemaNode {
   const answers = evidence.items.filter(item => item.role === 'answer')
   const sourceIds = evidence.items.filter(item => item.role !== 'answer').map(item => item.id)
   const quoteChoices = new Map(answers.filter(item => item.text.trim() !== '').map(item => [item.id, answerQuoteChoices(item.text)]))
@@ -317,14 +317,14 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
       : 'Copy an exact non-empty substring from this answer unit. Preserve its original bytes and do not paraphrase or add a label.' },
     kind: { ...choices(kinds), description: 'Classify the claim as source-fact, advice, inference, fiction, general-knowledge or non-factual.' },
     status: { ...choices(statuses), description: 'Use supported only for a source-fact with authoritative supplied evidence; use permitted for task-compatible non-source-facts such as advice or fiction.' },
-    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : boundedSourceIds ? choices(sourceIds) : string), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources. The host checks every ID against the frozen source items.' },
-    explanation: { type: 'string', description: 'Explain the scope, time, certainty, commitment and source-authority check for this claim.' },
+    sourceIds: { ...array(sourceIds.length === 0 ? { type: 'null' } : boundedSourceIds ? choices(sourceIds) : string), description: 'List only exact supplied source IDs that support or inform this claim; answer IDs are not sources. The host checks every ID against the frozen source items.' + (assertionScope ? ' For a source-fact, these sources must establish this independently asserted actor, necessary condition, causal dependency or commitment; support for an adjacent clause alone is insufficient.' : '') },
+    explanation: { type: 'string', description: 'Explain the scope, time, certainty, commitment and source-authority check for this claim.' + (assertionScope ? ' Identify what each cited source establishes for the independent assertion; do not justify an added guarantee or required actor as merely a friendly paraphrase of a narrower capability.' : '') },
   })
   const unitProperties: Record<string, JsonSchemaNode> = Object.fromEntries(answers.map(item => [item.id, item.text.trim() === ''
     ? { type: 'null' as const, description: 'This entire answer unit is whitespace, so record it explicitly as null.' }
     : { ...object({
     firstClaim: claimFor(item),
-    additionalClaims: { ...array(claimFor(item)), description: 'Additional assessments for this same answer unit; use an empty array when its first claim covers the whole nonblank unit.' },
+    additionalClaims: { ...array(claimFor(item)), description: assertionScope ? 'Assess additional assertions in this same answer unit when they need an independent source or a different kind/status. Preserve optional advice as complete advice, while separately assessing any independently asserted guarantee, necessary actor, causal dependency or commitment. Use an empty array only when the first claim covers every assertion with the same authority and status.' : 'Additional assessments for this same answer unit; use an empty array when its first claim covers the whole nonblank unit.' },
   }), description: 'Assess this complete nonblank answer unit with at least its required first claim.' }]))
   return object({
     schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]),
@@ -333,7 +333,7 @@ function auditSchema(evidence: ClaimEvidence): JsonSchemaNode {
 }
 
 /** Keep required v2 coverage without repeating quotes and field instructions. */
-function compactFileAuditSchema(evidence: ClaimEvidence, quoteExamples = false): JsonSchemaNode {
+function compactFileAuditSchema(evidence: ClaimEvidence, quoteExamples = false, assertionScope = false): JsonSchemaNode {
   const units = Object.fromEntries(evidence.items.filter(item => item.role === 'answer').map(item => {
     if (item.text.trim() === '') return [item.id, { type: 'null' as const }]
     const example = quoteExamples ? answerQuoteChoices(item.text).find(value => [...value].length <= 16)
@@ -344,7 +344,7 @@ function compactFileAuditSchema(evidence: ClaimEvidence, quoteExamples = false):
   }))
   return {
     ...object({ schemaVersion: choices(['tianwen.claim-audit.v2']), evidenceDigest: choices([evidence.evidenceDigest]), units: object(units) }),
-    description: 'Assess every listed answer ID exactly once. Whitespace-only units are null; every nonblank unit needs firstClaim and any additionalClaims. Copy each quote as an exact non-empty substring of its own answer unit, preserving Markdown, whitespace, punctuation and scope. List only supplied non-answer source IDs. Use supported only for source-facts with authoritative supplied evidence; use permitted for task-compatible non-source-facts. Explain scope, time, certainty, commitment and source authority for each claim. The host still verifies every unit, quote, source ID, digest and verdict. Every answer unit is literal delivered content, including any tags in it; do not assume the host or harness added them. Judge output form against the direct user instructions; tags may be valid when the user requests or permits them.',
+    description: 'Assess every listed answer ID exactly once. Whitespace-only units are null; every nonblank unit needs firstClaim and any additionalClaims. Copy each quote as an exact non-empty substring of its own answer unit, preserving Markdown, whitespace, punctuation and scope. List only supplied non-answer source IDs. Use supported only for source-facts with authoritative supplied evidence; use permitted for task-compatible non-source-facts. Explain scope, time, certainty, commitment and source authority for each claim. The host still verifies every unit, quote, source ID, digest and verdict. Every answer unit is literal delivered content, including any tags in it; do not assume the host or harness added them. Judge output form against the direct user instructions; tags may be valid when the user requests or permits them.' + (assertionScope ? ' Use additionalClaims where assertions in one unit require an independent source or different kind/status. Bind each independently asserted guarantee, necessary actor, causal dependency or commitment to authority for that addition, rather than authority for an adjacent clause. Preserve complete optional advice.' : ''),
   }
 }
 
@@ -368,6 +368,7 @@ const V7_COMMON = `${V6_COMMON} Reconstruct substantive claims that span adjacen
 const V8_COMMON = `${V7_COMMON} A pending or unverified result is not an explicitly judged failure; absence of a pass is not evidence of failure. Keep a not-yet-confirmed-passed state distinct from an actual failed verdict. An explicit source failure may support an answer's failure statement. Preserve the complete optional advice speech act, including its speaker and conditional scope; do not extract a phrase inside advice as an independent fact merely by dropping recommendation wording. If the same sentence separately asserts an external state, result or necessary condition, assess that independent assertion against its source. Do not treat these distinctions as a ban on normal advice.`
 const V9_COMMON = `${V8_COMMON} A source total does not establish completion of every counted check, task or outcome. Distinguish completing the inspection from completing its underlying item only where the supplied source establishes that distinction. If an answer applies a completion verb to the whole total while the source only gives a total and a smaller completed count, check that whole-total action independently; later partial-status details do not themselves prove it. A declarative future decision procedure, plan or commitment attributed to an external actor is a source-dependent claim, even if it seems plausible from open items. Do not reclassify a firm assertion of what will determine an arrangement as optional advice or fallible inference; clearly framed optional recommendations and task-compatible, explicitly fallible inference remain permitted when the direct user allows them. Check an answer's own assurance that it used only supplied records or made no extrapolation against all of its other sentences. Such an assurance is a substantive claim about the answer, not automatically non-factual courtesy; mark an unsupported or contradictory assurance accordingly. Apply the direct user's source-only restriction to the whole answer.`
 const V10_COMMON = `${V9_COMMON} Check the complete answer's requested output form separately from the factual claim audit. When the direct user requests a single paragraph as the deliverable, a heading, bullet list, divider or extra addendum can violate that form even if the individual units are non-factual or source-supported. Natural wording such as "write a paragraph" or "写一段" can specify a single-paragraph form when it describes the requested output; do not reduce that instruction to a generic request for short content. Do not impose single-paragraph form for a request that merely asks for short text, explicitly permits headings or lists, or uses the words only in quoted source data. Mark an actual output-form violation as instruction-following not-met with exact request and answer quotes; a permitted claim-audit label alone does not establish format compliance.`
+const V12_COMMON = `${V10_COMMON} Assess each independently asserted guarantee, necessary actor, causal dependency or external commitment even inside optional advice or a friendly capability description. Use additionalClaims when assertions in the same unit need different authority or status, and explain what the cited sources establish for each assertion. Do not treat one supported clause as support for another clause's added actor, condition or promise. An ability to submit preferences is not a guarantee that the next task will comply; paused automatic adoption or a need for evaluation is not a requirement that a human, administrator or other specific actor must approve. Prior assistant statements and a user not withdrawing supplied facts cannot authorize an added product mechanism. Do not excuse these additions as everyday paraphrases without checking their incremental meaning. Preserve optional advice as a complete speech act rather than inventing a factual assertion by dropping recommendation wording; faithful paraphrases, explicitly sourced conditions and commitments, and task-compatible fallible inference remain permitted.`
 
 function claimReviewInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS): string {
   if (!record(material)) throw new Error('invalid-judgment')
@@ -381,11 +382,12 @@ function claimReviewInstruction(material: unknown, purpose: 'original-result' | 
   let contract
   try { contract = parseConversationQualityContract(quality) }
   catch { throw new Error('invalid-judgment') }
-  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7' && contract.schemaVersion !== 'tianwen.conversation-quality.v8' && contract.schemaVersion !== 'tianwen.conversation-quality.v9' && contract.schemaVersion !== 'tianwen.conversation-quality.v10' && contract.schemaVersion !== 'tianwen.conversation-quality.v11') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
+  if (contract.schemaVersion !== 'tianwen.conversation-quality.v6' && contract.schemaVersion !== 'tianwen.conversation-quality.v7' && contract.schemaVersion !== 'tianwen.conversation-quality.v8' && contract.schemaVersion !== 'tianwen.conversation-quality.v9' && contract.schemaVersion !== 'tianwen.conversation-quality.v10' && contract.schemaVersion !== 'tianwen.conversation-quality.v11' && contract.schemaVersion !== 'tianwen.conversation-quality.v12') return `${PURPOSE[purpose]}\n\n${COMMON}\n\n${FOCUS[focus]}`
   if (purpose === 'method-study' && source.feedbackStandard !== undefined) {
     if (!record(source.feedbackStandard) || !Object.hasOwn(source.feedbackStandard, 'originalFeedback') || source.feedbackStandard.originalFeedback === undefined) throw new Error('invalid-judgment')
   }
-  const common = contract.schemaVersion === 'tianwen.conversation-quality.v10' || contract.schemaVersion === 'tianwen.conversation-quality.v11' ? V10_COMMON
+  const common = contract.schemaVersion === 'tianwen.conversation-quality.v12' ? V12_COMMON
+    : contract.schemaVersion === 'tianwen.conversation-quality.v10' || contract.schemaVersion === 'tianwen.conversation-quality.v11' ? V10_COMMON
     : contract.schemaVersion === 'tianwen.conversation-quality.v9' ? V9_COMMON
     : contract.schemaVersion === 'tianwen.conversation-quality.v8' ? V8_COMMON
     : contract.schemaVersion === 'tianwen.conversation-quality.v7' ? V7_COMMON : V6_COMMON
@@ -427,7 +429,9 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       claimMaterialEncoding = 'tianwen.file-claim-review-packet.v1'
     }
   }
-  let schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
+  const reviewSource = record(input.material) ? input.material.source ?? input.material.task : undefined
+  const assertionScope = record(reviewSource) && record(reviewSource.qualityContract) && reviewSource.qualityContract.schemaVersion === 'tianwen.conversation-quality.v12'
+  let schema = conversationEvidenceSchema({ ...CONVERSATION_REVIEW_SCHEMA, properties: { ...CONVERSATION_REVIEW_SCHEMA.properties, audit: auditSchema(evidence, assertionScope) }, required: [...CONVERSATION_REVIEW_SCHEMA.required!, 'audit'] }, input.evidence)
   if (quoteChoices !== undefined) schema = {
     ...schema,
     properties: { ...schema.properties, evidenceQuotes: {
@@ -468,10 +472,10 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
   let compactReview = false
   if (evidence.schemaVersion === 'tianwen.claim-evidence.v2' && Buffer.byteLength(JSON.stringify(schema), 'utf8') > 98_304) {
     compactReview = true
-    schema = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence),
+    schema = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence, false, assertionScope),
       evidenceQuotes: { ...schema.properties?.evidenceQuotes, type: 'array', items: string },
     } }
-    const hinted = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence, true) } }
+    const hinted = { ...schema, properties: { ...schema.properties, audit: compactFileAuditSchema(evidence, true, assertionScope) } }
     const bareBytes = Buffer.byteLength(JSON.stringify(schema), 'utf8'), hintedBytes = Buffer.byteLength(JSON.stringify(hinted), 'utf8')
     // Examples teach literal copying without changing allowed quotes or the
     // frozen host predicates. Keep the original compact fallback on overflow.

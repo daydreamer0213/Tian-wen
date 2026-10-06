@@ -1,6 +1,14 @@
 # 天问验证总表：已有证明、剩余缺口与补测必要性
 
-## 2026-10-06 当前覆盖：普通 Web 有限旅程完成，反馈引用缺陷已定位
+## 2026-10-06 当前：产品入口与兼容性验证完成，真实新效果未完成
+
+原 public apply 测试实测旧 bundle 红 1/2 → 原生成后绿 3/3；v12 当前相关 390 / 390、八顶层编译 0、原剩余 14 构建步骤 0、私有导入 0、完整包 73 / 73。完整包首次 2 清单漏项失败保留，只补此前 tracked 生产文件三个精确条目。旧 v11 16 项实际原生 proof 在当前校验器零模型恢复、原票不改；独立只读审查无 P1/P2。以上脚本机制/构建/恢复不能算真实模型自行纠错或全面语义安全。下一只新 F2/N2 和八个新正负任务原生首次验证；原发布门槛不加码，main/Daily 原 NO-GO 保留。详见[tianwen-public-build-assertion-scope-implementation-20261006.md](tianwen-public-build-assertion-scope-implementation-20261006.md)。
+
+## 2026-10-06 当前覆盖：原生反馈正常对照成立，纠错集成失败已定位
+
+全新普通Runtime/native feedback18真实+1scripted故障：两Task双met/四原proof恢复，N1preference/三continuing与两proof成立；F1invalid引文先捕获后late拒绝，无真实纠正，90本地回归尚不能代表普通集成前置检查生效。原CLI预检/运行/cold均0、关闭/正常drain/冷0不变；149生产/960保护原字节保持。只读新audit0及独立复核，不改失败或原票；首环境0调用失败与原auditorCLI1保留。详见[结果](tianwen-scope-repair-prospective-result-20261006.md)。确切缺口是原公开esbuild bundle陈旧、内联scope caller没有修复callback；下一补原公开apply行为回归及原构建，不修改SDKguard，再新反馈首次验证；既有R9语义澄清另用全新正负对照。未增自然等待/第三审/发布门槛，已完成受控学习与普通Web不重开。
+
+## 2026-10-06 此前覆盖：普通 Web 有限旅程完成，反馈引用缺陷已定位
 
 fd683bf4普通 Runtime/default quarantine 在独立原Web实际四消息/23请求：开启同意、介绍、模拟持续表达偏好和真实改写、关闭、原CLI正常退出、cold0状态/账本不变完成。两普通Task原双met；独立feedback原assessor preference/5标准，但scope引用加省略号被late检查拒绝→invalid-judgment/proofnull，持续标准未采用，不能列“反馈归因通过”。U3控制Task原review cancelled/inconclusive是关闭取消；study/activation0不作为欠缺。四UI不重发、不为已完成学习/消费者补数量。
 
