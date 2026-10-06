@@ -170,7 +170,7 @@ async function clearanceHarness(root: string, reviewer?: GuidanceIndependentRevi
   return { harness, parent, run }
 }
 
-it('study clearance integration preserves original DEV direct adoption without invoking a configured reviewer or creating permission', async () => {
+it.runIf(process.platform === 'win32')('study clearance integration preserves original DEV direct adoption without invoking a configured reviewer or creating permission', async () => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-development-'))
   const reviewer = vi.fn(async () => { throw new Error('DEV must not enter independent clearance') })
@@ -1189,7 +1189,7 @@ it('selects an unattempted pair beyond each newest compatible but consumed secon
   }
 })
 
-it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', 'no-source-scope', 'source-outside', 'source-mixed', 'source-use-alone', 'source-exploration-use', 'source-wrong-digest',
+it.for(['no-source-root', 'no-source-relative-root', 'no-source-environment', 'no-source-scope', 'source-outside', 'source-mixed', 'source-use-alone', 'source-exploration-use', 'source-wrong-digest',
   'source-adapted', 'source-not-used', 'source-insufficient', 'source-explored', 'source-second', 'source-invalid-use', 'source-no-use', 'source-disabled-get', 'source-disabled-candidate', 'source-support-get', 'source-support-candidate', 'source-interrupted', 'recover-source', 'recover-source-explored', 'recover-source-missing-selection', 'recover-source-removed-admission', 'recover-source-substituted-proposal',
   'source-explored-first', 'recover-source-explored-first', 'recover-source-explored-first-substituted-observation', 'recover-source-explored-first-substituted-selection',
   ...(['recover-source-explored', 'recover-source-explored-first'] as const).flatMap(order =>
@@ -1201,7 +1201,10 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
   'insufficient', 'refusal', 'outside-source', 'indistinguishable', 'blank-guidance', 'oversize-reason', 'empty-proposal', 'mixed-proposal', 'repair-mixed-proposal',
   'recover-explored', 'recover-explored-missing-proposal', 'recover-explored-changed-execution', 'recover-explored-changed-check', 'recover-explored-substituted-material',
   'recover-offline', 'recover-offline-missing-proof', 'recover-offline-disabled', 'recover-offline-quarantined',
-  'recover', 'recover-formatting', 'short-study-quotes', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'case-provider-failure', 'case-design-fresh-source', 'case-attempt-write-failure', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async scenario => {
+  'recover', 'recover-formatting', 'short-study-quotes', 'recover-missing-check', 'recover-changed-check', 'recover-nonexistent-quote', 'recover-assistant-only', 'recover-substituted-material', 'mixed-models', 'copied-holdout', 'case-provider-failure', 'case-design-fresh-source', 'case-attempt-write-failure', 'contradict-source', 'contradict-counter', 'derived-quote', 'regression', 'disabled'] as const)('evaluates native text attempts and gates future behavior: %s', async (scenario, context) => {
+  // The original CLI DEV profile is deliberately Windows-only; CI runs this
+  // unchanged control on Windows instead of weakening its canonical D boundary.
+  if (scenario === 'budget-cli-exit-withdrawal' && process.platform !== 'win32') context.skip()
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'loop-'))
   const guidance = '保留局部样本的适用范围，不将局部结论扩大到总体。'

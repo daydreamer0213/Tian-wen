@@ -382,8 +382,33 @@ describe('Tianwen native observation launch preparation', () => {
     let aclDiagnostic = ''
     const launchRoot = join(fixture.paths.stateRoot, 'native-observation-launch')
     if (prepared.status.kind !== 'observed' && process.platform === 'win32' && existsSync(launchRoot)) {
-      try { aclDiagnostic = JSON.stringify(readWindowsAcl(launchRoot)) }
-      catch (error) { aclDiagnostic = `acl-unavailable:${error instanceof Error ? error.name : 'unknown'}` }
+      const diagnostic: Record<string, unknown> = {}
+      try { diagnostic.acl = readWindowsAcl(launchRoot) }
+      catch (error) { diagnostic.snapshotError = error instanceof Error ? error.name : 'unknown' }
+      // On failure only, execute the exact production script and environment on
+      // another owned fixture directory. Do not change the original failed path
+      // or retry preparation; its first stock result remains the assertion.
+      const source = readFileSync(resolve('packages/tianwen-desktop-host/src/native-observation-launch.ts'), 'utf8')
+      const script = /const windowsAclScript = `([\s\S]*?)`/u.exec(source)?.[1]
+      if (script !== undefined) {
+        const diagnosticRoot = join(fixture.paths.stateRoot, 'acl-failure-diagnostic')
+        mkdirSync(diagnosticRoot)
+        const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
+        const diagnosticStartedAt = Date.now()
+        try {
+          execFileSync(windowsPowerShell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
+            env: { SystemRoot: systemRoot, windir: process.env.windir ?? systemRoot, TIANWEN_OBSERVATION_ACL_PATH: diagnosticRoot },
+            // Bound failure-only diagnostics inside the original 20s test deadline.
+            maxBuffer: 8192, timeout: 5000, windowsHide: true,
+          })
+          diagnostic.scriptSucceeded = true
+        } catch (error) {
+          const failure = error as { status?: number; stderr?: Buffer; name?: string; code?: string; signal?: string; killed?: boolean }
+          diagnostic.scriptFailure = { name: failure.name, code: failure.code, status: failure.status, signal: failure.signal, killed: failure.killed, stderr: failure.stderr?.toString('utf8') }
+        } finally { diagnostic.elapsedMs = Date.now() - diagnosticStartedAt; diagnostic.deadlineMs = 5000 }
+      }
+      aclDiagnostic = JSON.stringify(diagnostic)
     }
     expect(prepared.status, aclDiagnostic).toEqual({ kind: 'observed' })
     expect(prepared.patchPath).toBeDefined()

@@ -880,6 +880,10 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "tests/dsh-migration/conversation-file-ancillary.spec.ts "
         "tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts"
     )
+    development_controls_command = (
+        "pnpm exec vitest run tests/dsh-migration/conversation-guidance-loop.spec.ts "
+        "-t 'preserves original DEV direct adoption|budget-cli-exit-withdrawal'"
+    )
     expected_installer_job = textwrap.dedent(
         """\
         runs-on: windows-latest
@@ -912,12 +916,20 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
                 if ($LASTEXITCODE -ne 0) { throw 'Profile concurrent cold-boot check failed' }
                 {windows_vitest_command}
                 $testExit = $LASTEXITCODE
+                if ($testExit -eq 0) {
+                  # Keep both original Windows-only DEV controls in the release gate.
+                  $env:TIANWEN_FILE_TEST_ROOT = 'D:/DevData/tianwen-development-runtime'
+                  $env:TIANWEN_TEST_ROOT = 'D:/DevData/tianwen-development-runtime'
+                  {development_controls_command}
+                  $testExit = $LASTEXITCODE
+                }
               } finally {
                 if ($mappedDrive) { & subst.exe D: /D }
               }
               exit $testExit"""
         .replace("{profile_concurrent_command}", profile_concurrent_command)
-        .replace("{windows_vitest_command}", windows_vitest_command),
+        .replace("{windows_vitest_command}", windows_vitest_command)
+        .replace("{development_controls_command}", development_controls_command),
     ).strip()
     assert installer_job == expected_installer_job
 

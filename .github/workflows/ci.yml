@@ -96,6 +96,13 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Profile concurrent cold-boot check failed' }
             pnpm exec vitest run tests/dsh-migration/tianwen-installer.spec.ts tests/dsh-migration/controlled-lifecycle-command.spec.ts tests/dsh-migration/runtime-bundle.spec.ts tests/dsh-migration/one-shot-profile-lifecycle.spec.ts tests/dsh-migration/learn-loop-host.spec.ts tests/dsh-migration/conversation-file-material.spec.ts tests/dsh-migration/conversation-file-observer.spec.ts tests/dsh-migration/conversation-file-trial.spec.ts tests/dsh-migration/conversation-guidance-files.spec.ts tests/dsh-migration/conversation-file-learning.spec.ts tests/dsh-migration/native-tool-observation.spec.ts tests/dsh-migration/native-pwsh-observer.spec.ts tests/dsh-migration/native-tools-observer.spec.ts tests/dsh-migration/conversation-file-ancillary.spec.ts tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts
             $testExit = $LASTEXITCODE
+            if ($testExit -eq 0) {
+              # Keep both original Windows-only DEV controls in the release gate.
+              $env:TIANWEN_FILE_TEST_ROOT = 'D:/DevData/tianwen-development-runtime'
+              $env:TIANWEN_TEST_ROOT = 'D:/DevData/tianwen-development-runtime'
+              pnpm exec vitest run tests/dsh-migration/conversation-guidance-loop.spec.ts -t 'preserves original DEV direct adoption|budget-cli-exit-withdrawal'
+              $testExit = $LASTEXITCODE
+            }
           } finally {
             if ($mappedDrive) { & subst.exe D: /D }
           }
