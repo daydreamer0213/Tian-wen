@@ -1,4 +1,10 @@
-## 2026-10-07 当前：反馈已进入研究，具体语义核查通过，继续方法执行验证
+## 2026-10-07 当前：方法提示已进实际运行包，原兼容与218回归通过
+
+Task30单条proposal构造/适用时内部检查提示只是假设，Task29旧方法已有五步，旧失败不重判。实际public原16步/11元数据、产品入口4+4、默认types/imports，以及旧27feedback/190claim/57真实trial零模型恢复通过，原票不变。首217/1及构建后CLI25秒超时保留；诊断确认freshhome数百安装链接建立尚未进入control。首移到spawn前仍总测试30秒超时、CLI实际关闭260ms；最终只改原测试安装夹具复用上游SDK包链接，独立新会话/账本/profile保持，25秒/30秒/退出1/撤权/<5秒均不变。专项实际1通过/关闭265ms，完整四套v3实际218/218退出0。产品构建输入/输出在后续测试和文档更新下摘要完全相同，收据分别保留真实构建81f0f034与新HEAD，不虚称重构建。见[本轮实现](tianwen-method-construction-implementation-20261007.md)。
+
+Task31新whole7项和operator prepared-only独立PASS，来源每记录独立完整句、新更明确环境；原模拟反馈、原future3whole及六标准未消费不变，host46只subset，原native全文检查不变。下一实际author/冻结及0模型空profile预检后首次普通产品研究/首许可/激活/原后任务效果，不等用户出题、不第三票或抽到成功。goal active/mainDaily原NO-GO；D>=15GiB未20，只小profile/链接/记录，无全环境复制。scratch删除自动审批blocked by policy，未执行未绕过。
+
+## 2026-10-07 此前：反馈已进入研究，具体语义核查通过，继续方法执行验证
 
 Task28实际public16步/入口4+4、默认types/import及旧23feedback/176claim/53真实trial零模型恢复成功；原七套441/443首失败保留，构建后原两项canonical D运行2通过/176skip，CLI撤权关闭309ms，不虚称单次443全绿。
 

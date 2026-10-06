@@ -58,6 +58,10 @@ it('tells the case designer the ledger accepted criteria range in both supported
 })
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const { disposeProfileContext } = await import(pathToFileURL(join(cliRequire.resolve('@deepseek-ai/dsh/package.json'), '..', 'lib', 'profile-boot-DG5t9aNs.js')).href)
+const { healProfilesModuleFallback } = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-app-boot')).href)
+const installedCliHome = join(process.env.TIANWEN_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime', 'native-cli-control-install')
+// Reuse installation metadata; each control still owns empty native state.
+if (process.platform === 'win32') healProfilesModuleFallback(cliRequire.resolve('@deepseek-ai/dsh/package.json'), installedCliHome)
 
 it.skipIf(process.platform !== 'win32').each(['dev-paired-any-case.v1', undefined] as const)('preflights a persisted native failure pair without waking or consuming its research attempt: %s', async policy => {
   const base = 'D:/DevData/tianwen-development-runtime'
@@ -2112,6 +2116,9 @@ it.each(['no-source-root', 'no-source-relative-root', 'no-source-environment', '
       await handle.dispose(); await harness.ctx.fiber.dispose()
       const profile = join(root, 'profiles', 'analysis-exit-control'), receipt = join(root, 'exit-control-receipt.json'), trace = join(root, 'exit-control-trace.jsonl')
       mkdirSync(profile, { recursive: true })
+      // Share only SDK package links, never sessions, ledgers or credentials.
+      // Creating and removing hundreds of Windows junctions is installation setup.
+      symlinkSync(join(installedCliHome, 'profiles', 'node_modules'), join(root, 'profiles', 'node_modules'), 'junction')
       // Copy only this disposed SDK control's generated native evidence into
       // the CLI's original derived paths. No runtime, credentials or installs.
       cpSync(join(root, 'evolution'), join(profile, 'evolution'), { recursive: true })

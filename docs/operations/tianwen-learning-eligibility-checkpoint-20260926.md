@@ -1,4 +1,8 @@
-## 2026-10-07 当前：持续反馈资格已成立，方法执行尚缺完整采用与效果
+## 2026-10-07 当前：实际运行兼容和218回归通过，真实效果待新任务
+
+Task30原public16/实际入口4+4/types/imports、旧27feedback/190claim/57真实trial零模型恢复实际通过；source只单条方法构造提示，不把旧五步方法的执行失败认定为缺步骤。退出首失败保留并定位安装链接初始化；只复用原SDK链接的测试夹具，原25秒/30秒和撤权/关闭要求不变，新四套回归218/218实际0。后续测试/文档更新全部public构建输入输出不变，真实构建SHA与新HEAD独立绑定，不假称重构建或模型效果。Task31新明确source+原模拟持续反馈和原future whole/六标准prepared-only独立PASS，原hostsubset限制保留；下一空profile实际冻结/0模型preflight后首次普通研究/许可/采用/后任务。原whole eligible/正式十臂/5候选/源基线OR/首独立许可及发布门槛不变，mainDaily原NO-GO/goal active。见[tianwen-method-construction-implementation-20261007.md](tianwen-method-construction-implementation-20261007.md)。
+
+## 2026-10-07 此前：持续反馈资格已成立，方法执行尚缺完整采用与效果
 
 Task28实际public16/入口4+4、旧23feedback/176claim/53真实trial零模型恢复已完成。Task29首次44真实0脚本，3普通任务六met，两模拟反馈各四条continuing且whole eligible，系统自行研究。4臂8研究票，source1候选met，source2候选待入库分号并句真实违反原要求，双native/host/第一次独立判断一致拒绝；原candidate-failed，无decision/clearance/activation/未来。run/cold/audit0、终审PASS及actual close0；原whole资格/双审/十臂/候选5met/baseline OR/许可/未来六标准不变，不缺用户输入。
 
