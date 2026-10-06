@@ -1,4 +1,12 @@
-## 2026-10-07 当前：持续资格进入研究，修交付包装边界
+## 2026-10-07 当前：持续反馈资格已成立，方法执行尚缺完整采用与效果
+
+Task28实际public16/入口4+4、旧23feedback/176claim/53真实trial零模型恢复已完成。Task29首次44真实0脚本，3普通任务六met，两模拟反馈各四条continuing且whole eligible，系统自行研究。4臂8研究票，source1候选met，source2候选待入库分号并句真实违反原要求，双native/host/第一次独立判断一致拒绝；原candidate-failed，无decision/clearance/activation/未来。run/cold/audit0、终审PASS及actual close0；原whole资格/双审/十臂/候选5met/baseline OR/许可/未来六标准不变，不缺用户输入。
+
+同a99公开版本六个全新固定交付12真实原双审全部预期匹配，有源角色/条件承诺和用户JSON允许，无源新增角色/承诺和正文包装拒绝。0inc/invalid、终审PASS/actual close0；模型只审核固定答案，不是主答生成或学习改善。审查者准备时见过预期表的限制保留，不重评旧A2/E2、不第三审、不把面板升为新门槛。详情见[首次实际结果](tianwen-literal-delivery-prospective-result-20261007.md)。
+
+下一Task30仅proposal构造/适用时内部草稿检查提示的有限假设；旧方法已含五步，不能认定缺步骤为根因或当前已改善。工程兼容与真实新完整前瞻分别核实，失败不无限堆提示。整体goal active/mainDaily原NO-GO；D约16.1GiB>=15未20，无环境/依赖全复制。Task28 scratch删除auto-review blocked by policy未执行未绕过，不记清理完成。
+
+## 2026-10-07 此前：持续资格进入研究，修交付包装边界
 
 Task26原public16步/实际入口8项、默认types/imports及旧19feedback/166claim零模型恢复实际通过。Task27首次35真实/0脚本，三ordinary六met，两feedback均三条continuing且whole eligible，系统自行开启研究。候选内文正确但answer值里又序列化answer对象；两native误把字面正文包装当transport而met，原冻结host正确rejected，所以candidate-failed，仅2臂4票，无正式裁决/许可/激活/未来效果。cold/audit/独立首次盲审和终审PASS，actual close已退出0释放冻结。见[首次结果](tianwen-scope-evidence-prospective-result-20261007.md)。
 

@@ -1,4 +1,12 @@
-## 2026-10-07 当前：持续资格进入研究，修交付包装边界
+## 2026-10-07 当前：反馈已进入研究，具体语义核查通过，继续方法执行验证
+
+Task28实际public16步/入口4+4、默认types/import及旧23feedback/176claim/53真实trial零模型恢复成功；原七套441/443首失败保留，构建后原两项canonical D运行2通过/176skip，CLI撤权关闭309ms，不虚称单次443全绿。
+
+Task29首次44真实0脚本，3普通任务六met，两feedback各四条continuing且whole eligible；原研究4臂8票，source1候选met、source2候选把待入库与前项分号并句，双native/host/首盲一致拒绝，合法candidate-failed。无decision/首许可/激活/未来效果，原future whole和六标准未消费。run/cold/audit实际0、独立终审PASS及actual close0；不是缺用户输入或新增验收。随后同a99公开版本6全新固定交付12真实检查全部预期匹配，正常系统角色/已有承诺/用户JSON允许，无源角色/承诺/正文包装拒绝；仅固定答案审查，不冒称主答或效果，不重评旧A2/E2。独立文本审查先于票但准备时见过预期，非严格隐藏预期盲审。该有限面板终审PASS/actual close0，原发布仍NO-GO。见[实际结果](tianwen-literal-delivery-prospective-result-20261007.md)。
+
+Task30只改一条proposal构造/内部草稿检查提示，旧方法已有五步，不把缺步骤认定为根因；其效果待新完整前瞻。复用原SDK回归/类型与旧proof核兼容，不写逐字匹配提示的镜像RED/GREEN，不加第三票或标准。整体goal active/main Daily原NO-GO；D约16.1GiB>=15未20，无全环境/依赖/历史副本。Task28 scratch删除auto-review blocked by policy，未执行未绕过、不称已清理。
+
+## 2026-10-07 此前：持续资格进入研究，修交付包装边界
 
 Task26原public16步/实际入口8项、默认types/imports及旧19feedback/166claim零模型恢复实际通过。Task27首次35真实/0脚本，三ordinary六met，两feedback均三条continuing且whole eligible，系统自行开启研究。候选内文正确但answer值里又序列化answer对象；两native误把字面正文包装当transport而met，原冻结host正确rejected，所以candidate-failed，仅2臂4票，无正式裁决/许可/激活/未来效果。cold/audit/独立首次盲审和终审PASS，actual close已退出0释放冻结。见[首次结果](tianwen-scope-evidence-prospective-result-20261007.md)。
 
