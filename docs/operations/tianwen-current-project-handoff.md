@@ -1,4 +1,10 @@
-## 2026-10-07 当前：适用对象修复机制通过，继续公开构建与新普通学习
+## 2026-10-07 当前：公开兼容与两次新运行完成，修反馈证据误拒
+
+Task23 `dd5c31a4` 原公开16步/实际入口8项、默认types/imports和旧11feedback/150claim零模型恢复实际0，已推送。Task24首次33真实，三普通六met，两持续偏好合格；第一候选把待办逗号连接在时间后，双not-met/首盲一致，原candidate-failed，未激活/未来。Task25复用同公开版本、不重构建，24真实、三普通六met；同原反馈一整项合格、一项范围unclear，所以0研究/激活/未来。两批原票不改、cold真正挂载0模型/账本不变、终审PASS及actual freeze-end释放。
+
+Task25独立诊断：第一抽取把单段规则混进排序标准，范围模型收到完整三句却只引用排序一句；全文确实明示两规则，短引用遗漏支持导致范围证据误拒。Task26最窄澄清“先全文核支持，再选覆盖全部的连续引文”，设计独立PASS，Root接手两文件并完成4专项/三套144/默认types/diff0，0真实provider，独立spec/code审查PASS；见[机制结果](tianwen-scope-evidence-implementation-20261007.md)。Task27新whole任务/原future六标准/46host及准备独立PASS，实际公开构建/旧证明兼容/新profile尚待执行。不反复换题或等用户，whole资格/双审/正式十臂/原未来六标准和发布门槛不变。详见[当前结果](tianwen-explicit-source-learning-result-20261007.md)。整体goal active/mainDaily NO-GO；D约16.15GiB>=15未20，无整环境/依赖/完整历史复制。
+
+## 2026-10-07 此前：适用对象修复机制通过，继续公开构建与新普通学习
 
 Task23两owned文件最窄累计提醒，Task21旧段/原generator不改，当前v12/unversioned发送新完整串，严格恢复原/Task21/Task23三完整版本、显式旧quality只有原串。首RED8保留，专项56/完整249、默认两types/diff0；独立spec/qualityPASS，0实际provider/workerbuild。源4dd52f19/test8fb4aa00。见[tianwen-requirement-applicability-implementation-20261007.md](tianwen-requirement-applicability-implementation-20261007.md)。
 

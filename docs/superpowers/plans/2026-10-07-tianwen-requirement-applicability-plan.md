@@ -18,9 +18,9 @@
 
 2. **原公开入口及全新普通运行** — root。
 
-- [ ] 原public16/实际clearance4+feedback4/default types/private imports；历史11feedback及原124+Task22实际26原生检查零模型恢复，实际统计不写死总数。精准source-transition声明1src及确实改变的编译输出，其余旧原生/冻结证据原样保留。提交推送开发分支，不发布main/Daily。
-- [ ] Task24新whole来源/counter/adjacent/holdout，原feedback和同host合同；原future1/future2/unrelated完整对象及各题6标准不变未消费。prepared host46专项0调用不是模型效果。独立准备审查后才建空profile并冻结，ordinary Runtime/原policy undefined。复用环境，不复制依赖/凭据/全历史。
+- [x] 原public16/实际clearance4+feedback4/default types/private imports；历史11feedback及150原生claim零模型恢复实际0。精准source-transition声明1src、1已审查测试及5确实改变的编译输出，原失败与v2修复保留，其余旧原生/冻结证据不改。开发分支已推送，main/Daily未发布。
+- [x] Task24新whole来源/counter/adjacent/holdout，原feedback和同host合同；原future1/future2/unrelated完整对象及各题6标准不变未消费。prepared host46专项0调用不是模型效果。独立准备审查后实际新空profile/ordinary Runtime/原policy undefined，未复制依赖/凭据/全历史。
 - [ ] 实际首次研究：原全10明确、5候选met、至少一个sourcebaseline not-met、counterbaseline met，宿主检查不替票；原生首次独立clear→专用许可→自动激活才执行两后任务、对照模拟fault、无关任务与撤权。全部首次结果保留，不重跑旧对/补票。
-- [ ] 原cold0模型账本不变、request/proof绑定、无票首次语义审查再对票、独立终审及实际freeze-end。满足原发布门槛才收口；若确实新失败，自主修必要实现，不等用户出题、不新增门槛。
+- [x] Task24首次33真实，第一candidate确实分句错误，原candidate-failed未激活；cold0模型真挂载、request/proof绑定、首次盲审再对票、终审及实际freeze-end完成。Task25同版本24真实因仅一来源eligible未研究，也完成cold/审计/终审/actual close。完整采用及效果项仍未完成，不称全目标结束；新范围证据误拒交Task26修复，不等用户或新增门槛。
 
 完整学习目标active；一段提示/脚本/一轮结束不等于目标完成。main/Daily原NO-GO，D>=15GiB、优先20GiB；正常标点许可、角色及源内条件/承诺不得被额外禁止。

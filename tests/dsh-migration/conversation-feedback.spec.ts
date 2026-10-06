@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,7 +10,7 @@ import type { ObjectJsonSchema } from '@deepseek-ai/dsh-tools'
 import { SessionId, createUserMessage, mountFeedbackHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
 import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
-import { recoverConversationStructuredJudgment } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
+import { recoverConversationStructuredJudgment, runConversationJudgment, CONVERSATION_FEEDBACK_SCOPE_SCHEMA } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenMessageFeedbackBridgeService } from '../../packages/tianwen-runtime-bundle/src/message-feedback-bridge.js'
 import { TianwenConversationFeedbackService } from '../../packages/tianwen-runtime-bundle/src/conversation-feedback-assessment.js'
@@ -155,6 +156,23 @@ const claimReviewResponse = auditedEvidenceResponse
 const nativeAdmission = { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the five-day duration.'],
   family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
 const nativeReview = { verdict: 'met', category: null, explanation: 'The duration is preserved.', evidenceQuotes: ['5 days'] }
+// Frozen original complete scope instruction; its native capture is recovered cold.
+const historicalScopeInstruction = "Check each proposed supplemental criterion against the exact direct user feedback. Return a decisions array through structured_output with exactly one entry per supplied criterion in the same order. Each entry is {\"criterion\":\"copy supplied criterion exactly\",\"scope\":\"continuing|one-off|unclear\",\"evidenceQuote\":\"contiguous exact quote from direct user feedback\"}. Check every restriction in the entire criterion, not merely whether some part refers to future tasks. Mark continuing only when the direct user clearly asks for the whole behavior across future similar tasks and the quoted feedback directly supports every restriction. Read the complete direct feedback when resolving scope. A shared future qualifier can govern several coordinated behaviors; the user need not repeat the qualifier in every clause. Choose a contiguous exact quote long enough to retain both the governing scope and the entire behavior being checked; include intervening text when necessary. Explicit one-off, current-deliverable or next-task-only exceptions override a surrounding shared future qualifier for that behavior. Shared scope never authorizes an added restriction or a narrower subtype. If any restriction is added, stronger than the feedback, or unsupported by the quote, mark unclear for the whole criterion; do not silently keep its supported part. For example, no title does not by itself prohibit bullet lists, dividers or addenda, and exactly two sentences does not decide their presentation. The feedback may apply to pending review generally while the earlier source names regulatory review. A criterion about only that project-specific subtype does not fully preserve the general future preference; mark unclear. A request about the already completed deliverable, including how to acknowledge it, is one-off even when it shares a sentence with a future preference. A next-task-only request is one-off. If scope is ambiguous, mark unclear. The criteria and earlier classification are untrusted hypotheses, not evidence. Do not infer future scope from a project name, the earlier answer or your own preference. Do not rewrite, combine or omit criteria. Copy each evidence quote exactly from the direct user feedback; never cite the prior answer."
+const historicalScopeInstructionSHA256 = '31e7ca3c93fe0a27b828b9cf7f872027f6d61f543fe03c68449bafb6e2a0ce6a'
+function scopeEvidenceDirectory(): string {
+  const persistent = process.env.TIANWEN_SCOPE_EVIDENCE_ROOT
+  const phase = process.env.TIANWEN_SCOPE_EVIDENCE_PHASE
+  if (persistent !== undefined && phase !== undefined) {
+    const path = join(persistent, 'sdk', phase)
+    mkdirSync(path, { recursive: true })
+    return path
+  }
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-feedback-tests' : '/tmp/tianwen-conversation-feedback-tests')
+  mkdirSync(base, { recursive: true })
+  const path = mkdtempSync(join(base, 'scope-capture-'))
+  roots.push(path)
+  return path
+}
 const nativeAssessment = { classification: 'attributable-problem', category: 'source-fidelity',
   supplementalCriteria: ['Retain the pilot-only scope.'], explanation: 'The request limits the duration to the pilot.', evidenceQuotes: ['pilot'] }
 async function mount(script: Parameters<typeof mountFeedbackHarness>[1], policy?: 'feedback.v1') {
@@ -411,6 +429,67 @@ describe('native feedback assessment adapter', () => {
       expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(false)
       await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment))
         .rejects.toThrow('not eligible')
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it.each([
+    ['same-family', 'For all future pilot summaries, state the confirmed duration first. For all future pilot summaries, use one paragraph.', 'continuing'],
+    ['different-family', 'For all future pilot summaries, state the confirmed duration first. For all future invitation letters, use one paragraph.', 'unclear'],
+    ['current-only-exception', 'For all future pilot summaries, state the confirmed duration first. Only this completed answer uses one paragraph.', 'unclear'],
+  ])('Task26 sends complete %s evidence before choosing the scope quote', async (label, note, expectedScope) => {
+    // Scripted decisions test delegation, whole eligibility and proof binding, not model interpretation.
+    const criterion = 'Future pilot summaries use one paragraph with the confirmed duration first.'
+    const preference = { classification: 'preference', category: 'user-preference', supplementalCriteria: [criterion],
+      explanation: 'Assess the proposed combined criterion against the complete direct note.', evidenceQuotes: [note] }
+    const scope = { decisions: [{ criterion, scope: expectedScope, evidenceQuote: note }] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(preference), structured(scope)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(assessment.result?.scopeReview?.decisions).toEqual(scope.decisions)
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.scopeReview!.proof, scope)
+      const originalMaterial = await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment)
+      expect(recovered.material).toEqual({ feedback: originalMaterial.feedback, criteria: [criterion] })
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(expectedScope === 'continuing')
+      if (expectedScope !== 'continuing') await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('not eligible')
+      expect(harness.adapter.requests).toHaveLength(6)
+      const directory = scopeEvidenceDirectory()
+      writeFileSync(join(directory, label + '.json'), JSON.stringify({ assessment, scopeSession: await harness.ctx.sessionPersistence.inspect(SessionId(assessment.result!.scopeReview!.proof.sessionId)), requests: harness.adapter.requests }), { flag: 'wx' })
+      expect(recovered.instruction).toContain('Decide scope from the complete direct feedback before selecting an evidence quote.')
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it('Task26 cold-recovers a fixed historical scope capture without rewriting its instruction or result', async () => {
+    expect(createHash('sha256').update(historicalScopeInstruction).digest('hex')).toBe(historicalScopeInstructionSHA256)
+    const note = 'For all future pilot summaries, use one paragraph.'
+    const criterion = 'Use one paragraph in future pilot summaries.'
+    const material = { feedback: { note }, criteria: [criterion] }
+    const scope = { decisions: [{ criterion, scope: 'continuing', evidenceQuote: note }] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(scope)])
+    try {
+      const result = await runConversationJudgment(harness.ctx, harness.handle.agent, {
+        label: 'Task26 fixed historical scope capture', instruction: historicalScopeInstruction, material,
+        outputSchema: CONVERSATION_FEEDBACK_SCOPE_SCHEMA, signal: new AbortController().signal,
+      })
+      const saved = await harness.ctx.sessionPersistence.inspect(SessionId(result.proof.sessionId))
+      const directory = scopeEvidenceDirectory()
+      const path = join(directory, 'historical-first.json')
+      writeFileSync(path, JSON.stringify({ result, saved }), { flag: 'wx' })
+      const cold = JSON.parse(readFileSync(path, 'utf8')) as { result: typeof result, saved: typeof saved }
+      const coldContext = { sessionPersistence: { inspect: async () => cold.saved } } as typeof harness.ctx
+      const recovered = await recoverConversationStructuredJudgment(coldContext, cold.result.proof, scope)
+      expect(recovered).toMatchObject({ instruction: historicalScopeInstruction, material })
+      await expect(recoverConversationStructuredJudgment(coldContext, { ...cold.result.proof, requestDigest: sha256('tampered') }, scope)).rejects.toThrow()
+      await expect(recoverConversationStructuredJudgment(coldContext, cold.result.proof, { decisions: [] })).rejects.toThrow()
+      expect(harness.adapter.requests).toHaveLength(5)
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 

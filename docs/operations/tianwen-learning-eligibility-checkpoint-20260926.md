@@ -1,4 +1,10 @@
-## 2026-10-07 当前资格：对象范围修复只具机制资格，真实效果待新任务
+## 2026-10-07 当前资格：公开兼容通过，学习入口范围证据误拒待修
+
+Task23已实际原public16/入口8/types/imports及旧11feedback/150claim零调用恢复。Task24首次33真实，第一候选双not-met与独立首盲相符，正确candidate-failed。Task25同版本24真实、三普通六met，同原两反馈仅一整项eligible；另一分类把第三句单段并入第一排序criterion，scope只选第一句引用导致unclear。全文支持明确、原票不替换，因此0研究/激活/未来，不称完整学习。两批cold/审计/终审/actual freeze-end已完成。见[结果](tianwen-explicit-source-learning-result-20261007.md)。
+
+Task26最窄全文判断及引用选择顺序澄清，独立设计PASS，Root两文件实现4专项/三套144/默认types/diff0，0真实provider，独立spec/code审查PASS；[机制结果](tianwen-scope-evidence-implementation-20261007.md)不当成真实语义或完整学习效果。Task27准备46host/独立PASS尚无actualprofile/新公开构建，不改schema/SDK/whole资格/十臂/许可/六效果标准，不等用户。整体goal active/mainDaily原NO-GO；D约16.15GiB，未声称清理至20。
+
+## 2026-10-07 此前资格：对象范围修复只具机制资格，真实效果待新任务
 
 Task23首SDK scripted RED8→专项56/六套249/默认两types/diff0，独立spec/qualityPASS；原Task21固定段和旧完整generators不改，现行v12/unversioned累计新说明，旧quality原串，verifier严格三完整版本兼容。0实际provider/workerbuild，不能称真实语义或完整学习效果通过。下一原public16/入口/旧11feedback与含Task22原26的全历史claim零模型兼容，Task24新ordinary任务按原正式研究/原生独立clear/激活后执行原未来效果。prepared46host/准备与author-compat独立PASS不是模型效果；future三whole对象每题六标准不变未消费，goalactive/mainDailyNO-GO。见[tianwen-requirement-applicability-implementation-20261007.md](tianwen-requirement-applicability-implementation-20261007.md)。
 
