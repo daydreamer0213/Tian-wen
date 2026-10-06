@@ -6,7 +6,7 @@
 
 受控DEV完整学习闭环已完成，见[tianwen-summary-checkpoint-continuation-result-20261006.md](tianwen-summary-checkpoint-continuation-result-20261006.md)。当前原v11八例新固定答案首次双审7匹配/1有效分歧，无错误met共识，见[tianwen-current-semantic-panel-result-20261006.md](tianwen-current-semantic-panel-result-20261006.md)。这些分别是受控学习和有限语义证据，不升级成自然长期因果收益或普遍安全。原R9首次结果保持，不增加第三评审、关键词禁令或通过次数，不重开原决策窗口。
 
-下一有限普通Web预览使用当前Runtime普通apply/default quarantine，独立小配置验证当前入口、状态和交付整合，日常安装不变。使用新普通任务和明确模拟表达偏好，沿原同意/反馈/关闭/冷恢复；不要求再产生研究、方法或学习收益，不为已验证消费者凑数量。具体方案见[普通Web预览](../superpowers/specs/2026-10-06-tianwen-ordinary-web-preview-design.md)。已有证明和实际新缺口决定下一工作，单次模型质量问题不自动增加核心验收标准。
+有限普通Web预览已完成：当前Runtime普通apply/default quarantine，原网页四新消息/23真实请求，开启/普通介绍/模拟偏好改写/关闭/退出/冷0成立，原Daily安装不变。两Task原双met不代表全面事实安全；模拟反馈scope引用加省略号被原迟校验拒绝，持续标准未采用；U2未提供的“得先有人看过”等角色条件原双审仍met，保留既有R9风险。详见[普通Web结果](tianwen-ordinary-web-preview-result-20261006.md)。已实现捕获前原话检查/同子会话精确错误，四回归red→green/相关90测试/编译导入通过；这是模拟provider机制证据，非真实模型纠正或历史改判。下一全新反馈首次前瞻及原R9修复，不重发四消息、再产生研究或凑已有消费者数量，不自动增加核心验收标准。
 
 ## 以下保留2026-09-28至09-30历史范围与证据
 

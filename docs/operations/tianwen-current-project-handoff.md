@@ -1,5 +1,17 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 最新：当前普通 Web 流程完成，转具体反馈捕获修复
+
+干净 fd683bf4/current Runtime 普通 apply/default quarantine，独立 Profile 原 Web 实际发送四条新冻结消息，23 真实请求/0脚本主答。U0 同意 revision1、U1介绍/U2模拟表达偏好改写均原双met；U2独立反馈的范围子会话引用插入省略号，原迟校验拒绝→invalid-judgment/inconclusive/proofnull，未采用持续标准。U3 原工具关闭 revision2/quarantine仍true；关闭前已识别的控制任务原review cancelled，不算审查成功。study/activation0。本轮普通入口/任务/关闭/正常退出/零模型冷恢复完成，不称反馈有效归因、学习效果或全面语义安全。
+
+两次setup场景四消息均未消费：首次ctx新服务未inject预检CLI1/calls0，r2原服务注入修复后CLI0；Windows原auto目录选择宿主窗口，改r3原browse host/client组合，旧环境正常关闭/冷0。首终态核对因notice合法省略tools而sha256(undefined)退出1，独立只读精确字段比较audit实际0/0新模型：23原step、四有效双审proof、四原UI输入、149生产/1133旧保护字节成立。原所有失败/原票不变。
+
+U2新增“得先有人看过”等未提供角色条件，原grounding仍met，当前同类语义风险继续保留；不追加第三审/通过数或回判，不据此解除原R9 main/Daily NO-GO。既有Daily0.1.24/Desktoppreview.25当前169交付文件只读匹配，不改装。下一明确实现是反馈scope引用提前原生校验/精确错误，保持原unclear与语义门；普通Web批已收口，不重发四消息或既有学习。
+
+scope 捕获前引用校验已实现：原validateCapture返回具体字段错误，原子会话自己纠正，late检查/unclear/原语义规则保持。四回归亲眼red→green，原反馈28/判断62共90/90，原八顶层及引用项目编译0/私有导入0。provider为明确模拟，不称真实模型纠正效果；首失败/原票不变，没有新模型或依赖。下一有限全新反馈材料观察原模型纠正，继而处理既有R9角色/保证范围越界，不重发旧Web四消息。
+
+详见[tianwen-ordinary-web-preview-result-20261006.md](tianwen-ordinary-web-preview-result-20261006.md)及controller/final-audit.json。六重复快照gzip逐字核对收存释放125421977字节，原Session/真实请求/首结果保持；本轮约21.75MiB，D约16.67GiB>=15/未20，无依赖或旧状态副本，测试页已关。后续快照读取需解压json.gz；未要求用户再出题。
+
 ## 2026-10-06 最新：当前语义八例检查完成，转普通产品预览
 
 冻结72b1fb3d/current v11，八份全新公开固定诊断答案首次原生双审17真实请求，CLI预检/运行0、正常排空。七例符合预期，一例虚构必要依赖的requirements met/grounding not-met→原inconclusive；没有错误met共识，不称八例全过或普遍安全。四正常对照均met，未把可选建议及来源明确的条件/承诺一律禁止。

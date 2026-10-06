@@ -1,5 +1,15 @@
 # 天问验证总表：已有证明、剩余缺口与补测必要性
 
+## 2026-10-06 当前覆盖：普通 Web 有限旅程完成，反馈引用缺陷已定位
+
+fd683bf4普通 Runtime/default quarantine 在独立原Web实际四消息/23请求：开启同意、介绍、模拟持续表达偏好和真实改写、关闭、原CLI正常退出、cold0状态/账本不变完成。两普通Task原双met；独立feedback原assessor preference/5标准，但scope引用加省略号被late检查拒绝→invalid-judgment/proofnull，持续标准未采用，不能列“反馈归因通过”。U3控制Task原review cancelled/inconclusive是关闭取消；study/activation0不作为欠缺。四UI不重发、不为已完成学习/消费者补数量。
+
+独立只读audit实际0/0新模型，23原step与四原review proof/材料/合议绑定、149生产/1133保护字节、关闭/cold成立。首环境0calls缺inject、r2原auto宿主目录选择不适配IAB、首auditor合法缺tools导致sha256(undefined)均原记录保留；分别修设置、使用原browse组件、精确可选字段比较，无脚本答案或重判。U2“得先有人看过”等未给角色条件仍被双审met，不能宣称当前全面事实安全；延续R9原NO-GO，不加第三审或新发布门。见[tianwen-ordinary-web-preview-result-20261006.md](tianwen-ordinary-web-preview-result-20261006.md)。下一先修scope原话检查发生太晚的具体产品缺陷，不要求等待自然样本。
+
+原交付Daily0.1.24/preview.25当前169文件匹配、安装不变。六重复快照逐字gzip验证后收存，释放125421977字节；原Sessions/真实请求/首结果保留，本轮约21.75MiB、D16.67GiB>=15/未20。
+
+本轮可独立实现的scope原话迟校验已修：原validateCapture提前拒非字面/空引用，返回具体字段，允许同一原子会话纠正；不清洗材料、不强制continuing、late检查保持。四回归先失败后成功，原native service/proof recovery/Task不变和unclear不合资格均验证；原反馈28+原判断62共90通过，原构建/私有导入0。明确模拟provider，不覆盖真实模型自动纠正或语义可靠性。下一新材料首次前瞻及原R9修复，不重发Web四消息。
+
 ## 2026-10-06 当前覆盖：受控学习闭环已完成，八例语义检查收口
 
 本节覆盖下列旧记录对“尚无完整DEV闭环”的历史状态，不重判任何旧失败。受控完整学习、原研究采用、实际方法注入后任务与新任务、关闭撤回和零模型冷恢复已完成，见[tianwen-summary-checkpoint-continuation-result-20261006.md](tianwen-summary-checkpoint-continuation-result-20261006.md)。明确模拟来源/中断/错稿与真实模型效果分列，实际方法paired改善是去除交付XML标签，不是事实准确率因果提升。

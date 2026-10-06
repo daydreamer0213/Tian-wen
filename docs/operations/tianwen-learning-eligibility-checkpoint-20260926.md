@@ -1,5 +1,15 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 最新：普通 Web 原生链已检查，模拟反馈未获有效采用
+
+fd683bf4当前普通apply/默认暂停新激活，原Web独立配置四原UI消息、23actual、正常原CLI退出和cold0成立；U1/U2原Task各双met，模拟偏好实际关联U1且独立首assessor判preference，但scope首引用加省略号被原晚校验拒绝，最终invalid-judgment/inconclusive/proofnull。三continuing/两unclear不是持续标准已接受，本轮不能宣称反馈归因成功、方法改善或自然长期证据。U3关闭后原控制Task review cancelled、consent2disabled/quarantine true、study/activation0，cold账本/状态不变。
+
+实际独立只读audit0核23原step、四有效review proof、149生产/1133保护字节；原notice省略tools导致的首核对失败保存，仅精确可选字段比较更正/0新模型。两setup场景0模型/0消息发送不当作产品成功。普通流程检查收口，不重发旧材料，不新增研究数量要求。U2未提供“得先有人看过”的角色条件被原双审met，既有R9同类风险仍在；main/Daily原NO-GO保持，不新增门槛。下一是原capture内提前原话引用检查，保持unclear规则与历史判定。
+
+详见[tianwen-ordinary-web-preview-result-20261006.md](tianwen-ordinary-web-preview-result-20261006.md)。受控DEV完整学习已完成的资格保持；原Daily0.1.24/preview.25当前交付身份匹配、无需重装。六重复快照逐字gzip收存释放125MB，本轮约21.75MiB、D16.67GiB>=15/未20，原Sessions/请求/结果保留。
+
+已修具体scope捕获校验顺序，不修改学习资格或补全引用：原子会话在record前得到精确字段错误，literal修订可以原生capture/recover。四有意省略/标点/空值回归亲眼red→green，原反馈/判断90通过、构建/导入检查0；模拟provider机制证据，非真实模型改判或持续偏好采用。原两unclear与首invalid都保持；下一全新反馈首次前瞻，不重评历史。
+
 ## 2026-10-06 最新：八例当前双审完成，不追加学习或发布资格
 
 72b1fb3d原v11/SDK双审对八个全新公开固定答案首次实际17请求；不是自然主答、方法效果或旧R9重判。r2原CLI预检/运行0、正常排空；r3只读audit实际0、十六proof/完整材料/配置/逐step实际请求绑定成立：七预期匹配、一有效分歧、零invalid、零错误met共识。S01必要条件单票误认为来源后果，原inconclusive保留，不算识错成功，不因它添第三审/关键词拒绝/新核心标准。正常建议和明确有来源的条件/承诺均原met。

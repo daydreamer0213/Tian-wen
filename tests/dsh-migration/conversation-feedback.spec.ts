@@ -305,6 +305,55 @@ describe('native feedback assessment adapter', () => {
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
+  it.each([
+    ['omitted text', 'For all future pilot summaries…with no title.'],
+    ['changed punctuation', 'use exactly two sentences with no title!'],
+    ['empty quote', ''],
+    ['whitespace quote', '   '],
+  ])('returns a %s scope quote error to the same native assessor before capturing its correction', async (_kind, badQuote) => {
+    const note = 'For all future pilot summaries, use exactly two sentences with no title.'
+    const preference = { classification: 'preference', category: 'user-preference',
+      supplementalCriteria: ['Use exactly two sentences in future pilot summaries.', 'Use no title in future pilot summaries.'],
+      explanation: 'The user supplies a future style preference.', evidenceQuotes: ['For all future pilot summaries'] }
+    const corrected = { decisions: [
+      { criterion: preference.supplementalCriteria[0], scope: 'continuing', evidenceQuote: 'For all future pilot summaries' },
+      { criterion: preference.supplementalCriteria[1], scope: 'unclear', evidenceQuote: 'use exactly two sentences with no title.' },
+    ] }
+    const invalid = { decisions: [corrected.decisions[0], { ...corrected.decisions[1], evidenceQuote: badQuote }] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(preference),
+      toolCallResponse('invalid-scope', 'structured_output', invalid),
+      toolCallResponse('corrected-scope', 'structured_output', corrected)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(assessment.result).toMatchObject({ classification: 'preference', unavailableReason: null,
+        proof: { sessionId: expect.any(String) }, scopeReview: { decisions: corrected.decisions, proof: { sessionId: expect.any(String) } } })
+      const scopeProof = assessment.result!.scopeReview!.proof
+      const saved = await harness.ctx.sessionPersistence.inspect(SessionId(scopeProof.sessionId))
+      const denied = saved.events.find(event => event.type === 'tool/result' && event.data.message.source.callId === 'invalid-scope')
+      expect(denied?.type === 'tool/result' && denied.data.message.content.some(block => block.type === 'tool-result' && block.isError === true)).toBe(true)
+      expect(JSON.stringify(denied)).toContain('decisions[1].evidenceQuote')
+      expect(saved.events.filter(event => event.type === 'tool/result'
+        && event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(1)
+      expect(saved.events.some(event => event.type === 'tool/result' && event.data.message.source.callId === 'corrected-scope'
+        && event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toBe(true)
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, scopeProof, corrected)
+      expect(recovered.material).toMatchObject({ feedback: { rating: 'negative', note }, criteria: preference.supplementalCriteria })
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(false)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('not eligible')
+      expect(harness.adapter.requests).toHaveLength(7)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('fails closed when the one independent feedback recheck repeats the contradiction', async () => {
     const contradictory = { classification: 'requirement-change', category: null,
       supplementalCriteria: ['Use two sentences for future pilot summaries.'],

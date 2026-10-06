@@ -303,6 +303,18 @@ export class TianwenConversationFeedbackService extends Service {
           label: `Tianwen feedback continuing scope ${assessmentId}`, instruction: SCOPE_INSTRUCTION,
           material: { feedback: material.feedback, criteria: result.supplementalCriteria }, signal,
           outputSchema: CONVERSATION_FEEDBACK_SCOPE_SCHEMA,
+          validateCapture: (value: unknown) => {
+            if (value === null || typeof value !== 'object' || Array.isArray(value)
+              || !('decisions' in value) || !Array.isArray(value.decisions)) return undefined
+            for (const [index, item] of value.decisions.entries()) {
+              if (item !== null && typeof item === 'object' && 'evidenceQuote' in item
+                && typeof item.evidenceQuote === 'string'
+                && (item.evidenceQuote.trim() === '' || !direct.includes(item.evidenceQuote))) {
+                return `Invalid decisions[${index}].evidenceQuote: copy a non-empty exact continuous substring from the direct user feedback, preserving punctuation and whitespace. Do not omit text or add an ellipsis. Correct the quote yourself; the host has not repaired or captured this submission.`
+              }
+            }
+            return undefined
+          },
         })
         if (signal.aborted || !await this.isAssessmentActive(assessment)) throw new Error('cancelled')
         if (scope.value === null || typeof scope.value !== 'object' || Array.isArray(scope.value)
