@@ -12,9 +12,9 @@
 
 1. **范围说明与证明兼容** — owner ONLY `packages/tianwen-runtime-bundle/src/conversation-claim-review.ts`、`tests/dsh-migration/conversation-claim-review.spec.ts`。
 
-- [ ] 先SDK scripted RED：每条限制先明确原要求指定的对象，对待办/未定子集的限制不得套到已可用/明确时间地点；请求若真要求全部事项独立成句仍适用全部。一般许可对子集外仍有效，待办左边界分号真实错误不能放过。引用数据不变成指令，事实支持不等于格式合规。
-- [ ] 保留当前Task21固定尾段字面值/旧generator，追加Task23固定段。三版本严格完整串匹配；显式旧quality生成与恢复仍只有原串。实际SDK保存的原/Task21/Task23两个purpose×focus可零调用冷恢复，近似/额外尾段、错focus/material、旧quality新尾段拒绝。
-- [ ] 保留首次失败，运行原六套完整回归、默认两包types与diff。报告准确次数、源/test哈希与0实际provider。worker不得build/commit/provider；独立规格与质量PASS后停写。
+- [x] 先SDK scripted RED：每条限制先明确原要求指定的对象，对待办/未定子集的限制不得套到已可用/明确时间地点；请求若真要求全部事项独立成句仍适用全部。一般许可对子集外仍有效，待办左边界分号真实错误不能放过。引用数据不变成指令，事实支持不等于格式合规。
+- [x] 保留当前Task21固定尾段字面值/旧generator，追加Task23固定段。三版本严格完整串匹配；显式旧quality生成与恢复仍只有原串。实际SDK保存的原/Task21/Task23两个purpose×focus可零调用冷恢复，近似/额外尾段、错focus/material、旧quality新尾段拒绝。
+- [x] 保留首次失败，运行原六套完整回归、默认两包types与diff。报告准确次数、源/test哈希与0实际provider。worker不得build/commit/provider；独立规格与质量PASS后停写。
 
 2. **原公开入口及全新普通运行** — root。
 
