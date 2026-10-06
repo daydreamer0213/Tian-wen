@@ -1,3 +1,8 @@
+## 2026-10-07 当前：普通自动学习已完成正式研究、方法启用和两个后续效果
+
+Task31首次82真实/0脚本：两项whole持续偏好进入原正式十臂，五候选met、来源基线OR和正常对照成立；原native独立首许可clear，Runtime实际启用。两份原未来任务六标准效果均met，实际请求含方法，无关/撤权后无方法；原rev2回滚、cold真挂载0模型/ledger不变，82/82SDK绑定、终审PASS及actual close0。future2普通Task原requirements误以“四句不是一段”判NOT、grounding MET，故原inconclusive保留，不能用效果票替换。成功是更明确公开模拟环境的普通产品链路，不是自然满意度、Task29细粒度并句条件或单条提示的独立因果证明。见[tianwen-method-construction-prospective-result-20261007.md](tianwen-method-construction-prospective-result-20261007.md)。
+
+Task32仅澄清段落可以多句，保留显式一句话/真实分段/列表/独立句要求与严格旧producer恢复，以六条新首次正反例检查，不重评旧future2或重开已通过的研究/许可/效果。goal active，main/Daily原NO-GO；D约16GiB>=15未20，无全环境副本；scratch删除自动审批blocked by policy，未执行未绕过。
 ## 2026-10-07 当前：方法提示已进实际运行包，原兼容与218回归通过
 
 Task30单条proposal构造/适用时内部检查提示只是假设，Task29旧方法已有五步，旧失败不重判。实际public原16步/11元数据、产品入口4+4、默认types/imports，以及旧27feedback/190claim/57真实trial零模型恢复通过，原票不变。首217/1及构建后CLI25秒超时保留；诊断确认freshhome数百安装链接建立尚未进入control。首移到spawn前仍总测试30秒超时、CLI实际关闭260ms；最终只改原测试安装夹具复用上游SDK包链接，独立新会话/账本/profile保持，25秒/30秒/退出1/撤权/<5秒均不变。专项实际1通过/关闭265ms，完整四套v3实际218/218退出0。产品构建输入/输出在后续测试和文档更新下摘要完全相同，收据分别保留真实构建81f0f034与新HEAD，不虚称重构建。见[本轮实现](tianwen-method-construction-implementation-20261007.md)。

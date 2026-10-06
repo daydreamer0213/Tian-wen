@@ -1,3 +1,8 @@
+## 2026-10-07 当前：普通自动学习已完成正式研究、方法启用和两个后续效果
+
+Task31首次82真实/0脚本：两项whole持续偏好进入原正式十臂，五候选met、来源基线OR和正常对照成立；原native独立首许可clear，Runtime实际启用。两份原未来任务六标准效果均met，实际请求含方法，无关/撤权后无方法；原rev2回滚、cold真挂载0模型/ledger不变，82/82SDK绑定、终审PASS及actual close0。future2普通Task原requirements误以“四句不是一段”判NOT、grounding MET，故原inconclusive保留，不能用效果票替换。成功是更明确公开模拟环境的普通产品链路，不是自然满意度、Task29细粒度并句条件或单条提示的独立因果证明。见[tianwen-method-construction-prospective-result-20261007.md](tianwen-method-construction-prospective-result-20261007.md)。
+
+Task32仅澄清段落可以多句，保留显式一句话/真实分段/列表/独立句要求与严格旧producer恢复，以六条新首次正反例检查，不重评旧future2或重开已通过的研究/许可/效果。goal active，main/Daily原NO-GO；D约16GiB>=15未20，无全环境副本；scratch删除自动审批blocked by policy，未执行未绕过。
 ## 2026-10-07 当前：实际运行兼容和218回归通过，真实效果待新任务
 
 Task30原public16/实际入口4+4/types/imports、旧27feedback/190claim/57真实trial零模型恢复实际通过；source只单条方法构造提示，不把旧五步方法的执行失败认定为缺步骤。退出首失败保留并定位安装链接初始化；只复用原SDK链接的测试夹具，原25秒/30秒和撤权/关闭要求不变，新四套回归218/218实际0。后续测试/文档更新全部public构建输入输出不变，真实构建SHA与新HEAD独立绑定，不假称重构建或模型效果。Task31新明确source+原模拟持续反馈和原future whole/六标准prepared-only独立PASS，原hostsubset限制保留；下一空profile实际冻结/0模型preflight后首次普通研究/许可/采用/后任务。原whole eligible/正式十臂/5候选/源基线OR/首独立许可及发布门槛不变，mainDaily原NO-GO/goal active。见[tianwen-method-construction-implementation-20261007.md](tianwen-method-construction-implementation-20261007.md)。

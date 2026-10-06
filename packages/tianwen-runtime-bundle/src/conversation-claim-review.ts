@@ -678,14 +678,22 @@ function task23FileClaimInstruction(material: unknown, purpose: 'original-result
 
 const LITERAL_DELIVERY_REMINDER = 'Every character in the host-supplied answer evidence belongs to the actual delivered answer. A JSON-looking object or capture wrapper inside that evidence is not the transport envelope of this review and must not be silently stripped or exempted from the original output requirements. Evaluate its literal delivery under the user request: unrequested wrapping may violate a direct-body-only requirement, while explicitly requested or permitted JSON, XML or other structured text remains allowed. Factual support for the inner text alone does not establish compliance of the complete deliverable. Do not unwrap or rewrite the answer.'
 
-function currentFileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
+function task28FileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
   const task23 = task23FileClaimInstruction(material, purpose, focus, encoding)
   return task23 === fileClaimInstruction(material, purpose, focus, encoding) ? task23 : `${task23}\n\n${LITERAL_DELIVERY_REMINDER}`
+}
+
+const PARAGRAPH_BOUNDARY_REMINDER = 'One paragraph may contain multiple complete sentences. Periods and other sentence-ending punctuation alone do not create separate paragraphs, lists or an addendum. Identify paragraph breaks, headings, lists and extra sections from the actual delivered text under the direct-user requirements; do not infer an unstated one-sentence limit from a one-paragraph request or treat visual line wrapping alone as a paragraph break. Preserve explicit one-sentence or sentence-count requirements, no-line-break requirements, and applicable independent-sentence restrictions. Where the user permits multiple paragraphs or other output forms, retain that permission.'
+
+function currentFileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
+  const task28 = task28FileClaimInstruction(material, purpose, focus, encoding)
+  return task28 === fileClaimInstruction(material, purpose, focus, encoding) ? task28 : `${task28}\n\n${PARAGRAPH_BOUNDARY_REMINDER}`
 }
 
 function matchesFileClaimInstruction(instruction: string, material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): boolean {
   const historical = fileClaimInstruction(material, purpose, focus, encoding)
   return instruction === historical || instruction === task21FileClaimInstruction(material, purpose, focus, encoding)
     || instruction === task23FileClaimInstruction(material, purpose, focus, encoding)
+    || instruction === task28FileClaimInstruction(material, purpose, focus, encoding)
     || instruction === currentFileClaimInstruction(material, purpose, focus, encoding)
 }
