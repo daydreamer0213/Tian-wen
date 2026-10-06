@@ -1,4 +1,10 @@
-## 2026-10-07 当前资格：公开兼容通过，学习入口范围证据误拒待修
+## 2026-10-07 当前：持续资格进入研究，修交付包装边界
+
+Task26原public16步/实际入口8项、默认types/imports及旧19feedback/166claim零模型恢复实际通过。Task27首次35真实/0脚本，三ordinary六met，两feedback均三条continuing且whole eligible，系统自行开启研究。候选内文正确但answer值里又序列化answer对象；两native误把字面正文包装当transport而met，原冻结host正确rejected，所以candidate-failed，仅2臂4票，无正式裁决/许可/激活/未来效果。cold/audit/独立首次盲审和终审PASS，actual close已退出0释放冻结。见[首次结果](tianwen-scope-evidence-prospective-result-20261007.md)。
+
+Task28最窄修生成/审核交付边界，严格旧完整指令恢复、用户JSON允许、不宿主解包，原quality/schema/双审/十臂/原未来六标准不改。有效SDK RED9/2→当前专项11，六套265/265、两默认types/diff0，独立spec/code PASS。扩大七套441/443，DEV目录失配已确认，CLI超时的新source旧dist混用尚为假设；原失败保留，下一新public后用canonical D目录跑原两项、保存CLItrace，不提前称全绿/语义改善。全新Task29主动设计，原未来whole对象与六标准不变，main/Daily原NO-GO、整体goal active，不等待用户出题、不重跑旧pair凑票；D约16.12GiB>=15尚未20，无环境/依赖全复制。
+
+## 2026-10-07 此前资格：公开兼容通过，学习入口范围证据误拒待修
 
 Task23已实际原public16/入口8/types/imports及旧11feedback/150claim零调用恢复。Task24首次33真实，第一候选双not-met与独立首盲相符，正确candidate-failed。Task25同版本24真实、三普通六met，同原两反馈仅一整项eligible；另一分类把第三句单段并入第一排序criterion，scope只选第一句引用导致unclear。全文支持明确、原票不替换，因此0研究/激活/未来，不称完整学习。两批cold/审计/终审/actual freeze-end已完成。见[结果](tianwen-explicit-source-learning-result-20261007.md)。
 

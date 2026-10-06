@@ -11,7 +11,9 @@ Task25 已结束24真实/0脚本：三ordinary六met，两原文相同模拟偏�
 - [x] 独立设计审查PASS及Task25 actual freeze-end已实际0；限定两文件实现完成，独立spec/code审查PASS，无用户出题或许可等待。
 - [x] 真实SDK scripted有效RED/原scope派生会话完整多句材料及规范、独立native proof/quote约束、旧固定指令捕获冷恢复；scripted票不是真实语义证明。合并同族/不同族/current例外由新专项，next-only/无源加强/引文格式由原相关回归覆盖，篡改proof/value拒绝；旧Task25真实原票未改，实际历史proof恢复待公开。
 - [x] SCOPE文字最窄更改，保留其余指令/协议与默认行为；有效RED3fail/1pass→GREEN4，三套144及默认两types/diff0，0真实provider实施报告。首夹具4fail和types TS6379调用错误保留。旧固定scope脚本捕获冷恢复通过，真实历史19feedback/166claim兼容实际待公开构建。
-- [ ] 独立spec/qualityPASS后root原public16/actual入口/旧feedback与currentclaim兼容0调用，新source-transition只精确声明实际源码/编译/spec变化。保留首失败，不能复制环境或改SDK。
+- [x] 独立spec/qualityPASS后root原public16/actual入口/旧feedback与currentclaim兼容0调用，新source-transition只精确声明实际源码/编译/spec变化。保留首失败，不能复制环境或改SDK。
 - [ ] 全新原任务/公开模拟反馈普通运行，沿原formal/native firstclear/自动许可/原未来六标准及无关/撤权/cold/语义终审；不重跑旧题/补票/旧票多数化，不新增发布门槛。方法正式采用才运行未来。仍不把一段提示、脚本或一轮完结当整体目标完成。
 
 main/Daily继续原NO-GO直到原门槛满足；整体goal active。Task25独立诊断文件D:/DevData/tianwen-explicit-source-controller-20261007/task25-feedback-scope-diagnostic.md。该计划是新实现，不是重评旧样本。
+
+实际补充：Task26public16/8+19/166全部0。Task27首次35真实、两whole eligible、2臂后包装错误candidate-failed，cold/audit/独立终审/actual close均完成，但原计划“正式采用与未来效果”仍未完成，不能勾选其整体条目；接Task28/29字面交付计划。

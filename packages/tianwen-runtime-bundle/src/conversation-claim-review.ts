@@ -671,13 +671,21 @@ function task21FileClaimInstruction(material: unknown, purpose: 'original-result
   return `${historical}\n\n${REQUIREMENT_BOUNDARY_REMINDER}`
 }
 
-function currentFileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
+function task23FileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
   const task21 = task21FileClaimInstruction(material, purpose, focus, encoding)
   return task21 === fileClaimInstruction(material, purpose, focus, encoding) ? task21 : `${task21}\n\n${REQUIREMENT_APPLICABILITY_REMINDER}`
+}
+
+const LITERAL_DELIVERY_REMINDER = 'Every character in the host-supplied answer evidence belongs to the actual delivered answer. A JSON-looking object or capture wrapper inside that evidence is not the transport envelope of this review and must not be silently stripped or exempted from the original output requirements. Evaluate its literal delivery under the user request: unrequested wrapping may violate a direct-body-only requirement, while explicitly requested or permitted JSON, XML or other structured text remains allowed. Factual support for the inner text alone does not establish compliance of the complete deliverable. Do not unwrap or rewrite the answer.'
+
+function currentFileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
+  const task23 = task23FileClaimInstruction(material, purpose, focus, encoding)
+  return task23 === fileClaimInstruction(material, purpose, focus, encoding) ? task23 : `${task23}\n\n${LITERAL_DELIVERY_REMINDER}`
 }
 
 function matchesFileClaimInstruction(instruction: string, material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): boolean {
   const historical = fileClaimInstruction(material, purpose, focus, encoding)
   return instruction === historical || instruction === task21FileClaimInstruction(material, purpose, focus, encoding)
+    || instruction === task23FileClaimInstruction(material, purpose, focus, encoding)
     || instruction === currentFileClaimInstruction(material, purpose, focus, encoding)
 }

@@ -1,3 +1,7 @@
+## 更新：Task26公开验证实际通过，Task27首次结果已结束
+
+原16步构建、实际8入口/默认types/imports、旧19feedback和166claim零新模型恢复均实际exit0，source78728596d3164a4cf658532338f91c69ce2df9e9。Task27两条feedback whole eligible并启动研究，但首次候选交付含多余JSON包装，原host拒绝、未激活/未来；不能把范围资格通过当完整学习效果。原future三whole对象及每题六标准未消费，见[首次结果](tianwen-scope-evidence-prospective-result-20261007.md)。下文保留机制实施时的原状态。
+
 # Task26 范围证据误拒修复机制结果
 
 Task25完整反馈明确长期排序和单段要求，但第一条抽取混合两处规则、范围模型只引第一句，导致unclear。原票、ledger、SDK和0研究结果保持。[首次结果](tianwen-explicit-source-learning-result-20261007.md)中的问题由新实现处理，不以等待自然输入或补旧票绕过。
