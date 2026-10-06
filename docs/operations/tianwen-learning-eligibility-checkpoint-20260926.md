@@ -1,4 +1,10 @@
-## 2026-10-06 当前：出题缺失陈述选择规则通过独立审查
+## 2026-10-06 当前：新反馈有效但分族未研究，转普通产品逐项放行实现
+
+Task14 ef057a18原public16/相关163+public4/旧proof零调用兼容通过；首次25真实0脚本，三ordinary六原checks met，两模拟preference分别3/7continuing整项eligible。source1 writing/source2 summarization不满足原同族配对，study/attempt/activation/effect0，Task13 caseDesign未调用，不称该说明效果过或失败。首盲无明确事实/格式错，与原六票相容；后设偏好不回判。原run/cold/audit0、2532保护零差、withdrawrev2disabled/末1请求无分析方法/cold0，独立终态后原close-stage实际释放。未消费future/六效果保持，旧票不改。详见[tianwen-missing-value-learning-result-20261006.md](tianwen-missing-value-learning-result-20261006.md)。
+
+完整目标active/mainDailyNO-GO。下一不立即追加同类DEV批，按[新设计](../superpowers/specs/2026-10-06-tianwen-study-clearance-design.md)和[计划](../superpowers/plans/2026-10-06-tianwen-study-clearance-plan.md)实现普通产品一项正式accepted研究的受信许可/恢复/原激活；默认隔离保留，AI审查明确标注不冒充human，先脚本机制再新普通产品首次实际效果，不等待自然任务或用户许可。D约16.39GiB>=15，无全量环境复制；npm可再下载缓存删除被自动策略执行前拒绝，未释放该缓存。
+
+## 2026-10-06 此前：出题缺失陈述选择规则通过独立审查
 
 Task13仅在原text case-design指令追加三句，区分缺失的值与源内真实缺失陈述；生成prompt须明确该陈述保留/可选/省略，criteria遵从同一选择，不由不编值推导隐含禁句，也不一概要求保留。原schema/1–12/host/RAW/proposal/trial/claim/v12/双审/裁决/发布门槛未变。native实际RED1→GREEN1、原相关full163/163退出0，独立spec/quality PASS。首次长过滤零执行非RED、类型JS等价/最终focused1保留。公开build与新实际效果尚待执行，脚本14不称语义改善。整体active/mainDailyNO-GO，下一原publicbuild/旧proof零调用兼容+全新Task14，未消费future/六effect保持。详见[tianwen-missing-value-contract-implementation-20261006.md](tianwen-missing-value-contract-implementation-20261006.md)。
 
