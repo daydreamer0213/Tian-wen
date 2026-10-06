@@ -31,3 +31,13 @@ reviewer如实记录authority（independent-ai或human）、id及提示摘要；
 先用明确脚本fixture证明默认隔离、正式完整研究许可、错误身份/摘要/来源/同意/父版本、直写旁路、幂等、崩溃恢复和撤回。已有R9具体错误只做新机制拒绝fixture，旧票不重评；正常角色/承诺不新增禁令。再原构建/相关回归/旧证明零调用兼容和独立代码复核，最后全新普通产品Profile真实执行任务/模拟反馈/正式研究/独立审查/采用/原未来效果与撤回。无accepted即记录首次失败，不修改原裁决或暗加通过次数。
 
 独立设计审查依据为D:/DevData/tianwen-missing-value-learning-controller-20261006/product-study-clearance-design-review.md；已采纳动态摘要拆分、完整无票投影、恢复唤醒、许可/activation间隙幂等、如实AI身份等意见。第一部分不称整个产品通道已完成；最终给准确版本和原发布门槛下的明确结论。
+
+## Task16 接入细化
+
+Task15已通过独立审查。普通配置guidanceIndependentReview同时接受可信程序回调和可序列化原生描述符，后者明确mode=native、reviewerId及可选模型配置；未指定其他模型时复用经过原证明恢复的源任务配置，不静默换路由。公开原生工厂复用runConversationJudgment和recoverConversationStructuredJudgment，既不复制SDK执行器，也不把独立语义读证据变成第三张quality票。实际AI身份、输入独立性与路线准确留存，同模型独立子会话不称错误独立或真人审查。
+
+首盲投影采用静态字段白名单：完整三源request/context/原始交付/原反馈及明确标注的派生标准，父与候选方法，五案例请求与标准、十个完整答案和文件结果。不能展开proposalMaterial、nativeGoalOriginal.source或review字段把旧票/解释带入。完整原包另存，原512KiB传输界限仍按真实材料检查，不截短凑过。
+
+开始首审前持久化唯一attempt、准确包、首盲输入与固定指令；保存首次原始结果与native证明后才组装许可，之后另存原票对照。重启有结果即复核原证明，不再调用审查。若原生完成而宿主结果尚未保存，按同attempt唯一子会话恢复原捕获；没有唯一可恢复的完成结果就保留原未完成状态，不换审查追求通过。对程序回调也保存首结果，明确无原生证明的受信宿主回执，不能冒充原生AI执行。
+
+实现按顺序交接：investigate_actor_semantic_seam仅拥有新guidance-independent-review.ts及对应新测试，先完成投影/首审/持久化/恢复接口；implement_scope_repair_operator随后只拥有loop/runtime/index及对应loop/runtime测试，接三入口和配置，不能修改前者文件。Root负责文档、原public构建、生成控制器和实际服务商验证；review_shared_future_scope独立只读审查。所有worker不独占仓库，不回退他人修改。共享接口需先明确后接线，暂无新provider调用或旧研究重审。
