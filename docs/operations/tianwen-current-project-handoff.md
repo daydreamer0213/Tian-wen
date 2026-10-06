@@ -1,4 +1,18 @@
-## 2026-10-06 当前：null类型提示机制通过，准备公开构建及全新前瞻
+## 2026-10-07 当前：具体分句说明实现通过，继续公开版本及全新普通验证
+
+Task21仅claim-review producer当前wrapper及精确old/current恢复matcher，当前v12/unversioned补清具体限制优先一般许可、独立句左右边界；显式旧质量生产/COMMON/V6–V12/原file generator不改，原v5/v11固定fixture未改。真实SDK scripted32专项、原六套225/225、默认两types/diff0，独立spec/quality PASS。首221=219+2与legacy尾段误接受RED2保留；0实际provider/0worker build，不能称真实语义已修复。源SHA2326dbee/test8494e3fa，见[tianwen-requirement-boundary-implementation-20261007.md](tianwen-requirement-boundary-implementation-20261007.md)。
+
+下一root原public16/实际入口/指定历史proof零模型恢复→Task22全新普通首次运行。Task22新whole材料/同合同/42宿主夹具与准备/author-script独立PASS，尚无actualprofile/模型；holdout复用通用缺失地点字段已披露，不新增逐词必须全新门槛。原未来三whole对象及每题六条效果标准未消费。goal active/mainDaily原NO-GO，D约16.23GiB>=15，无整套环境/依赖/历史复制。
+
+## 2026-10-07 此前：候选5项通过，具体分句误判阻止正式采用，继续定点修复
+
+Task18 source433be已推送，原public16步/actual4+4/default types/imports及旧11feedback22claim/Task12(26)/Task17(24)零模型兼容全部实际0。Task19首次61真实/0脚本、10项20票，压缩幅度分歧导致inconclusive，无许可/采用/后任务，原票不改。其首次盲审/终态PASS、实际freeze-end已释放。
+
+Task20使用已有公开host检查/独立case接口，模型前冻结明确去重合同，全新空ordinary Profile59真实/0脚本。三普通六met，两模拟preference分别3/5 continuing整项eligible；10项20票，候选5项全部native met/host verified，两源baseline not-met/rejected，反例baseline met/verified。邻近baseline将地点与第一待办分号并句，requirements误met、grounding正确not-met，原合议inconclusive/host rejected。首盲确认同一错误，原票不重判。无独立许可/activation/future，原后任务三对象六标准未消费。
+
+实际run/cold/audit0、59请求绑定/52会话/3114冻结文件保持、撤权rev2/cold0模型账本不变；独立终态PASS后实际Task20 freeze-end已释放。下一Task21最窄具体限制/一般许可与句子左右边界说明，精确旧指令兼容，不改原quality.v12/schema/双审/正式门槛；Task22新记录prepared/42宿主检查，不冒充模型效果。goal active/mainDaily原NO-GO；D约16.23GiB>=15、无环境/依赖/历史全复制。详见[tianwen-controlled-contract-learning-result-20261007.md](tianwen-controlled-contract-learning-result-20261007.md)。
+
+## 2026-10-06 此前：null类型提示机制通过，准备公开构建及全新前瞻
 
 Task18只原scoped preexecute新增6行schema-guided category字符串null类型提示，模型自行决定/纠正，原SDK/schema/proof/质量/双审/裁决不变。真实SDK scripted RED2/73skip→GREEN13/62skip，原六套193/193、默认类型/diff0，独立spec/quality PASS。首scope夹具async错误及四首SDK快照保留，0真实provider/0install/0worker build；public仍待root。原Task17九臂/无许可效果及adjacent inc不补票，原future三对象/六标准未消费保持。Task19新无多余标签记录/cold明确inject模板prepared-only，无actual profile/freeze。goal active/main Daily原NO-GO；下一原public/旧proof兼容→新普通首次真实学习，不加标准、不等用户。见[tianwen-null-token-implementation-20261006.md](tianwen-null-token-implementation-20261006.md)。
 

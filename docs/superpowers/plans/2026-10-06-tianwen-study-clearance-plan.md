@@ -51,6 +51,14 @@ Task17完整研究/许可/效果未发生，不勾选第二项或整体完成。
 
 - [x] 原真实SDK scripted RED：category字符串null收到准确类型区别，模型自己在下一步交JSONnull；bad-only无proof，合法字符串null schema/正常enum/正常null沿原规则。原错误payload留存。
 - [x] 仅原同parent/label pre-execute依据原schema拒绝错误类型并说明；不换值、不变schema/SDK/材料/旧票/最终parser/quality/双审/裁决。GREEN及完整原judgment/claim/type/diff，独立复核。新增13、原完整193、默认类型/diff0，独立spec/quality PASS。
-- [ ] 原公开构建与入口、旧证明零模型兼容后全新清楚业务任务首次前瞻；保留原future三对象/六标准。若未formal accepted/独立许可/真实采用，不消费后任务、不填成功。
+- [x] 原公开构建与入口、旧证明零模型兼容后全新清楚业务任务首次前瞻；保留原future三对象/六标准。433be实际16步/4+4/types/imports/旧11feedback22claim/Task12(26)/Task17(24)均0。Task19首次61真/10项20票inconclusive，无许可/采用/未来，首盲/终审/actual freeze-end释放。没有补票或消费后任务。
 
 此项提示不保证模型成功，且不是原adjacent baseline inconclusive的修复；新任务无需多余标签歧义，不新增禁标签或更严格式要求。用户已经授权自主选择与模拟，不因设计/开发例行步骤再问执行许可。
+
+### Task19/20：保留首次结果，明确受控合同的真实研究
+
+- [x] Task19新普通任务首次61真/0脚本、10项20票，原压缩幅度分歧与三待办概括四的原case标准保持；cold/audit/首盲/终审/actual freeze-end完成。
+- [x] Task20模型前冻结新去重任务/5份同合同/2个case，既有公开host接口不改产品source；38宿主夹具。实际59真/0脚本，三原任务六met/两反馈3+5continuing/10研究20原生票，候选5全met/verified，邻近baseline误放行形成inc；原决定不改，未许可/采用/future。cold/audit/首盲/终审/实际freeze-end完成。
+- [ ] Task21按[最窄新计划](2026-10-07-tianwen-requirement-boundary-plan.md)补清具体限制/一般许可及完整句子左右边界，保留精确旧指令兼容；原public/旧proof恢复后Task22全新普通首次运行。Task22prepared与42宿主检查不是模型效果；原未来三对象六标准仍未消费。
+
+整体目标仍active。原正式 accepted、原生独立审查 clear、许可/实际自动采用及后任务效果仍需真实发生，不能由候选五项通过替代。

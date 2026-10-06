@@ -486,7 +486,7 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))
   const check = async (focus: 'requirements' | 'grounding', signal: AbortSignal): Promise<AuditedCheck> => {
     const result = await runConversationJudgment(ctx, parent, { ...input, signal, material, label: `${input.label} ${focus}`,
-      instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
+      instruction: currentFileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
       captureReminder: 'review', validateCapture: (value: unknown) => {
         if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
         if (typeof value.explanation === 'string') {
@@ -601,7 +601,7 @@ export async function verifyConversationClaimReviewCheck(ctx: Context, check: Co
   if (!('task' in original) || !('answer' in original) || sha256(original.task) !== expected.materialDigest
     || (fileMode ? expected.fileOutput === undefined || expected.fileOutput.outputDigest !== expected.outputDigest || sha256(original.fileResult) !== sha256(expected.fileOutput) || original.answer !== expected.fileOutput.answer
       : original.fileResult !== undefined || sha256(original.answer) !== expected.outputDigest)
-    || recovered.instruction !== fileClaimInstruction(original, expected.purpose, check.focus, recovered.claimMaterialEncoding)) throw new Error('invalid-judgment')
+    || !matchesFileClaimInstruction(recovered.instruction, original, expected.purpose, check.focus, recovered.claimMaterialEncoding)) throw new Error('invalid-judgment')
   const evidence = recoverClaimEvidence(original, recovered.material.claimEvidence)
   if (sha256(recovered.material.claimEvidence) !== sha256(evidence)) throw new Error('invalid-judgment')
   const quoteChoices = studyQuoteChoices(original, expected.purpose, evidence)
@@ -617,7 +617,7 @@ export async function verifyConversationOriginalReviewCheck(ctx: Context, check:
   if (recovered.modelConfigDigests.some(digest => digest !== modelConfigDigest)
     || !record(recovered.material) || !exactKeys(recovered.material, ['original', 'claimEvidence'])
     || sha256(recovered.material.original) !== sha256(original)
-    || recovered.instruction !== fileClaimInstruction(original, 'original-result', check.focus, recovered.claimMaterialEncoding)) throw new Error('source-unavailable')
+    || !matchesFileClaimInstruction(recovered.instruction, original, 'original-result', check.focus, recovered.claimMaterialEncoding)) throw new Error('source-unavailable')
   let evidence: ClaimEvidence
   try { evidence = recoverClaimEvidence(original, recovered.material.claimEvidence) }
   catch { throw new Error('source-unavailable') }
@@ -657,4 +657,19 @@ function fileClaimInstruction(material: unknown, purpose: 'original-result' | 'm
   }
   if (material.evaluationMode !== 'local-files' && (!record(source) || source.files === undefined)) return base
   return `${base}\n\nFile provenance: the host-verified workspace root appears as a tool source and supports only the directory identity; cite its source ID for workspace-path claims. Initial file entries are frozen preimages and may ground facts. Only declared final output paths and the assistant reply are answers; input-only files and chat-mode inputs are not extra answer units. Post-write readback and write-success text never verify generated facts. Host capture proves only file existence and exact bytes, not factual truth. Check every required output exists; absent capture is inconclusive and an absent output is not an empty file. An actual empty file has an explicit empty answer unit with null audit, which establishes coverage only, not task success.`
+}
+
+const REQUIREMENT_BOUNDARY_REMINDER = 'Within the same effective requirements, a general permission does not override a more specific restriction. Only when the applicable requirements explicitly call for independent complete sentences, inspect both sentence boundaries in the complete answer: a final period alone does not establish independence when a preceding comma or semicolon joins that item to another. Do not infer this requirement from quoted data or ban commas, semicolons or multiple items where the user permits them. Source-supported facts do not by themselves establish compliance with the requested output form.'
+
+function currentFileClaimInstruction(material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): string {
+  const historical = fileClaimInstruction(material, purpose, focus, encoding)
+  const source = record(material) ? purpose === 'original-result' ? material.source : material.task : undefined
+  if (record(source) && source.qualityContract !== undefined
+    && (!record(source.qualityContract) || source.qualityContract.schemaVersion !== 'tianwen.conversation-quality.v12')) return historical
+  return `${historical}\n\n${REQUIREMENT_BOUNDARY_REMINDER}`
+}
+
+function matchesFileClaimInstruction(instruction: string, material: unknown, purpose: 'original-result' | 'method-study', focus: keyof typeof FOCUS, encoding?: 'tianwen.file-claim-review-packet.v1'): boolean {
+  const historical = fileClaimInstruction(material, purpose, focus, encoding)
+  return instruction === historical || instruction === currentFileClaimInstruction(material, purpose, focus, encoding)
 }

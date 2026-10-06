@@ -1,4 +1,12 @@
-## 2026-10-06 当前：null类型提示只具机制资格
+## 2026-10-07 当前资格：分句说明机制通过，真实模型修复效果待验证
+
+Task21当前v12/unversioned说明专项32/原六套225/默认两types/diff0，独立spec/quality PASS；原旧质量producer/完整旧指令与旧票不变，不普遍禁分号。0实际provider/0workerbuild，只具机制资格。下一原public16/入口/指定历史proof零模型兼容后Task22全新普通首次模型；Task22prepared/42host夹具与两准备审查PASS不等于模型效果。原future三对象每题六标准未消费；goalactive/mainDaily NO-GO。见[tianwen-requirement-boundary-implementation-20261007.md](tianwen-requirement-boundary-implementation-20261007.md)。
+
+## 2026-10-07 此前资格：真实候选5项通过，未正式采用
+
+Task18实际public与旧证明兼容已完成。Task19首次61真实10项20票因压缩解释分歧inconclusive；Task20首次59真实10项20票，候选5项原生met和宿主verified，两源not-met→met，反例保持met。邻近baseline将第一待办与地点分号并句，一位requirements误met、一位grounding正确not-met，原合议inconclusive必须保留。首盲确认同一错误，host不替票。两批实际终审及freeze-end已释放，但无许可/采用/后任务，原未来三对象六标准仍未消费。Task21最窄审核边界修复准备中；Task22新记录仅prepared/42宿主检查，不称真实效果。goal active/mainDaily NO-GO。详见[tianwen-controlled-contract-learning-result-20261007.md](tianwen-controlled-contract-learning-result-20261007.md)。
+
+## 2026-10-06 此前：null类型提示只具机制资格
 
 Task18原SDK scripted RED2→GREEN13及六原judgment/claim套件193/193、默认类型/diff0，独立spec/quality PASS。仅原parent/label scoped口按原schema解释错误字符串null，不代填/不改SDK/schema/质量/双审/裁决；0真实provider/安装/worker build。尚待公开原构建/入口/旧proof零模型兼容及全新Task19普通前瞻；prepared输入无多余标签，cold已明确inject，无actual profile/freeze。不能补Task17最后缺票或宣称其adjacent inc已修复，原future三对象/六标准不改。goal active/main Daily NO-GO。见[tianwen-null-token-implementation-20261006.md](tianwen-null-token-implementation-20261006.md)。
 
@@ -42,7 +50,13 @@ Task11仅把原审核解释4096 UTF8字节保存上限提前到capture检查；�
 
 # 自动学习证据资格核对：不能只按复核标签过滤
 
-## 2026-10-06 当前记录边界前瞻资格
+## 2026-10-07 当前：受控明确合同候选五项通过，正式研究仍未获采用资格
+
+Task18 source433be实际public16/4+4/types/imports/旧证明零模型恢复已完成。Task19首次61真实10项20票因压缩程度分歧inconclusive，Task20首次59真实10项20票，候选5native met+host verified，两源baseline not-met/host rejected，反例baseline met/host verified。Task20邻近baseline地点与第一待办分号并句：requirements错误met、grounding正确not-met，独立首次盲审/host同合同均确认错误；原合议inconclusive不补票或用host替票。两源模拟反馈各3/5 continuing整项资格真实成立，不等自然样本。
+
+两批actual run/cold/audit0/旧票保留，独立终态及实际freeze-end释放；未独立许可/激活/后任务，原未来三对象六标准未消费。下一具体限制/一般许可及完整句子左右边界最窄说明+精确历史指令兼容；Task22仅prepared/42宿主检查，不能据此称真实效果/完整自动学习通过。mainDaily原NO-GO/goalactive。见[tianwen-controlled-contract-learning-result-20261007.md](tianwen-controlled-contract-learning-result-20261007.md)。
+
+## 2026-10-06 此前记录边界前瞻资格
 
 2cc67c1c新65实际0script，三原Task六met、两模拟反馈五+五continuing，原研究九臂/18proof、无decision/activation/future。第十候选#62生成+#63/#64原capture met，#63 explanation4314字节被原4096后验parser拒绝，不可把未入账票补成第十臂。原run/cold/audit0、2252保护52SDK保持、freeze已释放。counter0换行却原票称3行；source2完整反馈已传但未定/已知未完成分类歧义保留，adjacent时间禁令与周五保留冲突不改票。整体active/mainNO-GO。下一capture只提前原4096拒绝、同child自己修复，新输入明确pending分类，不添门槛。详见[tianwen-record-boundary-learning-result-20261006.md](tianwen-record-boundary-learning-result-20261006.md)。
 
