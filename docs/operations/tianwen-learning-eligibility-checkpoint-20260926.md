@@ -1,4 +1,8 @@
-## 2026-10-07 当前资格：分句说明机制通过，真实模型修复效果待验证
+## 2026-10-07 当前资格：公开与首次普通验证已完成，尚无完整学习效果
+
+Task21 c464306e公开原16/actual4+4/default types/imports、旧11feedback和124claim零模型恢复均实际0。Task22首次59真实/0脚本、三ordinary双met、两模拟preference3/4 continuing整项eligible、10臂20proof；候选4met/1inconclusive，原研究formal inconclusive无许可/激活/后效果。唯一确定错票把仅pending独立句扩大到completed/time，requirements false-NOT；原groundingmet/hostverified/首盲met不替票。真实待办左边界仍正确not-met，本批未见false-MET/虚假事实条件承诺。cold0模型真挂载/撤权/旧证据保护有效，独立终态PASS及实际freeze-end释放；首audit误引旧reader退出1与独立v2修正0均保留。原future三对象每题六效果不变未消费。goalactive/mainDailyNO-GO；Task23范围修复设计PASS、Task24新whole任务prepared46host非模型证明，继续原门槛开发。见[tianwen-requirement-boundary-prospective-result-20261007.md](tianwen-requirement-boundary-prospective-result-20261007.md)。
+
+## 2026-10-07 此前资格：分句说明机制通过，真实模型修复效果待验证
 
 Task21当前v12/unversioned说明专项32/原六套225/默认两types/diff0，独立spec/quality PASS；原旧质量producer/完整旧指令与旧票不变，不普遍禁分号。0实际provider/0workerbuild，只具机制资格。下一原public16/入口/指定历史proof零模型兼容后Task22全新普通首次模型；Task22prepared/42host夹具与两准备审查PASS不等于模型效果。原future三对象每题六标准未消费；goalactive/mainDaily NO-GO。见[tianwen-requirement-boundary-implementation-20261007.md](tianwen-requirement-boundary-implementation-20261007.md)。
 

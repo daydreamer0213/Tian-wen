@@ -1,4 +1,10 @@
-## 2026-10-07 当前：具体分句说明实现通过，继续公开版本及全新普通验证
+## 2026-10-07 当前：公开版本和新验证完成，继续修要求适用对象
+
+Task21 c464306e原public16/actual4+4/types/imports和旧11feedback/124claim零模型兼容实际0并已推送。Task22首次59真实/0脚本，三ordinary六met、两公开模拟反馈3/4 continuing整项eligible，10臂20票；候选4met/1inconclusive、host5verified。source1candidate requirements把仅pending独立句扩成全部事项，确定false-NOT；grounding正确met。原formal inconclusive不改，无clear/activation/future；原future三对象及每题六效果标准未消费。首盲未见false-MET/虚假事实条件承诺，真实待办左边界错误仍原票not-met。run/cold0、59请求/52SDK证明有效、3280冻结摘要保持、独立终态PASS和实际freeze-end已释放；首audit旧reader路径退出1保留，v2两import修正实际0。见[tianwen-requirement-boundary-prospective-result-20261007.md](tianwen-requirement-boundary-prospective-result-20261007.md)。
+
+下一[Task23/24计划](../superpowers/plans/2026-10-07-tianwen-requirement-applicability-plan.md)：最窄适用范围提醒、Task21完整尾段与旧证明兼容，新ordinary任务按原门槛采用后测原后任务。独立设计PASS；Task24prepared46host专项不是模型效果，无actualprofile或新provider。goalactive/mainDaily NO-GO，D约16.20GiB>=15，尚未20，无环境/依赖/历史全量复制。
+
+## 2026-10-07 此前：具体分句说明实现通过，继续公开版本及全新普通验证
 
 Task21仅claim-review producer当前wrapper及精确old/current恢复matcher，当前v12/unversioned补清具体限制优先一般许可、独立句左右边界；显式旧质量生产/COMMON/V6–V12/原file generator不改，原v5/v11固定fixture未改。真实SDK scripted32专项、原六套225/225、默认两types/diff0，独立spec/quality PASS。首221=219+2与legacy尾段误接受RED2保留；0实际provider/0worker build，不能称真实语义已修复。源SHA2326dbee/test8494e3fa，见[tianwen-requirement-boundary-implementation-20261007.md](tianwen-requirement-boundary-implementation-20261007.md)。
 
