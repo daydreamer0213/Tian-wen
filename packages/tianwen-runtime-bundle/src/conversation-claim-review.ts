@@ -489,6 +489,16 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
       captureReminder: 'review', validateCapture: (value: unknown) => {
         if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
+        if (record(value.audit) && typeof value.audit.evidenceDigest === 'string'
+          && value.audit.evidenceDigest !== evidence.evidenceDigest) {
+          const expected = evidence.evidenceDigest, actual = value.audit.evidenceDigest
+          let index = 0
+          // Compare at most the host's 71-character digest, regardless of submission length.
+          while (index < expected.length && expected[index] === actual[index]) index++
+          const expectedCharacter = index < expected.length ? JSON.stringify(expected[index]) : '<end>'
+          const actualCharacter = index < actual.length ? JSON.stringify(actual[index]) : '<end>'
+          return `Invalid audit.evidenceDigest: expected length ${expected.length}; actual length ${actual.length}; first differing position ${index + 1} (1-based, including sha256:); expected character ${expectedCharacter}; actual character ${actualCharacter}; exact expected value ${JSON.stringify(expected)}. Copy the supplied host digest exactly; do not recompute it. Correct the field yourself without changing the original evidence or presuming a passing verdict; the host has not repaired or captured this submission.`
+        }
         if (Array.isArray(value.evidenceQuotes)) {
           const index = invalidSummaryQuoteIndex(value.evidenceQuotes)
           if (index !== -1) return `Invalid evidenceQuotes item ${index + 1}: copy a non-empty exact quote from one supplied claimEvidence item, preserving punctuation and whitespace.`

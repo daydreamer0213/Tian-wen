@@ -131,6 +131,107 @@ it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'strin
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it.each(['met', 'not-met'] as const)('diagnoses a copied audit digest before native self-correction without changing the %s vote', async verdict => {
+  // Disclosed scripted responses check transport and proof mechanics, not real-model reliability.
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'digest-correction-')); roots.push(root)
+  const material = { task: { prompt: '原料尚待配送。只改写这句话。', criteria: [] },
+    answer: verdict === 'met' ? '原料尚待配送。' : '原料已送达。' }
+  const evidence = projectClaimEvidence(material)
+  const good = { verdict, category: verdict === 'not-met' ? 'source-fidelity' : null,
+    explanation: 'Preserve the original pending state.', evidenceQuotes: [material.answer],
+    audit: auditFor(evidence, text => claim(text, 'source-fact', verdict === 'met' ? 'supported' : 'contradicted', ['request-1'])) }
+  const bad = structuredClone(good)
+  const expectedDigest = evidence.evidenceDigest
+  bad.audit.evidenceDigest = expectedDigest.slice(0, 35) + expectedDigest.slice(36)
+  let difference = 0
+  while (difference < expectedDigest.length && expectedDigest[difference] === bad.audit.evidenceDigest[difference]) difference++
+  let correctionMessages = ''
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('bad-digest', 'structured_output', bad),
+    request => {
+      correctionMessages = JSON.stringify(request.messages)
+      return toolCallResponse('corrected-digest', 'structured_output', good)
+    },
+    toolCallResponse('independent-digest', 'structured_output', good),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('digest-correction-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  let checks: Awaited<ReturnType<typeof runConversationClaimReview>>['reviewChecks']
+  try {
+    const review = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Digest correction', material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal })
+    expect(correctionMessages).toContain('Invalid audit.evidenceDigest')
+    expect(correctionMessages).toContain('expected length 71; actual length 70')
+    expect(correctionMessages).toContain(`first differing position ${difference + 1} (1-based, including sha256:)`)
+    for (const detail of [
+      `expected character ${JSON.stringify(expectedDigest[difference])}`,
+      `actual character ${JSON.stringify(bad.audit.evidenceDigest[difference])}`,
+      `exact expected value ${JSON.stringify(expectedDigest)}`,
+    ]) expect(correctionMessages).toContain(JSON.stringify(detail).slice(1, -1))
+    expect(correctionMessages).toContain('host has not repaired or captured this submission')
+    expect(review.verdict).toBe(verdict)
+    expect(review.reviewChecks.map(check => check.audit)).toEqual([good.audit, good.audit])
+    expect(harness.adapter.requests).toHaveLength(3)
+    const sessions = harness.adapter.requests.map(request => String(request.sessionId))
+    expect(sessions[0]).toBe(sessions[1]); expect(sessions[2]).not.toBe(sessions[0])
+    const schema: any = harness.adapter.requests[0]!.tools!.find(tool => tool.name === 'structured_output')!.parameters
+    expect(schema.properties.audit.properties.evidenceDigest.enum).toEqual([expectedDigest])
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(review.reviewChecks[0]!.proof.sessionId))
+    expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments))
+      .toEqual([JSON.stringify(bad), JSON.stringify(good)])
+    const results = saved.events.filter(event => event.type === 'tool/result')
+    expect(results.map(event => ({ callId: event.data.message.source.callId,
+      error: event.data.message.content.some(block => block.type === 'tool-result' && block.isError === true) })))
+      .toEqual([{ callId: 'bad-digest', error: true }, { callId: 'corrected-digest', error: false }])
+    expect(bad.audit.evidenceDigest).toHaveLength(70)
+    checks = review.reviewChecks
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+  const cold = await mountPersistentHarness(root, [])
+  try {
+    for (const check of checks!) {
+      await verifyConversationReviewCheck(cold.ctx, check)
+      expect(await recoverConversationJudgmentRequest(cold.ctx, check)).toMatchObject({ material: { original: material, claimEvidence: evidence } })
+    }
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose() }
+})
+
+it('diagnoses an audit digest end difference without creating a proof for an uncorrected submission', async () => {
+  // The explicit fixture never corrects its bad digest; no actual provider is used.
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'digest-uncorrected-')); roots.push(root)
+  const material = { task: { prompt: '原料尚待配送。只改写这句话。', criteria: [] }, answer: '原料尚待配送。' }
+  const evidence = projectClaimEvidence(material)
+  const bad = { verdict: 'met', category: null, explanation: 'The pending state is retained.', evidenceQuotes: [material.answer],
+    audit: { ...auditFor(evidence), evidenceDigest: evidence.evidenceDigest + '0' } }
+  let correctionMessages = ''
+  const harness = await mountPersistentHarness(root, [toolCallResponse('uncorrected-digest', 'structured_output', bad), request => {
+    correctionMessages = JSON.stringify(request.messages)
+    return textResponse('I cannot correct this submission.')
+  }])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('digest-uncorrected-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Uncorrected digest', material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal }).catch((error: unknown) => error)
+    expect(correctionMessages).toContain('expected length 71; actual length 72')
+    expect(correctionMessages).toContain('first differing position 72 (1-based, including sha256:)')
+    expect(correctionMessages).toContain('expected character <end>')
+    expect(correctionMessages).toContain(JSON.stringify('actual character "0"').slice(1, -1))
+    expect(result).toMatchObject({ message: 'invalid-judgment' })
+    expect(result).not.toHaveProperty('proof'); expect(result).not.toHaveProperty('reviewChecks')
+    expect(harness.adapter.requests).toHaveLength(2)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(String(harness.adapter.requests[0]!.sessionId)))
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments)).toEqual([JSON.stringify(bad)])
+    expect(saved.events.filter(event => event.type === 'tool/result'
+      && event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(0)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each((['source-fact', 'advice', 'inference', 'fiction', 'general-knowledge', 'non-factual'] as const)
   .flatMap(kind => (['firstClaim', 'additionalClaims'] as const).map(position => ({ kind, position }))))
 ('repairs invalid kind/status before native capture: $kind in $position', async ({ kind, position }) => {

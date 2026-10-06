@@ -906,3 +906,9 @@ learning-r3在8ba81be5完成42真实/42完整、0模拟、10原生臂。source1 
 完整目标 active。c59695cd原public build16/相关98/legacy6proof恢复通过；39真实/0script新批run/cold/audit0，四普通Task八票met。currentRevision正确require-change[]，两未来feedback正确preference；但均把本次不改/范围解释抽成第4criterion，source1另unclear、source2第4one-off，whole资格false，study/activation/effect0。原结果不改，未来题仍未消费。source2审核编号抄错/JSON尾字符七次拒绝后第8次原捕获成功，无host修值。
 
 独立终态1999路径/26native通过，freeze-end已落盘。blind无明确无源事实/条件/角色/状态/承诺，source1正文prefix标题形式保留不确定，不新加gate。下一最窄AS提取行为标准与范围/本次改稿说明分开，保留真正持续futureworkflow；另原validateCapture坏digest提示首差位+长度+exactexpected，同child自纠、schema/SDK/原gate不变。两独立worker原nativeRED/GREEN后原public build+新实际验证，不重评/手工采用/新通过数。main/Daily NO-GO，D约16.50GiB>=15。详见[tianwen-feedback-target-result-20261006.md](tianwen-feedback-target-result-20261006.md)。
+
+## 2026-10-06 当前实现：可观察未来标准与审核编号精确提示候选
+
+Task7A/B已实现并独立spec/quality通过：AS仅新增continuing行为提取说明（不将scope/本次不改元话语列为criterion，保留明确长期不改旧答案workflow），claimreview仅原validateCapture坏stringdigest精确deny（长度/首差位/字符/exactexpected），schema/enum/args/COMMON/SDK/原gate全不改。native脚本RED2/3→GREEN/full34+158=192，旧public完整AS回归RED1/3skip，当前原public构建与真实新批仍待执行。脚本不称真实语义改善。
+
+完整目标active，main/Daily NO-GO。下一原build、公开入口GREEN、零模型旧proof兼容后，新的测量工具/朗读设备源与植物识别pristinecounter前瞻；source2保留单独本次不改说明以核提取，future1/2/无关题仍未消费同原题/标准，原实际接受后才测效果。原39首次结果、scope票和所有native失败保持。详见D:/DevData/tianwen-feedback-target-tests-20261006/task7a和task7b原RED/GREEN报告，独立task-7-code-review.md。

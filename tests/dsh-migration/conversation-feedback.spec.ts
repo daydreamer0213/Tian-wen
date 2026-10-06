@@ -293,6 +293,63 @@ describe('native feedback assessment adapter', () => {
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
+  it.each([
+    {
+      label: 'future output behavior with attribution metadata and a current-answer carve-out',
+      note: 'For all future pilot summaries, state the confirmed duration first. This is a continuing preference, not a current revision request. Only this completed answer needs no rewrite.',
+      criterion: 'State the confirmed duration first in future pilot summaries.',
+      behaviorQuote: 'For all future pilot summaries, state the confirmed duration first.',
+    },
+    {
+      label: 'an explicit continuing no-rewrite workflow behavior',
+      note: 'For all future feedback handling, leave completed answers unchanged unless the user explicitly requests a rewrite. This is an ongoing workflow preference, not a request to revise this answer.',
+      criterion: 'When handling future feedback, leave completed answers unchanged unless the user explicitly requests a rewrite.',
+      behaviorQuote: 'For all future feedback handling, leave completed answers unchanged unless the user explicitly requests a rewrite.',
+    },
+  ])('delegates behavior-only extraction for $label', async ({ note, criterion, behaviorQuote }) => {
+    // Scripted judgments verify the delivered boundary and native proof/clue path, not real-model extraction quality.
+    const preference = { classification: 'preference', category: 'user-preference', supplementalCriteria: [criterion],
+      explanation: 'Only the explicitly continuing output or workflow behavior becomes a criterion; attribution statements remain evidence.',
+      evidenceQuotes: [note] }
+    const scope = { decisions: [{ criterion, scope: 'continuing', evidenceQuote: behaviorQuote }] }
+    let delegated = ''
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), request => {
+        delegated = JSON.stringify(request)
+        return structured(preference)
+      }, structured(scope)])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(delegated).toContain('For a continuing preference, extract supplementalCriteria only as narrow observable output or workflow behaviors')
+      expect(delegated).toContain('Statements that only explain classification or future applicability are attribution evidence, not additional behaviors')
+      expect(delegated).toContain('A carve-out declining changes only to this completed answer is not a continuing criterion')
+      expect(delegated).toContain('An explicitly continuing workflow rule to preserve completed answers unless the user requests revision remains a valid behavior')
+      expect(delegated).toContain('Do not append parenthetical source or classification labels to criterion text')
+      expect(delegated).toContain(note)
+      expect(assessment.result).toMatchObject({ classification: 'preference', category: 'user-preference',
+        supplementalCriteria: [criterion], evidenceQuotes: [note], unavailableReason: null,
+        proof: { sessionId: expect.any(String) }, scopeReview: { decisions: scope.decisions, proof: { sessionId: expect.any(String) } } })
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, preference)
+      const scoped = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.scopeReview!.proof, scope)
+      expect(recovered.material).toEqual(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment))
+      expect(scoped.material).toMatchObject({ feedback: { rating: 'negative', note }, criteria: [criterion] })
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(true)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment))
+        .resolves.toMatchObject({ taskId: target.source.taskId, classification: 'preference',
+          supplementalCriteria: [criterion], feedback: { rating: 'negative', note } })
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(harness.adapter.requests).toHaveLength(6)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('independently rechecks a requirement-change judgment that also supplies future criteria', async () => {
     const futureNote = 'For all future pilot summaries, use two sentences. Do not revise the earlier answer.'
     const contradictory = { classification: 'requirement-change', category: null,
