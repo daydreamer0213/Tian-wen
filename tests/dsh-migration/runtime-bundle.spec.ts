@@ -50,7 +50,7 @@ it('public study clearance exposes the native factory and config types in the ac
   expect(readFileSync(resolve(packageRoot, 'dist/runtime.d.ts'), 'utf8')).toContain('guidanceIndependentReview?')
 })
 
-it.each(['function','descriptor','root-native-factory','bundle-profile','repository-profile'] as const)('public study clearance routes %s config through actual bundled ordinary apply without unquarantining', async mode => {
+it.each(['function','descriptor','root-native-factory','bundle-profile','repository-profile','managed-profile'] as const)('public study clearance routes %s config through actual bundled ordinary apply without unquarantining', async mode => {
   // Explicit SDK scripts exercise the published route only, not real-provider semantics.
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
   const profile = mkdtempSync(join(base, 'public-clearance-'))
@@ -81,19 +81,25 @@ it.each(['function','descriptor','root-native-factory','bundle-profile','reposit
   let parent: Awaited<ReturnType<typeof harness.ctx.agents.create>> | undefined
   try {
     let profileReviewer: NativeGuidanceIndependentReviewDescriptor | undefined
-    if (mode === 'bundle-profile' || mode === 'repository-profile') {
+    if (mode === 'bundle-profile' || mode === 'repository-profile' || mode === 'managed-profile') {
       // Read the effective ordinary product entry via the original DSH composition;
       // a later Profile config replaces the bundle config as a whole.
       const boot = await import(pathToFileURL(cli.resolve('@deepseek-ai/dsh-app-boot')).href)
       const loader = await import(pathToFileURL(cli.resolve('@deepseek-ai/cordis-plugin-loader')).href)
       const patches = [boot.loadOverlayPatches('tianwen-test', resolve(packageRoot, 'cordis.patch.yml'))]
       if (mode === 'repository-profile') patches.push(boot.loadOverlayPatches('tianwen-test', resolve(root, 'profiles/tianwen/cordis.patch.yml')))
+      if (mode === 'managed-profile') {
+        const paths = deriveInstallPaths(profile.replaceAll('/', '\\'), 'win32')
+        const patchPath = join(profile, 'managed.patch.yml')
+        writeFileSync(patchPath, renderProfilePatch(paths))
+        patches.push(boot.loadOverlayPatches('tianwen-test', patchPath))
+      }
       const entry = (boot.composeEntries(patches) as Array<{ id: string; config?: unknown }>).find(row => row.id === 'tianwen-runtime')
       const effective = loader.interpolate({ process }, entry?.config) as { guidanceIndependentReview?: NativeGuidanceIndependentReviewDescriptor }
       profileReviewer = effective.guidanceIndependentReview
     }
     const main = mode === 'root-native-factory' ? await import('../../packages/tianwen-runtime-bundle/dist/index.js') as typeof mainSource : undefined
-    const reviewer = mode === 'bundle-profile' || mode === 'repository-profile' ? profileReviewer
+    const reviewer = mode === 'bundle-profile' || mode === 'repository-profile' || mode === 'managed-profile' ? profileReviewer
       : main !== undefined ? main.createNativeGuidanceIndependentReview(harness.ctx, { mode: 'native', reviewerId: 'published-scripted-native' })
       : mode === 'descriptor' ? { mode: 'native' as const, reviewerId: 'published-scripted-native' } : async (input: { material: unknown }) => {
       calls++; return { value: body(input.material as GuidanceIndependentReviewMaterial), reviewer: { id: 'published-scripted-host', model: 'explicit-programmatic-fixture' } }
@@ -819,7 +825,7 @@ describe('@tianwen/runtime-bundle', () => {
       version: string
     }
     expect(runtimeManifest.name).toBe('@tianwen/runtime-bundle')
-    expect(runtimeManifest.version).toBe('0.1.24')
+    expect(runtimeManifest.version).toBe('0.1.25')
     expect(runtimeManifest).not.toHaveProperty('private')
     expect(runtimeManifest.bin).toEqual({ tianwen: 'dist/cli.js' })
     expect(runtimeManifest.dependencies ?? {}).toEqual({})
@@ -1101,7 +1107,7 @@ describe('@tianwen/runtime-bundle', () => {
         dependencies: {
           '@deepseek-ai/dsh-base': '0.1.1-rc.2',
           '@deepseek-ai/dsh-headless': '0.1.1-rc.2',
-          '@tianwen/runtime-bundle': '0.1.24',
+          '@tianwen/runtime-bundle': '0.1.25',
         },
         dsh: {
           profile: {
@@ -1585,7 +1591,7 @@ describe('@tianwen/runtime-bundle', () => {
   it('packs only the deployable runtime bundle files', () => {
     mkdirSync(packFixtureBase, { recursive: true })
     const packRoot = mkdtempSync(join(packFixtureBase, 'pack-'))
-    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.24.tgz')
+    const archive = resolve(packRoot, 'tianwen-runtime-bundle-0.1.25.tgz')
     const pnpmEntry = resolve(dirname(process.execPath), 'node_modules/corepack/dist/pnpm.js')
     try {
       execFileSync(process.execPath, [

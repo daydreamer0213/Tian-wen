@@ -103,6 +103,9 @@ importers:
       '@tianwen/dsh-compat':
         specifier: workspace:*
         version: link:packages/tianwen-dsh-compat
+      '@tianwen/evolution':
+        specifier: workspace:*
+        version: link:packages/tianwen-evolution
       '@types/node':
         specifier: 22.20.0
         version: 22.20.0

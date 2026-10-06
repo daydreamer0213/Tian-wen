@@ -99,13 +99,13 @@ DSH Message Feedback 只是学习归因的一项输入，本身不等于 Lesson�
 
 ## 在已有 DSH Profile 中使用天问
 
-当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。下面的命令会从当前源码构建尚未安装到日常环境的 0.1.24 开发包，安装到测试 Profile；它不是已经核验的日常交付包。运行前须使用已单独配置的测试 `DSH_HOME`，并把示例中的 `work` 换成该测试 Profile 的名称；这不是升级日常环境的指引：
+当前可移植包只支持精确版本 `@deepseek-ai/dsh@0.1.1-rc.2`。下面的命令会从当前源码构建尚未安装到日常环境的 0.1.25 开发包，安装到测试 Profile；它不是已经核验的日常交付包。运行前须使用已单独配置的测试 `DSH_HOME`，并把示例中的 `work` 换成该测试 Profile 的名称；这不是升级日常环境的指引：
 
 ```powershell
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home-tianwen-test'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.24.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.25.tgz
 ```
 
 `--allow-build=koffi` 是写入当前 Profile 的 pnpm 明确许可，不会修改全局 pnpm 设置。只有
@@ -132,7 +132,7 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen-dev-test --json
 
 可选的 Tianwen Desktop 复用用户现有的 DSH 与 Web Profile；它不是第二套 Runtime，也不要求
 用户改用天问托管安装目录。Desktop 打开的是同一套 DSH 对话界面，已知 Runtime
-`0.1.10` 至 `0.1.23` 的精确 Profile 可在用户确认后由开发版 preview.25 更新到内嵌的 `0.1.24`；未知或损坏版本不会被自动覆盖。日常已安装版为 Desktop preview.25 / Runtime 0.1.24，来自[已核验的日常交付](docs/operations/tianwen-status-024-delivery-20260930.md)，不是当前开发源码的构建物。完整自动学习尚未通过；已交付预览产品和独立维护分别按[固定范围](docs/operations/tianwen-product-learning-scope-20260928.md)记录，不重新打开它们的验收。
+`0.1.10` 至 `0.1.24` 的精确 Profile 可在用户确认后由开发版 preview.26 更新到内嵌的 `0.1.25`；未知或损坏版本不会被自动覆盖。日常已安装版为 Desktop preview.25 / Runtime 0.1.24，来自[已核验的日常交付](docs/operations/tianwen-status-024-delivery-20260930.md)，不是当前开发源码的构建物。完整自动学习尚未通过；已交付预览产品和独立维护分别按[固定范围](docs/operations/tianwen-product-learning-scope-20260928.md)记录，不重新打开它们的验收。
 
 安装后，直接在 DSH Web 或 Tianwen Desktop 中正常对话；确认学习开关后，自然任务与反馈可自动进入学习路径，不需要命令或规定格式。
 

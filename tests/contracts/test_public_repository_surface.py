@@ -976,7 +976,7 @@ def test_desktop_windows_native_observation_candidate_contract() -> None:
     assert "TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}\\tianwen-native-observation-dsh-probes" in desktop_job
     assert "TIANWEN_FILE_TEST_ROOT: ${{ runner.temp }}\\tianwen-native-consumer-fixtures" in desktop_job
     assert "TIANWEN_TASK4_EVIDENCE_ROOT: ${{ runner.temp }}\\tianwen-task4-evidence" in desktop_job
-    assert desktop_job.count("tianwen-runtime-bundle-0.1.24.tgz") == 2
+    assert desktop_job.count("tianwen-runtime-bundle-0.1.25.tgz") == 2
     assert "tianwen-runtime-bundle-0.1.23.tgz" not in desktop_job
 
 

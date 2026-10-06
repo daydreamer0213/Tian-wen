@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """天问证据报告 B：研究与激活报告。
 
 只实现 docs/operations/evidence-report-batch-contract.md 中的 B 合同。

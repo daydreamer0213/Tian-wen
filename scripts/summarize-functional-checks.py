@@ -40,7 +40,7 @@ def _decode(raw):
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise Invalid()
+        raise Invalid() from None
     decoder = json.JSONDecoder(
         object_pairs_hook=_unique_object,
         parse_constant=_reject_constant,
@@ -52,7 +52,7 @@ def _decode(raw):
     except Invalid:
         raise
     except Exception:
-        raise Invalid()
+        raise Invalid() from None
 
 
 def _normalize_task_id(value):

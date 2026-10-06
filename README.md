@@ -130,7 +130,7 @@ boundary is maintained in the
 ## Use Tianwen in an existing DSH Profile
 
 The portable package currently supports exact `@deepseek-ai/dsh@0.1.1-rc.2`.
-The following command builds and installs this checkout's uninstalled 0.1.24
+The following command builds and installs this checkout's uninstalled 0.1.25
 development candidate into a test Profile, not the verified Daily package.
 Use an already configured, separate test
 `DSH_HOME` and replace `work` with that test Profile's name before running this;
@@ -140,7 +140,7 @@ it is not a Daily upgrade instruction:
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
 $env:DSH_HOME = 'D:\DevData\dsh-home-tianwen-test'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.24.tgz
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.25.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -172,9 +172,9 @@ node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen-dev-test --json
 
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
-Desktop opens the same DSH conversation UI. The development preview.25 can, with
-confirmation, update an exact known Runtime `0.1.10` through `0.1.23`
-predecessor to its embedded `0.1.24`; unknown or damaged versions are never
+Desktop opens the same DSH conversation UI. The development preview.26 can, with
+confirmation, update an exact known Runtime `0.1.10` through `0.1.24`
+predecessor to its embedded `0.1.25`; unknown or damaged versions are never
 overwritten automatically. The installed Daily is preview.25 with Runtime
 0.1.24 from the [verified Daily delivery](docs/operations/tianwen-status-024-delivery-20260930.md),
 not a build of this development checkout. Complete automatic learning remains

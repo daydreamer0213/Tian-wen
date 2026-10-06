@@ -1,5 +1,12 @@
 ## 2026-10-07 当前：真实引文纠正完成，转原打包与安装入口
 
+## 2026-10-07 当前：0.1.25 候选接线与旧版升级已实现
+
+Task35 Runtime0.1.25/Desktop preview.26准确版本；managed Profile接原native首审器，旧0.1.24精确冻结patch/收据可升级，所有更旧版/损坏拒绝保持。RED3→GREEN3；原安装/Desktop首次294/295累计case20秒超时保留，拆原循环而不改断言/timeout后完整310/310；实际原16步Runtime构建/11meta、八包类型图、pack、81完整包+4公开反馈、25原首审/default解析、原frozenlock/imports均0。原Python首次604/6/4skip同因中文后台icacls汇总误拒；严格中文格式RED1/1→GREEN2/2，原隔离规则保持、ruff0，完整v2仍在运行，不能称全CI绿。根开发依赖漏声明以workspace/根importer补齐，0下载/SDK安装。独立三次设计/source/CI补审PASS。见[tianwen-025-managed-release-implementation-20261007.md](tianwen-025-managed-release-implementation-20261007.md)。
+
+Task31/33实际闭环证据保持，不重开模型研究或增加自然等待。goal active/mainDaily暂NO-GO，installed0.1.24/preview.25未动；下一原准确CI/候选成品/安装/数据保护及发布结论。D>=15GiB未20，无全环境复制，旧已拒绝scratch删除未执行未绕过。
+
+
 Task33 a324fa8c首次两例5真实0脚本/四合法check皆met；Q1纯换行quote被当前capture拒，同child下一step真实纠正成功。首只读audit按header数数request误列invalid保留，新v2逐step原SDK绑定5envelope/四proof、2匹配/invalid0；独立终审PASS及actual close-v2退出0释放4250冻结。旧P5 typed-invalid、Task31 ordinary future2 INC保持，原正式研究/许可/激活/两个effect不重开。见[真实结果](tianwen-nonblank-summary-quote-result-20261007.md)。
 
 Task34原完整包首75pass/3fail(78)保留，最窄补精确公共根/两已审src清单及两个dts peer；普通bundle和tracked Profile配置既有native首审。新原SDK两profile模式先RED2 accepted但未激活→完整80/80实际0且全局quarantine仍true；是模拟provider机制，未安装Daily。原pnpm锁仅更新bundle importer，原packages/snapshots逐字保持，frozen/lock-only/offline实际0，无依赖安装/下载。下一独立源码复核，原0.1.25准确受管配置/版本、CI/打包/安装/数据保护；不追加同类模型面板、不等天然反馈。整体goal active/mainDaily暂NO-GO，Daily0.1.24/preview.25不动。D约16GiB>=15未20，拒绝scratch清理未执行未绕过。

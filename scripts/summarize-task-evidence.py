@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Contract A: summarize task evidence.
 
 Implements only section A of docs/operations/evidence-report-batch-contract.md.
