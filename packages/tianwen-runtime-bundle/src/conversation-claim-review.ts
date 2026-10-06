@@ -489,6 +489,10 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
       instruction: fileClaimInstruction(input.material, input.purpose ?? 'original-result', focus, claimMaterialEncoding), outputSchema: schema,
       captureReminder: 'review', validateCapture: (value: unknown) => {
         if (!record(value) || !['met', 'not-met', 'inconclusive'].includes(String(value.verdict))) return undefined
+        if (typeof value.explanation === 'string') {
+          const bytes = Buffer.byteLength(value.explanation, 'utf8')
+          if (bytes > 4096) return `Invalid explanation: ${bytes} UTF-8 bytes exceeds the existing persisted limit of 4096 bytes. Revise the explanation yourself to fit that limit while retaining the evidence-led reasoning and original review instructions; the host has not truncated, repaired or captured this submission.`
+        }
         if (record(value.audit) && typeof value.audit.evidenceDigest === 'string'
           && value.audit.evidenceDigest !== evidence.evidenceDigest) {
           const expected = evidence.evidenceDigest, actual = value.audit.evidenceDigest

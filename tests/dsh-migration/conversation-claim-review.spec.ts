@@ -131,6 +131,88 @@ it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'strin
   } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
+it.each(['met', 'not-met'] as const)('rejects a 4097-byte explanation before native correction to the persisted 4096-byte boundary: %s', async verdict => {
+  // Explicit scripted output verifies byte limits and native proof mechanics, not model quality.
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'explanation-boundary-')); roots.push(root)
+  const material = { task: { prompt: '清洁尚未完成。只改写这句话。', criteria: [] },
+    answer: verdict === 'met' ? '清洁尚未完成。' : '清洁已经完成。' }
+  const evidence = projectClaimEvidence(material)
+  const good = { verdict, category: verdict === 'not-met' ? 'source-fidelity' : null,
+    explanation: '证'.repeat(1365) + 'x', evidenceQuotes: [material.answer],
+    audit: auditFor(evidence, text => claim(text, 'source-fact', verdict === 'met' ? 'supported' : 'contradicted', ['request-1'])) }
+  const bad = { ...good, explanation: good.explanation + 'y' }
+  expect(Buffer.byteLength(bad.explanation, 'utf8')).toBe(4097)
+  expect(bad.explanation.length).toBeLessThan(4096)
+  expect(Buffer.byteLength(good.explanation, 'utf8')).toBe(4096)
+  let correctionMessages = ''
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('oversize-explanation', 'structured_output', bad),
+    request => {
+      correctionMessages = JSON.stringify(request.messages)
+      return toolCallResponse('corrected-explanation', 'structured_output', good)
+    },
+    toolCallResponse('independent-explanation', 'structured_output', good),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('explanation-boundary-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  let checks: Awaited<ReturnType<typeof runConversationClaimReview>>['reviewChecks']
+  try {
+    const review = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Explanation byte boundary', material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal })
+    expect(correctionMessages).toContain('Invalid explanation: 4097 UTF-8 bytes exceeds the existing persisted limit of 4096 bytes')
+    expect(correctionMessages).toContain('host has not truncated, repaired or captured this submission')
+    expect(review.verdict).toBe(verdict)
+    expect(review.reviewChecks.map(check => check.explanation)).toEqual([good.explanation, good.explanation])
+    expect(harness.adapter.requests).toHaveLength(3)
+    const sessions = harness.adapter.requests.map(request => String(request.sessionId))
+    expect(sessions[0]).toBe(sessions[1]); expect(sessions[2]).not.toBe(sessions[0])
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(review.reviewChecks[0]!.proof.sessionId))
+    expect(saved.events.filter(event => event.type === 'turn/start')).toHaveLength(1)
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments))
+      .toEqual([JSON.stringify(bad), JSON.stringify(good)])
+    expect(saved.events.filter(event => event.type === 'tool/result').map(event => ({ callId: event.data.message.source.callId,
+      error: event.data.message.content.some(block => block.type === 'tool-result' && block.isError === true) })))
+      .toEqual([{ callId: 'oversize-explanation', error: true }, { callId: 'corrected-explanation', error: false }])
+    expect(Buffer.byteLength(bad.explanation, 'utf8')).toBe(4097)
+    checks = review.reviewChecks
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+  const cold = await mountPersistentHarness(root, [])
+  try {
+    for (const check of checks!) {
+      await verifyConversationReviewCheck(cold.ctx, check)
+      expect(await recoverConversationJudgmentRequest(cold.ctx, check)).toMatchObject({ material: { original: material, claimEvidence: evidence } })
+    }
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose() }
+})
+
+it('cannot create a proof from an uncorrected 4097-byte explanation', async () => {
+  // This disclosed fixture stops after rejection; it never supplies a corrected judgment.
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'explanation-uncorrected-')); roots.push(root)
+  const material = { task: { prompt: '清洁尚未完成。只改写这句话。', criteria: [] }, answer: '清洁尚未完成。' }
+  const evidence = projectClaimEvidence(material)
+  const bad = { verdict: 'met', category: null, explanation: '证'.repeat(1365) + 'xy', evidenceQuotes: [material.answer], audit: auditFor(evidence) }
+  const harness = await mountPersistentHarness(root, [toolCallResponse('uncorrected-explanation', 'structured_output', bad), textResponse('I cannot correct this submission.')])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('explanation-uncorrected-parent'), meta: { cwd: root },
+    agentOptions: { provider: 'tianwen-probe', model: 'scripted' } })
+  try {
+    const result = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Uncorrected explanation', material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal }).catch((error: unknown) => error)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(String(harness.adapter.requests[0]!.sessionId)))
+    expect(saved.events.filter(event => event.type === 'tool/call').map(event => event.data.arguments)).toEqual([JSON.stringify(bad)])
+    expect(saved.events.filter(event => event.type === 'tool/result'
+      && event.data.message.content.some(block => block.type === 'tool-result' && block.isError !== true))).toHaveLength(0)
+    expect(JSON.stringify(saved.events)).toContain('4097 UTF-8 bytes exceeds the existing persisted limit of 4096 bytes')
+    expect(result).toMatchObject({ message: 'invalid-judgment' })
+    expect(result).not.toHaveProperty('proof'); expect(result).not.toHaveProperty('reviewChecks')
+    expect(harness.adapter.requests).toHaveLength(2)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
 it.each(['met', 'not-met'] as const)('diagnoses a copied audit digest before native self-correction without changing the %s vote', async verdict => {
   // Disclosed scripted responses check transport and proof mechanics, not real-model reliability.
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'

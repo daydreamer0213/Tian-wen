@@ -1,3 +1,7 @@
+## 2026-10-06 当前：审核解释保存边界修复通过独立审查
+
+Task11仅把原审核解释4096 UTF8字节保存上限提前到capture检查；超限提交由同一原child自行修订，无host截短/改票，1536仍为建议。原schema/SDK/COMMON/最终parser/双审/v12及发布门槛不改。native RED3→GREEN3，原claim/judgment完整161/161退出0，独立spec与quality PASS。公开构建与零模型历史proof兼容尚待执行，不称真实语义或完整学习通过。完整目标active/mainDaily NO-GO。下一新模拟反馈明确已完成/可借用、尚待办理、未确定三类；已有未消费future/六效果标准保持，原自动激活后才测后任务。详见[tianwen-review-size-implementation-20261006.md](tianwen-review-size-implementation-20261006.md)。
+
 ## 2026-10-06 当前：新学习停止因审核解释超过原保存上限
 
 Task10原public16/public4/旧proof兼容、独立预检通过；65actual0script，三普通双met、两feedback各五continuing。原研究九已记录臂/18proof；holdoutcandidate实际#62生成+#63/#64双捕获met，但#63 explanation4314 UTF8超过原parser4096，TypeError被原catch归source-unavailable，第十臂/决策/激活未写。未消费future/效果标准不变，无后任务效果。原run/cold/audit0，2252保护+52SDK零差，撤回rev2，独立终态后freeze-end实际释放。
