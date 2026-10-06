@@ -273,6 +273,93 @@ describe('native feedback assessment adapter', () => {
     } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
   })
 
+  it('delegates shared future scope for two behaviors and retains their native proof', async () => {
+    // The scripted provider proves the native delegation and proof path, not model interpretation.
+    const note = 'For all future pilot summaries, keep these habits: state the confirmed duration first; put unresolved items in a separate sentence. Both habits are ongoing preferences. This completed answer needs no rewrite.'
+    const sharedQuote = 'For all future pilot summaries, keep these habits: state the confirmed duration first; put unresolved items in a separate sentence. Both habits are ongoing preferences.'
+    const criteria = ['State the confirmed duration first in future pilot summaries.',
+      'Put unresolved items in a separate sentence in future pilot summaries.']
+    const preference = { classification: 'preference', category: 'user-preference', supplementalCriteria: criteria,
+      explanation: 'The user makes both habits ongoing for future summaries.', evidenceQuotes: [sharedQuote] }
+    const scope = { decisions: criteria.map(criterion => ({ criterion, scope: 'continuing', evidenceQuote: sharedQuote })) }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(preference), request => {
+        const delegated = JSON.stringify(request)
+        expect(delegated).toContain('A shared future qualifier can govern several coordinated behaviors')
+        expect(delegated).toContain('Choose a contiguous exact quote long enough to retain both the governing scope and the entire behavior being checked')
+        expect(delegated).toContain(note)
+        for (const criterion of criteria) expect(delegated).toContain(criterion)
+        return structured(scope)
+      }])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(assessment.result).toMatchObject({ classification: 'preference', category: 'user-preference',
+        supplementalCriteria: criteria, unavailableReason: null, proof: { sessionId: expect.any(String) },
+        scopeReview: { decisions: scope.decisions, proof: { sessionId: expect.any(String) } } })
+      const originalRecovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.proof!, preference)
+      expect(originalRecovered.material).toMatchObject({ feedback: { rating: 'negative', note } })
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.scopeReview!.proof, scope)
+      expect(recovered.material).toMatchObject({ feedback: { rating: 'negative', note }, criteria })
+      expect(await harness.ctx.tianwenConversationFeedback.materialForAssessment(assessment))
+        .toMatchObject({ feedback: { rating: 'negative', note } })
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(true)
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(harness.adapter.requests).toHaveLength(6)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
+  it('keeps a next-task exception one-off beside two shared future behaviors', async () => {
+    // The scripted provider supplies scope decisions; the adapter must preserve all-or-nothing eligibility.
+    const note = 'For all future pilot summaries, keep these habits: state the confirmed duration first; put unresolved items in a separate sentence. Both habits are ongoing preferences. This completed answer needs no rewrite. Only for the next task, reply received.'
+    const sharedQuote = 'For all future pilot summaries, keep these habits: state the confirmed duration first; put unresolved items in a separate sentence. Both habits are ongoing preferences.'
+    const criteria = ['State the confirmed duration first in future pilot summaries.',
+      'Put unresolved items in a separate sentence in future pilot summaries.',
+      'Reply received for the next task.']
+    const preference = { classification: 'preference', category: 'user-preference', supplementalCriteria: criteria,
+      explanation: 'The user combines ongoing habits with a next-task instruction.', evidenceQuotes: [sharedQuote, 'Only for the next task, reply received.'] }
+    const scope = { decisions: [
+      { criterion: criteria[0], scope: 'continuing', evidenceQuote: sharedQuote },
+      { criterion: criteria[1], scope: 'continuing', evidenceQuote: sharedQuote },
+      { criterion: criteria[2], scope: 'one-off', evidenceQuote: 'Only for the next task, reply received.' },
+    ] }
+    const harness = await mount([structured(nativeAdmission), textResponse('It took 5 days.'),
+      claimReviewResponse(nativeReview), claimReviewResponse(nativeReview), structured(preference), request => {
+        const delegated = JSON.stringify(request)
+        expect(delegated).toContain('Explicit one-off, current-deliverable or next-task-only exceptions override a surrounding shared future qualifier for that behavior')
+        expect(delegated).toContain(note)
+        for (const criterion of criteria) expect(delegated).toContain(criterion)
+        return structured(scope)
+      }])
+    try {
+      await harness.ctx.plugin(TianwenConversationFeedbackService)
+      const target = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+      const original = structuredClone(target)
+      const put = await harness.ctx.messageFeedback.put({ sessionId: harness.handle.agent.session.id,
+        messageId: MessageId(target.completion!.assistantMessageIds.at(-1)!), rating: 'negative', note, ifVersion: null })
+      if (!put.ok) throw new Error('native feedback write failed')
+      await harness.ctx.tianwenMessageFeedbackBridge.reconcileSession('feedback-main')
+      await harness.ctx.tianwenConversationFeedback.scheduleForSession('feedback-main')
+      const assessment = harness.ctx.tianwenEvolution.listConversationFeedbackAssessments(target.source.taskId)[0]!
+      expect(assessment.result).toMatchObject({ classification: 'preference', supplementalCriteria: criteria,
+        unavailableReason: null, proof: { sessionId: expect.any(String) },
+        scopeReview: { decisions: scope.decisions, proof: { sessionId: expect.any(String) } } })
+      const recovered = await recoverConversationStructuredJudgment(harness.ctx, assessment.result!.scopeReview!.proof, scope)
+      expect(recovered.material).toMatchObject({ feedback: { rating: 'negative', note }, criteria })
+      expect(hasVerifiedContinuingPreference(assessment.result!)).toBe(false)
+      await expect(harness.ctx.tianwenConversationFeedback.proposalClueForAssessment(assessment)).rejects.toThrow('not eligible')
+      expect(harness.ctx.tianwenEvolution.listConversationTasks()[0]).toEqual(original)
+      expect(harness.adapter.requests).toHaveLength(6)
+    } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+  })
+
   it('checks every restriction in a future preference before promoting an expanded criterion', async () => {
     const note = 'For all future pilot summaries, use exactly two sentences with no title. This completed answer needs no rewrite.'
     const expanded = { classification: 'preference', category: 'user-preference',
