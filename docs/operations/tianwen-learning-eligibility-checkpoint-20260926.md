@@ -1,5 +1,11 @@
 # 自动学习证据资格核对：不能只按复核标签过滤
 
+## 2026-10-06 当前可观察标准资格
+
+e1734dac当前公开build16/196回归/33旧proof零模型兼容通过。新空DEV两公开模拟反馈原preference，各三observable标准及scope全部continuing，whole资格true；“本次不改”未提取为标准。70actual/0script、三普通六met、一原新研究10臂20有效proof，两source paired not-met→met，counter无回退，adjacent候选inconclusive/holdout候选not-met，原研究inconclusive未激活。原未来题/六标准未消费；不能称后任务改善、完整自动学习或正式发布通过。
+
+独立原盲审与生成四项纠正包首次盲审保留压缩/允许记录范围解释的不确定，不把有上下文来源的地点名叫捏造，不覆盖原票。原SDK70绑定/26review proof及反馈scopeproof有效、退出撤回rev2/cold0，2106保护路径及52新原SDK保持，source-freeze-end已生效。主线下一只澄清原自动出题的可检查且明确的任务范围，不新增裁决/通过数/质量版本；新模拟条件式记录反馈及保留的未消费future实际验证。整体active/main Daily NO-GO，详见[tianwen-observable-feedback-result-20261006.md](tianwen-observable-feedback-result-20261006.md)。
+
 ## 2026-10-06 最新收口资格
 
 7b07332b/current v12 公开 Runtime 新 F3 真正提前拒错引用并同 child 真实纠正，19真+1明确模拟，原 proof/SDK step/退出/cold0成立；F3四unclear、N3两continuing两unclear，双方不具原继续学习资格。引用有效不等于范围通过或新方法效果。N3主答新增手续完成/通知承诺被原双审指出，不改原票。首F2模拟接口400与首八例20预算CLI1/D1取消/D2未消费完整保存；新E1/E2仅补边界4真，E1notmet/E2分歧。八完整新语义结果6匹配/2分歧，原16新proof/全24实际绑定；不回判、不加第三审、不重开旧accepted学习或把旧v11效果当v12。独立收口无P1/P2、main/Daily原NO-GO保持。见[当前收口](tianwen-product-closeout-result-20261006.md)。

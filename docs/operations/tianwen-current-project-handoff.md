@@ -1,4 +1,10 @@
-## 2026-10-06 当前实现：可观察未来标准与审核编号精确提示候选
+## 2026-10-06 当前：标准提取实测修复，完整研究尚未采用
+
+e1734dac原构建16/196检查、11反馈+22审核旧proof零模型兼容通过；全新批70实际/0脚本，三普通Task六met，两反馈各三行为/scope全continuing，没有本次不改元标准。原一项完整10臂/20proof研究：两源baseline not-met/candidate met，counter双方met，adjacent候选压缩分歧、holdout候选依sheet-only限制not-met；原decision inconclusive，无activation/未来效果。独立盲审保留压缩及上下文地点范围解释，不称捏造地点。原退出/cold/audit0，2106路径+52SDK零差，freeze-end已释放。
+
+整体目标active/main Daily NO-GO。下一只澄清原自动text case-design的可检查/明确范围与兼容压缩要求，并以全新记录块及“时间/地点只在授权正文给出时写”模拟持续反馈前瞻；未消费future1/2/无关题与原效果标准不变。编号提示未遇真实坏digest；category空值10拒绝后自纠11调用成功，可选提示不作新阻塞。首启动旧源保护摘要失败、外部盲包undefined映射错误已完整记录，原任务/票未改。详见[tianwen-observable-feedback-result-20261006.md](tianwen-observable-feedback-result-20261006.md)。D约16.47GiB>=15，本批39.2MiB无全量环境复制。
+
+## 2026-10-06 此前实现：可观察未来标准与审核编号精确提示候选
 
 Task7A/B已实现并独立spec/quality通过：AS仅新增continuing行为提取说明（不将scope/本次不改元话语列为criterion，保留明确长期不改旧答案workflow），claimreview仅原validateCapture坏stringdigest精确deny（长度/首差位/字符/exactexpected），schema/enum/args/COMMON/SDK/原gate全不改。native脚本RED2/3→GREEN/full34+158=192，旧public完整AS回归RED1/3skip，当前原public构建与真实新批仍待执行。脚本不称真实语义改善。
 
