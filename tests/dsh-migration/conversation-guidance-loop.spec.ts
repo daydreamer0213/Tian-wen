@@ -136,7 +136,20 @@ it.each([
       },
     },
   },
-])('delegates bounded text case design for $story', async ({ generated }) => {
+  {
+    story: 'explicit missing-value and supplied-absence selection',
+    generated: {
+      adjacent: {
+        prompt: 'Synthetic case. Use only this authorized record: nine tripods are already borrowable; two grips await registration; the record explicitly provides no collection time or location. Write one short body paragraph without line breaks. Retain the truthful statement that the record gives no collection time or location; do not invent either value. Put the borrowable items first and keep the pending registration in its own complete period-ended sentence. Add no conditions, completion or notification promises.',
+        criteria: ['One short body paragraph without line breaks or a heading.', 'Preserve nine borrowable tripods and two grips awaiting registration.', 'Retain the supplied statement that no collection time or location is provided, without inventing either value.', 'Put the borrowable items first and keep the pending registration in its own period-ended sentence.', 'Add no source-external conditions, completion or notification promises.'],
+      },
+      holdout: {
+        prompt: 'Synthetic case. Use only this authorized record: sixteen tarps are already usable; four hooks await storage; the record explicitly provides no pickup time or location. Write one short body paragraph without line breaks. Omit the statement that the record gives no pickup time or location, and do not write a missing-information notice; do not invent either value. Preserve the two equipment facts, put the usable items first and keep the pending storage in its own complete period-ended sentence. Add no conditions, completion or notification promises.',
+        criteria: ['One short body paragraph without line breaks or a heading.', 'Preserve sixteen usable tarps and four hooks awaiting storage.', 'Omit the supplied no-pickup-time-or-location statement and any missing-information notice; invent neither value.', 'Put the usable items first and keep the pending storage in its own period-ended sentence.', 'Add no source-external conditions, completion or notification promises.'],
+      },
+    },
+  },
+])('delegates bounded text case design for $story', async ({ story, generated }) => {
   // Scripted captures prove original delegation/provenance, not real-model case-design efficacy.
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-record-boundary-learning-tests-20261006/task9'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'case-design-'))
@@ -179,11 +192,21 @@ it.each([
     expect(delegated).toContain('For genuine requested condensation, specify an understandable operation that retains required facts')
     expect(delegated).toContain('Do not turn vague brevity into a hidden word count, rewriting every sentence or requiring different source syntax')
     expect(delegated).toContain('Keep genuine requested compression and a missing-field holdout that tests unsupported time or location')
+    if (story === 'explicit missing-value and supplied-absence selection') {
+      expect(delegated).toContain('distinguish omitting the nonexistent value from omitting that truthful statement')
+      expect(delegated).toContain('The generated prompt must explicitly say whether that statement must be retained, may be included or must be omitted, and its criteria must follow the same selection')
+      expect(delegated).toContain('Do not infer a ban on describing a supplied absence from a ban on inventing an unsupported value, and do not always require retaining absence statements')
+    }
     const study = harness.ctx.tianwenEvolution.listConversationGuidanceStudies()[0]!
     expect(study.opened.cases).toHaveLength(5)
     const recovered = await recoverConversationCaseDesign(harness.ctx, study.opened)
     expect(recovered).toMatchObject({ material: designMaterial, output: generated, semanticIndependence: 'unestablished' })
     expect(recovered?.instruction).toContain('For genuine requested condensation, specify an understandable operation that retains required facts')
+    if (story === 'explicit missing-value and supplied-absence selection') {
+      expect(recovered?.instruction).toContain('distinguish omitting the nonexistent value from omitting that truthful statement')
+      expect((recovered as { readonly output: typeof generated } | undefined)?.output.adjacent).toEqual(generated.adjacent)
+      expect((recovered as { readonly output: typeof generated } | undefined)?.output.holdout).toEqual(generated.holdout)
+    }
     expect(study.arms).toEqual([])
     expect(study.activation).toBeUndefined()
     expect(harness.ctx.tianwenEvolution.listConversationTasks()).toEqual(before)

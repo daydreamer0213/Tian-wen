@@ -1,3 +1,7 @@
+## 2026-10-06 当前：出题缺失陈述选择规则通过独立审查
+
+Task13仅在原text case-design指令追加三句，区分缺失的值与源内真实缺失陈述；生成prompt须明确该陈述保留/可选/省略，criteria遵从同一选择，不由不编值推导隐含禁句，也不一概要求保留。原schema/1–12/host/RAW/proposal/trial/claim/v12/双审/裁决/发布门槛未变。native实际RED1→GREEN1、原相关full163/163退出0，独立spec/quality PASS。首次长过滤零执行非RED、类型JS等价/最终focused1保留。公开build与新实际效果尚待执行，脚本14不称语义改善。整体active/mainDailyNO-GO，下一原publicbuild/旧proof零调用兼容+全新Task14，未消费future/六effect保持。详见[tianwen-missing-value-contract-implementation-20261006.md](tianwen-missing-value-contract-implementation-20261006.md)。
+
 ## 2026-10-06 当前：十臂完整，缺失陈述范围歧义已独立识别
 
 Task11经原public16/相关161+public4/11feedback+22claim+Task10九臂24checks零模型兼容后，9e606ded全新Task12完成60真实/0脚本，原run/cold/audit均0、errors[]。三普通任务六原生met；两公开模拟preference各5continuing/整项eligible，原case/proposal及完整10臂20proof成立。source1 not-met→met，source2 inconclusive→met，counter与adjacent met→met，holdout met→not-met；原rejected，无activation/future/effect。末候选忠实写了记录缺失时间地点的说明，被两原审按冻结省略标准拒绝；首盲无明确无源事实，保留省略值/缺失说明范围歧义，不改原票。source2baseline一张met票错误描述实际pending已在后，整体inc保留。撤回rev2/撤后1请求无分析方法/cold0；2393保护+52SDK有效，独立终态后freeze-end实际释放。原未来三对象/六效果标准仍未消费。整体目标active/mainDailyNO-GO；下一澄清原自动出题的值/缺失陈述选择规则，不增加禁词/数量标准，不重评本批。详见[tianwen-pending-state-learning-result-20261006.md](tianwen-pending-state-learning-result-20261006.md)。
