@@ -1,5 +1,11 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 最新推进：完整自动学习目标 active，共同未来范围接缝
+
+用户在 0fd42178 有限阶段收口后明确要求继续开启目标模式。新目标为完整自动学习的可审查产品交付；不得因一轮诊断、实现或实验结束就标整体完成。旧收口结果和 main/Daily NO-GO 保持。当前 N3 真实 scope 推理读到了完整长期声明，但选取独立短句时丢失共同未来限定；F3 模拟首 scope 全 unclear 且原标准混入任务领取步骤，不能当纯净范围效果基线。A2 采用/生效和 E2 承诺/会发送有实际语义差异，尚不能直接定为误判，不重评旧票或强迫其通过。
+
+按[设计](../superpowers/specs/2026-10-06-tianwen-shared-future-scope-design.md)和[实施计划](../superpowers/plans/2026-10-06-tianwen-shared-future-scope-plan.md)：仅在原独立 scope 指令说明整段共同未来限定和足够连续原文引用；例外/新增限制/unclear/整项资格/原 SDK 及 schema 保持。机制先红绿，原公开构建，独立审查后冻结；全新 L1/L2 长期并列偏好和 O1 仅下一次对照原普通 Runtime 首次真实执行，模型自主判断、0模拟模型响应。实际有效时继续当前版本新研究及后任务，不重开旧 v11 学习，不添加第三审/新质量版本/发布条件或等待用户出题。生成物在 D:/DevData/tianwen-shared-future-scope-controller-20261006；模型未启动，D约16.6GiB，最低15保持。
+
 ## 2026-10-06 最新收口：真实引用纠正打通，语义首结果与发布限制保留
 
 冻结 7b07332b 的普通公开 Runtime：F3/N3 首次 19 真实请求 + 1 明确模拟故障，原字段拒绝 → 同一 child 下一真实请求 → 唯一逐字引用成功捕获，四原 Task proof、四反馈/scope proof 与全部原 SDK steps/headers 有效；CLI 预检/运行/冷恢复/审计均 0、关闭 revision2/quarantine/原排空/cold0 不变。F3 四 unclear，N3 两 continuing/两 unclear，均不满足原继续学习条件；不强制采用、不称新研究或激活。N3 实际新增“手续办结/另行告知”，原双审 not-met 指出了无源程序完成和通知承诺，原票保留。
