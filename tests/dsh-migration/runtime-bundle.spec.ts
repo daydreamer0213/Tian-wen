@@ -52,7 +52,10 @@ it('public study clearance exposes the native factory and config types in the ac
 
 it.each(['function','descriptor','root-native-factory','bundle-profile','repository-profile','managed-profile'] as const)('public study clearance routes %s config through actual bundled ordinary apply without unquarantining', async mode => {
   // Explicit SDK scripts exercise the published route only, not real-provider semantics.
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = mode === 'managed-profile' && process.platform === 'win32'
+    ? 'D:/DevData/tianwen-runtime-bundle-tests/managed-entry'
+    : process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
+  mkdirSync(base, { recursive: true })
   const profile = mkdtempSync(join(base, 'public-clearance-'))
   const admission = { kind: 'task', objective: 'Summarize source scope', criteria: ['Preserve source scope'], family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null }
   const structured = (value: Record<string, unknown>) => toolCallResponse('public-clearance-result', 'structured_output', value)
@@ -128,6 +131,8 @@ const packFixtureBase = resolve(
   process.env.TIANWEN_DSH_PROBE_ROOT ?? join(tmpdir(), 'tianwen-dsh-probes'),
   'runtime-bundle',
 )
+const managedFixtureBase = process.platform === 'win32'
+  ? 'D:/DevData/tianwen-runtime-bundle-tests/managed-entry' : packFixtureBase
 const tar = process.platform === 'win32'
   ? resolve(process.env.SystemRoot!, 'System32', 'tar.exe')
   : 'tar'
@@ -1088,7 +1093,8 @@ describe('@tianwen/runtime-bundle', () => {
   })
 
   it('mounts the standard coding preset through the formal Goal-first Profile without a Session or Turn', () => {
-    const fixtureRoot = mkdtempSync(join(packFixtureBase, 'goal-first-preset-audit-'))
+    mkdirSync(managedFixtureBase, { recursive: true })
+    const fixtureRoot = mkdtempSync(join(managedFixtureBase, 'goal-first-preset-audit-'))
     const paths = deriveInstallPaths(fixtureRoot)
     const requireFromRuntimeBundle = createRequire(resolve(packageRoot, 'package.json'))
     const dshManifestPath = requireFromRuntimeBundle.resolve('@deepseek-ai/dsh/package.json')

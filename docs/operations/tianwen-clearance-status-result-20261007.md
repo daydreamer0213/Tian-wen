@@ -11,3 +11,5 @@ Task35 原完整 Python 复验 **611 通过、4 原规则跳过、退出 0**；�
 原status夹具新增已保存clear/reject/错scope/空记录恢复、无模型、无私有材料泄漏与账本字节不变断言。实际 RED1→原完整status **42/42**、Runtime noEmit退出0。独立复核 PASS/PASS，之前P2关闭；运行物和审查在 `D:/DevData/tianwen-025-release-controller-20261007`。此修改后要更新正式候选构建和准确CI，不使用Task35旧成品冒充已含新提示。
 
 Goal active/mainDaily暂NO-GO，installed Runtime0.1.24 / Desktop preview.25仍保留。完整自动学习原Task31/33闭环不重开；剩准确CI、安装/数据保护和原门槛发布结论，不追加模型样本或自然等待。此前scratch删除被自动审批以`blocked by policy`拒绝，未执行未绕过；D仍高于15GiB。
+
+后续实际更新已完成：clean dafc2e41 原构建16 steps/11meta，新 runtime.js bbd88828；110/110、实际pack与Desktop同目录成品审计0。准确云端首CI Python成功/其他三失败，Task37定点修原测试路径并补失败诊断，不能称发布完成；见[tianwen-release-ci-portability-result-20261007.md](tianwen-release-ci-portability-result-20261007.md)。

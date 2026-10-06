@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -44,7 +45,7 @@ function body(verdict: GuidanceIndependentReviewBody['verdict']): GuidanceIndepe
   return { verdict, sourceChecks: ['source1', 'source2', 'counterexample'].map(kind => ({ caseId: kind, kind: kind as any, verdict, reason: 'Original raw source and feedback remain faithful.' })),
     armChecks: ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'].flatMap(caseId => (['baseline', 'candidate'] as const).map(role => ({ caseId, role, verdict, boundary: 'Actor, condition, certainty and commitment.', reason: 'Scripted boundary mechanism, not provider quality.' }))) }
 }
-function root() { const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true }); const r = mkdtempSync(join(base, 'independent-review-')); roots.push(r); return r }
+function root() { const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true }); const r = mkdtempSync(join(base, 'independent-review-')); roots.push(r); return r }
 function packetMocks(packet: any) { vi.spyOn(packets, 'recoverTextGuidanceStudyReviewPacket').mockResolvedValue(packet); vi.spyOn(packets, 'recoverFileGuidanceStudyReviewPacket').mockResolvedValue(packet) }
 function paths(r: string, study: any) { return join(r, 'independent-review', sha256(study.opened.studyId).slice(7)) }
 

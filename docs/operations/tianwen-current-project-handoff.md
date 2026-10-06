@@ -1,3 +1,9 @@
+## 2026-10-07 最新：自动学习闭环已完成，修复原发布 CI
+
+Task36 clean候选已构建、110/110、pack及Desktop成品审计0；Task35完整Python v2实际611通过/4原跳过。PR6首准确CI仅Python成功，Linux测试路径、Windows受管fixture和Desktop观察准备三项失败保留。当前Task37原四套436/436、bundle81/81、native28/28（含实际启动），两独立审查PASS；下一原云端复验与Desktop失败诊断，不重开Task31/33、不增学习标准。实际Daily两Profile仍0.1.24，47受保护文件/快捷方式摘要未变，未安装。整体goal active/mainDaily暂NO-GO；D约15.4GiB>=15未20，pytest残余删除又被自动审批blocked by policy拒绝、未执行未绕过。详见[tianwen-release-ci-portability-result-20261007.md](tianwen-release-ci-portability-result-20261007.md)。
+
+以下保留各阶段当时记录；以本节最新结果为当前状态。
+
 ## 2026-10-07 当前：真实引文纠正完成，转原打包与安装入口
 
 ## 2026-10-07 当前：0.1.25 候选接线与旧版升级已实现

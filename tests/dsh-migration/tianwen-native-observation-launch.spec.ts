@@ -379,7 +379,13 @@ describe('Tianwen native observation launch preparation', () => {
       fixture.environment,
     )
 
-    expect(prepared.status).toEqual({ kind: 'observed' })
+    let aclDiagnostic = ''
+    const launchRoot = join(fixture.paths.stateRoot, 'native-observation-launch')
+    if (prepared.status.kind !== 'observed' && process.platform === 'win32' && existsSync(launchRoot)) {
+      try { aclDiagnostic = JSON.stringify(readWindowsAcl(launchRoot)) }
+      catch (error) { aclDiagnostic = `acl-unavailable:${error instanceof Error ? error.name : 'unknown'}` }
+    }
+    expect(prepared.status, aclDiagnostic).toEqual({ kind: 'observed' })
     expect(prepared.patchPath).toBeDefined()
     const [{ entryListSchema }, yaml] = await Promise.all([
       import(pathToFileURL(includeModulePath).href) as Promise<{ entryListSchema: unknown }>,

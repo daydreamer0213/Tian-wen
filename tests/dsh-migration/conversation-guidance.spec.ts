@@ -259,7 +259,7 @@ describe('proposal-only feedback clues', () => {
     const cases = base.cases.map(item => {
       if ('sourceTaskId' in item) return item
       const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const,
-        cwd: 'D:/DevData/tianwen-conversation-guidance-tests/frozen', entries: [{ path: 'input.txt', content: 'frozen input' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+        cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-guidance-tests/frozen' : '/tmp/tianwen-conversation-guidance-tests/frozen', entries: [{ path: 'input.txt', content: 'frozen input' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
       const material = { prompt: item.prompt, criteria: item.criteria, files }
       return { id: item.id, kind: item.kind, ...material, materialDigest: sha256(material), inputDigest: guidanceInputDigest(item.prompt, files) }
     })

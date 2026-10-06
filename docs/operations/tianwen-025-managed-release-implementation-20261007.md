@@ -22,3 +22,5 @@ Runtime 0.1.25 / Desktop preview.26 的 manifest、归档、预检、构建、�
 ## 交付边界
 
 Goal active，main/Daily 暂 NO-GO，日常两 Profile 和桌面程序未更新。下一步是原 CI、准确候选成品/安装和数据保护后发布结论，不能把此轮结束作为完整目标完成。D 剩余仍高于 15GiB；复用依赖、不全环境复制。此前 scratch 删除自动审批 `blocked by policy`，未执行、未绕过，不能声称全部清理完成。
+
+后续完成记录：完整Python v2实际611通过/4原跳过/退出0；Task36已更新准确clean候选构建、110/110及Desktop成品审计。PR6首准确CI仅Python成功，三项失败已保留；当前定点修复与日常只读数据保护见[tianwen-release-ci-portability-result-20261007.md](tianwen-release-ci-portability-result-20261007.md)，此前“正在核验”仅为Task35当时状态。

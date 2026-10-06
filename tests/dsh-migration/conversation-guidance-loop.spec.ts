@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, symlinkSync, cpSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
@@ -59,9 +60,10 @@ it('tells the case designer the ledger accepted criteria range in both supported
 const spawn = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-subagent-spawn-in-process')).href)
 const { disposeProfileContext } = await import(pathToFileURL(join(cliRequire.resolve('@deepseek-ai/dsh/package.json'), '..', 'lib', 'profile-boot-DG5t9aNs.js')).href)
 const { healProfilesModuleFallback } = await import(pathToFileURL(cliRequire.resolve('@deepseek-ai/dsh-app-boot')).href)
-const installedCliHome = join(process.env.TIANWEN_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime', 'native-cli-control-install')
+const installedCliHome = join(process.env.TIANWEN_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')), 'native-cli-control-install')
 // Reuse installation metadata; each control still owns empty native state.
-if (process.platform === 'win32') healProfilesModuleFallback(cliRequire.resolve('@deepseek-ai/dsh/package.json'), installedCliHome)
+mkdirSync(join(installedCliHome, 'profiles'), { recursive: true })
+healProfilesModuleFallback(cliRequire.resolve('@deepseek-ai/dsh/package.json'), installedCliHome)
 
 it.skipIf(process.platform !== 'win32').each(['dev-paired-any-case.v1', undefined] as const)('preflights a persisted native failure pair without waking or consuming its research attempt: %s', async policy => {
   const base = 'D:/DevData/tianwen-development-runtime'
@@ -169,7 +171,7 @@ async function clearanceHarness(root: string, reviewer?: GuidanceIndependentRevi
 }
 
 it('study clearance integration preserves original DEV direct adoption without invoking a configured reviewer or creating permission', async () => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-development-'))
   const reviewer = vi.fn(async () => { throw new Error('DEV must not enter independent clearance') })
   const f = await clearanceHarness(root, reviewer, undefined, true)
@@ -183,7 +185,7 @@ it('study clearance integration preserves original DEV direct adoption without i
 })
 
 it.each(['programmatic','native'] as const)('study clearance integration uses ordinary source Runtime and one %s first review before adoption', async mode => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-integration-')); let calls = 0
   const callback: GuidanceIndependentReviewConfig = async input => {
     calls++; expect((input.material as GuidanceIndependentReviewMaterial).cases).toHaveLength(5)
@@ -212,7 +214,7 @@ it.each(['programmatic','native'] as const)('study clearance integration uses or
 })
 
 it.each(['clear','reject','insufficient'] as const)('study clearance integration preserves first %s and cold-recovers without another reviewer or parent', async result => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-cold-'))
   const f = await clearanceHarness(root, { mode: 'native', reviewerId: 'scripted-native-review' }, result)
   const hold = vi.spyOn(f.harness.ctx.tianwenEvolution, 'recordReviewedConversationGuidanceActivation').mockImplementation(() => { throw new Error('scripted gap after saved permission') })
@@ -242,7 +244,7 @@ it.each(['clear','reject','insufficient'] as const)('study clearance integration
 })
 
 it.each(['receipt-drift','native-proof-missing'] as const)('study clearance integration retains managed %s pending without rejudge', async scenario => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-proof-')), f = await clearanceHarness(root, { mode: 'native', reviewerId: 'scripted-native-review' }, 'clear')
   const hold = vi.spyOn(f.harness.ctx.tianwenEvolution, 'recordReviewedConversationGuidanceActivation').mockImplementation(() => { throw new Error('scripted permission gap') })
   try {
@@ -267,7 +269,7 @@ it.each(['receipt-drift','native-proof-missing'] as const)('study clearance inte
 })
 
 it('study clearance integration keeps no-config pending and adopts on real service clearance event after its source is released', async () => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-event-')), f = await clearanceHarness(root)
   try {
     const study = await f.run()
@@ -292,7 +294,7 @@ it('study clearance integration keeps no-config pending and adopts on real servi
 })
 
 it('study clearance integration accepts a separately trusted human fixture permission without requiring managed native proof', async () => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-external-')), f = await clearanceHarness(root)
   try {
     const study = await f.run(), packet = JSON.parse(JSON.stringify(await recoverTextGuidanceStudyReviewPacket(f.harness.ctx, study)))
@@ -310,7 +312,7 @@ it('study clearance integration accepts a separately trusted human fixture permi
 })
 
 it('study clearance integration first-reviews a cold pending accepted study without rerunning sources or arms', async () => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-first-cold-')), f = await clearanceHarness(root)
   try {
     const accepted = await f.run(), tasks = f.harness.ctx.tianwenEvolution.listConversationTasks()
@@ -334,7 +336,7 @@ it('study clearance integration first-reviews a cold pending accepted study with
 })
 
 it.each(['consent','support','parent','dispose'] as const)('study clearance integration blocks late %s change after first review starts', async change => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'; mkdirSync(base, { recursive: true })
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime')); mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'clearance-late-')); let f: Awaited<ReturnType<typeof clearanceHarness>>
   let calls = 0, disposeStarted: Promise<void> | undefined
   const reviewer: GuidanceIndependentReviewConfig = async input => {
@@ -402,7 +404,7 @@ it.each([
   },
 ])('delegates bounded text case design for $story', async ({ story, generated }) => {
   // Scripted captures prove original delegation/provenance, not real-model case-design efficacy.
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-record-boundary-learning-tests-20261006/task9'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-record-boundary-learning-tests-20261006/task9' : join(tmpdir(), 'tianwen-record-boundary-learning-tests-20261006/task9'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'case-design-'))
   let delegated = ''
   let designMaterial: unknown
@@ -466,7 +468,7 @@ it.each([
 })
 
 it.each(['valid', 'cold', 'cold-proof-drift', 'cold-packet-drift', 'prior-legacy-packet', 'prior-observation-drift', 'prior-clue-drift', 'proof-drift', 'proposal-drift', 'execution-drift', 'outside-scope', 'old-consent', 'model-drift', 'quality-drift', 'family-drift', 'mode-drift', 'late-stop', 'same-stop', 'missing-stop', 'model-met', 'missing-proof', 'capacity'] as const)('freezes one authenticated rejected source method for a different native study: %s', async scenario => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'rejected-method-'))
   const method = 'FAILED-METHOD: Add a scope checklist before summarizing.'
   const captured = (request: GenerateOptions) => {

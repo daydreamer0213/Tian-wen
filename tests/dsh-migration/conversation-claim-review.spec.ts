@@ -1,3 +1,4 @@
+import { tmpdir } from 'node:os'
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
@@ -76,7 +77,7 @@ it.each((['original-result', 'method-study'] as const).flatMap(purpose => [
   { purpose, name: 'all items restriction includes confirmed items', prompt: applicabilityAll, answer: applicabilityJoined, verdict: 'not-met' as const },
   { purpose, name: 'all items genuinely separated', prompt: applicabilityAll, answer: applicabilitySeparate, verdict: 'met' as const },
 ]))('forwards requirement-applicability without widening or dropping the original restriction: $purpose / $name', async ({ purpose, name, prompt, answer, verdict }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'applicability-')); roots.push(root)
   const material = boundaryMaterial(purpose, prompt, answer), evidence = projectClaimEvidence(material)
   const grounding = { verdict: 'met', category: null, explanation: 'Scripted sourced-facts fixture; format is reviewed separately.', evidenceQuotes: [answer, prompt], audit: auditFor(evidence) }
@@ -109,7 +110,7 @@ const applicabilityCompatibilityCases = (['original-result', 'method-study'] as 
   ...(['near-task23', 'without-task21', 'near-task32', 'without-task28'] as const).map(mode => ({ purpose, focus: 'requirements' as const, mode, accepted: false })),
 ])
 it.each(applicabilityCompatibilityCases)('cold-recovers only whole requirement-applicability versions: $purpose / $focus / $mode', async ({ purpose, focus, mode, accepted }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'applicability-cold-')); roots.push(root)
   const material = boundaryMaterial(purpose, applicabilitySubset, applicabilityJoined), evidence = projectClaimEvidence(material)
   const value = { verdict: 'met', category: null, explanation: 'Scripted exact whole-version recovery.', evidenceQuotes: [applicabilityJoined], audit: auditFor(evidence) }
@@ -152,7 +153,7 @@ it.each(applicabilityCompatibilityCases)('cold-recovers only whole requirement-a
 })
 
 it.each((['original-result', 'method-study'] as const).flatMap(purpose => (['legacy-v11', 'no-quality'] as const).map(quality => ({ purpose, quality }))))('keeps requirement-boundary producers and exact cold recovery within the current quality boundary: $purpose / $quality', async ({ purpose, quality }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'boundary-quality-')); roots.push(root)
   const material = boundaryMaterial(purpose, boundaryPermitted, boundaryJoined)
   const source = purpose === 'method-study' ? material.task! : material.source!
@@ -216,7 +217,7 @@ it.each((['original-result', 'method-study'] as const).flatMap(purpose => [
   { purpose, name: 'explicit independent sentence satisfied', prompt: boundaryRequired, answer: boundarySeparate, verdict: 'met' as const },
   { purpose, name: 'semicolon permission without independent sentence requirement', prompt: boundaryPermitted, answer: boundaryJoined, verdict: 'met' as const },
 ]))('sends the requirement-boundary explanation to both blind native reviewers: $purpose / $name', async ({ purpose, name, prompt, answer, verdict }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'requirement-boundary-')); roots.push(root)
   const material = boundaryMaterial(purpose, prompt, answer), evidence = projectClaimEvidence(material)
   const value = { verdict, category: verdict === 'met' ? null : 'instruction-following', explanation: 'Scripted fixture tests instruction forwarding and capture, not model quality.', evidenceQuotes: [answer, prompt], audit: auditFor(evidence) }
@@ -244,7 +245,7 @@ const boundaryCompatibilityCases = (['original-result', 'method-study'] as const
   ...(['near-tail', 'extra-tail', 'wrong-focus', 'changed-material'] as const).map(mode => ({ purpose, focus: 'requirements' as const, mode, accepted: false })),
 ])
 it.each(boundaryCompatibilityCases)('recovers only complete requirement-boundary instructions in a cold native store: $purpose / $focus / $mode', async ({ purpose, focus, mode, accepted }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'boundary-cold-')); roots.push(root)
   const material = boundaryMaterial(purpose, boundaryPermitted, boundaryJoined), evidence = projectClaimEvidence(material)
   const value = { verdict: 'met', category: null, explanation: 'Faithful permitted fixture.', evidenceQuotes: [boundaryJoined], audit: auditFor(evidence) }
@@ -300,7 +301,7 @@ const boundaryEncodedHashes = {
   'method-study': { requirements: 'd427b6e7937a5a9b5ca81a506cf5df4c960c767db86f78b66abdbe9252028fe8', grounding: '9006ae4d605f44ab1e3e625e56414a42e05ca2fc519b2fb6a3a70c2c9bab9aa8' },
 } as const
 it.each((['original-result', 'method-study'] as const).flatMap(purpose => (['old', 'new', 'missing-encoding'] as const).map(mode => ({ purpose, mode }))))('binds requirement-boundary compatibility to the native file encoding: $purpose / $mode', async ({ purpose, mode }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'boundary-encoded-')); roots.push(root)
   const entries = [{ path: 'source.txt', content: 'x'.repeat(40000) }, { path: 'output.txt', content: null }]
   const files = { schemaVersion: 'tianwen.conversation-file-material.v1', outputKind: 'files', cwd: root, entries, outputPaths: ['output.txt'] }
@@ -353,7 +354,7 @@ it.each((['original-result', 'method-study'] as const).flatMap(purpose => (['old
 })
 
 it.each(['exact', 'cross-unit', 'invented', 'criterion'] as const)('captures short file evidence without weakening original-unit checks: %s', async mode => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'file-short-quote-')); roots.push(root)
   const text = '原料已送达。' + '甲'.repeat(380) + '乙：后续状态未确认。'
   const files = { schemaVersion: 'tianwen.conversation-file-material.v1', cwd: root, outputKind: 'files',
@@ -403,7 +404,7 @@ it.each(['exact', 'cross-unit', 'invented', 'criterion'] as const)('captures sho
 })
 
 it.each((['original-result', 'method-study'] as const).flatMap(purpose => ['\n', ' \t'].map(blank => ({ purpose, blank }))))('rejects whitespace-only summary quotes before capture and cold-recovers the same-child correction: $purpose / $blank', async ({ purpose, blank }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'summary-blank-capture-')); roots.push(root)
   const answer = blank === '\n' ? '描图纸已可借用。\n\n压纸夹尚待登记。' : `描图纸已可借用。\n${blank}\n压纸夹尚待登记。`
   const material = boundaryMaterial(purpose, '按记录给两段正文，不添加状态：描图纸已可借用；压纸夹尚待登记。', answer)
@@ -462,7 +463,7 @@ it.each((['original-result', 'method-study'] as const).flatMap(purpose => ['\n',
 })
 
 it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'string-object'] as const)('repairs original review submission in the same native session: %s', async mode => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-repair-')); roots.push(root)
   const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [] }, answer: '原料已送达。' }
   const evidence = projectClaimEvidence(material)
@@ -518,7 +519,7 @@ it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'strin
 
 it.each(['met', 'not-met'] as const)('rejects a 4097-byte explanation before native correction to the persisted 4096-byte boundary: %s', async verdict => {
   // Explicit scripted output verifies byte limits and native proof mechanics, not model quality.
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'explanation-boundary-')); roots.push(root)
   const material = { task: { prompt: '清洁尚未完成。只改写这句话。', criteria: [] },
     answer: verdict === 'met' ? '清洁尚未完成。' : '清洁已经完成。' }
@@ -575,7 +576,7 @@ it.each(['met', 'not-met'] as const)('rejects a 4097-byte explanation before nat
 
 it('cannot create a proof from an uncorrected 4097-byte explanation', async () => {
   // This disclosed fixture stops after rejection; it never supplies a corrected judgment.
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-development-runtime' : join(tmpdir(), 'tianwen-development-runtime'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'explanation-uncorrected-')); roots.push(root)
   const material = { task: { prompt: '清洁尚未完成。只改写这句话。', criteria: [] }, answer: '清洁尚未完成。' }
   const evidence = projectClaimEvidence(material)
@@ -600,7 +601,7 @@ it('cannot create a proof from an uncorrected 4097-byte explanation', async () =
 
 it.each(['met', 'not-met'] as const)('diagnoses a copied audit digest before native self-correction without changing the %s vote', async verdict => {
   // Disclosed scripted responses check transport and proof mechanics, not real-model reliability.
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'digest-correction-')); roots.push(root)
   const material = { task: { prompt: '原料尚待配送。只改写这句话。', criteria: [] },
     answer: verdict === 'met' ? '原料尚待配送。' : '原料已送达。' }
@@ -668,7 +669,7 @@ it.each(['met', 'not-met'] as const)('diagnoses a copied audit digest before nat
 
 it('diagnoses an audit digest end difference without creating a proof for an uncorrected submission', async () => {
   // The explicit fixture never corrects its bad digest; no actual provider is used.
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'digest-uncorrected-')); roots.push(root)
   const material = { task: { prompt: '原料尚待配送。只改写这句话。', criteria: [] }, answer: '原料尚待配送。' }
   const evidence = projectClaimEvidence(material)
@@ -702,7 +703,7 @@ it('diagnoses an audit digest end difference without creating a proof for an unc
 it.each((['source-fact', 'advice', 'inference', 'fiction', 'general-knowledge', 'non-factual'] as const)
   .flatMap(kind => (['firstClaim', 'additionalClaims'] as const).map(position => ({ kind, position }))))
 ('repairs invalid kind/status before native capture: $kind in $position', async ({ kind, position }) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-tuple-repair-')); roots.push(root)
   const material = { task: { prompt: '原料已送达。只改写这句话。', criteria: [] }, answer: '原料已送达。' }
   const evidence = projectClaimEvidence(material)
@@ -776,7 +777,7 @@ it.each([
   ['source-fact', 'unsupported', 'not-met'], ['source-fact', 'contradicted', 'not-met'], ['source-fact', 'uncertain', 'inconclusive'],
   ['inference', 'uncertain', 'inconclusive'],
 ] as const)('captures a valid tuple without correction or verdict coercion: %s/%s/%s', async (kind, status, verdict) => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-valid-tuple-')); roots.push(root)
   const material = { task: { prompt: '核对原料状态并保留不确定性。' }, answer: '原料已送达。' }
   const evidence = projectClaimEvidence(material)
@@ -797,7 +798,7 @@ it.each([
 })
 
 it.each(['', ' '] as const)('rejects a blank answer quote before compact capture and allows correction: %j', async invalidQuote => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'blank-quote-repair-')); roots.push(root)
   const answer = Array.from({ length: 128 }, (_, index) => `${index}: ${'x'.repeat(246)}；\n`).join('')
   const material = { task: { context: Array.from({ length: 10 }, (_, index) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `Earlier source ${index}.` }] })), request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Review this answer.' }] })] }, answer }
@@ -823,7 +824,7 @@ it.each(['', ' '] as const)('rejects a blank answer quote before compact capture
 })
 
 it('does not turn a second plain-text review into a successful capture', async () => {
-  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : join(tmpdir(), 'tianwen-conversation-tests'))
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-reminder-limit-')); roots.push(root)
   const harness = await mountPersistentHarness(root, [textResponse('met'), textResponse('met again')])
   await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
