@@ -1,4 +1,10 @@
-## 2026-10-07 当前：公开版本和新验证完成，继续修要求适用对象
+## 2026-10-07 当前：适用对象修复机制通过，继续公开构建与新普通学习
+
+Task23两owned文件最窄累计提醒，Task21旧段/原generator不改，当前v12/unversioned发送新完整串，严格恢复原/Task21/Task23三完整版本、显式旧quality只有原串。首RED8保留，专项56/完整249、默认两types/diff0；独立spec/qualityPASS，0实际provider/workerbuild。源4dd52f19/test8fb4aa00。见[tianwen-requirement-applicability-implementation-20261007.md](tianwen-requirement-applicability-implementation-20261007.md)。
+
+下一root原public16/实际入口/旧11feedback及包括Task22的原claim零模型兼容→全新Task24 ordinary首次学习/原生首clear/激活/原后任务效果。Task24 prepared46host及准备/author-compat独立PASS，未建profile或调用provider；未来三whole对象和每题六标准保持不变未消费。goalactive/mainDailyNO-GO，D约16.20GiB>=15/未20，无整套环境/依赖/历史复制。
+
+## 2026-10-07 此前：公开版本和新验证完成，继续修要求适用对象
 
 Task21 c464306e原public16/actual4+4/types/imports和旧11feedback/124claim零模型兼容实际0并已推送。Task22首次59真实/0脚本，三ordinary六met、两公开模拟反馈3/4 continuing整项eligible，10臂20票；候选4met/1inconclusive、host5verified。source1candidate requirements把仅pending独立句扩成全部事项，确定false-NOT；grounding正确met。原formal inconclusive不改，无clear/activation/future；原future三对象及每题六效果标准未消费。首盲未见false-MET/虚假事实条件承诺，真实待办左边界错误仍原票not-met。run/cold0、59请求/52SDK证明有效、3280冻结摘要保持、独立终态PASS和实际freeze-end已释放；首audit旧reader路径退出1保留，v2两import修正实际0。见[tianwen-requirement-boundary-prospective-result-20261007.md](tianwen-requirement-boundary-prospective-result-20261007.md)。
 
