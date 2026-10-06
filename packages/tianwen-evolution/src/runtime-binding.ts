@@ -2,7 +2,8 @@ import { Service } from '@tianwen/dsh-compat'
 import type { ConversationLearningRecord, ConversationTask } from './conversation-learning.js'
 import type { GoalTaskOutcomeInput, GoalTaskOutcomeReceipt, GoalTaskOutcomeObservation } from './goal-task-outcome.js'
 import type { GoalTaskResearchSourceInput, GoalTaskResearchSource } from './goal-task-research.js'
-import type { ConversationGuidanceRecord, ConversationCaseDesignAttempt, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord } from './conversation-guidance.js'
+import type { ConversationGuidanceRecord, ConversationCaseDesignAttempt, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord, GuidanceActivationRecord } from './conversation-guidance.js'
+import type { ConversationGuidanceClearance } from './conversation-guidance-clearance.js'
 import type { ConversationFeedbackRecord, ConversationFeedbackAssessment } from './conversation-feedback.js'
 import type {
   Agent,
@@ -528,6 +529,18 @@ export class TianwenEvolutionService extends Service {
   conversationGuidanceDecision(studyId: string): GuidanceDecisionRecord { return this.state().ledger.conversationGuidanceDecision(studyId) }
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
     return this.formalWrite(() => this.state().ledger.recordConversationGuidance(input))
+  }
+
+  recordConversationGuidanceClearance(input: ConversationGuidanceClearance): { readonly duplicate: boolean } {
+    return this.formalWrite(() => this.state().ledger.recordConversationGuidanceClearance(input))
+  }
+
+  listConversationGuidanceClearances(scopeKey?: string): readonly ConversationGuidanceClearance[] {
+    return this.state().ledger.listConversationGuidanceClearances(scopeKey)
+  }
+
+  recordReviewedConversationGuidanceActivation(input: GuidanceActivationRecord): { readonly duplicate: boolean } {
+    return this.formalWrite(() => this.state().ledger.recordReviewedConversationGuidanceActivation(input))
   }
   listConversationFeedbackAssessments(taskId?: string): readonly ConversationFeedbackAssessment[] { return this.state().ledger.listConversationFeedbackAssessments(taskId) }
   isConversationFeedbackAssessmentActive(assessmentId: string): boolean { return this.state().ledger.isConversationFeedbackAssessmentActive(assessmentId) }

@@ -1,10 +1,11 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
-import { EvolutionLedger, isPublicLedgerEvent, type ArtifactId } from '../../packages/tianwen-evolution/src/ledger.js'
+import { EvolutionLedger, isPublicLedgerEvent, LedgerCommitUnknownError, type ArtifactId } from '../../packages/tianwen-evolution/src/ledger.js'
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
+import { conversationGuidanceClearanceEnvironmentDigest, conversationGuidanceClearanceStudyEvidenceDigest, parseConversationGuidanceClearance, type ConversationGuidanceClearance } from '../../packages/tianwen-evolution/src/conversation-guidance-clearance.js'
 import { conversationQualityContract, conversationTaskId, conversationReviewConsensus, conversationTaskInputDigest, conversationRequestContentDigest, parseConversationAuditedReviewChecks, parseConversationReviewChecks, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import {
   ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemptId, parseConversationCaseDesignAttempt, parseConversationGuidanceRecord,
@@ -24,6 +25,20 @@ import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 
 const roots: string[] = []
+const clearanceAppendFault = vi.hoisted(() => ({ sync: 0, read: 0 }))
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual,
+    fsyncSync(descriptor: number) {
+      actual.fsyncSync(descriptor)
+      if (clearanceAppendFault.sync > 0) { clearanceAppendFault.sync--; throw new Error('scripted clearance post-sync uncertainty') }
+    },
+    readFileSync: ((...args: Parameters<typeof actual.readFileSync>) => {
+      if (clearanceAppendFault.read > 0 && String(args[0]).endsWith('ledger.jsonl')) { clearanceAppendFault.read--; throw new Error('scripted clearance recovery read unavailable') }
+      return actual.readFileSync(...args)
+    }) as typeof actual.readFileSync,
+  }
+})
 const scope = 'workspace:guidance-ledger'
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
 const exactV1Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' }
@@ -39,7 +54,7 @@ const auditedChecks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive', 
 const exactV2Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${exactV1Quality.criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
 const exactV3Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host', criterion: `${exactV2Quality.criterion} Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.` }
 const exactV4Quality: ConversationQualityContract = { ...exactV3Quality, schemaVersion: 'tianwen.conversation-quality.v4' }
-afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks(); clearanceAppendFault.sync = 0; clearanceAppendFault.read = 0; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 function ledgerRoot() {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
@@ -874,6 +889,219 @@ it.each([exactV1Quality, exactV2Quality, exactV4Quality].flatMap(quality => [fal
 function activation(value: ReturnType<typeof evaluated>) {
   return { kind: 'guidance-activated' as const, studyId: value.opened.studyId, expectedParentVersion: value.opened.parentVersion, decisionDigest: sha256(value.decision) }
 }
+
+// Scripted ledger receipts verify persistence and guards only, not AI semantic efficacy.
+function clearanceFixture(root: string, value: ReturnType<typeof evaluated>, verdict: 'clear' | 'reject' | 'insufficient' = 'clear'): ConversationGuidanceClearance {
+  return { studyId: value.opened.studyId, scopeKey: scope,
+    environmentDigest: conversationGuidanceClearanceEnvironmentDigest(root),
+    parentVersion: value.opened.parentVersion, candidateVersion: guidanceVersion(value.candidate.candidateSnapshot),
+    decisionDigest: sha256(value.decision), armsDigest: value.decision.armsDigest,
+    studyEvidenceDigest: conversationGuidanceClearanceStudyEvidenceDigest({ ...value, openedAt: 'fixture' }),
+    packetDigest: sha256('host-saved complete static review packet'), consentRevision: 1,
+    reviewer: { authority: 'independent-ai' as const, id: 'scripted-independent-review', model: 'explicit-scripted-fixture', promptDigest: sha256('blind source and answer boundary review') }, verdict,
+    sourceChecks: value.opened.cases.slice(0, 3).map(item => ({ caseId: item.id, kind: item.kind as 'source1' | 'source2' | 'counterexample', verdict: 'clear' as const, reason: 'The supplied duration criterion faithfully preserves the original pilot request.' })),
+    armChecks: value.arms.map(arm => ({ caseId: arm.caseId, role: arm.role,
+      verdict: arm.role === 'candidate' ? verdict : arm.verdict === 'not-met' ? 'reject' as const : 'clear' as const,
+      boundary: 'No new status, actor, necessary condition or promise is asserted.',
+      reason: arm.verdict === 'not-met' ? 'The baseline omitted the requested duration; its original failure is retained.' : 'The fixture answer preserves the supplied duration and applicable output form.' })) }
+}
+type ClearanceFixture = ReturnType<typeof clearanceFixture>
+type ClearanceLedger = EvolutionLedger
+function clearanceStudy() {
+  const f = seeded(), value = evaluated(f.ledger, opening(f.tasks, 'study-clearance'))
+  const held = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  return { ...f, value, held, clearance: clearanceFixture(f.root, value) }
+}
+
+it('study clearance persists before reviewed activation and resumes from cold replay without opening ordinary activation', () => {
+  const f = clearanceStudy()
+  expect(() => f.held.recordConversationGuidance(activation(f.value))).toThrow(/quarantin/i)
+  expect(() => f.held.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/clearance/i)
+  expect(f.held.recordConversationGuidanceClearance(f.clearance)).toEqual({ duplicate: false })
+  expect(f.held.recordConversationGuidanceClearance(f.clearance)).toEqual({ duplicate: true })
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  expect(cold.listConversationGuidanceClearances(scope)).toEqual([f.clearance])
+  const copied = cold.listConversationGuidanceClearances()[0]!
+  ;(copied as { packetDigest: string }).packetDigest = sha256('mutated caller copy')
+  expect(cold.listConversationGuidanceClearances()[0]).toEqual(f.clearance)
+  expect(cold.listConversationGuidanceClearances('different scope')).toEqual([])
+  expect(() => cold.recordConversationGuidance(activation(f.value))).toThrow(/quarantin/i)
+  expect(cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: false })
+  expect(cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: true })
+  expect(cold.getConversationGuidance(scope)).toEqual(f.value.candidate.candidateSnapshot)
+  const final = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  expect(final.listConversationGuidanceClearances()[0]).toEqual(f.clearance)
+  expect(final.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: true })
+  expect(final.listEvents().filter(e => e.type === ('conversation-guidance-clearance-recorded' as string))).toHaveLength(1)
+  expect(final.listEvents().filter(e => e.type === 'approval-recorded')).toHaveLength(0)
+})
+
+it.each(['reject', 'insufficient'] as const)('study clearance retains first %s and forbids replacement or activation', verdict => {
+  const f = clearanceStudy(), record = clearanceFixture(f.root, f.value, verdict)
+  expect(f.held.recordConversationGuidanceClearance(record)).toEqual({ duplicate: false })
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  expect(cold.recordConversationGuidanceClearance(record)).toEqual({ duplicate: true })
+  expect(() => cold.recordConversationGuidanceClearance(f.clearance)).toThrow(/freeze|conflict|immutable/i)
+  expect(() => cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/clearance/i)
+  expect(cold.listConversationGuidanceStudies()[0]!.decision).toEqual(f.value.decision)
+})
+
+it.each(['studyId','scopeKey','environmentDigest','parentVersion','candidateVersion','decisionDigest','armsDigest','studyEvidenceDigest','consentRevision'] as const)('study clearance rejects changed %s binding', field => {
+  const f = clearanceStudy()
+  const changed = { ...f.clearance, [field]: field === 'consentRevision' ? 2 : field === 'scopeKey' ? 'different-scope' : field === 'studyId' ? `guidance-study:${sha256('other').slice(7)}` : sha256('changed binding') }
+  expect(() => f.held.recordConversationGuidanceClearance(changed as ClearanceFixture)).toThrow()
+  expect(f.held.listConversationGuidanceClearances()).toEqual([])
+})
+
+it('study clearance requires exact source3/arm10 and rejects clear with candidate boundary failure or source distortion', () => {
+  const f = clearanceStudy()
+  for (const changed of [
+    { ...f.clearance, sourceChecks: f.clearance.sourceChecks.slice(0, 2) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.slice(0, 9) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map((c, i) => i === 1 ? f.clearance.armChecks[0]! : c) },
+    { ...f.clearance, sourceChecks: f.clearance.sourceChecks.map((c, i) => ({ ...c, kind: f.clearance.sourceChecks[(i + 1) % 3]!.kind })) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map(c => c.caseId === f.value.opened.cases[4]!.id ? { ...c, caseId: 'not-original-holdout' } : c) },
+    { ...f.clearance, sourceChecks: f.clearance.sourceChecks.map((c, i) => i === 0 ? { ...c, verdict: 'reject', reason: 'The extracted criterion omitted an explicit original exclusion.' } : c) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map(c => c.role === 'candidate' ? { ...c, verdict: 'reject', boundary: 'The answer invented a confirmed return date.', reason: 'No supplied record confirms that date.' } : c) },
+    { ...f.clearance, reviewer: { ...f.clearance.reviewer, model: '' } },
+    { ...f.clearance, reviewer: { ...f.clearance.reviewer, authority: 'human' } },
+    { ...f.clearance, packetDigest: 'invalid' },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map((c, i) => i === 0 ? { ...c, boundary: '' } : c) },
+    { ...f.clearance, globalQuarantine: false },
+  ]) expect(() => f.held.recordConversationGuidanceClearance(changed as ClearanceFixture)).toThrow()
+  expect(f.held.listConversationGuidanceClearances()).toEqual([])
+})
+
+it('study clearance rechecks consent and support between permission and activation', () => {
+  const f = clearanceStudy()
+  f.held.recordConversationGuidanceClearance(f.clearance)
+  f.held.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  expect(() => f.held.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/consent/i)
+  const supported = clearanceStudy()
+  supported.held.recordConversationGuidanceClearance(supported.clearance)
+  const target = supported.tasks[0]
+  supported.held.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId: target.completion!.assistantMessageIds[0]!,
+    feedbackVersion: 'clearance-contradictory-v1', rating: 'positive', note: 'Original result is correct.', scopeKey: scope,
+    sessionDigest: sha256('clearance contradictory feedback'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  expect(() => supported.held.recordReviewedConversationGuidanceActivation(activation(supported.value))).toThrow(/support|feedback/i)
+})
+
+it('study clearance preserves static identity across activation and refuses changed first review packet or reviewer', () => {
+  const f = clearanceStudy(), study = f.held.listConversationGuidanceStudies()[0]!
+  expect(conversationGuidanceClearanceEnvironmentDigest(join(f.root, 'unused', '..'))).toBe(f.clearance.environmentDigest)
+  expect(conversationGuidanceClearanceStudyEvidenceDigest(study)).toBe(f.clearance.studyEvidenceDigest)
+  f.held.recordConversationGuidanceClearance(f.clearance)
+  for (const changed of [{ ...f.clearance, packetDigest: sha256('different saved packet') },
+    { ...f.clearance, reviewer: { ...f.clearance.reviewer, promptDigest: sha256('different reviewer instruction') } }]) {
+    expect(() => f.held.recordConversationGuidanceClearance(changed)).toThrow(/immutable|freeze/i)
+  }
+  f.held.recordReviewedConversationGuidanceActivation(activation(f.value))
+  expect(conversationGuidanceClearanceStudyEvidenceDigest(f.held.listConversationGuidanceStudies()[0]!)).toBe(f.clearance.studyEvidenceDigest)
+  expect(f.held.listConversationTasks()).toEqual(f.tasks)
+})
+
+it('study clearance replays moved historical evidence but refuses new activation in a different root', () => {
+  const f = clearanceStudy(); f.held.recordConversationGuidanceClearance(f.clearance)
+  const copy = ledgerRoot(); cpSync(f.root, copy, { recursive: true })
+  const moved = new EvolutionLedger(copy, { guidanceActivationQuarantine: true })
+  expect(moved.listConversationGuidanceClearances()).toEqual([f.clearance])
+  expect(() => moved.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/environment/i)
+  expect(() => moved.recordConversationGuidanceClearance({ ...f.clearance, environmentDigest: conversationGuidanceClearanceEnvironmentDigest(copy) })).toThrow(/immutable|freeze/i)
+  expect(moved.getConversationGuidance(scope)).toEqual(f.value.opened.parentSnapshot)
+})
+
+it('study clearance cannot grant a DEV, incomplete, rejected, old-quality or already activated study permission', () => {
+  const f = clearanceStudy()
+  const dev = conclusivePairStudy('dev-conclusive-pair.v1', ['not-met','met','met','met','met'])
+  const devDecision = dev.ledger.conversationGuidanceDecision(dev.opened.studyId); dev.ledger.recordConversationGuidance(devDecision)
+  const devValue = { ...proposalPlan(dev.opened), decision: devDecision }
+  expect(() => dev.ledger.recordConversationGuidanceClearance(clearanceFixture(dev.root, devValue))).toThrow(/formal/i)
+  const partial = seeded(), partialValue = proposed(partial.ledger, opening(partial.tasks, 'partial'))
+  for (const arm of partialValue.arms.slice(0, 9)) partial.ledger.recordConversationGuidance(arm)
+  expect(() => partial.ledger.recordConversationGuidanceClearance({ ...f.clearance, studyId: partialValue.opened.studyId })).toThrow(/complete|accepted/i)
+  const rejected = conclusivePairStudy(undefined, ['not-met','met','met','met','met'], ['not-met','met','met','met','met'])
+  const rejectDecision = rejected.ledger.conversationGuidanceDecision(rejected.opened.studyId); rejected.ledger.recordConversationGuidance(rejectDecision)
+  expect(rejectDecision.verdict).toBe('rejected')
+  expect(() => rejected.ledger.recordConversationGuidanceClearance(clearanceFixture(rejected.root, { ...proposalPlan(rejected.opened), decision: rejectDecision }, 'reject'))).toThrow(/accepted/i)
+  const old = seeded('not-met', scope, false, undefined, exactV4Quality)
+  const oldValue = historicalStudy(old.root, old.ledger, opening(old.tasks, 'old-clearance'), false)
+  expect(() => oldValue.ledger.recordConversationGuidanceClearance(clearanceFixture(old.root, oldValue))).toThrow(/quality/i)
+  const active = clearanceStudy(), writer = new EvolutionLedger(active.root)
+  writer.recordConversationGuidance(activation(active.value))
+  expect(() => writer.recordConversationGuidanceClearance(active.clearance)).toThrow(/unactivated/i)
+  expect(writer.recordReviewedConversationGuidanceActivation(activation(active.value))).toEqual({ duplicate: true })
+  expect(writer.listConversationGuidanceClearances()).toEqual([])
+})
+
+it('study clearance rechecks the current parent and leaves rolled-back activation duplicates inactive', () => {
+  const f = clearanceStudy(); f.held.recordConversationGuidanceClearance(f.clearance)
+  const writer = new EvolutionLedger(f.root)
+  const other = evaluated(writer, opening(f.tasks, 'competing-parent')); writer.recordConversationGuidance(activation(other))
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true })
+  expect(() => cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/parent/i)
+  const active = clearanceStudy(); active.held.recordConversationGuidanceClearance(active.clearance)
+  active.held.recordReviewedConversationGuidanceActivation(activation(active.value))
+  active.held.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  active.held.retireIncompatibleConversationGuidance(scope)
+  expect(active.held.listConversationGuidanceStudies()[0]!.rollback?.reason).toBe('consent-disabled')
+  expect(active.held.recordReviewedConversationGuidanceActivation(activation(active.value))).toEqual({ duplicate: true })
+  expect(active.held.getConversationGuidance(scope)).toEqual(active.value.opened.parentSnapshot)
+})
+
+it('study clearance refuses missing exact shared evaluation and permits repair through the original decision receipt', () => {
+  const f = seeded(), value = proposed(f.ledger, opening(f.tasks, 'missing-evaluation'))
+  for (const arm of value.arms) f.ledger.recordConversationGuidance(arm)
+  const decision = f.ledger.conversationGuidanceDecision(value.opened.studyId)
+  const fault = vi.spyOn(f.ledger, 'recordEvaluation').mockImplementationOnce(() => { throw new Error('scripted missing evaluation') })
+  expect(() => f.ledger.recordConversationGuidance(decision)).toThrow('scripted missing evaluation'); fault.mockRestore()
+  const full = { ...value, decision }, held = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true })
+  const clearance = clearanceFixture(f.root, full)
+  expect(() => held.recordConversationGuidanceClearance(clearance)).toThrow(/shared evaluation/i)
+  expect(held.recordConversationGuidance(decision)).toEqual({ duplicate: true })
+  expect(held.recordConversationGuidanceClearance(clearance)).toEqual({ duplicate: false })
+})
+
+it.each(['clearance', 'activation'] as const)('study clearance preserves append-unknown blocking and cold recovery for %s', stage => {
+  const f = clearanceStudy()
+  if (stage === 'activation') f.held.recordConversationGuidanceClearance(f.clearance)
+  clearanceAppendFault.sync = 1; clearanceAppendFault.read = 1
+  const write = () => stage === 'clearance' ? f.held.recordConversationGuidanceClearance(f.clearance) : f.held.recordReviewedConversationGuidanceActivation(activation(f.value))
+  expect(write).toThrow(LedgerCommitUnknownError)
+  expect(write).toThrow(LedgerCommitUnknownError)
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true })
+  expect(cold.listConversationGuidanceClearances()).toEqual([f.clearance])
+  expect(cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: stage === 'activation' })
+  expect(cold.getConversationGuidance(scope)).toEqual(f.value.candidate.candidateSnapshot)
+})
+
+it('study clearance parses human authority separately and rejects tampered or repeated persisted events', () => {
+  const f = clearanceStudy()
+  const human = { ...f.clearance, reviewer: { authority: 'human' as const, id: 'explicit-human-reviewer', promptDigest: sha256('human review instructions') } }
+  expect(parseConversationGuidanceClearance(human)).toEqual(human)
+  f.held.recordConversationGuidanceClearance(human)
+  const ledgerPath = join(f.root, 'ledger.jsonl'), before = readFileSync(ledgerPath, 'utf8')
+  const line = before.trimEnd().split('\n').at(-1)!
+  const event = JSON.parse(line)
+  expect(event.type).toBe('conversation-guidance-clearance-recorded')
+  event.clearance.armChecks[0].caseId = 'not-original-case'
+  writeFileSync(ledgerPath, before.slice(0, before.length - line.length - 1) + canonicalJson(event) + '\n')
+  expect(() => new EvolutionLedger(f.root)).toThrow(/clearance/i)
+  writeFileSync(ledgerPath, before + line + '\n')
+  expect(() => new EvolutionLedger(f.root)).toThrow(/duplicate.*clearance/i)
+  writeFileSync(ledgerPath, before)
+  expect(new EvolutionLedger(f.root).listConversationGuidanceClearances()).toEqual([human])
+})
+
+it('study clearance records sourced actors, commitments and optional advice without a blanket language ban', () => {
+  const f = clearanceStudy()
+  const clearance = { ...f.clearance, armChecks: f.clearance.armChecks.map(check => ({ ...check,
+    boundary: 'The pilot facts remain faithful. Sourced actors and commitments or labeled optional advice would be allowed; those words alone are not a boundary failure.',
+    reason: check.reason })) }
+  expect(f.held.recordConversationGuidanceClearance(clearance)).toEqual({ duplicate: false })
+  expect(f.held.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: false })
+  expect(f.held.listConversationGuidanceClearances()).toEqual([clearance])
+})
 
 it('quarantines new activation writes while retaining accepted decisions and historical active replay', () => {
   const { root, ledger, tasks } = seeded()

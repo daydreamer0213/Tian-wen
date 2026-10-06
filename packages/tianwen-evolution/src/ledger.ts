@@ -21,7 +21,8 @@ import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
 import { ConversationLearningState, effectiveConversationFamily, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
-import { ConversationGuidanceState, guidanceFileInputIdentity, guidanceVersion, parseConversationGuidanceRecord, parseConversationCaseDesignAttempt, type ConversationCaseDesignAttempt, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
+import { ConversationGuidanceState, guidanceFileInputIdentity, guidanceVersion, parseConversationGuidanceRecord, parseConversationCaseDesignAttempt, type ConversationCaseDesignAttempt, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord, type GuidanceActivationRecord } from './conversation-guidance.js'
+import { parseConversationGuidanceClearance, conversationGuidanceClearanceEnvironmentDigest, conversationGuidanceClearanceStudyEvidenceDigest, type ConversationGuidanceClearance } from './conversation-guidance-clearance.js'
 import { ConversationFeedbackState, hasVerifiedContinuingPreference, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
 import {
@@ -389,6 +390,7 @@ export type LedgerEvent =
   | GoalTaskResearchSourceRecordedEvent
   | ConversationLearningEvent
   | { readonly type: 'conversation-guidance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-record.v1', readonly at: string, readonly record: ConversationGuidanceRecord }
+  | { readonly type: 'conversation-guidance-clearance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-clearance.v1', readonly at: string, readonly clearance: ConversationGuidanceClearance }
   | { readonly type: 'conversation-case-design-attempted', readonly schemaVersion: 'tianwen.conversation-case-design-attempt.v1', readonly at: string, readonly attempt: ConversationCaseDesignAttempt }
   | { readonly type: 'conversation-feedback-recorded', readonly schemaVersion: 'tianwen.conversation-feedback.v1', readonly at: string, readonly record: ConversationFeedbackRecord }
   | LearningIntakeLedgerEvent
@@ -1907,6 +1909,11 @@ function parseEvent(value: unknown): LedgerEvent {
     if (value.schemaVersion !== 'tianwen.conversation-case-design-attempt.v1') throw new LedgerIntegrityError('invalid case design attempt schema')
     return { type, schemaVersion: value.schemaVersion, at, attempt: parseConversationCaseDesignAttempt(value.attempt) }
   }
+  if (type === 'conversation-guidance-clearance-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'clearance'])
+    if (value.schemaVersion !== 'tianwen.conversation-guidance-clearance.v1') throw new LedgerIntegrityError('invalid conversation guidance clearance schema')
+    return { type, schemaVersion: value.schemaVersion, at, clearance: parseConversationGuidanceClearance(value.clearance) }
+  }
   if (type === 'conversation-feedback-recorded') {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
     if (value.schemaVersion !== 'tianwen.conversation-feedback.v1') throw new LedgerIntegrityError('invalid conversation feedback schema')
@@ -3221,7 +3228,80 @@ export class EvolutionLedger {
     }
   }
 
+  listConversationGuidanceClearances(scopeKey?: string): readonly ConversationGuidanceClearance[] {
+    return this.#events.filter((event): event is Extract<LedgerEvent, { type: 'conversation-guidance-clearance-recorded' }> => event.type === 'conversation-guidance-clearance-recorded')
+      .map(event => event.clearance).filter(record => scopeKey === undefined || record.scopeKey === scopeKey).map(record => structuredClone(record))
+  }
+
+  recordConversationGuidanceClearance(input: ConversationGuidanceClearance): { readonly duplicate: boolean } {
+    const clearance = parseConversationGuidanceClearance(input)
+    const previous = this.listConversationGuidanceClearances().find(record => record.studyId === clearance.studyId)
+    if (previous !== undefined) {
+      if (sha256(previous) !== sha256(clearance)) throw new LedgerIntegrityError('conversation guidance clearance is immutable after freeze')
+      return { duplicate: true }
+    }
+    this.#validateConversationGuidanceClearance(clearance, true)
+    this.#accept({ type: 'conversation-guidance-clearance-recorded', schemaVersion: 'tianwen.conversation-guidance-clearance.v1', at: this.#now(), clearance })
+    return { duplicate: false }
+  }
+
+  recordReviewedConversationGuidanceActivation(input: GuidanceActivationRecord): { readonly duplicate: boolean } {
+    const record = parseConversationGuidanceRecord(input)
+    if (record.kind !== 'guidance-activated') throw new LedgerIntegrityError('reviewed activation requires an activation record')
+    // Historical duplicate activations retain their original meaning, including after rollback.
+    if (this.#conversationGuidance.existing(record) !== undefined) return this.#recordConversationGuidance(record)
+    const clearance = this.listConversationGuidanceClearances().find(item => item.studyId === record.studyId)
+    if (clearance?.verdict !== 'clear') throw new LedgerIntegrityError('reviewed activation requires persisted clear clearance')
+    this.#validateConversationGuidanceClearance(clearance, true)
+    return this.#recordConversationGuidance(record, clearance.studyId)
+  }
+
+  #validateConversationGuidanceClearance(clearance: ConversationGuidanceClearance, mutation = false): void {
+    const study = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === clearance.studyId)
+    if (study === undefined || study.candidate === undefined || study.decision?.verdict !== 'accepted'
+      || study.activation !== undefined || study.rollback !== undefined || study.stopped !== undefined || study.arms.length !== 10
+      || study.opened.decisionPolicy !== undefined) throw new LedgerIntegrityError('clearance requires a complete formal accepted unactivated study')
+    if (clearance.scopeKey !== study.opened.scopeKey || clearance.parentVersion !== study.opened.parentVersion
+      || clearance.candidateVersion !== guidanceVersion(study.candidate.candidateSnapshot)
+      || clearance.decisionDigest !== sha256(study.decision) || clearance.armsDigest !== study.decision.armsDigest
+      || clearance.studyEvidenceDigest !== conversationGuidanceClearanceStudyEvidenceDigest(study)
+      || clearance.consentRevision !== study.opened.consentRevision) throw new LedgerIntegrityError('clearance study evidence binding changed')
+    for (const item of study.opened.cases) {
+      if (['source1','source2','counterexample'].includes(item.kind)
+        && !clearance.sourceChecks.some(check => check.caseId === item.id && check.kind === item.kind)) throw new LedgerIntegrityError('clearance source checks differ from original cases')
+      for (const role of ['baseline','candidate'] as const) {
+        if (!clearance.armChecks.some(check => check.caseId === item.id && check.role === role)) throw new LedgerIntegrityError('clearance arm checks differ from original paired cases')
+      }
+    }
+    if (mutation) {
+      if (clearance.environmentDigest !== conversationGuidanceClearanceEnvironmentDigest(this.#root)) throw new LedgerIntegrityError('clearance environment binding changed')
+      this.#validateNewConversationGuidanceStudy(study.opened)
+    }
+    const artifactId = `artifact:${clearance.candidateVersion.slice(7)}` as ArtifactId
+    if (!this.#artifacts.has(artifactId) || this.readSource(artifactId) !== canonicalJson(study.candidate.candidateSnapshot)) throw new LedgerIntegrityError('clearance requires the exact shared candidate artifact')
+    this.#validateConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId, expectedParentVersion: clearance.parentVersion, decisionDigest: clearance.decisionDigest })
+  }
+
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
+    return this.#recordConversationGuidance(input)
+  }
+
+  #validateNewConversationGuidanceStudy(opened: GuidanceStudyOpened | undefined): void {
+    if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
+    const generatedFileInputs = new Set<string>()
+    for (const item of opened!.cases) {
+      if (!('prompt' in item) || item.files === undefined) continue
+      const identity = guidanceFileInputIdentity(item.prompt, item.files)
+      if (generatedFileInputs.has(identity)) throw new LedgerIntegrityError('duplicate generated file input cannot support a new study or activation')
+      generatedFileInputs.add(identity)
+    }
+    if (opened!.nativeGoalSources === undefined) {
+      this.#requireNewConversationCounterevidence(opened!.counterexampleTaskId)
+      this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
+    }
+  }
+
+  #recordConversationGuidance(input: ConversationGuidanceRecord, clearedStudyId?: string): { readonly duplicate: boolean } {
     const record = parseConversationGuidanceRecord(input)
     const previous = this.#conversationGuidance.existing(record)
     if (previous !== undefined) {
@@ -3236,25 +3316,14 @@ export class EvolutionLedger {
       && record.kind !== 'guidance-rolled-back' && record.kind !== 'study-stopped') {
       throw new LedgerIntegrityError('DEV guidance decision policy mutations are quarantined')
     }
-    if (record.kind === 'guidance-activated' && this.#guidanceActivationQuarantine) {
+    if (record.kind === 'guidance-activated' && this.#guidanceActivationQuarantine && clearedStudyId !== record.studyId) {
       throw new LedgerIntegrityError('conversation guidance activation is quarantined')
     }
     // This gate is intentionally mutation-only: replay must retain the exact
     // original meaning of pre-contract studies, decisions and activations.
     if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
       const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
-      if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
-      const generatedFileInputs = new Set<string>()
-      for (const item of opened!.cases) {
-        if (!('prompt' in item) || item.files === undefined) continue
-        const identity = guidanceFileInputIdentity(item.prompt, item.files)
-        if (generatedFileInputs.has(identity)) throw new LedgerIntegrityError('duplicate generated file input cannot support a new study or activation')
-        generatedFileInputs.add(identity)
-      }
-      if (opened!.nativeGoalSources === undefined) {
-        this.#requireNewConversationCounterevidence(opened!.counterexampleTaskId)
-        this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
-      }
+      this.#validateNewConversationGuidanceStudy(opened)
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
     if (record.kind === 'study-opened') {
@@ -7513,6 +7582,7 @@ export class EvolutionLedger {
         parsed.type === 'conversation-learning-recorded'
         || parsed.type === 'goal-task-research-source-recorded'
         || parsed.type === 'conversation-guidance-recorded'
+        || parsed.type === 'conversation-guidance-clearance-recorded'
         || parsed.type === 'conversation-case-design-attempted'
         || parsed.type === 'conversation-feedback-recorded'
         || parsed.type === 'initial-run-skill-binding-recorded'
@@ -7621,6 +7691,11 @@ export class EvolutionLedger {
     }
     if (event.type === 'conversation-guidance-recorded') {
       this.#validateConversationGuidance(event.record)
+      return
+    }
+    if (event.type === 'conversation-guidance-clearance-recorded') {
+      if (this.listConversationGuidanceClearances().some(record => record.studyId === event.clearance.studyId)) throw new LedgerIntegrityError('duplicate conversation guidance clearance event')
+      this.#validateConversationGuidanceClearance(event.clearance)
       return
     }
     if (event.type === 'conversation-case-design-attempted') {
@@ -9187,6 +9262,7 @@ export class EvolutionLedger {
       this.#conversationGuidance.apply(event.record, event.at)
       return
     }
+    if (event.type === 'conversation-guidance-clearance-recorded') return
     if (event.type === 'conversation-feedback-recorded') {
       this.#conversationFeedback.apply(event.record, event.at)
       return

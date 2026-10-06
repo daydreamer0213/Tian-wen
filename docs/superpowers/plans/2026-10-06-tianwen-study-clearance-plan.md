@@ -22,10 +22,10 @@ Owner implement_scope_repair_operator，ONLY packages/tianwen-evolution/src/conv
 
 Interfaces: export ConversationGuidanceClearance, parseConversationGuidanceClearance, conversationGuidanceClearanceEnvironmentDigest(root), conversationGuidanceClearanceStudyEvidenceDigest(study)。EvolutionLedger及TianwenEvolutionService新增recordConversationGuidanceClearance(input): {duplicate:boolean}、listConversationGuidanceClearances(scopeKey?): readonly ConversationGuidanceClearance[]、recordReviewedConversationGuidanceActivation(input: GuidanceActivationRecord): {duplicate:boolean}。字段和许可门槛按设计。不要暴露global-quarantine=false开关，不修改原ConversationGuidanceRecord schema或human ApprovalRecord。
 
-- [ ] 用已有正式完整accepted、当前v12 fixture（清晰脚本化，无真实provider宣称）增加RED：默认直写activation仍拒绝，正确许可可专用激活并冷恢复；同一写入duplicate，冲突/错误study/candidate/digest/profile/consent/parent/support、DEV与历史激活不准获新许可；reject/insufficient不激活。观察实际RED后最小实现。
-- [ ] 独立许可事件严格parse/完整回放/复制返回，完整记录source3/arm10，不造SDKproof、不改研究decision；许可内容canonical绑定，clear仅候选5/来源明确clear。
-- [ ] 专用入口重查现行授权并复用原activation校验，只跳过本项隔离拒绝；普通记录路径仍拒绝。许可后未activation的重启恢复可用，已有activation/rollback不再生效；LedgerCommitUnknown沿旧规则。
-- [ ] GREEN新增检查、完整原conversation-guidance-ledger及相关guidance schema回归，保留首次失败；报告真实执行计数/退出码/确切diff/限制，0模型/0build/0commit。大型temp全部D。停写交独立spec与quality复核。
+- [x] 用已有正式完整accepted、当前v12 fixture（清晰脚本化，无真实provider宣称）增加RED：默认直写activation仍拒绝，正确许可可专用激活并冷恢复；同一写入duplicate，冲突/错误study/candidate/digest/profile/consent/parent/support、DEV与历史激活不准获新许可；reject/insufficient不激活。观察实际RED后最小实现。
+- [x] 独立许可事件严格parse/完整回放/复制返回，完整记录source3/arm10，不造SDKproof、不改研究decision；许可内容canonical绑定，clear仅候选5/来源明确clear。
+- [x] 专用入口重查现行授权并复用原activation校验，只跳过本项隔离拒绝；普通记录路径仍拒绝。许可后未activation的重启恢复可用，已有activation/rollback不再生效；LedgerCommitUnknown沿旧规则。
+- [x] GREEN新增检查、完整原conversation-guidance-ledger及相关guidance schema回归，保留首次失败；报告真实执行计数/退出码/确切diff/限制，0模型/0build/0commit。大型temp全部D。停写交独立spec与quality复核。
 
 ### Task16：Runtime普通产品的受信独立审查与即时/恢复采用
 
