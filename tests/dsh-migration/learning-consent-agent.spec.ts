@@ -26,6 +26,7 @@ import {
   type ConversationAdmissionDecision,
   type ConversationFeedbackAssessment,
   type ConversationTask,
+  type ConversationGuidanceClearance,
   type GuidanceSnapshot,
   type GuidanceStudy,
   type GuidanceArmRecord,
@@ -832,6 +833,24 @@ describe('Tianwen main-chat learning consent tool', () => {
           activationPending: { total: 4, independentResultsNotSatisfied: 2, quarantined: 4, reasonUnestablished: 0 },
         } } },
       } })
+      const savedClearances = vi.spyOn(evolution, 'listConversationGuidanceClearances').mockReturnValue([
+        { studyId: studies[0]!.opened.studyId, scopeKey: scope, verdict: 'clear' },
+        { studyId: studies[1]!.opened.studyId, scopeKey: scope, verdict: 'reject' },
+        { studyId: studies[5]!.opened.studyId, scopeKey: 'PRIVATE wrong workspace', verdict: 'clear' },
+      ] as ConversationGuidanceClearance[])
+      const withClearance = await executeLearningStatus(mounted.ctx, main.agent)
+      expect(withClearance).toMatchObject({ value: {
+        conversationGuidanceActivation: { quarantined: true },
+        history: { naturalConversation: { guidanceStudies: { activationPending: {
+          total: 5, independentResultsNotSatisfied: 3, independentClearanceRecorded: 1, quarantined: 4, reasonUnestablished: 1,
+        } } } },
+        currentSession: { naturalConversation: { guidanceStudies: { activationPending: {
+          total: 4, independentResultsNotSatisfied: 2, independentClearanceRecorded: 1, quarantined: 3, reasonUnestablished: 1,
+        } } } },
+      } })
+      expect(JSON.stringify(withClearance.value)).toContain('exact independent clear clearance')
+      expect(JSON.stringify(withClearance.value)).not.toContain('PRIVATE')
+      savedClearances.mockReturnValue([])
       vi.spyOn(evolution, 'isConversationGuidanceActivationQuarantined').mockReturnValue(false)
       const unquarantined = await executeLearningStatus(mounted.ctx, main.agent)
       expect(unquarantined).toMatchObject({ value: {
