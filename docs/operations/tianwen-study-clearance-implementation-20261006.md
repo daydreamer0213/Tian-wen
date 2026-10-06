@@ -9,3 +9,5 @@ Task15已完成源码实现并通过独立规范和质量审查。它让默认�
 实现回执：D:/DevData/tianwen-study-clearance-tests-20261006/task15/task-15-implementation-report.md（SHA256 af6321cc0013324ccb74fccf1bf1d96f03adc6e3cb84ea58b0c214101df1f1df）。独立审查：同目录task-15-code-review.md。改动仅Evolution新许可模块、ledger/runtime-binding/index及原ledger测试五文件。下一按已提交计划实现普通Runtime可信宿主：无原票完整投影、首个原生结果及证明保存、可序列化配置与三入口统一恢复；宿主负责把packetDigest和审查者身份绑定实际材料，不能把合成fixture当真实AI审查。
 
 D盘最近实核17,604,108,288字节，约16.40GiB，满足15GiB最低要求但未到20GiB。原包管理器缓存完整性检查退出0，本次可测前后空间相同；不虚报清理收益，不复制依赖或删除历史原生证明。
+
+后续公开兼容已实际完成：原完整构建16/16退出0，完成时HEAD为2824aafda3679e8b11580da3d4cabab1ad996e89（相对e25af663仅接入设计文档变化，生产源码相同），runtime SHA256 2f1b9f1daa8525e0c270f03047835c774db362271052b9823b1ba272c63ba61d。当前实现零模型恢复旧11个反馈证明、22个审核证明及Task12完整研究原26个审核/执行材料，旧原票未改、无失效证明。构建与兼容回执在D:/DevData/tianwen-study-clearance-controller-20261006。此构建尚未包含Task16接线，不能称普通产品会自动审查。
