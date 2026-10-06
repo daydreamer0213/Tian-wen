@@ -1,5 +1,14 @@
 # Tianwen 当前项目权威交接
 
+## 2026-10-06 当前：长期范围首次实测有效，原生研究已启动，完整目标仍 active
+
+共同未来范围最窄修复 de3953af 原机制 red2→green30、原完整公开构建16步/138回归/私有导入0。全新普通 L1/L2/O1，30真实/0脚本，三原任务双met及6proof；L1/L2原 preference和两组3/4 continuing，四反馈/范围proof有效。O1一次性要求因预算耗尽 unavailable，不算对照通过。系统原生提出候选并运行 source1 baseline 双not-met1臂后原 study-stopped:model-unavailable，未决策/未激活，旧票不改。
+
+独立终态审查无P1/P2，原caseDesign/提案/执行/双研究证明可恢复；单会话退出记录尾部仅step/end+预算turn/end，原成功auditor CLI1保留，独立终态audit0/30请求绑定/两个被预算拒绝step0provider。关闭rev2/quarantine/cold0，150源码1472旧证据匹配后解除冻结；重复snapshot逐字gzip释放7,680,517字节，D约16.58GiB>=15。详见[tianwen-shared-future-scope-result-20261006.md](tianwen-shared-future-scope-result-20261006.md)。
+
+当前目标仍active，main/Daily原NO-GO/0.1.24与preview.25保持。下一主动设计新支持+一次性对照+干净正常控制，精确关闭前账本分支保留原stopped/attempt而不重跑旧pair，经原DEV决策/激活后才核新后任务效果、语义安全、无关注入及撤回。生成物D:/DevData/tianwen-shared-future-learning-controller-20261006；不新增门槛、不等用户出题。
+
+
 ## 2026-10-06 最新推进：完整自动学习目标 active，共同未来范围接缝
 
 用户在 0fd42178 有限阶段收口后明确要求继续开启目标模式。新目标为完整自动学习的可审查产品交付；不得因一轮诊断、实现或实验结束就标整体完成。旧收口结果和 main/Daily NO-GO 保持。当前 N3 真实 scope 推理读到了完整长期声明，但选取独立短句时丢失共同未来限定；F3 模拟首 scope 全 unclear 且原标准混入任务领取步骤，不能当纯净范围效果基线。A2 采用/生效和 E2 承诺/会发送有实际语义差异，尚不能直接定为误判，不重评旧票或强迫其通过。
