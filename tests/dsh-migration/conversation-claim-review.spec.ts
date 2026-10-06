@@ -402,6 +402,65 @@ it.each(['exact', 'cross-unit', 'invented', 'criterion'] as const)('captures sho
   } finally { await cold.ctx.fiber.dispose() }
 })
 
+it.each((['original-result', 'method-study'] as const).flatMap(purpose => ['\n', ' \t'].map(blank => ({ purpose, blank }))))('rejects whitespace-only summary quotes before capture and cold-recovers the same-child correction: $purpose / $blank', async ({ purpose, blank }) => {
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-development-runtime'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'summary-blank-capture-')); roots.push(root)
+  const answer = blank === '\n' ? '描图纸已可借用。\n\n压纸夹尚待登记。' : `描图纸已可借用。\n${blank}\n压纸夹尚待登记。`
+  const material = boundaryMaterial(purpose, '按记录给两段正文，不添加状态：描图纸已可借用；压纸夹尚待登记。', answer)
+  const evidence = projectClaimEvidence(material)
+  expect(evidence.items.some(item => item.text.includes(blank))).toBe(true)
+  const exactQuote = evidence.items.find(item => item.role === 'answer' && item.text.trim() !== '')!.text
+  expect(exactQuote.endsWith('\n')).toBe(true)
+  const good = { verdict: 'met', category: null, explanation: 'Scripted capture/parser parity fixture, not model semantic performance.', evidenceQuotes: [exactQuote], audit: auditFor(evidence) }
+  const bad = { ...structuredClone(good), evidenceQuotes: [blank] }
+  let correctionSeen = false
+  const harness = await mountPersistentHarness(root, [
+    toolCallResponse('summary-blank-first', 'structured_output', bad),
+    request => {
+      correctionSeen = JSON.stringify(request.messages).includes('Invalid evidenceQuotes item 1')
+      return toolCallResponse('summary-blank-corrected', 'structured_output', good)
+    },
+    toolCallResponse('summary-blank-independent', 'structured_output', good),
+  ])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('summary-blank-parent'), meta: { cwd: root }, agentOptions: boundaryConfig })
+  let checks!: Awaited<ReturnType<typeof runConversationClaimReview>>['reviewChecks']
+  try {
+    const review = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'Nonblank summary quote', purpose, material,
+      evidence: evidence.items.map(item => item.text), signal: new AbortController().signal, callConfig: boundaryConfig })
+    expect(review.verdict).toBe('met'); checks = review.reviewChecks
+    expect(correctionSeen).toBe(true)
+    expect(harness.adapter.requests).toHaveLength(3)
+    expect(harness.adapter.requests[0]!.sessionId).toBe(harness.adapter.requests[1]!.sessionId)
+    expect(harness.adapter.requests[2]!.sessionId).not.toBe(harness.adapter.requests[0]!.sessionId)
+    expect(checks.every(check => check.evidenceQuotes[0] === exactQuote)).toBe(true)
+    const saved = await harness.ctx.sessionPersistence.inspect(SessionId(checks[0].proof.sessionId))
+    const calls = saved.events.filter(event => event.type === 'tool/call' && event.data.name === 'structured_output')
+    expect(calls).toHaveLength(2)
+    expect(JSON.parse(calls[0]!.data.arguments).evidenceQuotes).toEqual([blank])
+    const results = saved.events.filter(event => event.type === 'tool/result').flatMap(event => event.data.message.content.filter(block => block.type === 'tool-result'))
+    expect(results.some(result => result.isError)).toBe(true)
+    expect(results.filter(result => !result.isError)).toHaveLength(1)
+  } finally {
+    const diagnosticRoot = process.env.TIANWEN_SUMMARY_QUOTE_EVIDENCE_ROOT
+    if (diagnosticRoot !== undefined && harness.adapter.requests.length > 0) {
+      mkdirSync(diagnosticRoot, { recursive: true })
+      const firstChild = await harness.ctx.sessionPersistence.inspect(SessionId(String(harness.adapter.requests[0]!.sessionId)))
+      writeFileSync(join(diagnosticRoot, `${purpose}-${blank === '\n' ? 'newline' : 'spaces-tabs'}.json`), JSON.stringify({ scripted: true, actualProviderCalls: 0, correctionSeen, requests: harness.adapter.requests.length, firstChild }), { flag: 'wx' })
+    }
+    await handle.dispose(); await harness.ctx.fiber.dispose()
+  }
+  const cold = await mountPersistentHarness(root, [])
+  try {
+    for (const check of checks) {
+      if (purpose === 'original-result') await verifyConversationOriginalReviewCheck(cold.ctx, check, material, sha256(boundaryConfig))
+      else await verifyConversationClaimReviewCheck(cold.ctx, check, { purpose, materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(boundaryConfig) })
+      expect(await recoverConversationJudgmentRequest(cold.ctx, check)).toMatchObject({ material: { original: material, claimEvidence: evidence } })
+    }
+    expect(cold.adapter.requests).toHaveLength(0)
+  } finally { await cold.ctx.fiber.dispose() }
+})
+
 it.each(['plain-text', 'summary-quote', 'answer-quote', 'malformed-json', 'string-object'] as const)('repairs original review submission in the same native session: %s', async mode => {
   const base = process.env.TIANWEN_FILE_TEST_ROOT ?? 'D:/DevData/tianwen-conversation-tests'
   mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'review-repair-')); roots.push(root)

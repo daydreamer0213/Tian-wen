@@ -6,8 +6,9 @@ Task31普通自动学习已完成原正式研究、首独立许可、激活、�
 
 - [x] 原实际源冻结释放；设计独立PASS。
 - [x] 单一生产文件改动和既有完整版本兼容spec适配；机械SDK专项RED28（尚未实现现行producer，非模型语义失败），claim+judgment全量242/242实际GREEN，零真实provider。
-- [ ] 独立source/spec/operator/author复核；原公开构建、实际运行入口、严格旧190及Task31原证明零模型恢复。
-- [ ] 新profile实际预检0模型；六新模拟固定交付首次原双审，3普通original-result及3method-study；私有预期不入模型。
-- [ ] 独立文本检查后原票对照、SDK完整envelope绑定、终审及actual close；原门槛总体收口盘点。
+- [x] 独立source/spec/operator/author复核；原公开16/入口8/types/imports0，旧190/57及Task31原证明零模型恢复；首收据摘要错误保留并v2修正。
+- [x] 新profile实际预检0模型；六新模拟固定交付首次12实际，5有效预期匹配，P5纯换行summary quote晚parse拒而typed-invalid；不称六项全过。
+- [x] 独立文本后对票；失败补审全12SDK envelope绑定/19会话，终态结构PASS及actual失败close0保留invalid1；原source冻结已释放。
+- [ ] Task33仅提前现有非空白摘要引文校验，有限SDK纠正/新实际正常交付后按原门槛收口；不重评P5或重开研究/效果。
 
 固定面板检查单段多句、真实空行、显式一句话、待办独立句、明确两段许可及未请求标题/列表。只提供这六条有限边界证据，不冒称新主答生成/新学习效果，不重评旧pair、不第三票、不重开已经成立的研究采用链路。最多30请求/15分钟，结果不确定原样保留。运行文件D:/DevData/tianwen-paragraph-boundary-controller-20261007，复用原环境/依赖，无全副本；D>=15GiB优先20，已拒绝scratch删除不绕过。goal active，main/Daily原NO-GO。

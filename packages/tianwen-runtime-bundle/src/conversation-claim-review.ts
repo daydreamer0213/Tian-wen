@@ -482,7 +482,7 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
     if (hintedBytes <= 98_304 && hintedBytes - bareBytes <= 16_384) schema = hinted
   }
   const invalidSummaryQuoteIndex = (quotes: readonly unknown[]) => quotes.findIndex(quote =>
-    typeof quote !== 'string' || quote.length === 0 || (quoteChoices === undefined
+    typeof quote !== 'string' || quote.trim().length === 0 || (quoteChoices === undefined
       ? !evidence.items.some(item => item.text.includes(quote)) : !quoteChoices.includes(quote)))
   const check = async (focus: 'requirements' | 'grounding', signal: AbortSignal): Promise<AuditedCheck> => {
     const result = await runConversationJudgment(ctx, parent, { ...input, signal, material, label: `${input.label} ${focus}`,
@@ -505,7 +505,7 @@ export async function runConversationClaimReview(ctx: Context, parent: Agent, in
         }
         if (Array.isArray(value.evidenceQuotes)) {
           const index = invalidSummaryQuoteIndex(value.evidenceQuotes)
-          if (index !== -1) return `Invalid evidenceQuotes item ${index + 1}: copy a non-empty exact quote from one supplied claimEvidence item, preserving punctuation and whitespace.`
+          if (index !== -1) return `Invalid evidenceQuotes item ${index + 1}: copy a non-blank exact quote from one supplied claimEvidence item, preserving punctuation and whitespace. Spaces, tabs or line breaks alone are not a valid quote; original whitespace within or around a quote containing source or answer text remains allowed.`
         }
         // The current capture schema is v2. Check quotes before parsing the
         // audit: empty/whitespace quotes otherwise fail with a generic parse

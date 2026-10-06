@@ -1,3 +1,8 @@
+## 2026-10-07 当前：单段多句不再误拒，处理摘要引文晚校验
+
+Task32源015a9424：原SDK242/242、public16/入口8/types/imports0、旧190审核/57trial及Task31原研究/效果/许可证明零模型恢复通过。新六例首次12真实，单段多句和待办独立句双met、真实分段/明确一句话/标题列表违约双not-met，共5有效匹配；P5允许两段，两raw输出met，但一个summary quote只有换行，native先记录、原最后parser拒绝，故typed-invalid，不算第六通过或语义false-NOT。原audit invalid1保持；失败补审全12SDK绑定/19会话/4162冻行不变，终审结构PASS及actual失败close0已释放。见[tianwen-paragraph-boundary-result-20261007.md](tianwen-paragraph-boundary-result-20261007.md)。
+
+Task31已成功的普通研究/首许可/启用/两个原效果保持，不重开。Task33只将已有非空白引文规则提前capture、同child自行纠正；两新有限正常材料，不重评旧P5或第三票，不加自然等待或普遍准确率门槛。goal active/mainDaily原NO-GO；D约16GiB>=15未20，scratch清理blocked by policy未执行未绕过。
 # 天问验证总表：已有证明、剩余缺口与补测必要性
 
 ## 2026-10-06 最新收口：引用真实纠错通过，有限语义证据保持

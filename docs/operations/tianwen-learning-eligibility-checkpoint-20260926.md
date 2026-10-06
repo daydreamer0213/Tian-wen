@@ -1,3 +1,8 @@
+## 2026-10-07 当前：单段多句不再误拒，处理摘要引文晚校验
+
+Task32源015a9424：原SDK242/242、public16/入口8/types/imports0、旧190审核/57trial及Task31原研究/效果/许可证明零模型恢复通过。新六例首次12真实，单段多句和待办独立句双met、真实分段/明确一句话/标题列表违约双not-met，共5有效匹配；P5允许两段，两raw输出met，但一个summary quote只有换行，native先记录、原最后parser拒绝，故typed-invalid，不算第六通过或语义false-NOT。原audit invalid1保持；失败补审全12SDK绑定/19会话/4162冻行不变，终审结构PASS及actual失败close0已释放。见[tianwen-paragraph-boundary-result-20261007.md](tianwen-paragraph-boundary-result-20261007.md)。
+
+Task31已成功的普通研究/首许可/启用/两个原效果保持，不重开。Task33只将已有非空白引文规则提前capture、同child自行纠正；两新有限正常材料，不重评旧P5或第三票，不加自然等待或普遍准确率门槛。goal active/mainDaily原NO-GO；D约16GiB>=15未20，scratch清理blocked by policy未执行未绕过。
 ## 2026-10-07 当前：普通自动学习已完成正式研究、方法启用和两个后续效果
 
 Task31首次82真实/0脚本：两项whole持续偏好进入原正式十臂，五候选met、来源基线OR和正常对照成立；原native独立首许可clear，Runtime实际启用。两份原未来任务六标准效果均met，实际请求含方法，无关/撤权后无方法；原rev2回滚、cold真挂载0模型/ledger不变，82/82SDK绑定、终审PASS及actual close0。future2普通Task原requirements误以“四句不是一段”判NOT、grounding MET，故原inconclusive保留，不能用效果票替换。成功是更明确公开模拟环境的普通产品链路，不是自然满意度、Task29细粒度并句条件或单条提示的独立因果证明。见[tianwen-method-construction-prospective-result-20261007.md](tianwen-method-construction-prospective-result-20261007.md)。
