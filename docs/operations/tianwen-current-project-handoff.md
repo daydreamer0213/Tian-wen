@@ -1,3 +1,9 @@
+## 2026-10-07 最新：原CI三项已绿，修复剩余Desktop ACL超时
+
+原Task38 CI37549195023：Python/TypeScript/installer-windows成功，Desktop12失败已捕获ETIMEDOUT。Task39保留原预算/完整ACL/stock，补5标准Windows启动路径、只在owner实际不符时修正；隔离RED1→GREEN1、类型0、原5Desktop本地229/229含实际native启动。只读审查诊断旧env的P2已改同产品helper，待最新专项/原四CI；尚不报云端绿。E程序127文件及保护数据45文件5.6MB均逐hash/后者private ACL；原Daily47hash/024/preview25未改。D15.4GiB>=15未20。目标active，main/Daily暂NO-GO；仅余原发布CI及实际受管交付，不重开Task31/33，不增标准。见[tianwen-desktop-acl-startup-result-20261007.md](tianwen-desktop-acl-startup-result-20261007.md)。
+
+以下保留当时记录，以本节为当前状态。
+
 ## 2026-10-07 最新：自动学习闭环已完成，修复原发布 CI
 
 Task36 clean候选已构建、110/110、pack及Desktop成品审计0；Task35完整Python v2实际611通过/4原跳过。PR6首准确CI仅Python成功，Linux测试路径、Windows受管fixture和Desktop观察准备三项失败保留。当前Task37原四套436/436、bundle81/81、native28/28（含实际启动），两独立审查PASS；下一原云端复验与Desktop失败诊断，不重开Task31/33、不增学习标准。实际Daily两Profile仍0.1.24，47受保护文件/快捷方式摘要未变，未安装。整体goal active/mainDaily暂NO-GO；D约15.4GiB>=15未20，pytest残余删除又被自动审批blocked by policy拒绝、未执行未绕过。详见[tianwen-release-ci-portability-result-20261007.md](tianwen-release-ci-portability-result-20261007.md)。

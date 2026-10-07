@@ -116,6 +116,14 @@ foreach ($sid in @($current, $system) | Select-Object -Unique) {
 $info.SetAccessControl($acl)
 $actual = $info.GetAccessControl()
 $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+if ($owner -ne $current.Value) {
+  # Establish the private DACL first, so current already has WRITE_OWNER.
+  # Do not request an owner change when the existing owner is already correct.
+  $actual.SetOwner($current)
+  $info.SetAccessControl($actual)
+  $actual = $info.GetAccessControl()
+  $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+}
 $expected = @($current.Value, $system.Value) | Select-Object -Unique
 $rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
 if (!$actual.AreAccessRulesProtected -or $owner -ne $current.Value -or $rules.Count -ne $expected.Count) {
@@ -134,6 +142,20 @@ foreach ($rule in $rules) {
 }
 `
 
+/** Required Windows startup paths only; never forward provider credentials. */
+export function nativeObservationWindowsEnvironment(source: NodeJS.ProcessEnv, path: string): NodeJS.ProcessEnv {
+  const systemRoot = source.SystemRoot ?? 'C:\\Windows'
+  const environment: NodeJS.ProcessEnv = {
+    SystemRoot: systemRoot,
+    windir: source.windir ?? systemRoot,
+    TIANWEN_OBSERVATION_ACL_PATH: path,
+  }
+  for (const key of ['TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'] as const) {
+    if (source[key] !== undefined) environment[key] = source[key]
+  }
+  return environment
+}
+
 function secureLaunchDirectory(path: string): void {
   if (process.platform !== 'win32') return
   const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
@@ -146,11 +168,7 @@ function secureLaunchDirectory(path: string): void {
     '-EncodedCommand',
     Buffer.from(windowsAclScript, 'utf16le').toString('base64'),
   ], {
-    env: {
-      SystemRoot: systemRoot,
-      windir: process.env.windir ?? systemRoot,
-      TIANWEN_OBSERVATION_ACL_PATH: path,
-    },
+    env: nativeObservationWindowsEnvironment(process.env, path),
     maxBuffer: 8192,
     timeout: 10_000,
     windowsHide: true,

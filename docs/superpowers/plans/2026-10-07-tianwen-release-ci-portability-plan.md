@@ -22,3 +22,11 @@ Desktop仍12例stock失败约10秒，与原ACL子进程10秒deadline一致；pro
 本地DEV两原控制加ordinary对照3/3已通过（其余175未选）；不把管理员fixture设置失败算RED。
 
 Task38本地三控制3/3、最新launch首例1/1退出0；原public-repository严格workflow快照RED1/26保留，逐字同步Windows两原控制后27/27。expected长行ruff失败以原精确command变量替换，等值断言保持。既有独立reviewer只读PASS；总耗时最坏受ACL快照影响，若下一CI诊断本身timeout只能如实保留，不能捏造根因。
+
+## Task39：已捕获ACL超时的最小修复
+
+Task38原云端Desktop仍12失败；另自有目录精确脚本/minimalenv已捕获ETIMEDOUT/statusnull/SIGTERM/stderr空/5017ms，原prod预算10s未改。保留此RED。Linux自然学习已过，原其余job仍待终态，不提前报全绿。
+
+修复仅允许PS继承Windows运行必需TEMP/TMP/USERPROFILE/APPDATA/LOCALAPPDATA，不整体透传环境或模型密钥，保持NoProfile/原10s/fallback/完整ACL验证。先应用原私有DACL，再仅实际owner非当前时单独设当前owner；不无条件写owner，避免无必要WRITE_OWNER请求。原hostile ACL/启动28套保持覆盖，原4CI验证真实云端差异。
+
+E保护数据45files5,632,873B已严格current/SYSTEM ACL复制/逐hash，无共享SDK、不移动原件；首次备份ACL无条件SetOwner当前（原owner已是当前）在WRITE_OWNER失败、0文件复制；v2只设DACL并原owner核验成功，失败收据保留。D旧managed树184,030,074逻辑字节，25973硬链接，1787junction；当前15.4GiB、按完整旧树额外copy后尚约247MB余量，实际安装仍需逐阶段空间核验。

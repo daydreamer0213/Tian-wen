@@ -37,6 +37,7 @@ const task4EvidenceRoot = resolve(
 )
 
 interface LaunchModule {
+  nativeObservationWindowsEnvironment(source: NodeJS.ProcessEnv, path: string): NodeJS.ProcessEnv
   prepareNativeObservationLaunch(
     target: {
       nodeExecutable: string
@@ -368,6 +369,25 @@ afterEach(() => {
 })
 
 describe('Tianwen native observation launch preparation', () => {
+  it('keeps Windows startup paths without forwarding provider credentials or arbitrary environment', async () => {
+    const launch = await loadLaunchModule()
+    expect(launch?.nativeObservationWindowsEnvironment).toBeTypeOf('function')
+    const source = {
+      SystemRoot: 'C:/Windows', windir: 'C:/Windows',
+      TEMP: 'D:/DevData/owned-temp', TMP: 'D:/DevData/owned-temp',
+      USERPROFILE: 'D:/DevData/owned-user', APPDATA: 'D:/DevData/owned-user/roaming', LOCALAPPDATA: 'D:/DevData/owned-user/local',
+      OPENAI_API_KEY: 'private-fixture-token', DEEPSEEK_API_KEY: 'private-fixture-token',
+      TIANWEN_TOKEN: 'private-fixture-token', PATH: 'unrelated-path', PSModulePath: 'unrelated-modules',
+    }
+    const path = 'D:/DevData/owned-launch'
+    expect(launch!.nativeObservationWindowsEnvironment(source, path)).toEqual({
+      SystemRoot: source.SystemRoot, windir: source.windir, TIANWEN_OBSERVATION_ACL_PATH: path,
+      TEMP: source.TEMP, TMP: source.TMP, USERPROFILE: source.USERPROFILE, APPDATA: source.APPDATA, LOCALAPPDATA: source.LOCALAPPDATA,
+    })
+    expect(launch!.nativeObservationWindowsEnvironment({}, path)).toEqual({
+      SystemRoot: 'C:\\Windows', windir: 'C:\\Windows', TIANWEN_OBSERVATION_ACL_PATH: path,
+    })
+  })
   it('uses native bundle, profile, and home composition to render only two lossless observer rows', async () => {
     const launch = await loadLaunchModule()
     expect(launch, 'native observation launch helper is not implemented').toBeDefined()
@@ -393,12 +413,11 @@ describe('Tianwen native observation launch preparation', () => {
       if (script !== undefined) {
         const diagnosticRoot = join(fixture.paths.stateRoot, 'acl-failure-diagnostic')
         mkdirSync(diagnosticRoot)
-        const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'
         const diagnosticStartedAt = Date.now()
         try {
           execFileSync(windowsPowerShell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
             '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {
-            env: { SystemRoot: systemRoot, windir: process.env.windir ?? systemRoot, TIANWEN_OBSERVATION_ACL_PATH: diagnosticRoot },
+            env: launch.nativeObservationWindowsEnvironment(process.env, diagnosticRoot),
             // Bound failure-only diagnostics inside the original 20s test deadline.
             maxBuffer: 8192, timeout: 5000, windowsHide: true,
           })
