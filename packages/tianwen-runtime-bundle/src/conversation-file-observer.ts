@@ -7,7 +7,7 @@ import { CAPTURED_FILE_FACTS_TOOL, capturedFileFacts, conversationFileCaptureOut
 import { isAbsolute } from 'node:path'
 import { TIANWEN_CONTROLLED_AGENT_PRESET } from '@tianwen/runtime'
 import { conversationFilePath, readConversationFile } from './conversation-file-material.js'
-import { ConversationFileAncillaryCapture, isCreatedFileMissingRead, isFileAncillaryTool, verifyConversationFileAncillary, type ConversationFileAncillaryConfig } from './conversation-file-ancillary.js'
+import { ConversationFileAncillaryCapture, isCreatedFileMissingRead, isFileAncillaryTool, recordedFilePath, verifyConversationFileAncillary, type ConversationFileAncillaryConfig } from './conversation-file-ancillary.js'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 declare module '@deepseek-ai/cordis' {
@@ -21,6 +21,7 @@ interface CaptureState {
   readonly cwd: string
   readonly outputKind: 'files' | 'chat'
   readonly captures: Map<string, Promise<void>>
+  readonly captureReservations: Map<string, Promise<void>>
   readonly outputPaths: Map<string, string>
   readonly successfulReads: Set<string>
   readonly missingReads: Map<string, string>
@@ -187,7 +188,7 @@ export class TianwenConversationFileObserverService extends Service {
     let state = this.states.get(task.source.taskId)
     if (state === undefined) {
       state = { taskId: task.source.taskId, sessionId: task.source.sessionId, consentRevision: task.source.consentRevision, cwd, outputKind,
-        captures: new Map(), outputPaths: new Map(), successfulReads: new Set(), missingReads: new Map(), unavailable: false, revoked: false,
+        captures: new Map(), captureReservations: new Map(), outputPaths: new Map(), successfulReads: new Set(), missingReads: new Map(), unavailable: false, revoked: false,
         native: new ConversationFileAncillaryCapture(this.ctx, task, cwd, this.config) }
       this.states.set(task.source.taskId, state)
     }
@@ -207,6 +208,29 @@ export class TianwenConversationFileObserverService extends Service {
       this.unavailable(state, 'unsupported-tool')
       return next()
     }
+    // Reserve the first call before asynchronous path validation can reorder aliases.
+    // This groups captures only; every caller still validates its path and tools stay concurrent.
+    const candidate = nativePath(exec)
+    const reservationKey = (exec.name === 'read' || exec.name === 'write' || exec.name === 'edit' || exec.name === CAPTURED_FILE_FACTS_TOOL)
+      && exec.parent === undefined && String(exec.rootCallId) === String(exec.callId)
+      && (state.outputKind !== 'chat' || exec.name === 'read' || exec.name === CAPTURED_FILE_FACTS_TOOL)
+      && (exec.name !== CAPTURED_FILE_FACTS_TOOL || candidate !== undefined && !isAbsolute(candidate))
+      ? recordedFilePath(state.cwd, candidate)?.toLowerCase() : undefined
+    let reservedCapture = reservationKey === undefined ? undefined : state.captureReservations.get(reservationKey)
+    if (reservationKey !== undefined && reservedCapture === undefined) {
+      reservedCapture = conversationFilePath(state.cwd, candidate!).then(path => {
+        const alias = path.toLowerCase()
+        let capture = state.captures.get(alias)
+        if (capture === undefined) {
+          capture = readConversationFile(state.cwd, path).then(entry => this.capture(task, state, exec, entry))
+          state.captures.set(alias, capture)
+        }
+        return capture
+      })
+      // The same rejection is handled below after native preparation, without an unhandled gap.
+      void reservedCapture.catch(() => {})
+      state.captureReservations.set(reservationKey, reservedCapture)
+    }
     try { await state.native.prepare(exec) }
     catch (error) { this.unavailable(state, 'material-unavailable'); this.warn(error, state, 'prepare') }
     if (isFileAncillaryTool(exec.name) && exec.name !== CAPTURED_FILE_FACTS_TOOL) return state.native.execute(exec, next)
@@ -216,7 +240,6 @@ export class TianwenConversationFileObserverService extends Service {
       this.unavailable(state, 'unsupported-tool')
       return next()
     }
-    const candidate = nativePath(exec)
     if (candidate === undefined || exec.name === CAPTURED_FILE_FACTS_TOOL && isAbsolute(candidate)) {
       this.unavailable(state, 'material-unavailable')
       return next()
@@ -225,7 +248,7 @@ export class TianwenConversationFileObserverService extends Service {
     try {
       path = await conversationFilePath(state.cwd, candidate)
       const alias = path.toLowerCase()
-      let capture = state.captures.get(alias)
+      let capture = reservedCapture ?? state.captures.get(alias)
       if (capture === undefined) {
         capture = readConversationFile(state.cwd, path).then(entry => this.capture(task, state, exec, entry))
         state.captures.set(alias, capture)

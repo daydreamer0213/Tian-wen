@@ -12,6 +12,7 @@ import { apply as applyRuntime } from '../../packages/tianwen-runtime/src/index.
 import { sha256, hasRejectedConversationCodeCheck, parseConversationAuditedReviewChecks } from '../../packages/tianwen-evolution/src/index.js'
 import { TianwenConversationFileObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-file-observer.js'
 import { isCreatedFileMissingRead } from '../../packages/tianwen-runtime-bundle/src/conversation-file-ancillary.js'
+import * as fileMaterial from '../../packages/tianwen-runtime-bundle/src/conversation-file-material.js'
 import { TianwenConversationObserverService } from '../../packages/tianwen-runtime-bundle/src/conversation-observer.js'
 import { recoverConversationTaskMaterial } from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { projectClaimEvidence, verifyConversationOriginalReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
@@ -1065,6 +1066,31 @@ it.each(process.platform === 'win32' ? [
     expect(task.completion?.files?.entries).toEqual([{ path: 'new.md', content: 'created' }])
     expect((await recoverConversationTaskMaterial(harness.ctx, task)).files?.outputPaths).toEqual(['new.md'])
   } finally { await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it.runIf(process.platform === 'win32')('keeps the first missing-read identity when its Windows path validation finishes last', async () => {
+  const harness = await mount([structured(admission), parallelCalls([
+    { id: 'slow-first-read', name: 'read', arguments: { file_path: 'new.md' } },
+    { id: 'fast-second-read', name: 'read', arguments: { file_path: 'NEW.md' } },
+  ]), toolCallResponse('create-after-aliases', 'write', { file_path: 'new.md', content: 'created' }), textResponse('saved'), ...reviewPair()])
+  let release!: () => void, first = true
+  const held = new Promise<void>(resolve => { release = resolve })
+  const originalPath = fileMaterial.conversationFilePath
+  const path = vi.spyOn(fileMaterial, 'conversationFilePath').mockImplementation(async (root, candidate) => {
+    const value = await originalPath(root, candidate)
+    if (root === harness.root && candidate === 'new.md' && first) { first = false; await held }
+    else if (root === harness.root && candidate === 'NEW.md') setImmediate(release)
+    return value
+  })
+  try {
+    harness.handle.agent.followup(direct('Create new.md after checking both aliases.'))
+    await harness.handle.agent.whenIdle(); await harness.ctx.tianwenConversationObserver.whenIdle()
+    const task = harness.ctx.tianwenEvolution.listConversationTasks()[0]!
+    expect(task.fileUnavailable).toBeUndefined()
+    expect(task.fileInputs).toEqual([expect.objectContaining({ callId: 'slow-first-read', path: 'new.md', content: null })])
+    expect(task.completion?.files?.entries).toEqual([{ path: 'new.md', content: 'created' }])
+    expect((await recoverConversationTaskMaterial(harness.ctx, task)).files?.entries).toEqual([{ path: 'new.md', content: null }])
+  } finally { release(); path.mockRestore(); await harness.handle.dispose(); await harness.ctx.fiber.dispose() }
 })
 
 it.each([false, true])('keeps a rejected edit from being certified by a subsequent allowed write (guarded=%s)', async guarded => {
