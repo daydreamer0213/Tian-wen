@@ -1,3 +1,7 @@
+## 2026-10-07 收口结果
+
+Task43已完成独立源码复核（PASS、无P1/P2）、最后facts作用范围补验10/10及准确source d6b45ccf的原四项CI。PR6合入main04e49f90同树，原main四CI全部成功；Runtime0.1.25/Desktoppreview.26已实际交付日常，两Profile、83成品、42保护/五预期变化和原窗口／正常关闭均通过，独立终审PASS。旧首次失败/原学习票不改。最终运行包以真实installer bc4354c4…绑定，旧5f候选只属历史。详见 [实际交付](tianwen-runtime-025-delivery-20261007.md)。以下保留当时的诊断与待办文字，不能作为当前NO-GO。
+
 # Task43 文件初始捕获的并发顺序（2026-10-07）
 
 原四CI37552830115（da3f5b41）已结束：Python、TypeScript、Desktop成功（含目录/NSIS成品审计），installer 599通过/1失败。失败为 Windows 两个大小写别名并发读取的 capture-interrupted，不是文件已存在。原日志未包含事件dump，不冒称已读到云端首捕获身份；源码追踪给出严格可达竞态，受控事件循环屏障在本机复现同一失败（Task43 RED1）。
