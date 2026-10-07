@@ -1,0 +1,17 @@
+name: Temporary native ACL boot diagnostic
+on:
+  push:
+    branches: [codex/conversation-claim-evidence]
+    paths:
+      - .github/workflows/native-acl-boot-diagnostic.yml
+      - tests/dsh-migration/native-acl-boot-diagnostic.mjs
+permissions:
+  contents: read
+jobs:
+  acl-boot-diagnostic:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Compare original ACL startup on one owned Windows host
+        shell: pwsh
+        run: node tests/dsh-migration/native-acl-boot-diagnostic.mjs
