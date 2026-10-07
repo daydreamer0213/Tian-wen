@@ -29,3 +29,11 @@ Task41 将两处去重管道改为 PowerShell 语言原生数组，当前用户�
 目标 active，main/Daily仍 NO-GO；实际Daily Runtime0.1.24/Desktoppreview.25未安装升级，原47项数据保护仍要求验收。D约15.38GiB（16,512,679,936字节），高于15GiB但尚未20GiB。三次旧残余删除被自动审批 blocked by policy，均未执行、不绕过、不称清理完成。详情见[tianwen-desktop-acl-startup-result-20261007.md](tianwen-desktop-acl-startup-result-20261007.md)。
 
 以下保留历史记录，以本节为当前状态。
+
+## Task41 云端实际结果
+
+Task41 修复8b8e2abb：云端诊断37552691186九种启动全部实际退出0；原最小三变量下完整 ACL 脚本192ms，忽略输入150ms，逐行159ms且走完原owner修复和严格权限验证。旧Task39失败/Task40超时保留。移除两处模块发现依赖即已消除观察到的超时，不扩大环境、不放宽权限或增加10秒预算。诊断不是四项发布CI。
+
+本机29/29、专项2/2、类型0，独立最终审查PASS无P1/P2，报告 task41-final-review.md，SHA256 A77F06057DE132EDE5C589A6533B931777DAAE03DB26D204F266958D07177A55。临时工作流/驱动已移除；下一最终源码原四项CI、同一Desktop成品与实际受管升级/数据保护/main发布。原学习Task31/33不重开，目标active，main/Daily仍NO-GO，实际024/preview25尚未升级。不增加验收标准。
+
+以下保留历史与失败证据，以本节为当前状态。
