@@ -1,3 +1,17 @@
+## 2026-10-07 最终：自动学习固定目标完成，main／日常 0.1.25 已实际交付
+
+当前发布结论 **main/Daily GO**。原固定目标的普通任务、反馈归因、正式研究、原生独立许可、方法实际启用、新后续任务效果、作用范围／撤权及恢复证据已闭合；Task31首次82真实请求、Task33首次5真实请求分别按原用途记录。明确标注的模拟反馈／受控故障仍为模拟，旧普通future2 INC及旧失败保留，不宣称普遍正确率或自然长期满意度。
+
+代码 d6b45ccf3fd1621c25e4972c22143ee5cae8a982 已经 PR6 合入 main04e49f9095864e3d1f5118a182bb3ff516501148，同树；分支37554140520及main37554717924原四CI分别全部成功（含云端NSIS）。日常Tianwen/Web两Profile实际Runtime0.1.25，原Desktop原位preview.26；正式受管installer8步0/ready，正常SDK Web更新、实际宿主HTTP200及原快捷方式参数真实窗口加载／正常关闭均通过，重复真installer0子命令／收据字节未变。原47保护中42字节不变、仅五项预期版本/接线/收据变化，home45原路径未增删，E备份172项完整；原设置、同意、撤权和隔离保持。
+
+实际installer包 bc4354c45a508c9e17564851b663860e7162d7493c5bfe8f645d1302093ad719 为最终身份。旧5f候选仅manifest内两个开发依赖键顺序不同，完整JSON深等；不改原安装receipt迎合旧摘要断言。新83成品seal/原audit/真实候选window重新绑定bc，v2 gate引用原成功gate；managed完整manifest核固定源码e94、Web核固定tar f227，全部27发布项逐hash同源码/无source link。V4终验及独立终审PASS无P1/P2。正常native启动只留下两条空父目录，0文件，不冒称state根不存在。
+
+完整结果见 [0.1.25实际交付报告](tianwen-runtime-025-delivery-20261007.md)；收据与最终独立终审在 D:/DevData/tianwen-025-release-controller-20261007。后续状态文档commit不改已验证产品源码，不冒称上述CI对新文档HEAD执行。当前固定目标已完成；没有新故障/新需求时保持安静，不按下方旧NO-GO重开实验，不增加第三票、不等自然样本、不重跑原研究。旧5f installer/gate/seal和失败仅属历史。
+
+D盘约15.28GiB>=15、未达20。旧scratch/pytest/两旧隔离窗口共三次删除被自动审批blocked by policy拒绝，未执行、未绕过，残余仍在。
+
+以下全部为历史记录，以本节和交付报告为当前状态。
+
 ## 2026-10-07 当前：桌面云端通过，修复文件捕获的并发顺序
 
 原四CI37552830115（da3f5b41）已结束：Python、TypeScript、Desktop成功（含目录/NSIS成品审计），installer 599通过/1失败。失败为 Windows 两个大小写别名并发读取的 capture-interrupted，不是文件已存在。原日志未包含事件dump，不冒称已读到云端首捕获身份；源码追踪给出严格可达竞态，受控事件循环屏障在本机复现同一失败（Task43 RED1）。
