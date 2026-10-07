@@ -18,9 +18,33 @@
       "types": "./dist/inspection.d.ts",
       "default": "./dist/inspection.js"
     },
+    "./file-mutation-denial": {
+      "types": "./dist/conversation-file-mutation-denial.d.ts",
+      "default": "./dist/conversation-file-mutation-denial.js"
+    },
+    "./file-claim-packet": {
+      "types": "./dist/conversation-file-claim-packet.d.ts",
+      "default": "./dist/conversation-file-claim-packet.js"
+    },
     "./learning-intake": {
       "types": "./dist/learning-intake.d.ts",
       "default": "./dist/learning-intake.js"
+    },
+    "./external-check": {
+      "types": "./dist/conversation-external-check.d.ts",
+      "default": "./dist/conversation-external-check.js"
+    },
+    "./guidance": {
+      "types": "./dist/conversation-guidance.d.ts",
+      "default": "./dist/conversation-guidance.js"
+    },
+    "./goal-task-research": {
+      "types": "./dist/goal-task-research.d.ts",
+      "default": "./dist/goal-task-research.js"
+    },
+    "./content-review": {
+      "types": "./dist/content-review-contract.d.ts",
+      "default": "./dist/content-review-contract.js"
     }
   },
   "dependencies": {

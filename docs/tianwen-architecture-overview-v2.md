@@ -1,6 +1,51 @@
 # 天问架构总览 v2
 
-**更新：** 2026-09-08
+**更新：** 2026-09-26
+
+**最新执行：** 033独立真实检查中，两条同族摘要支持及成功对照成立；首个host
+未及时触发研究，同一冻结Profile恢复后自然打开。X局部线索确实进入提案原生请求，
+独立案例与盲评未见线索；五案例十试验臂的最终裁决为`inconclusive`，未采用方法。
+后续F读取工作区外控制材料，不能证明未来效果。032的复核长度窄验证保留，
+main/Daily未升级，完整连接仍NO-GO。详见
+[当前交接](operations/tianwen-current-project-handoff.md)。
+
+**027既有结论：** 反馈适配工程及独立审查完成，固定真实输入与关闭审计已结束，
+发布判断NO-GO。X反馈未关联原任务，缺可用混合线索；研究又缺第二份完整支持，
+没有真实提案消费或采用。学习已关闭、原记录保留，Daily022/preview23不变；
+不自动开028，旧结果与已有文字学习证明不改判。见
+[027结果](operations/tianwen-feedback-adaptation-027-results-20260910.md)、
+[当前交接](operations/tianwen-current-project-handoff.md)和
+[新合同](superpowers/specs/2026-09-10-tianwen-feedback-adaptation-design.md)。
+
+### 026结账状态（历史结果保持不变）
+
+**当前：** 026有限三步已结账：A局部反馈只到提案的连接和独立工程审查完成；B一次
+真实IAB/DeepSeek使用未过新连接门；C明确NO-GO，不合并、不升级。实际文件/命令
+任务落在external而非local-files，不能进入新选择器；准确反馈虽成功归因，完整线索
+又超过8KB被拒绝。研究/采用为0，不能只说缺用户或缺三个来源。学习已关闭，原任务/
+反馈/会话/三文身份保留，自有host及页关闭，Daily仍022/preview23。详见
+[026真实结果及不交付结账](operations/tianwen-feedback-clue-026-results-20260910.md)。
+不自动开027，不放宽类别/容量/采用门；旧四阶段证明保留，未证明效果没有宣布完成。
+
+### 026输入前检查点（历史）
+
+日常交付基线为022/preview23，本轮未升级。023文件学习候选已完成原定
+工程检查；后续已补原生辅助工具衔接与材料容量，但024/025仍未证明完整文件学习。
+025在内置浏览器真实调用DeepSeek、网页内选目录完成任务，三文采集通过；后续
+跨工作区读取使完整证据不可用，两份独立评审均无法定论。该任务实际还包含9个
+读取路径和超出目录认证范围的命令，不能靠单点放开路径修复。
+
+2026-09-10开发分支已推送，首次检查点dd4572d；main仍为c13bad7，没有合并或升级。
+来源复核已否决“直接把部分快照交给事实评审”的简化方案。项目所有者已同意进一步
+区分普通任务的可核对复盘线索与启用新方法所需的独立证据；新连接尚未实现。
+当前按[总路线收口与有限工作包](operations/tianwen-verification-coverage-current.md)
+推进：连接修正、新连接验收、按实际结果交付。旧学习核心与历史证明继续复用，
+不增加通用命令执行器、不重跑025；仍未证明的效果不冒充完成，也不自动生成新开发。
+详见[范围复盘](research/2026-09-10-tianwen-file-evidence-scope.md)、
+[025真实结果](operations/tianwen-multidocument-capacity-025-real-results-20260910.md)
+及[当前交接](operations/tianwen-current-project-handoff.md)。下方旧阶段快照保留原时间范围。
+
+### 2026-09-08历史验收入口
 
 **当前验收入口：** [验证总表与必要检查](operations/tianwen-verification-coverage-current.md)
 及[当前交接](operations/tianwen-current-project-handoff.md)。021候选已完成工程检查与R10；

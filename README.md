@@ -4,18 +4,23 @@
 
 Tianwen is an auditable learning control plane for long-running agents.
 
-**Current source candidate: Runtime 0.1.24 / Desktop preview.25.** Installed delivery
-and source preparation are recorded separately in the [maintenance record](docs/operations/tianwen-status-024-release-20260930.md). DSH 0.1.1-rc.2 is
-the exact supported Agent Runtime. After one-time consent, ordinary unstructured
+**Installed Daily: Runtime 0.1.24 / Desktop preview.25**, verified in the
+[024 delivery record](docs/operations/tianwen-status-024-delivery-20260930.md).
+This development checkout uses the same version labels but includes changes
+that are not installed in Daily. Matching version labels do not mean matching
+program contents; building this checkout is not a Daily upgrade.
+DSH 0.1.1-rc.2 is the exact supported Agent Runtime. Ordinary chat does not require
+enabling learning analysis. After one-time consent, ordinary unstructured
 DSH Web/Desktop conversation can be observed and reviewed automatically, including
 later turns and natural feedback. No `/research-summary`, formatted source packet,
 Goal or separate request to reflect is required for this natural learning path.
 
 Tasks freeze their acceptance conditions before answers. Attributable recurring
-problems or durable preferences can trigger an independent text-only comparison;
-New conversation-guidance activation is currently quarantined, including accepted
-studies; historical activations are not automatically withdrawn. Receiving feedback does not mean a
-method has already activated. External effects and personal satisfaction remain
+problems or durable preferences can trigger an independent text-only comparison.
+An accepted study is an evaluation result, not proof that its method is active or
+improves future tasks. New conversation-guidance activation is currently
+quarantined. Receiving feedback does not mean a method has activated. External
+effects and personal satisfaction remain
 unproven without the corresponding evidence. See the [current handoff](docs/operations/tianwen-current-project-handoff.md)
 for the separate source, actual-model acceptance and installed-delivery status.
 
@@ -125,14 +130,17 @@ boundary is maintained in the
 ## Use Tianwen in an existing DSH Profile
 
 The portable package currently supports exact `@deepseek-ai/dsh@0.1.1-rc.2`.
-Build the one Runtime Bundle tarball from this checkout, then let DSH install it
-into the Profile selected by the user:
+The following command builds and installs this checkout's uninstalled 0.1.25
+development candidate into a test Profile, not the verified Daily package.
+Use an already configured, separate test
+`DSH_HOME` and replace `work` with that test Profile's name before running this;
+it is not a Daily upgrade instruction:
 
 ```powershell
 pnpm --filter @tianwen/runtime-bundle... build
 pnpm --filter @tianwen/runtime-bundle pack --pack-destination D:\DevData\tianwen-packs
-$env:DSH_HOME = 'D:\DevData\dsh-home'
-dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.24.tgz
+$env:DSH_HOME = 'D:\DevData\dsh-home-tianwen-test'
+dsh plugin --profile work --allow-build=koffi add D:\DevData\tianwen-packs\tianwen-runtime-bundle-0.1.25.tgz
 ```
 
 `--allow-build=koffi` is an explicit pnpm approval recorded in that Profile; it
@@ -159,16 +167,19 @@ is deliberately retained. The repository-owned managed installer remains an
 alternative for project-controlled deployments:
 
 ```powershell
-node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen --json
+node scripts/install-tianwen.mjs --data-dir D:\DevData\tianwen-dev-test --json
 ```
 
 The optional Tianwen Desktop reuses the user's existing DSH and Web Profile. It
 is not a second Runtime and does not require the managed Tianwen installation.
-Desktop opens the same DSH conversation UI. With confirmation, it can update the exact
-known Runtime `0.1.10` through `0.1.23` predecessor to its embedded `0.1.24`; unknown or damaged
-versions are never overwritten automatically.
-
-Daily017 remains a historical delivered Desktop target; this source candidate does not claim a new Daily installation.
+Desktop opens the same DSH conversation UI. The development preview.26 can, with
+confirmation, update an exact known Runtime `0.1.10` through `0.1.24`
+predecessor to its embedded `0.1.25`; unknown or damaged versions are never
+overwritten automatically. The installed Daily is preview.25 with Runtime
+0.1.24 from the [verified Daily delivery](docs/operations/tianwen-status-024-delivery-20260930.md),
+not a build of this development checkout. Complete automatic learning remains
+unproven; the delivered preview and independent maintenance have their own
+[fixed scope](docs/operations/tianwen-product-learning-scope-20260928.md).
 
 After installation, chat normally in DSH Web or Tianwen Desktop. Once learning is
 enabled, natural tasks and feedback can enter the learning path without commands

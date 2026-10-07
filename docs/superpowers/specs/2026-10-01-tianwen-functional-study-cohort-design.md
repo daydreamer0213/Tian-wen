@@ -1,0 +1,13 @@
+# 五任务不同功能合同的具体研究生产者
+
+当前34aa498已有单固定Python JSON功能生产者、五案例事前prepare和可信宿主prepareIndependentCases接口。但单producer的requestText/criteria必须精确相同，不能直接核验source1/source2/counterexample/adjacent/holdout的不同请求与功能期望；此前五真实Docker控制同prompt、不同初始源码，只证明共享检查机制，没有证明不同合同的实际生产者。
+
+选用原脚本内薄组合：可信宿主在案例设计调用前固定五角色完整研究material及各自cases/requiredCondition/isolated配置，复用现有单producer，不创建Agent/通用注册平台、不修改loop或发布规则。人工逐个写闭包可行但重复身份匹配容易错；动态生成期望或模型自编检查不能证明独立结果，不采用。
+
+closed cohort工厂接受固定五角色source1/source2/counterexample/adjacent/holdout及modelConfigDigest。前三角色必须原saved request/context/objective；后二为完整prompt/criteria/files。所有完整文件材料、原criteria、质量合同、原请求/反馈标准克隆固定；每角色只一个.py输出，其他输入只读，适用限额复用现有parser。每项独立功能case期望由宿主事前提供，不从答案、提案或现盘补齐。
+
+具体prepareIndependentCases先核对来源对顺序、成功对照、cwd/model/质量合同，完整投影材料精确匹配后才返回冻结adjacent/holdout。prepare按caseId和完整材料精确命中唯一角色，错位/未登记/漂移返回undefined且不准备runner；不试下一个producer、不动态登记、不fallback。现有单producer读取saved inputs、不依赖原目录存在，具体有界runner/结果/清理策略全部复用。prepared contract另绑定整个cohort与角色，冷恢复沿现有结果摘要/原caseDesignProof，不重新prepare或执行。
+
+该适配不证明原来源资格、输入事实独立、两臂效果、激活或未来改善；可信宿主是否具有适用原要求/独立依据仍需真实证据。原task/ledger/NO-GO/隔离/十日窗口保持，不重评清理摘要或旧存储题，不索任务/造反馈。0真实模型实现阶段；控制仅证明不同任务精确派发和停止边界。
+
+先用旧单producer在五不同prompt/criteria/saved-file条件下的具体失败反证缺口，再实现closed factory；核验不同检查期望不串用、全五检查先准备/两臂一致、完整材料或模型/角色/来源漂移不执行、修改宿主对象不改变已冻结合同、原目录消失仍正确。独立审查、适用回归/完整修改TS、必要缓存Docker真实控制后清理自有容器/fixture，不复制Profile或依赖。生成物D:/DevData/tianwen-functional-study-cohort-20261001，D≥15GiB，prefer20。允许目标内必要read/write/edit的下一实际任务另立事前原合同，不用本控制凑自然来源。

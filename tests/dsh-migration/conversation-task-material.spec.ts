@@ -42,8 +42,8 @@ it('projects only surface assistant text from a real native Session while retain
   const start = session.append('turn/start', { turn: 1 })
   session.append('user/message', createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'visible user input' }] }), { surfaceOp: 'append' })
   session.append('assistant/message', {
-    turn: 1,
-    message: { id: 'answer-1' as never, role: 'assistant', content: [
+    turn: 1, step: 1,
+    message: { id: 'answer-1' as never, role: 'assistant', source: { kind: 'model', provider: 'tianwen-test-fixture', model: 'surface-projection' }, content: [
       { type: 'text', text: 'visible assistant answer' },
       { type: 'reasoning', text: 'hidden-reasoning-'.repeat(8_000) },
       { type: 'tool-call', id: 'native-tool-call' as never, name: 'native_tool', arguments: '{"private":true}' },

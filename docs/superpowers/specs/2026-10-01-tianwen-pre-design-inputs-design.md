@@ -1,0 +1,31 @@
+# 研究设计前固定可信任务输入与结果依据
+
+## 目标与授权
+
+所有者要求自行寻找或设计任务并持续推进。复用当前开发分支，不再请求任务或执行许可；完整学习目标、原发布门槛、隔离和十工作日窗口保持。本任务直接修补C/D产品入口，不声称自然研究已经发生。
+
+## 已核实的缺口
+
+85e14db的loop先调用模型设计adjacent/holdout，再prepare五项独立检查。能固定答案之前的合同，却不能证明案例事实和标准在设计之前已有可信依据。研究原生proof恢复只允许family/failureCategory/sources及可选checkedFailureSources。
+
+## 取舍
+
+继续事后prepare不能消除此缺口。重建案例平台、数据注册表或宿主独立证明协议超出当前责任。采用现有宿主studyResultCheck的可选prepareIndependentCases：可信宿主返回两个完整、有限、无答案的任务，五项检查均在原模型案例调用之前prepare。保留既有一次原生设计调用作为协议投影，要求精确返回预置任务，不允许模型另写事实、要求或路径；避免重做proof/历史存储协议。该投影目前不增加调用，未来是否完全去掉由实际证据决定。
+
+## 接口与流程
+
+- 仅code/local-files/files启用；prepareIndependentCases接收两项来源及成功对照的完整材料、modelConfigDigest、质量合同、cwd和signal，不接收候选方法/新答案。
+- 返回adjacent/holdout的prompt、criteria、files.entries/outputPaths；undefined视为缺证停止，绝不回退到自由生成。无此可选函数的旧prepare行为保持，不能追认为预生成独立。
+- 原来源对attempt先持久化，失败/取消不重复花费；随后克隆宿主返回值，按既有案例和文件解析器检查限额及独立输入身份，在任何模型设计调用前prepare全部五项检查。
+- 原生设计请求传预置任务，无checker标识、单项合同摘要、评估函数；请求材料内保存independentCases及整个五检查数组的不可解释摘要independentResultChecksDigest，恢复核对它与opened.resultChecks一致，防止设计后替换检查。模型必须精确投影，变更任何字段拒绝，提案和试验尚未启动。
+- 既有caseDesignProof恢复比较independentCases与保存案例，历史无字段保持；semanticIndependence仍unestablished。宿主代码的可信边界不等于真实来源独立或自然效果证明，不增加采用权限。
+- 独立检查元数据仍按现有resultChecks持久保存；同一五项检查闭包供十臂复用，冷恢复不prepare、不复评。新路径禁止在生成后重新prepare。
+- 输入准备、结果准备及原生设计后的取消/同意/父版本变化必须在进入提案/试验前停止。原隔离保持true。
+
+## 验证与停止条件
+
+原生受控场景证明调用顺序、五项事前准备、精确材料、十臂、冷恢复零调用；宿主缺输入/缺检查/重复输入/超限/取消以及模型换输入必须停止，原来源对不会重试。回归原check-only和无检查模式、原材料恢复、公开宿主类型和安装包边界。真实模型/所有者反馈/自然研究本轮均为0；不能用夹具作学习完成证据。
+
+## 下一实际任务
+
+本功能交付后，从真实未完成开发需求及既有测试中选新的普通任务，先固定原要求和可检查结果，再进行一次原生尝试；结果未知且失败如实保留。两项问题来源未出现时不得制造失败或反馈。本任务不等待OfferGo评价。

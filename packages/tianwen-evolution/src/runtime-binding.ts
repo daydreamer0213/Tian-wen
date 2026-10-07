@@ -1,6 +1,9 @@
 import { Service } from '@tianwen/dsh-compat'
 import type { ConversationLearningRecord, ConversationTask } from './conversation-learning.js'
-import type { ConversationGuidanceRecord, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord } from './conversation-guidance.js'
+import type { GoalTaskOutcomeInput, GoalTaskOutcomeReceipt, GoalTaskOutcomeObservation } from './goal-task-outcome.js'
+import type { GoalTaskResearchSourceInput, GoalTaskResearchSource } from './goal-task-research.js'
+import type { ConversationGuidanceRecord, ConversationCaseDesignAttempt, GuidanceSnapshot, GuidanceStudy, GuidanceDecisionRecord, GuidanceActivationRecord } from './conversation-guidance.js'
+import type { ConversationGuidanceClearance } from './conversation-guidance-clearance.js'
 import type { ConversationFeedbackRecord, ConversationFeedbackAssessment } from './conversation-feedback.js'
 import type {
   Agent,
@@ -215,9 +218,13 @@ declare module '@deepseek-ai/cordis' {
   interface Events {
     'tianwen/learning-consent-changed'(consent: LearningAnalysisConsentReceipt): void
     'tianwen/conversation-task-reviewed'(taskId: string): void
+    'tianwen/goal-task-research-source-recorded'(sourceId: string): void
+    'tianwen/conversation-code-check-finished'(taskId: string): void
+    'tianwen/conversation-code-check-invalidated'(taskId: string): void
     'tianwen/conversation-admission-recorded'(taskId: string): void
     'tianwen/conversation-feedback-reconciled'(sessionId: string): void
     'tianwen/conversation-feedback-assessed'(assessmentId: string): void
+    'tianwen/conversation-guidance-clearance-recorded'(studyId: string): void
   }
 }
 
@@ -501,6 +508,8 @@ export class TianwenEvolutionService extends Service {
   recordConversationLearning(input: ConversationLearningRecord): { readonly duplicate: boolean } {
     const receipt = this.formalWrite(() => this.state().ledger.recordConversationLearning(input))
     if (!receipt.duplicate && input.kind === 'task-reviewed') this.ctx.emit('tianwen/conversation-task-reviewed', input.taskId)
+    if (!receipt.duplicate && input.kind === 'task-external-check-finished') this.ctx.emit('tianwen/conversation-code-check-finished', input.taskId)
+    if (!receipt.duplicate && input.kind === 'task-external-check-invalidated') this.ctx.emit('tianwen/conversation-code-check-invalidated', input.taskId)
     if (!receipt.duplicate && input.kind === 'task-admitted') this.ctx.emit('tianwen/conversation-admission-recorded', input.taskId)
     return receipt
   }
@@ -513,10 +522,28 @@ export class TianwenEvolutionService extends Service {
   getConversationGuidance(scopeKey: string): GuidanceSnapshot { return this.state().ledger.getConversationGuidance(scopeKey) }
   retireIncompatibleConversationGuidance(scopeKey: string): void { this.formalWrite(() => this.state().ledger.retireIncompatibleConversationGuidance(scopeKey)) }
   listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] { return this.state().ledger.listConversationGuidanceStudies(scopeKey) }
+  listConversationCaseDesignAttempts(scopeKey?: string): readonly ConversationCaseDesignAttempt[] { return this.state().ledger.listConversationCaseDesignAttempts(scopeKey) }
+  recordConversationCaseDesignAttempt(input: ConversationCaseDesignAttempt): { readonly duplicate: boolean } {
+    return this.formalWrite(() => this.state().ledger.recordConversationCaseDesignAttempt(input))
+  }
   isConversationGuidanceSupported(studyId: string): boolean { return this.state().ledger.isConversationGuidanceSupported(studyId) }
   conversationGuidanceDecision(studyId: string): GuidanceDecisionRecord { return this.state().ledger.conversationGuidanceDecision(studyId) }
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
     return this.formalWrite(() => this.state().ledger.recordConversationGuidance(input))
+  }
+
+  recordConversationGuidanceClearance(input: ConversationGuidanceClearance): { readonly duplicate: boolean } {
+    const receipt = this.formalWrite(() => this.state().ledger.recordConversationGuidanceClearance(input))
+    if (!receipt.duplicate) this.ctx.emit('tianwen/conversation-guidance-clearance-recorded', input.studyId)
+    return receipt
+  }
+
+  listConversationGuidanceClearances(scopeKey?: string): readonly ConversationGuidanceClearance[] {
+    return this.state().ledger.listConversationGuidanceClearances(scopeKey)
+  }
+
+  recordReviewedConversationGuidanceActivation(input: GuidanceActivationRecord): { readonly duplicate: boolean } {
+    return this.formalWrite(() => this.state().ledger.recordReviewedConversationGuidanceActivation(input))
   }
   listConversationFeedbackAssessments(taskId?: string): readonly ConversationFeedbackAssessment[] { return this.state().ledger.listConversationFeedbackAssessments(taskId) }
   isConversationFeedbackAssessmentActive(assessmentId: string): boolean { return this.state().ledger.isConversationFeedbackAssessmentActive(assessmentId) }
@@ -547,6 +574,21 @@ export class TianwenEvolutionService extends Service {
   recordOutcomeIntake(input: OutcomeIntakeInput): OutcomeIntakeReceipt {
     return this.formalWrite(() =>
       this.state().ledger.recordOutcomeIntake(input))
+  }
+
+  recordGoalTaskOutcome(input: GoalTaskOutcomeInput): GoalTaskOutcomeReceipt {
+    return this.formalWrite(() => this.state().ledger.recordGoalTaskOutcome(input))
+  }
+  listGoalTaskOutcomes(): readonly GoalTaskOutcomeObservation[] {
+    return this.state().ledger.listGoalTaskOutcomes()
+  }
+  recordGoalTaskResearchSource(input: GoalTaskResearchSourceInput): { readonly sourceId: string; readonly duplicate: boolean } {
+    const receipt = this.formalWrite(() => this.state().ledger.recordGoalTaskResearchSource(input))
+    if (!receipt.duplicate) this.ctx.emit('tianwen/goal-task-research-source-recorded', receipt.sourceId)
+    return receipt
+  }
+  listGoalTaskResearchSources(): readonly GoalTaskResearchSource[] {
+    return this.state().ledger.listGoalTaskResearchSources()
   }
 
   recordRunSkillManifest(

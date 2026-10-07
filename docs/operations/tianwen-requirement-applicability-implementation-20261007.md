@@ -1,0 +1,11 @@
+# Task23：限制适用对象修复机制已完成
+
+Task22 source1候选正确给两个待定事项独立句，但requirements审核错误扩大限制到已可用项/明确时间。本次只加通用要求适用对象说明：先识别原要求明示对象，子集限制不扩大到全部；真全部限制仍适用全部，子集内独立句左右边界仍检查。原Task21固定段、原COMMON/V6–V12/claim及file完整生成器不变。
+
+现行v12/未显式quality producer发送累计Task21+Task23完整指令；显式旧quality仍原串。verifier只接受同一已验证材料/purpose/focus/encoding逐字重建的原始、Task21、Task23三完整版本，旧quality不能借新尾段放宽。未改schema/SDK/capture/双审/host/正式研究裁决/许可激活，旧票未重评。
+
+原DSH SDK scripted首RED8失败（16请求正常捕获但缺新段）保留；新增24机制项，专项56=原32+24，六套249=原225+24全部通过；默认Runtime/Evolution noEmit与diff0。包括三版本两目的两focus的真实保存/cold0模型恢复，错focus/材料/近似或额外尾段/旧quality错误尾段拒绝。64 first-only证据文件不是64真实模型请求。worker实际provider/build/install/commit均0。
+
+独立specCompliance/codeQuality PASS。报告SHA b78d1d27ee3bb040c66df1567fe040b9905a0afa771e080fedde58e9f2d36f68，独立审查SHA b33e936ea6dd96892a236a4126d6dae388a6b520c7f3538d05f1d19127d16219；源码SHA4dd52f195da77580930f7911a407ae376b3e38c649d4725f6263800ac5158aa7，测试SHA8fb4aa00dda37d23b832d81371a7d377c09134759fbce09686707a97041eba3f。D证据位于 `D:/DevData/tianwen-requirement-applicability-tests-20261007/task23`。
+
+只证明指令送达与绑定兼容，未证明新模型已正确判断。下一root原公开16步/实际入口/default types/private imports与旧11feedback及实际历史claim全恢复（含Task22原26）；Task24新普通首次学习按原formal accepted→native首审clear→许可激活后执行原未来效果，无关/撤权/cold/语义终审。Task24prepared46 host/准备及author-compat独立PASS，无actual profile/new provider。goalactive/mainDaily NO-GO，D约16.2GiB，所有生成物D且复用环境。

@@ -1,0 +1,7 @@
+# Bounded source-ID choices for native claim review
+
+The v9 S2 native reviewer understood an unsourced future decision but included `answer-1` beside `request-1` in `sourceIds`. The host correctly rejected the audit, leaving only one valid review. The tool schema currently tells reviewers not to use answer IDs but accepts arbitrary strings. For small packets, provide an enum of only frozen non-answer source IDs in each claim's `sourceIds` array item; preserve the host's existing exact validation. This narrows a common formatting error without weakening proof.
+
+The enum is repeated in first and additional claim schemas for every nonblank answer unit. Include it only when twice the serialized source-ID list times the nonblank answer-unit count is at most 8 KiB; otherwise keep today's free string schema. Keep empty-source handling unchanged. This cap prevents returning to the historically oversized source-ID tool mode. The review instruction, quality contract, evidence packet, verdict consensus and replay validation do not change; old sessions and failed S2 stay untouched.
+
+Verify a one-source packet exposes only `request-1`, a many-unit/many-source packet falls back without inflating the schema, and the host still rejects a forged answer ID even if a scripted provider bypasses the schema. Then freeze a new candidate and new cases; do not rerun S2 to seek a pass. The diagnostic driver must stop on an unavailable result or unexpected verdict, and an offline failure simulation must demonstrate that later cases do not start. main/Daily remains NO-GO.

@@ -17,7 +17,7 @@ import {
 
 const fixtureRoot = resolve('D:/DevData/tianwen-desktop-profile-prepare-tests')
 const runtimePackage = '@tianwen/runtime-bundle'
-const runtimeVersion = '0.1.24'
+const runtimeVersion = '0.1.25'
 const fixtures: string[] = []
 
 interface FakeChild extends EventEmitter {
@@ -71,6 +71,14 @@ afterEach(() => {
 })
 
 describe('Tianwen Desktop Profile preparation boundary', () => {
+  it.each(['0.1.24', '0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('classifies known-old Runtime %s without mutation', version => {
+    const outdated = fixture()
+    writeJson(join(profileRoot(outdated), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
+      name: runtimePackage, version,
+    })
+    expect(inspectWebProfile(outdated)).toEqual({ kind: 'outdated-runtime', profileRoot: profileRoot(outdated) })
+  })
+
   it('classifies current, unknown, missing, plain, and broken Profile entries without mutation', () => {
     const ready = fixture()
     expect(inspectWebProfile(ready)).toEqual({ kind: 'ready', profileRoot: profileRoot(ready) })
@@ -113,14 +121,6 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     })
   })
 
-  it.each(['0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('classifies supported old Runtime %s without mutation', version => {
-    const outdated = fixture()
-    writeJson(join(profileRoot(outdated), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
-      name: runtimePackage, version,
-    })
-    expect(inspectWebProfile(outdated)).toEqual({ kind: 'outdated-runtime', profileRoot: profileRoot(outdated) })
-  })
-
   it('renders the selected DSH home and every path as a pasteable PowerShell literal', () => {
     const target: DesktopBaseTarget = {
       nodeExecutable: "D:\\Program Files\\Node's\\node.exe",
@@ -138,7 +138,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     rmSync(profileRoot(target), { recursive: true })
     const child = fakeChild()
     const calls: unknown[] = []
-    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.24.tgz'
+    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.25.tgz'
     const preparation = prepareMissingWebProfile(target, runtimeTarball, {
       spawn: ((program, args, options) => {
         calls.push({ program, args, options })
@@ -157,7 +157,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     })
   })
 
-  it.each(['0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('updates known-old Runtime %s exactly once with the embedded tarball and selected home', async version => {
+  it.each(['0.1.24', '0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('updates known-old Runtime %s exactly once with the embedded tarball and selected home', async version => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
       name: runtimePackage, version,
@@ -168,7 +168,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     })
     const child = fakeChild()
     const calls: unknown[] = []
-    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.24.tgz'
+    const runtimeTarball = 'D:\\Runtime Packs\\tianwen-runtime-bundle-0.1.25.tgz'
     const update = updateOutdatedWebProfile(target, runtimeTarball, {
       spawn: ((program, args, options) => {
         calls.push({ program, args, options })
@@ -393,13 +393,13 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     expect(inspectWebProfile(target)).toEqual({ kind: 'missing-runtime', profileRoot: profileRoot(target) })
   })
 
-  it.each(['0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('stops normally without update or validation when known-old Runtime %s update is refused', async version => {
+  it.each(['0.1.24', '0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('stops normally without update or validation when known-old Runtime %s update is refused', async version => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
       name: runtimePackage, version,
     })
     const calls: string[] = []
-    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.24.tgz', {
+    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.25.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async root => { calls.push(`update-confirm:${root}`); return false },
       showManualPreparation: async () => { calls.push('manual') },
@@ -412,13 +412,13 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     expect(inspectWebProfile(target)).toEqual({ kind: 'outdated-runtime', profileRoot: profileRoot(target) })
   })
 
-  it.each(['0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('updates known-old Runtime %s once after acceptance and then strictly validates the current Runtime', async version => {
+  it.each(['0.1.24', '0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('updates known-old Runtime %s once after acceptance and then strictly validates the current Runtime', async version => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
       name: runtimePackage, version,
     })
     const calls: string[] = []
-    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.24.tgz', {
+    const result = await resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.25.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
@@ -442,7 +442,7 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     })
     const calls: string[] = []
     const failure = new ProfilePreparationError(12, profileRoot(target), 'update failed')
-    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.24.tgz', {
+    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.25.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },
@@ -453,13 +453,13 @@ describe('Tianwen Desktop Profile preparation boundary', () => {
     expect(calls).toEqual(['update-confirm', 'update'])
   })
 
-  it.each(['0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('does not accept known-old Runtime %s update unless strict post-update validation sees the current Runtime', async version => {
+  it.each(['0.1.24', '0.1.23', '0.1.22', '0.1.21', '0.1.20', '0.1.19', '0.1.18', '0.1.17', '0.1.16', '0.1.15', '0.1.14', '0.1.13', '0.1.12', '0.1.11', '0.1.10'])('does not accept known-old Runtime %s update unless strict post-update validation sees the current Runtime', async version => {
     const target = fixture()
     writeJson(join(profileRoot(target), 'node_modules', '@tianwen', 'runtime-bundle', 'package.json'), {
       name: runtimePackage, version,
     })
     const calls: string[] = []
-    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.24.tgz', {
+    await expect(resolvePreparedDesktopTarget(target, 'D:\\runtime-0.1.25.tgz', {
       confirmCreateProfile: async () => { calls.push('create-confirm'); return true },
       confirmUpdateRuntime: async () => { calls.push('update-confirm'); return true },
       showManualPreparation: async () => { calls.push('manual') },

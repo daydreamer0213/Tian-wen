@@ -12,7 +12,7 @@ it('versions the original-instruction authority while keeping the exact historic
   const legacy = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' } as const
   expect(parseConversationQualityContract(legacy)).toEqual(legacy)
   expect(hasCurrentConversationQuality(legacy)).toBe(false)
-  expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v6')
+  expect(conversationQualityContract().schemaVersion).toBe('tianwen.conversation-quality.v12')
   expect(conversationQualityContract().criterion).toContain('original direct-user instructions')
   expect(() => parseConversationQualityContract({ ...legacy, criterion: 'Accept everything.' })).toThrow()
 })
@@ -40,4 +40,15 @@ it('requires exactly two ordered independent native proofs and evidence for conc
   for (const invalid of [[first], [second, first], [first, first], [first, { ...second, proof: first.proof }], [first, { ...second, evidenceQuotes: [] }], [first, { ...second, proof: null }]]) {
     expect(() => parseConversationReviewChecks(invalid)).toThrow()
   }
+})
+
+it('bounds the combined summary while retaining two native explanations up to their individual limit', () => {
+  const explanation = 'a'.repeat(4096)
+  const first = { ...check('requirements', 'met'), explanation }
+  const second = { ...check('grounding', 'met'), explanation }
+  const checks = parseConversationReviewChecks([first, second])
+  expect(Buffer.byteLength(conversationReviewConsensus(checks).explanation, 'utf8')).toBeLessThanOrEqual(4096)
+  expect(checks[0].explanation).toBe(explanation)
+  expect(checks[1].explanation).toBe(explanation)
+  expect(() => parseConversationReviewChecks([{ ...first, explanation: `${explanation}a` }, second])).toThrow()
 })

@@ -2,6 +2,7 @@ import { SessionId, type Agent, type Context } from '@tianwen/dsh-compat'
 import { type LearningAnalysisStatus, type OutcomeLearningAnalysisBinding, type TianwenRunId } from '@tianwen/evolution'
 import { normalizeResearchSummarySubmission, RESEARCH_SUMMARY_SCOPE, RESEARCH_SUMMARY_TOOL_NAME } from '@tianwen/runtime'
 import { researchSummaryPacketFromEvents } from './research-summary-admission.js'
+import type {} from './learning-consent-agent.js'
 
 const LEGACY_OUTCOME_CATEGORY = 'research-summary-result.v1:'
 const SEMANTIC_OUTCOME_CATEGORY = 'research-summary-result.v2:'

@@ -1,0 +1,47 @@
+# 普通产品逐项研究放行设计
+
+用户已授权自主持续开发、明确标注的模拟故障/反馈/环境与新后任务；不再等待自然出题或重复执行许可。Task14正常终态且源码冻结已实际释放；本设计实现原独立语义放行边界，不增加quality.v12、原双审、正式研究条件或效果标准。main/Daily在原发布条件满足前仍NO-GO。
+
+## 选择与边界
+
+永久隔离不能完成普通产品自动学习，全局解隔离会使未独立审查的方法生效。选择受信宿主对一项完整、正式accepted、尚未激活研究给予可回放许可，默认apply()仍隔离。DEV策略、历史已激活/回滚、不完整和非accepted研究不能借此升级；原原生票和decision不改。
+
+9月只读审查设计暂以人工判断为后续选择。本实现依据当前自主推进授权允许明确标注的independent-ai宿主审查器，真实人工可用human记录；AI不写进原authority=human的ApprovalRecord，也不称人工评价或外部自然收益。无已配置审查器时继续待审，系统仍可独立开发和模拟机制验证。
+
+## 账本第一部分：许可与受信激活
+
+新模块conversation-guidance-clearance.ts定义专用记录，与原ConversationGuidanceRecord和ApprovalRecord分开。记录包含studyId、scopeKey、environmentDigest、parentVersion、candidateVersion、decisionDigest、armsDigest、studyEvidenceDigest、packetDigest、consentRevision、reviewer、verdict、sourceChecks、armChecks。environmentDigest由规范化账本根产生；studyEvidenceDigest为原opened/candidate/arms/decision的canonical摘要，排除动态activation/currentConsent/support。packetDigest绑定宿主已保存的完整待审包，后续不拿激活后的动态包重算身份。
+
+reviewer如实记录authority（independent-ai或human）、id及提示摘要；AI另有model。sourceChecks准确覆盖source1/source2/counterexample三项并各有clear/reject/insufficient与原文理由；armChecks准确覆盖原五案例的十个caseId/role，每项记录边界与理由。clear须来源标准忠实、所有candidate独立判断clear；baseline可保留原失败，但必须逐项说明。任何明确候选无源事实、状态升级、必要条件/承诺越界或反馈主体错误不能clear；正常有源角色/承诺和可选建议不一律禁止。
+
+新事件conversation-guidance-clearance-recorded存完整记录和宿主时间，一个study的一次原独立结论不可覆写；完全相同写入幂等，冲突拒绝。listConversationGuidanceClearances只读返回副本，inspection和旧事件回放无原语义变化。新recordConversationGuidanceClearance只接受当前正式accepted未激活研究，重查同意/来源/质量/父版本/共享回执和准确绑定；清晰标注的reject/insufficient也可存，但不给激活资格。
+
+普通recordConversationGuidance的隔离守卫保持。专用recordReviewedConversationGuidanceActivation仅凭同研究持久化clear许可放行原activation校验；不是一个关闭全局隔离的开关。一次写入过程中重新核同意、来源、当前父版本、候选/裁决/十臂/质量及共享evaluation/met。已有同一activation重复调用保留原duplicate语义，不重新生效；回滚后不得再激活。
+
+不将每次操作器和原SDK证明再复制一份进账本。许可与activation分两条原持久化事件；崩溃中间是可恢复的已clear未激活，恢复只补原activation、不重跑研究或独立首审。提交结果不明沿原LedgerCommitUnknownError封锁/恢复处理。跨Profile许可拒绝新激活，搬移历史只读材料不改变旧事件含义。
+
+## 普通运行接入第二部分
+
+复用recoverText/FileGuidanceStudyReviewPacket验证完整原生材料，生成不含原票的静态首盲投影；源任务、原反馈、派生标准、五案例及十个完整答案都在投影中。先保存受信独立审查结果，再另存原票对照，完整材料内容寻址留在D盘。宿主配置guidanceIndependentReview为程序回调，仅真实宿主注入，普通模型工具不暴露许可创建或人工批准。
+
+即时accepted、初始化与restoreAccepted统一走同一个审查/激活方法。recoverable不能在许可未到前永久丢失；持久化许可后可唤醒原study，重启可从许可恢复。拒绝或证据不足保留首次记录并隔离，不换评审追求通过。已有clear不再次调用审查器，旧rollback、撤权和质量退役路径照旧。
+
+## 验证与交付
+
+先用明确脚本fixture证明默认隔离、正式完整研究许可、错误身份/摘要/来源/同意/父版本、直写旁路、幂等、崩溃恢复和撤回。已有R9具体错误只做新机制拒绝fixture，旧票不重评；正常角色/承诺不新增禁令。再原构建/相关回归/旧证明零调用兼容和独立代码复核，最后全新普通产品Profile真实执行任务/模拟反馈/正式研究/独立审查/采用/原未来效果与撤回。无accepted即记录首次失败，不修改原裁决或暗加通过次数。
+
+独立设计审查依据为D:/DevData/tianwen-missing-value-learning-controller-20261006/product-study-clearance-design-review.md；已采纳动态摘要拆分、完整无票投影、恢复唤醒、许可/activation间隙幂等、如实AI身份等意见。第一部分不称整个产品通道已完成；最终给准确版本和原发布门槛下的明确结论。
+
+## Task16 接入细化
+
+Task15已通过独立审查。普通配置guidanceIndependentReview同时接受可信程序回调和可序列化原生描述符，后者明确mode=native、reviewerId及可选模型配置；未指定其他模型时复用经过原证明恢复的源任务配置，不静默换路由。公开原生工厂复用runConversationJudgment和recoverConversationStructuredJudgment，既不复制SDK执行器，也不把独立语义读证据变成第三张quality票。实际AI身份、输入独立性与路线准确留存，同模型独立子会话不称错误独立或真人审查。
+
+首盲投影采用静态字段白名单：完整三源request/context/原始交付/原反馈及明确标注的派生标准，父与候选方法，五案例请求与标准、十个完整答案和文件结果。不能展开proposalMaterial、nativeGoalOriginal.source或review字段把旧票/解释带入。完整原包另存，原512KiB传输界限仍按真实材料检查，不截短凑过。
+
+开始首审前持久化唯一attempt、准确包、首盲输入与固定指令；保存首次原始结果与native证明后才组装许可，之后另存原票对照。重启有结果即复核原证明，不再调用审查。若原生完成而宿主结果尚未保存，按同attempt唯一子会话恢复原捕获；没有唯一可恢复的完成结果就保留原未完成状态，不换审查追求通过。对程序回调也保存首结果，明确无原生证明的受信宿主回执，不能冒充原生AI执行。
+
+实现按顺序交接：investigate_actor_semantic_seam仅拥有新guidance-independent-review.ts及对应新测试，先完成投影/首审/持久化/恢复接口；implement_scope_repair_operator随后只拥有loop/runtime/index及对应loop/runtime测试，接三入口和配置，不能修改前者文件。Root负责文档、原public构建、生成控制器和实际服务商验证；review_shared_future_scope独立只读审查。所有worker不独占仓库，不回退他人修改。共享接口需先明确后接线，暂无新provider调用或旧研究重审。
+
+共享reviewGuidanceStudy只保存和返回许可，由loop重查当前授权后记录并采用。已有许可的冷采用通过verifySavedGuidanceIndependentReview只读核本模块保存的准确包、首盲、首次结果、原native证明与冻结配置，逐字绑定许可；无需live parent或新模型。没有本模块attempt的可信外部许可沿Task15规则，不强加原生证明；已有模块文件损坏不静默降为外部许可。Evolution runtime-binding仅增typed clearance-recorded事件及成功新写后emit，loop经原串行队列合并唤醒，避免许可内部事件造成第二首审或自等待。
+
+公开工厂与配置回调的正常组合也须跨现有 index/runtime 两个入口可用。原 build 分别内联模块，因此只保存在单模块 WeakMap 的工厂身份会在另一入口丢失，把真实 native callback 错当 programmatic、漏传原冻结模型配置，导致工厂在 SDK 请求前失败。按原接口做最窄进程内共享工厂注册表，仅宿主工厂注册原函数，不从模型输出或任意函数属性接受原生身份；原独立证明、来源配置、parent/attempt 核验保持。先保留独立模块复现的 RED，再修复并核实际原 public 两入口组合；这属于既有接口兼容，不新增模型评分或发布标准。A owner仅改其原两文件，待B回归停止后再写，避免运行中源漂移。

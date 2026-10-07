@@ -57,6 +57,18 @@ const TASK_2 = '00000000-0000-4000-8000-000000000003'
 const EXECUTION_1 = { sessionId: 'task-session-1', goalId: 'task-goal-1' }
 const EXECUTION_2 = { sessionId: 'task-session-2', goalId: 'task-goal-2' }
 
+function expectOriginalTaskRequirements(prompt: readonly { readonly type: 'text'; readonly text: string }[], goal: LongGoalRecordV3) {
+  const text = prompt[0]!.text
+  const prefix = 'Original continuous Goal requirements (reference only): '
+  const reference = text.split('\n').find(line => line.startsWith(prefix))
+  expect(reference, 'original Goal requirements must reach the native child').toBeDefined()
+  expect(JSON.parse(reference!.slice(prefix.length))).toEqual({
+    objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+  })
+  expect(text).toContain('Goal context and Planner wording are requirements metadata, not confirmed user facts.')
+  expect(text).toContain('Perform only the delegated Task within these original requirements; do not perform other Goal tasks or expand permissions.')
+}
+
 type ProbeProjection = {
   readonly key: string
   init(): unknown
@@ -523,6 +535,103 @@ async function liveTerminalGateFixture(input: {
 }
 
 describe('continuous Goal Host', () => {
+  it('serializes a genuine live completed Task turn into same-Task finalization once', async () => {
+    const subject = harness(record({ tianwenEvents: [{ type: 'attempt-started', taskId: TASK_1, attempt: {
+      epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+      permissionFingerprint: 'sha256:host-finalization', status: 'running', startedAt: '2026-10-05T00:00:00.000Z',
+    } }] }))
+    const events = [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    Object.assign(subject.first.session, { events })
+    const finalizeTask = vi.fn(async () => undefined)
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask } as never)
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    await unmount()
+    expect(finalizeTask).toHaveBeenCalledTimes(1)
+    expect(finalizeTask.mock.calls[0]?.[0]).toMatchObject({
+      longGoalId: GOAL_ID, sessionId: EXECUTION_1.sessionId, completedTurnSeq: 2,
+    })
+    expect(subject.continueProgress).not.toHaveBeenCalled()
+  })
+
+  it.each(['error', 'aborted', 'max-tokens'])('does not finalize a %s turn or an old cold Session', async reason => {
+    const subject = harness()
+    const event = { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: reason } } }
+    Object.assign(subject.first.session, { events: [{ type: 'turn/start', seq: 1, data: { turn: 1 } }, event] })
+    const finalizeTask = vi.fn(async () => undefined)
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask } as never)
+    subject.sessionEvent(EXECUTION_1.sessionId, event)
+    await unmount()
+    expect(finalizeTask).not.toHaveBeenCalled()
+  })
+
+  it('does not automatically finalize an old completed turn when merely mounting the host', async () => {
+    const subject = harness()
+    Object.assign(subject.first.session, { events: [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ] })
+    const finalizeTask = vi.fn(async () => undefined)
+    await mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask })()
+    expect(finalizeTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['abort', 'permission'])('invalidates queued finalization immediately on %s before its lane dispatch', async change => {
+    const subject = harness(record({ tianwenEvents: [{ type: 'attempt-started', taskId: TASK_1, attempt: {
+      epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+      permissionFingerprint: 'sha256:host-finalization', status: 'running', startedAt: '2026-10-05T00:00:00.000Z',
+    } }] }))
+    const events = [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    Object.assign(subject.first.session, { events })
+    const finalizeTask = vi.fn(async () => undefined)
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask })
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    if (change === 'abort') subject.abort(EXECUTION_1.sessionId)
+    else subject.sessionEvent('control-session', { type: 'sandbox/mode', seq: 3, data: { mode: 'workspace-write' } })
+    await unmount()
+    expect(finalizeTask).not.toHaveBeenCalled()
+  })
+
+  it.each(['pause', 'pause-and-replan'] as const)('invalidates asynchronous parent recovery before queued explicit %s control executes', async action => {
+    const source = record({ tianwenEvents: [{ type: 'attempt-started', taskId: TASK_1, attempt: {
+      epoch: 1, parentSessionId: 'planner-session', childSessionId: EXECUTION_1.sessionId,
+      permissionFingerprint: 'sha256:host-finalization', status: 'running', startedAt: '2026-10-05T00:00:00.000Z',
+    } }] })
+    const subject = harness(source)
+    const main = agent('control-session', 'main-goal')
+    subject.live.set('control-session', main)
+    const events = [
+      { type: 'turn/start', seq: 1, data: { turn: 1 } },
+      { type: 'turn/end', seq: 2, data: { turn: 1, reason: { kind: 'completed' } } },
+    ]
+    Object.assign(subject.first.session, { events })
+    const restoring = Promise.withResolvers<AbortSignal>()
+    const recovered = Promise.withResolvers<void>()
+    const dispatch = vi.fn()
+    const finalizeTask = async (input: { readonly signal: AbortSignal }) => {
+      restoring.resolve(input.signal)
+      await recovered.promise
+      input.signal.throwIfAborted()
+      dispatch()
+    }
+    const unmount = mountContinuousGoalHost(subject.ctx as never, { ...subject.dependencies, finalizeTask })
+    subject.sessionEvent(EXECUTION_1.sessionId, events[1])
+    const signal = await restoring.promise
+    const paused = subject.control(main, action === 'pause' ? { action } : { action, text: 'New direction', resume: false })
+    recovered.resolve()
+    await paused
+    await unmount()
+    expect(signal.aborted).toBe(true)
+    expect(dispatch).not.toHaveBeenCalled()
+    expect(subject.dependencies.control).toHaveBeenCalledTimes(1)
+  })
+
   it('public DSH publishes Task terminal capture before Planner settlement admission without a model-facing marker', async () => {
     const base = resolve('D:/DevData/tianwen-dsh-probe/terminal-boundary-order')
     mkdirSync(base, { recursive: true })
@@ -2290,9 +2399,9 @@ describe('continuous Goal Host', () => {
       const stateRoot = resolve(fixture, 'state')
       const source = createContinuousLongGoal({
         stateRoot,
-        objective: 'Bind before work starts',
-        context: null,
-        successCriteria: null,
+        objective: 'Bind before work starts. Return only project and status.',
+        context: 'Tests passed; review is "pending".\nNo release has been approved.',
+        successCriteria: 'The JSON must contain project and status only.',
         workspaceRoot: fixture,
         agentPreset: 'planner-preset',
         controlSessionId: 'main-control',
@@ -2351,6 +2460,7 @@ describe('continuous Goal Host', () => {
         expect(input.prompt[0]?.text).toContain('Do not create another Goal')
         expect(input.prompt[0]?.text).toContain('Future steps mentioned in the objective are context, not additional work for this Task.')
         expect(input.prompt[0]?.text).toContain('Do not create status-marker files merely to claim completion.')
+        expectOriginalTaskRequirements(input.prompt, source)
         let announce: ((event: { readonly agent: Agent }) => void) | undefined
         const prepared = setup({
           agent: child,
@@ -2470,8 +2580,9 @@ describe('continuous Goal Host', () => {
         ctx: { goals: { get: () => adoptedGoal } },
       } as unknown as Agent
       const live = new Map<string, Agent>([['live-planner', planner]])
-      const followupNativeTaskChild = vi.fn(async (_parent: Agent, childId: string) => {
+      const followupNativeTaskChild = vi.fn(async (_parent: Agent, childId: string, prompt: readonly { readonly type: 'text'; readonly text: string }[]) => {
         expect(childId).toBe('accepted-before-bind-child')
+        expectOriginalTaskRequirements(prompt, source)
         live.set(childId, adoptedChild)
         return 'cold-adopt-message'
       })
@@ -3542,9 +3653,10 @@ describe('continuous Goal Host', () => {
     }))
     Object.defineProperty(task.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     let resumed = false
-    const followupNativeTaskChild = vi.fn(async (parent: Agent, childId: string) => {
+    const followupNativeTaskChild = vi.fn(async (parent: Agent, childId: string, prompt: readonly { readonly type: 'text'; readonly text: string }[]) => {
       expect(parent).toBe(planner)
       expect(childId).toBe('cold-task')
+      expectOriginalTaskRequirements(prompt, source)
       resumed = true
       return 'followup-message'
     })
@@ -3701,6 +3813,8 @@ describe('continuous Goal Host', () => {
   it('keeps a disarmed v3 Task retryable until its exact Planner parent is live', async () => {
     const execution = { sessionId: 'disarmed-task', goalId: 'disarmed-goal' }
     const source = record({
+      context: 'Only a recorded passed review permits completion.',
+      successCriteria: 'Keep pending distinct from failed.',
       planner: { ...record().planner, sessionId: 'live-planner' },
       tasks: [{ id: TASK_1, objective: 'Continue disarmed Task', execution, resolution: null }],
     })
@@ -3710,8 +3824,9 @@ describe('continuous Goal Host', () => {
     Object.defineProperty(task.value.ctx, 'goals', { get() { throw new Error('uninjected Goal service') } })
     const planner = { session: { id: 'live-planner' } } as unknown as Agent
     let plannerLive = false
-    const followupNativeTaskChild = vi.fn(async () => {
+    const followupNativeTaskChild = vi.fn(async (_parent: Agent, _childId: string, prompt: readonly { readonly type: 'text'; readonly text: string }[]) => {
       expect(task.current().activation).toBe('disarmed')
+      expectOriginalTaskRequirements(prompt, source)
       return 'followup-message'
     })
     const dependencies = {

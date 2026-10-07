@@ -1,0 +1,44 @@
+# 前瞻开发试用：确定改善不再被其他未知对照否决
+
+## 这次解决什么
+
+上一批真实研究 b950b45f 的五个候选答案全部合格，其中两个案例明确失败→合格；其他两个原答案检查结果不确定。旧 DEV v1 因为任一原答案未知而否决整份研究。这是具体的开发试用障碍，不是缺少用户出题。
+
+新增显式隔离开发选项 `dev-conclusive-pair.v1`：仍需完整十臂、五个候选全部原独立检查合格，并且至少一个同案例原答案确定不合格→候选合格。其他原答案的未知仍原样保存，不计成功或改善。候选不合格/未知均不能启用；没有确定改善也不能启用。
+
+默认和原 `dev-paired-any-case.v1` 语义不变。旧 b950b45f 与 2cab6ab0 原结果不重判、来源对不补跑。新版本仅显式 `applyDevelopment` 和合法 D 开发目录可用；普通 Runtime 仍拒绝两 DEV 选项，正式隔离账本继续禁止它们的新研究修改，只保留原严格历史重放/安全停止/撤回。配置了程序检查的任务仍需原完整、可验证的独立证据，不能把程序检查未知当通过。
+
+## 工程核验已完成
+
+证据根目录：`D:/DevData/tianwen-conclusive-pair-engineering-20261006`。
+
+- 原实现实际 RED：35 项失败、30 项通过、353 过滤，`task-1-red.json` 保留。
+- 专项 GREEN：65 通过、353 过滤。包含新策略十臂原生派生接受、自动激活、未来任务注入及两次零新增模型调用冷恢复；相同未知输入默认/旧版本仍 inconclusive。
+- 五个完整源码套件：430/430 通过。最后加强的账本/程序检查控制另核 206/206，属于上述套件，不重复累加。
+- 同五套件打包版本：427 通过、3 原仅源码装配场景未运行，`task-1-published-full.json`。源码中三项已执行；过滤不算成功。
+- 原 evolution `tsc -b` 与 Runtime 十五条原构建命令全部退出 0；私有导入检查零违规、差异空白检查退出 0。首次只编 Runtime 因旧 evolution 声明未重建而失败，`build-first-result.json` 保留；按原依赖顺序重建，不修改正确的源码类型来掩盖。
+- 限定规则/代码复查无新有据 P1/P2。新实际操作器复查的三项 P2 已修：模拟答只注入首请求，后续纠正交付走真实模型；同角色确定失败→成功才计实际改善；普通/纠正/紧急快照前排空原反馈队列，防止过早关闭会话取消评估。
+
+## 下一项实际执行
+
+操作器根目录 `D:/DevData/tianwen-conclusive-pair-learning-20261006`。新隔离 profile、不同的预约/付款/部分取消业务记录；先真实两项未来任务基线，再明确模拟历史错误及用户纠正，原入题/独立检查/反馈归因/研究真实运行。允许原 Loop 自然产生多个新研究，只选实际原生接受并启用的方法进入后续；不再假设 `whenIdle` 必须产生一个 study。
+
+未知→合格只记录为消除不确定，合格→合格只记录保持；实际改善按相同 role 的原明确不合格→合格计数。新未使用任务无原基线，不单独称提高。接受后核真实方法注入、后续交付及原 consent 撤回/无后续注入/零调用冷恢复。保护旧共享九 Task、八 study、九 attempt 与账本字节，不复制依赖或旧全账本；新 nonce 避免持久化 ID 冲突。
+
+当前工程通过不等于真实学习效果已完成；实际执行与终态审计结果在下面追加。完整目标 active，main/Daily NO-GO 和 R9 原发布条件保留。生成物只在 D，D 约 16.7 GiB，高于 15 GiB 底线，尚未达到 20 GiB 偏好；本轮无依赖/环境副本。
+
+## e776230e 首批真实结果
+
+只读预检原 CLI0/零模型/零账本改变。正式批 16 actual、1 明确模拟主答，三个新 Task，零研究/attempt/激活；CLI1，但正常完整排空、consent enabled/revision1、零 active。独立 `final-audit.json` 核 145 冻结文件、旧共享九 Task/八 study/九 attempt 及账本逐字保持，D 约 16.74 GiB，无依赖或全账本副本。
+
+两真实未来基线分别为 inconclusive（原评审 invalid-judgment，无合格原生 review proof）与 met。预设正常对照原双审 not-met/instruction-following：用户明确要求覆盖预约状态，而操作员固定稿遗漏预约，只说了登记/批准/付款/履约/退款；事实本身正确不能代替完整要求。这是对照设计错误，不修改评审或重判原稿。其 native family 为 writing，两实际未来基线为 summarization，不能硬改旧分类配对。
+
+来源错误/用户纠正尚未执行。下一复用已有实际 met 的摘要作为正常对照；主动设计明确“压缩原始记录成当前状态摘要”的新来源请求，使原模型按真实用户转换要求分类。原三 Task/两基线/失败对照保留，不重跑；之前未执行原任务文件也保留。原 accepted 才后续/撤回/冷恢复。首基线评审无效另查原轨迹，不算模型交付确定失败，也不将未知→met伪称确定改善。目标 active，不等待用户或自然输入。
+
+## 3c479a06 第二批真实结果
+
+证据 `D:/DevData/tianwen-conclusive-pair-learning-20261006/learning-r2`。预检 CLI0/零模型/零账本改变；正式 56 actual、2 明确模拟历史主答、1 明确模拟用户纠正。原三 Task 不重跑；新增三 Task 后共六 Task、一 study、一 attempt。用户纠正的原生评估为 attributable-problem，随后真实模型修订交付 met；这是实际反馈归因链路，纠正内容的来源是模拟用户，不能称用户真实评价。
+
+原 study054c574c…八臂：source1 met→met、source2 not-met→met、counter met→met、adjacent met→not-met。source2 是实际成对改善；adjacent 正文事实均获两独立检查确认，但交付末尾夹入原用户禁止的 `</answer>`，原 candidate-failed，未执行 holdout、未裁决接受或激活。CLI1、normal drain、consent enabled/revision1、零 active；独立 final-audit 核 147 冻结文件、原三 Task/账本前缀及旧共享九 Task/八 study/九 attempt/账本字节保持，D 约16.73 GiB。
+
+首批 future1 无效评审另确认：模型将 inference 标为 supported，违反原已有字段关系；捕获工具未提前提示该非法组合，后置解析才 invalid-judgment。其答案不可直接当确定失败。第二批标签污染和首批字段问题均是实际缺口；按 `2026-10-06-tianwen-native-capture-boundary-plan.md` 修复已有捕获说明/诊断，不增加质量标准、不去掉旧标签或重判旧研究。来源1/2对已消费，下一只用新的来源组合。

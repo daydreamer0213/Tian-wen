@@ -85,6 +85,11 @@ function formatControlResult(result: ControlOperationResult, agent: Agent): stri
       completedTasks: status.goal.completedTasks,
       totalTasks: status.goal.totalTasks,
       autoProgress: status.control.autoProgress,
+      ...(status.tasks.some(task => task.acceptance !== undefined) ? {
+        taskAcceptances: status.tasks.filter(task => task.acceptance !== undefined).map(task => ({
+          id: task.id, objective: task.objective, phase: task.phase, acceptance: task.acceptance,
+        })),
+      } : {}),
       currentTask: currentTask === undefined
         ? null
         : {
@@ -201,10 +206,12 @@ export function installBoundContinuousGoalControls(
         'autoProgress "running" means automatic progression is enabled, not that a Task is executing. currentTask.phase and currentTask.attempt describe saved progress and may still say active/running after a restart; they are not proof of live execution and must not replace a requested resume.',
         'Do not execute the continuous Goal Task in this control chat.',
         'Treat Planner and Task subagent reports as progress only. Inspect goal_control status.',
-        'After status returns, give one brief user-facing update in the user\'s language: completed stages, current stage, and whether user action is needed. Do not call other tools merely to re-check the same status.',
+        'Honor the original user\'s applicable overall Goal deliverable and output-form requirements in this control chat, including JSON-only or no-commentary restrictions. Do not reinterpret an explicit overall Goal requirement as applying only to the Task executor.',
+        'When the applicable user request permits progress commentary, give one brief user-facing update in the user\'s language: completed stages, current stage, and whether user action is needed. Do not call other tools merely to re-check the same status.',
         'If status includes requiredUserAction, explain that native main Session setting in plain language and end your reply. Do not use request_user_input to invent an approval or promise one-time elevated execution.',
         'Each Task owns a separate native Goal. A Task reporting its Goal complete is normal Task completion, not premature completion of the continuous Goal; do not investigate it with get_goal.',
         'Report the Goal as complete only after goal_control reports phase "complete".',
+        'Task phase complete and completedTasks describe execution only. taskAcceptances preserve the original host verdicts: rejected, pending or unverifiable is not a pass, even when a content review says met. Do not use guidance to override those verdicts or claim the original requirements have passed. A new user direction may change future work; it does not rewrite an old acceptance.',
         'Use exactly one of:',
         ...GOAL_CONTROL_SHAPES,
         'Do not add fields or use text/resume for an action that does not list them.',

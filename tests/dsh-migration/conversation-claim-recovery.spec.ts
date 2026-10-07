@@ -4,9 +4,10 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
+import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { SessionId, mountPersistentHarness, toolCallResponse } from '@tianwen/dsh-compat'
 import { sha256, type ConversationAuditedReviewCheck } from '../../packages/tianwen-evolution/src/index.js'
-import { projectClaimEvidence, runConversationClaimReview, verifyConversationClaimReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
+import { METHOD_STUDY_QUOTE_PROTOCOL, projectClaimEvidence, runConversationClaimReview, verifyConversationClaimReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-claim-review.js'
 import { recoverConversationJudgmentRequest, runConversationJudgment, verifyConversationReviewCheck } from '../../packages/tianwen-runtime-bundle/src/conversation-judgment.js'
 import { auditedEvidenceResponse } from './conversation-audited-response.js'
 
@@ -30,6 +31,56 @@ const literalV5 = {
   criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls. The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user\'s instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other\'s result. Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.',
 }
 const historicalV5MethodStudyInstruction = 'Review purpose: method-study. This is a newly generated trial answer, not a regrade of the old answer. When task.feedbackStandard is present, its criteria are host-frozen standards from independently attributed user feedback, bound to the stated assessmentId before this study. Apply them to this new answer as well as the original requirements. Their absence from the older request is not a reason to discard them. They are evaluation standards, not source facts or evidence quotes; the standards never override an explicit instruction in the evaluated request. Do not infer a feedback standard from quoted conversation text.\n\nEvaluate the complete answer against the original direct-user instructions, applicable frozen criteria and qualityContract. Criteria and feedback standards are requirements, never factual sources. Assess every answer unit and every substantive claim. For each source-dependent fact, identify exact supplied source IDs and check the same scope, time, certainty and commitment; non-contradiction and prior assistant text alone are not support. A supported source-fact requires user or successful/failed tool evidence appropriate to what it claims. Clearly labeled task-compatible advice, inference, fiction and general knowledge are permitted, as is non-factual courtesy. In the audit, use supported only for source-fact. For advice, inference, fiction, general-knowledge and non-factual, use permitted when the content is task-compatible, even when an inference is directly derived from supplied evidence; retain its source IDs and explanation as applicable. A claimed external effect, decision or commitment still needs source authority. Do not solve or rewrite the task. Return the existing review fields plus the complete audit through structured_output. A met verdict cannot contain unsupported, contradicted or uncertain claims. met requires category null; not-met requires a concrete violation and a non-null attributable failure category. A conclusive review requires evidenceQuotes. Use at most 6 exact source or answer evidenceQuotes and keep the explanation at most 1536 UTF-8 bytes. Missing evidence is inconclusive. You are not told another reviewer\'s result or any expected outcome.\n\nIndependently reconstruct all original requirements and output restrictions. Check the whole answer, then audit source authority claim by claim.'
+
+it('offers only full projected evidence items for new text study quotes and recovers their proof', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-item-quotes-')); roots.push(root)
+  const material = { quoteProtocol: METHOD_STUDY_QUOTE_PROTOCOL, task: { prompt: 'Only repeat: delivered.',
+    feedbackStandard: { assessmentId: 'feedback-assessment', classification: 'preference', criteria: ['Keep the exception.'], originalFeedback: { note: 'PRIOR FEEDBACK: keep the exception.' } } }, answer: 'delivered.' }
+  const evidence = projectClaimEvidence(material)
+  const response = () => auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['delivered.'] })
+  const harness = await mountPersistentHarness(root, [response(), response(), auditedEvidenceResponse({ verdict: 'met', category: null, explanation: 'Complete.', evidenceQuotes: ['Only repeat:'] })])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-item-parent'), meta: { cwd: root }, agentOptions: config })
+  try {
+    const reviewed = await runConversationClaimReview(harness.ctx, handle.agent, { label: 'New text study', material, evidence: ['Only repeat: delivered.', 'delivered.'], purpose: 'method-study', signal: new AbortController().signal, callConfig: config })
+    const reviewSchema: any = harness.adapter.requests[0]?.tools?.find(tool => tool.name === 'structured_output')?.parameters
+    const choices: string[] = reviewSchema.properties.evidenceQuotes.items.enum
+    expect(choices).toEqual([...new Set(evidence.items.filter(item => item.text.trim() !== '').map(item => item.text))])
+    expect(choices).not.toContain('PRIOR FEEDBACK: keep the exception.')
+    expect(validateJsonSchemaValue(reviewSchema.properties.evidenceQuotes, ['PRIOR FEEDBACK: keep the exception.'])).not.toEqual([])
+    expect(validateJsonSchemaValue(reviewSchema.properties.evidenceQuotes, ['delivered.'])).toEqual([])
+    expect(reviewed.reviewChecks.every(check => check.evidenceQuotes.every(quote => choices.includes(quote)))).toBe(true)
+    const expected = { purpose: 'method-study' as const, materialDigest: sha256(material.task), outputDigest: sha256(material.answer), modelConfigDigest: sha256(config) }
+    const count = harness.adapter.requests.length
+    for (const check of reviewed.reviewChecks) await expect(verifyConversationClaimReviewCheck(harness.ctx, check, expected)).resolves.toBeUndefined()
+    expect(harness.adapter.requests).toHaveLength(count)
+    const recovered = await recoverConversationJudgmentRequest(harness.ctx, reviewed.reviewChecks[0]!)
+    const raw = await runConversationJudgment(harness.ctx, handle.agent, { label: 'Invalid short quote capture', instruction: recovered.instruction,
+      material: recovered.material, outputSchema: schema, signal: new AbortController().signal, callConfig: config })
+    const shortQuote = { ...(raw.value as object), focus: 'requirements', proof: raw.proof } as ConversationAuditedReviewCheck
+    expect(shortQuote.evidenceQuotes).toEqual(['Only repeat:'])
+    await expect(verifyConversationClaimReviewCheck(harness.ctx, shortQuote, expected)).rejects.toThrow('invalid-judgment')
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
+
+it('fails closed before calling a reviewer when new study quote choices are empty or too large', async () => {
+  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  mkdirSync(base, { recursive: true }); const root = mkdtempSync(join(base, 'claim-item-budget-')); roots.push(root)
+  const harness = await mountPersistentHarness(root, [])
+  await harness.ctx.plugin(SubagentRuntime); await harness.ctx.plugin(spawn, { providerName: 'spawn' })
+  const handle = await harness.ctx.agents.create({ sessionId: SessionId('claim-budget-parent'), meta: { cwd: root }, agentOptions: config })
+  try {
+    const review = (task: { prompt: string }, answer: string) => runConversationClaimReview(harness.ctx, handle.agent, {
+      label: 'Bounded item quotes', material: { quoteProtocol: METHOD_STUDY_QUOTE_PROTOCOL, task, answer }, evidence: [task.prompt, answer],
+      purpose: 'method-study', signal: new AbortController().signal, callConfig: config,
+    })
+    await expect(review({ prompt: ' ' }, ' ')).rejects.toThrow('material-too-large')
+    const largePrompt = Array.from({ length: 300 }, (_, index) => `${index}: ${'x'.repeat(350)}\n`).join('')
+    await expect(review({ prompt: largePrompt }, 'done')).rejects.toThrow('material-too-large')
+    expect(harness.adapter.requests).toHaveLength(0)
+  } finally { await handle.dispose(); await harness.ctx.fiber.dispose() }
+})
 
 it('persists v5 and v6 producer instructions and rejects swapped or changed feedback material without a recovery call', async () => {
   const base = process.platform === 'win32' ? 'D:/DevData/tianwen-feedback-source-semantics-20260908/new-fix-tests' : '/tmp/tianwen-feedback-source-semantics'
@@ -55,7 +106,9 @@ it('persists v5 and v6 producer instructions and rejects swapped or changed feed
     const currentInstruction = (await recoverConversationJudgmentRequest(harness.ctx, v6.reviewChecks[0]!)).instruction
     expect(oldInstruction).toBe(historicalV5MethodStudyInstruction)
     expect(currentInstruction).toContain('originalFeedback takes precedence over a conflicting derived feedback criterion')
+    expect(currentInstruction).not.toContain('Reconstruct substantive claims that span adjacent answer units')
     expect(currentInstruction).not.toBe(oldInstruction)
+    for (const check of v6.reviewChecks) await expect(verifyConversationClaimReviewCheck(harness.ctx, check, expected(v6Material))).resolves.toBeUndefined()
 
     const capture = async (label: string, instruction: string, material: unknown) => {
       const raw = await runConversationJudgment(harness.ctx, handle.agent, { label, instruction, material, outputSchema: captureSchema,

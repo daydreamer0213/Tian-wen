@@ -986,6 +986,10 @@ describe('Tianwen learning intake ledger', () => {
     expect(ledger.getLearningIntakeStatus(base.sessionId, 'missing-message'))
       .toBeUndefined()
     expect(ledger.listLearningIntakeStatuses('missing-session')).toEqual([])
+    expect(() => Reflect.apply(ledger.listLearningIntakeStatuses, ledger, []))
+      .toThrow(/sessionId is required/)
+    expect(() => ledger.listLearningIntakeStatuses(''))
+      .toThrow(/sessionId is required/)
 
     const firstList = ledger.listLearningIntakeStatuses(base.sessionId)
     const secondList = ledger.listLearningIntakeStatuses(base.sessionId)

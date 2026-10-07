@@ -1,0 +1,689 @@
+[
+  {
+    "input": {
+      "id": "empty",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [],
+      "nativeGoalSources": []
+    },
+    "expected": {
+      "id": "empty",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "ordinary-original-non-task-compatibility",
+      "sessionId": "main-A",
+      "conversationTasks": [
+        {
+          "source": {
+            "sessionId": "main-A",
+            "scopeKey": "scope-z"
+          },
+          "admission": {
+            "decision": {
+              "kind": "non-task"
+            }
+          }
+        },
+        {
+          "source": {
+            "sessionId": "main-B",
+            "scopeKey": "scope-other"
+          },
+          "admission": {
+            "decision": {
+              "kind": "non-task"
+            }
+          }
+        },
+        {
+          "source": {
+            "sessionId": "main-A",
+            "scopeKey": "scope-a"
+          },
+          "admission": {
+            "decision": {
+              "kind": "non-task"
+            }
+          }
+        }
+      ],
+      "goalOutcomes": [],
+      "nativeGoalSources": []
+    },
+    "expected": {
+      "id": "ordinary-original-non-task-compatibility",
+      "scopes": [
+        "scope-a",
+        "scope-z"
+      ],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "native-control-root",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "native-control-root",
+      "scopes": [
+        "scope-goal-A"
+      ],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "native-task-child",
+      "sessionId": "child-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "native-task-child",
+      "scopes": [
+        "scope-goal-A"
+      ],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "other-goal-is-not-current",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-B",
+          "inputDigest": "digest-B",
+          "input": {
+            "origin": {
+              "sessionId": "main-B"
+            },
+            "childSessionId": "child-B"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-B",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-B",
+            "outcomeInputDigest": "digest-B",
+            "scopeKey": "scope-goal-B"
+          },
+          "outcome": {
+            "sourceId": "goal-B",
+            "inputDigest": "digest-B",
+            "input": {
+              "origin": {
+                "sessionId": "main-B"
+              },
+              "childSessionId": "child-B"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "other-goal-is-not-current",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "unpublished-goal-is-not-guessed",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": []
+    },
+    "expected": {
+      "id": "unpublished-goal-is-not-guessed",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "mixed-sorted-deduplicated",
+      "sessionId": "main-A",
+      "conversationTasks": [
+        {
+          "source": {
+            "sessionId": "main-A",
+            "scopeKey": "scope-z"
+          },
+          "admission": {
+            "decision": {
+              "kind": "non-task"
+            }
+          }
+        },
+        {
+          "source": {
+            "sessionId": "main-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "admission": {
+            "decision": {
+              "kind": "non-task"
+            }
+          }
+        }
+      ],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        },
+        {
+          "sourceId": "goal-B",
+          "inputDigest": "digest-B",
+          "input": {
+            "origin": {
+              "sessionId": "main-B"
+            },
+            "childSessionId": "child-B"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        },
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        },
+        {
+          "sourceId": "goal-B",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-B",
+            "outcomeInputDigest": "digest-B",
+            "scopeKey": "scope-goal-B"
+          },
+          "outcome": {
+            "sourceId": "goal-B",
+            "inputDigest": "digest-B",
+            "input": {
+              "origin": {
+                "sessionId": "main-B"
+              },
+              "childSessionId": "child-B"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "mixed-sorted-deduplicated",
+      "scopes": [
+        "scope-goal-A",
+        "scope-z"
+      ],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "reject-outer-source-id",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "different",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "reject-outer-source-id",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "reject-input-source-id",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "different",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "reject-input-source-id",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "reject-outcome-digest",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "different",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "reject-outcome-digest",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "reject-embedded-source-id",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "different",
+            "inputDigest": "digest-A",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "reject-embedded-source-id",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "reject-embedded-digest",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-A",
+            "scopeKey": "scope-goal-A"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "different",
+            "input": {
+              "origin": {
+                "sessionId": "main-A"
+              },
+              "childSessionId": "child-A"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "reject-embedded-digest",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "same-id-other-original-input",
+      "sessionId": "main-A",
+      "conversationTasks": [],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-A",
+          "input": {
+            "origin": {
+              "sessionId": "main-A"
+            },
+            "childSessionId": "child-A"
+          }
+        },
+        {
+          "sourceId": "goal-A",
+          "inputDigest": "digest-other",
+          "input": {
+            "origin": {
+              "sessionId": "main-B"
+            },
+            "childSessionId": "child-B"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-A",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-A",
+            "outcomeInputDigest": "digest-other",
+            "scopeKey": "scope-other"
+          },
+          "outcome": {
+            "sourceId": "goal-A",
+            "inputDigest": "digest-other",
+            "input": {
+              "origin": {
+                "sessionId": "main-B"
+              },
+              "childSessionId": "child-B"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "same-id-other-original-input",
+      "scopes": [],
+      "unchanged": true
+    }
+  },
+  {
+    "input": {
+      "id": "shared-ordinary-scope-preserved",
+      "sessionId": "main-A",
+      "conversationTasks": [
+        {
+          "source": {
+            "sessionId": "main-A",
+            "scopeKey": "scope-goal-B"
+          },
+          "admission": {
+            "decision": {
+              "kind": "non-task"
+            }
+          }
+        }
+      ],
+      "goalOutcomes": [
+        {
+          "sourceId": "goal-B",
+          "inputDigest": "digest-B",
+          "input": {
+            "origin": {
+              "sessionId": "main-B"
+            },
+            "childSessionId": "child-B"
+          }
+        }
+      ],
+      "nativeGoalSources": [
+        {
+          "sourceId": "goal-B",
+          "input": {
+            "sourceKind": "native-goal-task",
+            "sourceId": "goal-B",
+            "outcomeInputDigest": "digest-B",
+            "scopeKey": "scope-goal-B"
+          },
+          "outcome": {
+            "sourceId": "goal-B",
+            "inputDigest": "digest-B",
+            "input": {
+              "origin": {
+                "sessionId": "main-B"
+              },
+              "childSessionId": "child-B"
+            }
+          }
+        }
+      ]
+    },
+    "expected": {
+      "id": "shared-ordinary-scope-preserved",
+      "scopes": [
+        "scope-goal-B"
+      ],
+      "unchanged": true
+    }
+  }
+]

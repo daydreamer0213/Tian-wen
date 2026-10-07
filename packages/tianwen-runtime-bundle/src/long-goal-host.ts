@@ -92,8 +92,11 @@ import {
   projectLearningAudit,
   type LearningAudit,
 } from './learning-clue-status.js'
-import { readGoalStatus } from './status.js'
+import { GoalStatusNotFoundError, readGoalStatus } from './status.js'
 import { NativeLongGoalChild } from './native-long-goal-child.js'
+import { finalizeNativeLongGoalTask } from './native-task-finalization.js'
+export { finalizeNativeLongGoalTask } from './native-task-finalization.js'
+import { currentGoalCommandOrigin, GoalTaskAcceptanceChecks, type GoalTaskAcceptanceCheck } from './goal-task-acceptance.js'
 import {
   permissionLimitedEvidence,
   permissionSnapshot,
@@ -177,10 +180,80 @@ export interface TianwenLongGoalHostRoots {
   readonly evolutionRoot: string
 }
 
+export async function cancelContinuousTaskAgent(
+  taskAgent: Agent,
+  goalId: string,
+  goals: Pick<Context['goals'], 'get' | 'pause'>,
+): Promise<void> {
+  const goal = goals.get(taskAgent)
+  if (goal === undefined || String(goal.id) !== goalId) {
+    throw new LongGoalIntegrityError('Continuous Goal Task binding does not match live Goal')
+  }
+  const lastTurn = taskAgent.session.events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end')
+  const idleError = taskAgent.status === 'idle' && lastTurn?.type === 'turn/end'
+    && lastTurn.data.reason.kind === 'error'
+  taskAgent.cancel({ kind: 'parent' })
+  await taskAgent.whenIdle()
+  // An already idle error cannot produce the aborted turn handled by the SDK driver.
+  if (idleError && taskAgent.status === 'idle'
+    && taskAgent.session.events.findLast(event => event.type === 'turn/start' || event.type === 'turn/end') === lastTurn) {
+    const current = goals.get(taskAgent)
+    if (current === undefined || String(current.id) !== goalId) {
+      throw new LongGoalIntegrityError('Continuous Goal Task cancellation binding mismatch')
+    }
+    if (current.phase === 'active') goals.pause(taskAgent, { id: current.id, revision: current.revision })
+  }
+}
+
+export async function readLongGoalStatusWithLiveAdmission(
+  input: Parameters<typeof readLongGoalStatus>[0],
+  dependencies: {
+    readonly attachedAgent: (sessionId: string) => Agent | undefined
+    readonly getGoal?: (agent: Agent) => GoalView | undefined
+    readonly flushSession: (agent: Agent) => Promise<void>
+    readonly readStatus?: typeof readLongGoalStatus
+    readonly readRecord?: typeof readLongGoal
+  },
+): ReturnType<typeof readLongGoalStatus> {
+  const readStatus = dependencies.readStatus ?? readLongGoalStatus
+  try { return await readStatus(input) } catch (error) {
+    if (!(error instanceof GoalStatusNotFoundError)) throw error
+    const readRecord = dependencies.readRecord ?? readLongGoal
+    const record = readRecord(input.stateRoot, input.longGoalId)
+    if (record.schemaVersion !== 'tianwen.long-goal.v3') throw error
+    const task = record.tasks.find(candidate => candidate.execution?.goalId === error.goalId)
+    const execution = task?.execution
+    if (task === undefined || execution === undefined || execution === null) throw error
+    const agent = dependencies.attachedAgent(execution.sessionId)
+    const getGoal = dependencies.getGoal ?? ((candidate: Agent) => candidate.ctx.goals.get(candidate))
+    const matchesLiveGoal = (candidate: Agent): boolean => {
+      const goal = getGoal(candidate)
+      return goal !== undefined && String(goal.id) === execution.goalId
+    }
+    if (agent === undefined || String(agent.session.id) !== execution.sessionId
+      || !matchesLiveGoal(agent)
+      || agent.session.header.cwd !== record.workspaceRoot
+      || agent.session.header.agentPreset !== record.planner.agentPreset) throw error
+    // Persist existing live events only; the standalone cold reader remains read-only.
+    await dependencies.flushSession(agent)
+    const latest = readRecord(input.stateRoot, input.longGoalId)
+    const currentTask = latest.tasks.find(candidate => candidate.id === task.id)
+    if (latest.schemaVersion !== 'tianwen.long-goal.v3'
+      || latest.workspaceRoot !== record.workspaceRoot || latest.planner.agentPreset !== record.planner.agentPreset
+      || currentTask?.execution?.sessionId !== execution.sessionId || currentTask.execution.goalId !== execution.goalId
+      || dependencies.attachedAgent(execution.sessionId) !== agent || !matchesLiveGoal(agent)) {
+      throw new LongGoalIntegrityError('Continuous Goal live status binding changed while persisting')
+    }
+    return readStatus(input)
+  }
+}
+
 export interface TianwenLongGoalHostConfig {
   readonly stateRoot?: string
   readonly sessionsRoot?: string
   readonly evolutionRoot?: string
+  /** Trusted, default-off pre-answer Task acceptance. Does not grant learning source eligibility. */
+  readonly goalTaskAcceptance?: GoalTaskAcceptanceCheck
 }
 
 export interface TianwenLongGoalHostDependencies {
@@ -243,6 +316,7 @@ export interface TianwenLongGoalRunDependencies {
   readonly attachedAgent: (sessionId: string) => Agent | undefined
   readonly recoverNativeTaskParent?: (
     record: GoalFirstLongGoalRecord,
+    authorization?: { readonly signal: AbortSignal, readonly assertAuthority: () => void },
   ) => Promise<NativePlannerRecoveryLease | undefined>
   readonly getGoal?: (agent: Agent) => GoalView | undefined
   readonly nativeGoalService?: Pick<Context['goals'], 'resume' | 'disarm'>
@@ -288,7 +362,7 @@ function installPlannerTaskAdmission(agentCtx: Context, admit: (planner: Agent) 
   let claimed = false
   agentCtx.tools.register(defineTool({
     name: 'recover_long_goal_task',
-    description: 'Let Tianwen attach the already-reserved Task while this Planner turn remains active. Call exactly once.',
+    description: 'Let Tianwen attach the already-reserved Task while this Planner turn remains active. Call exactly once in THIS turn for each new recovery admission; earlier calls in this Session do not admit the current recovery.',
     parameters: {},
     output: {
       schema: { type: 'string', const: 'task-recovery-admitted' },
@@ -307,7 +381,10 @@ function installPlannerTaskAdmission(agentCtx: Context, admit: (planner: Agent) 
 export async function recoverNativeLongGoalPlannerParent(
   record: GoalFirstLongGoalRecord,
   dependencies: NativePlannerRecoveryDependencies,
+  authorization?: { readonly signal: AbortSignal, readonly assertAuthority: () => void },
 ): Promise<NativePlannerRecoveryLease | undefined> {
+  authorization?.signal.throwIfAborted()
+  authorization?.assertAuthority()
   if (record.schemaVersion !== 'tianwen.long-goal.v3') return undefined
   const existing = dependencies.attachedAgent(record.planner.sessionId)
   if (existing !== undefined) return { parent: existing, release: () => undefined }
@@ -315,6 +392,8 @@ export async function recoverNativeLongGoalPlannerParent(
   if (main === undefined || String(main.session.id) !== record.control.sessionId) return undefined
   const matches = (await dependencies.listSessions())
     .filter(session => session.sessionId === record.planner.sessionId)
+  authorization?.signal.throwIfAborted()
+  authorization?.assertAuthority()
   if (
     matches.length !== 1
     || matches[0]!.cwd !== record.workspaceRoot
@@ -331,14 +410,17 @@ export async function recoverNativeLongGoalPlannerParent(
     })
   })
   try {
+    authorization?.signal.throwIfAborted()
+    authorization?.assertAuthority()
     await dependencies.followupNativeChild(
       main,
       record.planner.sessionId,
       [{
         type: 'text',
-        text: 'Recover only as the existing Long Goal Planner parent so Tianwen can continue the already-started Task after Host restart. Call recover_long_goal_task exactly once. Do not replan, start another Task, or modify the workspace.',
+        text: 'Recover only as the existing Long Goal Planner parent so Tianwen can continue the already-started Task. This is a new recovery admission for THIS turn. Earlier calls in this Session do not admit this recovery. Call recover_long_goal_task exactly once in THIS turn, even if it was called in earlier turns. Do not replan, start another Task, or modify the workspace.',
       }],
-      AbortSignal.timeout(30_000),
+      authorization === undefined ? AbortSignal.timeout(30_000)
+        : AbortSignal.any([authorization.signal, AbortSignal.timeout(30_000)]),
     )
   } catch (error) {
     released.resolve()
@@ -349,7 +431,9 @@ export async function recoverNativeLongGoalPlannerParent(
     recovered = await Promise.race([
       claimed.promise,
       new Promise<never>((_resolve, reject) => {
-        const signal = AbortSignal.timeout(30_000)
+        const signal = authorization === undefined ? AbortSignal.timeout(30_000)
+          : AbortSignal.any([authorization.signal, AbortSignal.timeout(30_000)])
+        if (signal.aborted) { reject(signal.reason); return }
         signal.addEventListener('abort', () => {
           reject(new LongGoalIntegrityError('Continuous Goal Planner recovery was not claimed'))
         }, { once: true })
@@ -693,7 +777,7 @@ export function createPermissionAttemptHost(
     if (planner === undefined) {
       const prompt = [{
         type: 'text' as const,
-        text: 'Restore only the Planner parent after a main-session permission change. Call recover_long_goal_task exactly once so Tianwen can attach the already-reserved Task. Do not execute the Task or submit a plan in this turn. Later planning requests provide the exact Goal revision.',
+        text: 'Restore only the Planner parent after a main-session permission change. This is a new recovery admission for THIS turn. Earlier calls in this Session do not admit this recovery. Call recover_long_goal_task exactly once in THIS turn, even if it was called in earlier turns, so Tianwen can attach the already-reserved Task. Do not execute the Task or submit a plan in this turn. Later planning requests provide the exact Goal revision.',
       }]
       const inspection = await dependencies.inspectSession(record.planner.sessionId)
       let admitted = false
@@ -906,10 +990,20 @@ function currentGoal(
   return goal
 }
 
-function nativeTaskPrompt(objective: string, continuation?: string): string {
+function nativeTaskPrompt(
+  goal: Pick<LongGoalRecordV3, 'objective' | 'context' | 'successCriteria'>,
+  objective: string,
+  continuation?: string,
+): string {
   return [
     'Execute exactly one Tianwen Long Goal Task.',
     `Task objective: ${objective}`,
+    `Original continuous Goal requirements (reference only): ${JSON.stringify({
+      objective: goal.objective, context: goal.context, successCriteria: goal.successCriteria,
+    })}`,
+    'Perform only the delegated Task within these original requirements; do not perform other Goal tasks or expand permissions.',
+    'Preserve original requirements applicable to this Task, including the requested deliverable content and output form.',
+    'Goal context and Planner wording are requirements metadata, not confirmed user facts.',
     'Future steps mentioned in the objective are context, not additional work for this Task.',
     'Do not create status-marker files merely to claim completion.',
     'A native DSH Goal is already active in this Task Session.',
@@ -1137,7 +1231,7 @@ export async function runCurrentWebTask(input: {
               parent,
               childId: sessionId,
               label: `Task ${taskIndex + 1}: ${task.objective}`,
-              prompt: [{ type: 'text', text: nativeTaskPrompt(task.objective) }],
+              prompt: [{ type: 'text', text: nativeTaskPrompt(goalFirstRecord, task.objective) }],
               agentOptions: nativeAgentOptions,
               signal: AbortSignal.timeout(30_000),
             })
@@ -1154,6 +1248,7 @@ export async function runCurrentWebTask(input: {
                 [{
                   type: 'text',
                   text: nativeTaskPrompt(
+                    goalFirstRecord,
                     task.objective,
                     'Cold-adopt the already accepted Task. Do not repeat completed work; continue only unfinished work from durable Session state.',
                   ),
@@ -1301,7 +1396,7 @@ export async function runCurrentWebTask(input: {
         await dependencies.followupNativeTaskChild(
           parent,
           sessionId,
-          [{ type: 'text', text: nativeTaskPrompt(task.objective, 'Continue only unfinished work from durable Session state.') }],
+          [{ type: 'text', text: nativeTaskPrompt(goalFirstRecord, task.objective, 'Continue only unfinished work from durable Session state.') }],
           AbortSignal.timeout(30_000),
         )
       } finally {
@@ -1365,7 +1460,7 @@ export async function runCurrentWebTask(input: {
         await dependencies.followupNativeTaskChild!(
           nativeParent,
           sessionId,
-          [{ type: 'text', text: nativeTaskPrompt(task.objective, 'Continue only unfinished work from durable Session state.') }],
+          [{ type: 'text', text: nativeTaskPrompt(goalFirstRecord, task.objective, 'Continue only unfinished work from durable Session state.') }],
           AbortSignal.timeout(30_000),
         )
       } catch (cause) {
@@ -2196,6 +2291,15 @@ export function mountTianwenLongGoalHost(
       ...(config === undefined ? {} : { config }),
     })
     const host = injected as HostContext
+    const readLiveStatus: typeof readLongGoalStatus = input => readLongGoalStatusWithLiveAdmission(input, {
+      attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
+      getGoal: agent => injected.goals.get(agent),
+      flushSession: async agent => {
+        if (!await injected.sessions.flush(agent.session)) throw new Error('Session persistence is unavailable')
+      },
+    })
+    const taskAcceptance = new GoalTaskAcceptanceChecks(injected, roots, config?.goalTaskAcceptance)
+    injected.effect(() => taskAcceptance.mount())
     const nativeChild = new NativeLongGoalChild(injected)
     const nativeSetups = new Map<string, AgentSetup>()
     const disposeNativeSetup = injected.subagents.registerContinuableSetup(childCtx => {
@@ -2233,7 +2337,7 @@ export function mountTianwenLongGoalHost(
     }
     const runDependencies: TianwenLongGoalRunDependencies = {
       readLongGoal,
-      readLongGoalStatus,
+      readLongGoalStatus: readLiveStatus,
       bindLongGoalTask,
       bindGoalFirstLongGoalTask,
       listSessions: async () => unwrapRpc(await host.apiProxy.sessions.list({
@@ -2258,13 +2362,13 @@ export function mountTianwenLongGoalHost(
         nativeChild.followupTask(parent, SessionId(childId), prompt, signal),
       nativeAgentOptions: host.agentDefaultModel.currentSelection(),
       attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
-      recoverNativeTaskParent: record => recoverNativeLongGoalPlannerParent(record, {
+      recoverNativeTaskParent: (record, authorization) => recoverNativeLongGoalPlannerParent(record, {
         listSessions: runDependencies.listSessions,
         attachedAgent: sessionId => injected.agents.get(SessionId(sessionId)),
         installNativeSetup: (sessionId, setup) => { nativeSetups.set(sessionId, setup) },
         followupNativeChild: (parent, childId, prompt, signal) =>
           nativeChild.followup(parent, SessionId(childId), prompt, signal),
-      }),
+      }, authorization),
       getGoal: agent => injected.goals.get(agent),
       nativeGoalService: injected.goals,
       createGoal: (agent, goalInput) => injected.goals.create(agent, goalInput),
@@ -2447,15 +2551,20 @@ export function mountTianwenLongGoalHost(
     const serviceDependencies: GoalFirstServiceDependencies = {
       createRecord: createGoalFirstLongGoal,
       readRecord: readLongGoal,
-      readStatus: readLongGoalStatus,
+      readStatus: readLiveStatus,
       appendGuidance: appendLongGoalGuidance,
       abandonBlockedTask: abandonBlockedLongGoalTask,
-      runPlannerTurn: ({ record, reason }) => runLongGoalPlannerTurn({
+      runPlannerTurn: async ({ record, reason }) => {
+        await taskAcceptance.finishGoal(record.id)
+        const latest = config?.goalTaskAcceptance === undefined ? record : readLongGoal(roots.stateRoot, record.id)
+        if (latest.schemaVersion === 'tianwen.long-goal.v1') throw new LongGoalIntegrityError('Planner requires Goal-first record')
+        return runLongGoalPlannerTurn({
         stateRoot: roots.stateRoot,
         dshStatusTarget,
-        record,
+        record: latest,
         reason,
-      }, plannerDependencies),
+        }, plannerDependencies)
+      },
       runTask: async input => {
         const result = await runCurrentWebTask({
           roots,
@@ -2492,7 +2601,11 @@ export function mountTianwenLongGoalHost(
     }
     const continuousServiceDependencies: ContinuousGoalServiceDependencies = {
       ...serviceDependencies,
-      createContinuousRecord: createContinuousLongGoal,
+      createContinuousRecord: input => {
+        const origin = config?.goalTaskAcceptance === undefined ? undefined
+          : currentGoalCommandOrigin(injected.agents.get(SessionId(input.controlSessionId)), input.objective)
+        return createContinuousLongGoal({ ...input, ...(origin === undefined ? {} : { origin }) })
+      },
       setMode: setContinuousGoalMode,
       appendGuidanceOnly: appendContinuousGoalGuidance,
       redirect: redirectContinuousGoal,
@@ -2502,12 +2615,7 @@ export function mountTianwenLongGoalHost(
         if (taskAgent === undefined) {
           throw new LongGoalIntegrityError('Continuous Goal Task Session is not live')
         }
-        const goal = injected.goals.get(taskAgent)
-        if (goal === undefined || String(goal.id) !== execution.goalId) {
-          throw new LongGoalIntegrityError('Continuous Goal Task binding does not match live Goal')
-        }
-        taskAgent.cancel({ kind: 'parent' })
-        await taskAgent.whenIdle()
+        await cancelContinuousTaskAgent(taskAgent, execution.goalId, injected.goals)
         if (!await injected.sessions.flush(taskAgent.session)) {
           throw new Error('Session persistence is unavailable')
         }
@@ -2527,7 +2635,7 @@ export function mountTianwenLongGoalHost(
       },
     }
     const readContinuousStatus = async (longGoalId: string): Promise<LongGoalStatusProjectionV3> => {
-      const status = await readLongGoalStatus({
+      const status = await readLiveStatus({
         stateRoot: roots.stateRoot,
         longGoalId,
         dshStatusTarget,
@@ -2563,12 +2671,16 @@ export function mountTianwenLongGoalHost(
       flushSession: async agent => injected.sessions.flush(agent.session),
       getGoal: agent => injected.goals.get(agent),
       reportProgress: async input => { await reportLongGoalProgress(injected, input) },
-      recordTerminalAttempt: input => recordContinuousGoalTerminalAttempt({
+      recordTerminalAttempt: async input => {
+        const recorded = await recordContinuousGoalTerminalAttempt({
         stateRoot: roots.stateRoot,
         ...input,
       }, {
         inspectSession: sessionId => host.sessionPersistence.inspect(SessionId(sessionId)),
-      }),
+        })
+        if (recorded !== false) await taskAcceptance.finishGoal(input.longGoalId)
+        return recorded
+      },
       deliver: intent => deliverContinuousGoalSettlement(intent, {
         stateRoot: roots.stateRoot,
         getAgent: sessionId => injected.agents.get(SessionId(sessionId)),
@@ -2581,6 +2693,32 @@ export function mountTianwenLongGoalHost(
       installBoundControls: installBoundContinuousGoalControls,
       handlePermissionEvent: permissionAttemptHost.handlePermissionEvent,
       reconcilePermissionAttempt: permissionAttemptHost.reconcilePermissionAttempt,
+      finalizeTask: input => finalizeNativeLongGoalTask(input, {
+        readRecord: id => {
+          const record = readLongGoal(roots.stateRoot, id)
+          if (record.schemaVersion !== 'tianwen.long-goal.v3') throw new LongGoalIntegrityError('Task finalization requires v3')
+          return record
+        },
+        readStatus: readContinuousStatus,
+        inspectSession: id => host.sessionPersistence.inspect(SessionId(id)),
+        attachedAgent: runDependencies.attachedAgent,
+        getGoal: agent => injected.goals.get(agent),
+        readGoalRef: runDependencies.readGoalRef,
+        readPermissionSnapshot: runDependencies.readPermissionSnapshot!,
+        reconcilePermissionAttempt: permissionAttemptHost.reconcilePermissionAttempt,
+        recoverParent: (record, authorization) => runDependencies.recoverNativeTaskParent!(record, authorization),
+        followupTask: (parent, childId, prompt, signal, assertAuthority) =>
+          nativeChild.followupTask(parent, SessionId(childId), prompt, signal, assertAuthority),
+        stopTask: async (record, reason) => {
+          const explained = appendContinuousGoalGuidance({
+            stateRoot: roots.stateRoot, longGoalId: record.id, expectedRevision: record.revision,
+            text: `${reason.code}: ${reason.message}`,
+          })
+          setContinuousGoalMode({
+            stateRoot: roots.stateRoot, longGoalId: explained.id, expectedRevision: explained.revision, mode: 'paused',
+          })
+        },
+      }),
     })
     if (typeof injected.effect === 'function') {
       injected.effect(function* () {
@@ -2595,7 +2733,7 @@ export function mountTianwenLongGoalHost(
     }
     host.connection.rpc.handle('/tianwen', createTianwenLongGoalRpcHandler(
       roots,
-      undefined,
+      { listLongGoals, createLongGoal, readLongGoalStatus: readLiveStatus },
       runDependencies,
       goalFirstOperations,
       learningAuditOperations,

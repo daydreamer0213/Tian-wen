@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { hasSatisfiedConversationCodeCheck, hasRejectedConversationCodeCheck, conversationCodeCheckIdentity, conversationCheckedFailureSource, conversationExternalInputsDigest, type ConversationCheckedFailureSources } from './conversation-external-check.js'
+import { conversationFileTaskInputDigest, conversationTaskFileInputs } from './conversation-files.js'
+import { conversationTaskInputDigest } from './conversation-learning.js'
+import { parseGoalTaskOutcomeInput, goalTaskOutcomeSourceId, goalTaskOutcomeClassification, type GoalTaskOutcomeInput, type GoalTaskOutcomeReceipt, type GoalTaskOutcomeRecordedEvent, type GoalTaskOutcomeObservation } from './goal-task-outcome.js'
+import { parseGoalTaskResearchSourceInput, goalTaskResearchProblem, goalTaskResearchCommonCategory, goalTaskResearchCheckInputsMatch, goalTaskResearchSuccess, goalTaskResearchFeedbackContradicts, isGoalTaskGuidanceRegression, sameGoalTaskResearchInput, type GoalTaskResearchSourceInput, type GoalTaskResearchSourceRecordedEvent, type GoalTaskResearchSource } from './goal-task-research.js'
 import {
   closeSync,
   existsSync,
@@ -15,9 +20,10 @@ import {
 import { join } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { resolveControlledSkillSourceFidelityFamily } from './controlled-skill-source-fidelity.js'
-import { ConversationLearningState, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
-import { ConversationGuidanceState, guidanceVersion, parseConversationGuidanceRecord, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord } from './conversation-guidance.js'
-import { ConversationFeedbackState, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
+import { ConversationLearningState, effectiveConversationFamily, hasCurrentConversationQuality, parseConversationLearningRecord, type ConversationLearningEvent, type ConversationLearningRecord, type ConversationTask } from './conversation-learning.js'
+import { ConversationGuidanceState, guidanceFileInputIdentity, guidanceVersion, parseConversationGuidanceRecord, parseConversationCaseDesignAttempt, type ConversationCaseDesignAttempt, type ConversationGuidanceRecord, type GuidanceSnapshot, type GuidanceStudy, type GuidanceStudyOpened, type GuidanceDecisionRecord, type GuidanceActivationRecord } from './conversation-guidance.js'
+import { parseConversationGuidanceClearance, conversationGuidanceClearanceEnvironmentDigest, conversationGuidanceClearanceStudyEvidenceDigest, type ConversationGuidanceClearance } from './conversation-guidance-clearance.js'
+import { ConversationFeedbackState, hasVerifiedContinuingPreference, parseConversationFeedbackRecord, type ConversationFeedbackRecord, type ConversationFeedbackAssessment } from './conversation-feedback.js'
 
 import {
   canonicalJson,
@@ -380,8 +386,12 @@ export interface RecoveryFailedEvent {
 }
 
 export type LedgerEvent =
+  | GoalTaskOutcomeRecordedEvent
+  | GoalTaskResearchSourceRecordedEvent
   | ConversationLearningEvent
   | { readonly type: 'conversation-guidance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-record.v1', readonly at: string, readonly record: ConversationGuidanceRecord }
+  | { readonly type: 'conversation-guidance-clearance-recorded', readonly schemaVersion: 'tianwen.conversation-guidance-clearance.v1', readonly at: string, readonly clearance: ConversationGuidanceClearance }
+  | { readonly type: 'conversation-case-design-attempted', readonly schemaVersion: 'tianwen.conversation-case-design-attempt.v1', readonly at: string, readonly attempt: ConversationCaseDesignAttempt }
   | { readonly type: 'conversation-feedback-recorded', readonly schemaVersion: 'tianwen.conversation-feedback.v1', readonly at: string, readonly record: ConversationFeedbackRecord }
   | LearningIntakeLedgerEvent
   | LearningFeedbackRetractedEvent
@@ -1869,6 +1879,21 @@ function parseEvent(value: unknown): LedgerEvent {
   }
   const type = requireString(value.type, 'event type')
   const at = requireTimestamp(value.at)
+  if (type === 'goal-task-outcome-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'sourceId', 'inputDigest', 'input'])
+    if (value.schemaVersion !== 'tianwen.goal-task-outcome.v1') throw new LedgerIntegrityError('unknown Goal Task outcome schema')
+    const input = parseGoalTaskOutcomeInput(value.input)
+    if (value.sourceId !== goalTaskOutcomeSourceId(input) || value.inputDigest !== sha256(input)) throw new LedgerIntegrityError('Goal Task outcome source identity changed')
+    return { type, schemaVersion: value.schemaVersion, at, sourceId: value.sourceId, inputDigest: sha256(input), input }
+  }
+  if (type === 'goal-task-research-source-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'sourceId', 'inputDigest', 'input'])
+    const input = parseGoalTaskResearchSourceInput(value.input)
+    if (value.schemaVersion !== 'tianwen.goal-task-research-source.v1' || value.sourceId !== input.sourceId || value.inputDigest !== sha256(input)) {
+      throw new LedgerIntegrityError('native Goal research source identity changed')
+    }
+    return { type, schemaVersion: value.schemaVersion, at, sourceId: input.sourceId, inputDigest: sha256(input), input }
+  }
   if (type === 'conversation-learning-recorded') {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
     if (value.schemaVersion !== 'tianwen.conversation-learning.v1') throw new LedgerIntegrityError('unknown conversation learning schema')
@@ -1878,6 +1903,16 @@ function parseEvent(value: unknown): LedgerEvent {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
     if (value.schemaVersion !== 'tianwen.conversation-guidance-record.v1') throw new LedgerIntegrityError('invalid conversation guidance schema')
     return { type, schemaVersion: value.schemaVersion, at, record: parseConversationGuidanceRecord(value.record) }
+  }
+  if (type === 'conversation-case-design-attempted') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'attempt'])
+    if (value.schemaVersion !== 'tianwen.conversation-case-design-attempt.v1') throw new LedgerIntegrityError('invalid case design attempt schema')
+    return { type, schemaVersion: value.schemaVersion, at, attempt: parseConversationCaseDesignAttempt(value.attempt) }
+  }
+  if (type === 'conversation-guidance-clearance-recorded') {
+    exactKeys(value, ['type', 'schemaVersion', 'at', 'clearance'])
+    if (value.schemaVersion !== 'tianwen.conversation-guidance-clearance.v1') throw new LedgerIntegrityError('invalid conversation guidance clearance schema')
+    return { type, schemaVersion: value.schemaVersion, at, clearance: parseConversationGuidanceClearance(value.clearance) }
   }
   if (type === 'conversation-feedback-recorded') {
     exactKeys(value, ['type', 'schemaVersion', 'at', 'record'])
@@ -2748,6 +2783,8 @@ type LearningRevisionWrite =
   }
 
 export class EvolutionLedger {
+  readonly #goalTaskOutcomes = new Map<string, GoalTaskOutcomeRecordedEvent>()
+  readonly #goalTaskResearchSources = new Map<string, GoalTaskResearchSourceRecordedEvent>()
   readonly #root: string
   readonly #artifactsRoot: string
   readonly #ledgerPath: string
@@ -2950,6 +2987,7 @@ export class EvolutionLedger {
     const existing = this.#conversationLearning.existing(record)
     if (existing !== undefined) {
       if (sha256(existing) !== sha256(record)) throw new LedgerIntegrityError('conversation learning record changed after freeze')
+      if (record.kind === 'task-external-check-invalidated') this.retireIncompatibleConversationGuidance(this.#conversationLearning.list().find(task => task.source.taskId === record.taskId)!.source.scopeKey)
       return { duplicate: true }
     }
     if (record.kind === 'task-admitted' && record.decision?.kind === 'task' && !hasCurrentConversationQuality(record.qualityContract)) throw new LedgerIntegrityError('new task admission requires the current host quality contract')
@@ -2961,6 +2999,7 @@ export class EvolutionLedger {
       this.recordArtifact(canonicalJson(snapshot))
     }
     this.#accept({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: this.#now(), record })
+    if (record.kind === 'task-external-check-invalidated') this.retireIncompatibleConversationGuidance(this.#conversationLearning.list().find(task => task.source.taskId === record.taskId)!.source.scopeKey)
     return { duplicate: false }
   }
 
@@ -2972,6 +3011,38 @@ export class EvolutionLedger {
   #requireConversationConsent(revision: number): void {
     const consent = this.#learningAnalysisConsent
     if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== revision) throw new LedgerIntegrityError('natural analysis requires current scoped v3 consent')
+  }
+  recordGoalTaskOutcome(raw: GoalTaskOutcomeInput): GoalTaskOutcomeReceipt {
+    const input = parseGoalTaskOutcomeInput(raw), sourceId = goalTaskOutcomeSourceId(input), inputDigest = sha256(input)
+    const existing = this.#goalTaskOutcomes.get(sourceId)
+    if (existing !== undefined) {
+      if (existing.inputDigest !== inputDigest) throw new LedgerIntegrityError('Goal Task outcome changed after recording')
+      return { sourceId, classification: goalTaskOutcomeClassification(input), duplicate: true }
+    }
+    this.#requireConversationConsent(input.consentRevision)
+    this.#accept({ type: 'goal-task-outcome-recorded', schemaVersion: 'tianwen.goal-task-outcome.v1', at: this.#now(), sourceId, inputDigest, input })
+    return { sourceId, classification: goalTaskOutcomeClassification(input), duplicate: false }
+  }
+  listGoalTaskOutcomes(): readonly GoalTaskOutcomeObservation[] {
+    return clone([...this.#goalTaskOutcomes.values()].map(event => ({ ...event, classification: goalTaskOutcomeClassification(event.input) })))
+  }
+  recordGoalTaskResearchSource(raw: GoalTaskResearchSourceInput): { readonly sourceId: string; readonly duplicate: boolean } {
+    const input = parseGoalTaskResearchSourceInput(raw), inputDigest = sha256(input)
+    const previous = this.#goalTaskResearchSources.get(input.sourceId)
+    if (previous !== undefined) {
+      if (previous.inputDigest !== inputDigest) throw new LedgerIntegrityError('original Goal research source changed after freeze')
+      return { sourceId: input.sourceId, duplicate: true }
+    }
+    if (!hasCurrentConversationQuality(input.qualityContract)) throw new LedgerIntegrityError('new Goal research source requires its original current quality contract')
+    this.#accept({ type: 'goal-task-research-source-recorded', schemaVersion: 'tianwen.goal-task-research-source.v1',
+      at: this.#now(), sourceId: input.sourceId, inputDigest, input })
+    return { sourceId: input.sourceId, duplicate: false }
+  }
+  listGoalTaskResearchSources(): readonly GoalTaskResearchSource[] {
+    return clone([...this.#goalTaskResearchSources.values()].map(event => {
+      const outcome = this.#goalTaskOutcomes.get(event.sourceId)!
+      return { ...event, outcome: { ...outcome, classification: goalTaskOutcomeClassification(outcome.input) } }
+    }))
   }
   recordConversationFeedback(input: ConversationFeedbackRecord): { readonly duplicate: boolean } {
     const record = parseConversationFeedbackRecord(input)
@@ -3006,21 +3077,119 @@ export class EvolutionLedger {
     const artifactId = `artifact:${guidanceVersion(snapshot).slice(7)}` as ArtifactId
     if (this.#artifacts.has(artifactId)) {
       if (this.readSource(artifactId) !== canonicalJson(snapshot)) throw new LedgerIntegrityError('conversation guidance source drift')
-    } else if (Object.keys(snapshot.rules).length > 0) throw new LedgerIntegrityError('active conversation guidance artifact is missing')
+    } else if (Object.keys(snapshot.rules).length > 0 || Object.keys(snapshot.fileRules ?? {}).length > 0) throw new LedgerIntegrityError('active conversation guidance artifact is missing')
     return snapshot
   }
 
   listConversationGuidanceStudies(scopeKey?: string): readonly GuidanceStudy[] {
     return this.#conversationGuidance.listStudies(scopeKey)
   }
+  listConversationCaseDesignAttempts(scopeKey?: string): readonly ConversationCaseDesignAttempt[] {
+    return this.#events.filter((event): event is Extract<LedgerEvent, { type: 'conversation-case-design-attempted' }> => event.type === 'conversation-case-design-attempted')
+      .map(event => event.attempt).filter(attempt => scopeKey === undefined || attempt.scopeKey === scopeKey).map(attempt => structuredClone(attempt))
+  }
+  recordConversationCaseDesignAttempt(input: ConversationCaseDesignAttempt): { readonly duplicate: boolean } {
+    const attempt = parseConversationCaseDesignAttempt(input)
+    const previous = this.listConversationCaseDesignAttempts(attempt.scopeKey).find(item => attempt.sourceTaskIds.every(id => item.sourceTaskIds.includes(id)))
+    if (previous !== undefined) {
+      if (sha256(previous) !== sha256(attempt)) throw new LedgerIntegrityError('case design source pair was already attempted')
+      return { duplicate: true }
+    }
+    // Current-contract eligibility applies to new writes only; old attempts
+    // must retain their frozen meaning when the host contract advances.
+    if (attempt.nativeGoalSources !== undefined) {
+      if (attempt.nativeGoalSources.some(reference => !hasCurrentConversationQuality(this.#goalTaskResearchSources.get(reference.sourceId)?.input.qualityContract))) {
+        throw new LedgerIntegrityError('new native Goal case design requires the original current quality contract')
+      }
+      this.#validateConversationCaseDesignAttempt(attempt)
+      this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
+      return { duplicate: false }
+    }
+    const tasks = this.listConversationTasks()
+    if ([...attempt.sourceTaskIds, attempt.counterexampleTaskId].some(id => !hasCurrentConversationQuality(tasks.find(task => task.source.taskId === id)?.admission?.qualityContract))) {
+      throw new LedgerIntegrityError('new case design attempts require the current quality contract')
+    }
+    this.#requireNewConversationCounterevidence(attempt.counterexampleTaskId)
+    this.#requireDistinctConversationTaskContents(attempt.sourceTaskIds)
+    this.#validateConversationCaseDesignAttempt(attempt)
+    this.#accept({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: this.#now(), attempt })
+    return { duplicate: false }
+  }
+  #validateConversationCaseDesignAttempt(attempt: ConversationCaseDesignAttempt): void {
+    this.#requireConversationConsent(attempt.consentRevision)
+    if (attempt.parentVersion !== guidanceVersion(this.getConversationGuidance(attempt.scopeKey))
+      || this.listConversationCaseDesignAttempts(attempt.scopeKey).some(item => attempt.sourceTaskIds.every(id => item.sourceTaskIds.includes(id)))) {
+      throw new LedgerIntegrityError('case design requires current parent and an unattempted source pair')
+    }
+    if (attempt.nativeGoalSources !== undefined) { this.#validateNativeGoalGuidanceSupport(attempt); return }
+    const tasks = this.listConversationTasks()
+    const first = tasks.find(task => task.source.taskId === attempt.sourceTaskIds[0])
+    if (first === undefined) throw new LedgerIntegrityError('case design source is unavailable')
+    for (const id of [...attempt.sourceTaskIds, attempt.counterexampleTaskId]) {
+      const task = tasks.find(item => item.source.taskId === id)
+      if (task === undefined || task.source.scopeKey !== attempt.scopeKey || task.source.consentRevision !== attempt.consentRevision
+        || task.source.behaviorVersion !== attempt.parentVersion || task.completion?.status !== 'completed'
+        || !['text', 'local-files'].includes(task.admission?.decision?.evaluationMode ?? '')
+        || effectiveConversationFamily(task) === null || effectiveConversationFamily(task) !== effectiveConversationFamily(first)
+        || task.admission?.decision?.evaluationMode !== first?.admission?.decision?.evaluationMode
+        || task.admission?.decision?.fileOutputKind !== first?.admission?.decision?.fileOutputKind
+        || task.source.admissionPolicy !== first?.source.admissionPolicy
+        || sha256(task.admission?.qualityContract) !== sha256(first?.admission?.qualityContract)
+        || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== attempt.modelConfigDigest)) {
+        throw new LedgerIntegrityError('case design requires exact compatible completed sources and native model identity')
+      }
+    }
+    if (attempt.checkedFailureSources !== undefined) this.#validateCheckedFailureSources(attempt.sourceTaskIds, attempt.counterexampleTaskId, attempt.checkedFailureSources)
+  }
+
+  #validateCheckedFailureSources(ids: readonly [string, string], counterId: string, references: ConversationCheckedFailureSources): void {
+    const tasks = this.listConversationTasks(), sources = ids.map(id => tasks.find(task => task.source.taskId === id))
+    for (const [index, task] of sources.entries()) {
+      if (task?.review?.verdict === 'not-met') throw new LedgerIntegrityError('checked failure sources preserve original failed review priority')
+      const expected = conversationCheckedFailureSource(task)
+      if (task === undefined || task.review === undefined || task.source.requestContentDigest === undefined || expected === undefined
+        || task.fileUnavailable !== undefined || task.completion?.files?.outputKind !== 'files'
+        || sha256(expected) !== sha256(references[index])) throw new LedgerIntegrityError('checked failure source reference is absent or changed')
+      const all = this.listConversationFeedbackAssessments(task.source.taskId)
+      const latest = [...all].reverse().find(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
+        && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
+      if (all.some(item => item.result === undefined && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)) || latest?.result?.classification === 'positive'
+        || latest?.result !== undefined && latest.result.supplementalCriteria.length > 0 && hasVerifiedContinuingPreference(latest.result)
+        || this.listLearningIntakeStatuses(task.source.sessionId).some(status => status.state === 'active' && status.rating === 'positive'
+          && status.sessionLifecycleFingerprint === task.source.sessionLifecycleFingerprint && task.completion!.assistantMessageIds.includes(status.messageId))) {
+        throw new LedgerIntegrityError('checked failure support has pending or overriding feedback')
+      }
+    }
+    const identity = conversationCodeCheckIdentity(sources[0]), counter = tasks.find(task => task.source.taskId === counterId)
+    if (identity === undefined || conversationCodeCheckIdentity(sources[1]) !== identity || conversationCodeCheckIdentity(counter) !== identity
+      || counter?.externalCheckFinished?.status !== 'verified' || !hasSatisfiedConversationCodeCheck(counter) || counter.review?.verdict !== 'met' || counter.review.proof == null) {
+      throw new LedgerIntegrityError('checked failure sources require the same checker and original condition with a configured verified counter')
+    }
+    const counterAssessments = this.listConversationFeedbackAssessments(counter!.source.taskId)
+    const latestCounter = [...counterAssessments].reverse().find(item => item.result?.proof != null && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
+      && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
+    if (counterAssessments.some(item => item.result === undefined && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)) || latestCounter !== undefined && latestCounter.result!.classification !== 'positive'
+      || this.listLearningIntakeStatuses(counter!.source.sessionId).some(status => status.state === 'active' && status.rating === 'negative'
+        && status.sessionLifecycleFingerprint === counter!.source.sessionLifecycleFingerprint && counter!.completion!.assistantMessageIds.includes(status.messageId))) {
+      throw new LedgerIntegrityError('checked failure counter has pending or adverse feedback')
+    }
+    if (new Set(sources.map(task => conversationTaskInputDigest(task!))).size !== 2) throw new LedgerIntegrityError('checked failure sources require distinct original input contents')
+  }
 
   /** Future-only policy migration. Historical receipts and task verdicts stay
    * unchanged; walk the exact active parent chain, never the plugin Champion. */
   retireIncompatibleConversationGuidance(scopeKey: string): void {
     let study = this.#conversationGuidance.activeStudy(scopeKey)
-    while (study !== undefined && !hasCurrentConversationQuality(study.opened.qualityContract)) {
+    while (study !== undefined) {
+      const disabled = this.#learningAnalysisConsent?.enabled !== true || this.#learningAnalysisConsent.policyVersion !== 'tianwen-auto-analysis.v3'
+      const ancestor = this.#conversationGuidance.activeStudyChain(scopeKey).slice(1).find(item => disabled || !this.isConversationGuidanceSupported(item.opened.studyId))
+      const reason = !hasCurrentConversationQuality(study.opened.qualityContract) ? 'quality-contract-changed' as const
+        : ancestor !== undefined ? 'ancestor-invalidated' as const : disabled ? 'consent-disabled' as const
+          : !this.isConversationGuidanceSupported(study.opened.studyId) ? 'support-retracted' as const : undefined
+      if (reason === undefined) break
       this.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: study.opened.studyId,
-        expectedCurrentVersion: guidanceVersion(study.candidate!.candidateSnapshot), reason: 'quality-contract-changed', evidenceTaskIds: [] })
+        expectedCurrentVersion: guidanceVersion(study.candidate!.candidateSnapshot), reason, evidenceTaskIds: [],
+        ...(reason === 'ancestor-invalidated' ? { ancestorStudyId: ancestor!.opened.studyId } : {}) })
       study = this.#conversationGuidance.activeStudy(scopeKey)
     }
   }
@@ -3029,7 +3198,110 @@ export class EvolutionLedger {
     return this.#conversationGuidance.decision(studyId)
   }
 
+  // New writes only. Shared support validation also owns historical replay,
+  // whose original decisions must not acquire a later check requirement.
+  #requireNewConversationCounterevidence(taskId: string): void {
+    const task = this.#conversationLearning.list().find(task => task.source.taskId === taskId)
+    if (!hasSatisfiedConversationCodeCheck(task)) {
+      throw new LedgerIntegrityError('new research counterevidence requires its prepared code check to be verified')
+    }
+    // Enforce the existing study-support rule before an invalid counter can
+    // consume a design pair. Historical replay retains its original checks.
+    const latest = [...this.listConversationFeedbackAssessments(taskId)].reverse().find(item => item.result?.proof != null
+      && this.isConversationFeedbackAssessmentActive(item.started.assessmentId)
+      && ['attributable-problem', 'preference', 'positive'].includes(item.result.classification))
+    if (latest !== undefined && latest.result!.classification !== 'positive'
+      || this.listLearningIntakeStatuses(task!.source.sessionId).some(status => status.state === 'active' && status.rating === 'negative'
+        && status.sessionLifecycleFingerprint === task!.source.sessionLifecycleFingerprint && task!.completion?.assistantMessageIds.includes(status.messageId))) {
+      throw new LedgerIntegrityError('new research counterevidence has contradictory active feedback')
+    }
+  }
+
+  // New content-bearing sources only. Historical/mixed support retains its
+  // frozen ledger rules; ordinary file selection also recovers exact inputs.
+  #requireDistinctConversationTaskContents(taskIds: readonly string[]): void {
+    const tasks = taskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
+    if (tasks.some(task => task?.source.requestContentDigest === undefined)) return
+    const identities = tasks.map(task => conversationTaskInputDigest(task!))
+    if (identities.some(identity => identity === undefined) || new Set(identities).size !== tasks.length) {
+      throw new LedgerIntegrityError('new research requires distinct requests and distinct task contents with captured inputs')
+    }
+  }
+
+  listConversationGuidanceClearances(scopeKey?: string): readonly ConversationGuidanceClearance[] {
+    return this.#events.filter((event): event is Extract<LedgerEvent, { type: 'conversation-guidance-clearance-recorded' }> => event.type === 'conversation-guidance-clearance-recorded')
+      .map(event => event.clearance).filter(record => scopeKey === undefined || record.scopeKey === scopeKey).map(record => structuredClone(record))
+  }
+
+  recordConversationGuidanceClearance(input: ConversationGuidanceClearance): { readonly duplicate: boolean } {
+    const clearance = parseConversationGuidanceClearance(input)
+    const previous = this.listConversationGuidanceClearances().find(record => record.studyId === clearance.studyId)
+    if (previous !== undefined) {
+      if (sha256(previous) !== sha256(clearance)) throw new LedgerIntegrityError('conversation guidance clearance is immutable after freeze')
+      return { duplicate: true }
+    }
+    this.#validateConversationGuidanceClearance(clearance, true)
+    this.#accept({ type: 'conversation-guidance-clearance-recorded', schemaVersion: 'tianwen.conversation-guidance-clearance.v1', at: this.#now(), clearance })
+    return { duplicate: false }
+  }
+
+  recordReviewedConversationGuidanceActivation(input: GuidanceActivationRecord): { readonly duplicate: boolean } {
+    const record = parseConversationGuidanceRecord(input)
+    if (record.kind !== 'guidance-activated') throw new LedgerIntegrityError('reviewed activation requires an activation record')
+    // Historical duplicate activations retain their original meaning, including after rollback.
+    if (this.#conversationGuidance.existing(record) !== undefined) return this.#recordConversationGuidance(record)
+    const clearance = this.listConversationGuidanceClearances().find(item => item.studyId === record.studyId)
+    if (clearance?.verdict !== 'clear') throw new LedgerIntegrityError('reviewed activation requires persisted clear clearance')
+    this.#validateConversationGuidanceClearance(clearance, true)
+    return this.#recordConversationGuidance(record, clearance.studyId)
+  }
+
+  #validateConversationGuidanceClearance(clearance: ConversationGuidanceClearance, mutation = false): void {
+    const study = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === clearance.studyId)
+    if (study === undefined || study.candidate === undefined || study.decision?.verdict !== 'accepted'
+      || study.activation !== undefined || study.rollback !== undefined || study.stopped !== undefined || study.arms.length !== 10
+      || study.opened.decisionPolicy !== undefined) throw new LedgerIntegrityError('clearance requires a complete formal accepted unactivated study')
+    if (clearance.scopeKey !== study.opened.scopeKey || clearance.parentVersion !== study.opened.parentVersion
+      || clearance.candidateVersion !== guidanceVersion(study.candidate.candidateSnapshot)
+      || clearance.decisionDigest !== sha256(study.decision) || clearance.armsDigest !== study.decision.armsDigest
+      || clearance.studyEvidenceDigest !== conversationGuidanceClearanceStudyEvidenceDigest(study)
+      || clearance.consentRevision !== study.opened.consentRevision) throw new LedgerIntegrityError('clearance study evidence binding changed')
+    for (const item of study.opened.cases) {
+      if (['source1','source2','counterexample'].includes(item.kind)
+        && !clearance.sourceChecks.some(check => check.caseId === item.id && check.kind === item.kind)) throw new LedgerIntegrityError('clearance source checks differ from original cases')
+      for (const role of ['baseline','candidate'] as const) {
+        if (!clearance.armChecks.some(check => check.caseId === item.id && check.role === role)) throw new LedgerIntegrityError('clearance arm checks differ from original paired cases')
+      }
+    }
+    if (mutation) {
+      if (clearance.environmentDigest !== conversationGuidanceClearanceEnvironmentDigest(this.#root)) throw new LedgerIntegrityError('clearance environment binding changed')
+      this.#validateNewConversationGuidanceStudy(study.opened)
+    }
+    const artifactId = `artifact:${clearance.candidateVersion.slice(7)}` as ArtifactId
+    if (!this.#artifacts.has(artifactId) || this.readSource(artifactId) !== canonicalJson(study.candidate.candidateSnapshot)) throw new LedgerIntegrityError('clearance requires the exact shared candidate artifact')
+    this.#validateConversationGuidance({ kind: 'guidance-activated', studyId: study.opened.studyId, expectedParentVersion: clearance.parentVersion, decisionDigest: clearance.decisionDigest })
+  }
+
   recordConversationGuidance(input: ConversationGuidanceRecord): { readonly duplicate: boolean } {
+    return this.#recordConversationGuidance(input)
+  }
+
+  #validateNewConversationGuidanceStudy(opened: GuidanceStudyOpened | undefined): void {
+    if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
+    const generatedFileInputs = new Set<string>()
+    for (const item of opened!.cases) {
+      if (!('prompt' in item) || item.files === undefined) continue
+      const identity = guidanceFileInputIdentity(item.prompt, item.files)
+      if (generatedFileInputs.has(identity)) throw new LedgerIntegrityError('duplicate generated file input cannot support a new study or activation')
+      generatedFileInputs.add(identity)
+    }
+    if (opened!.nativeGoalSources === undefined) {
+      this.#requireNewConversationCounterevidence(opened!.counterexampleTaskId)
+      this.#requireDistinctConversationTaskContents(opened!.sourceTaskIds)
+    }
+  }
+
+  #recordConversationGuidance(input: ConversationGuidanceRecord, clearedStudyId?: string): { readonly duplicate: boolean } {
     const record = parseConversationGuidanceRecord(input)
     const previous = this.#conversationGuidance.existing(record)
     if (previous !== undefined) {
@@ -3037,18 +3309,41 @@ export class EvolutionLedger {
       if (record.kind === 'study-decided') this.#ensureConversationGuidanceEvaluation(record)
       return { duplicate: true }
     }
-    if (record.kind === 'guidance-activated' && this.#guidanceActivationQuarantine) {
+    const existingStudy = record.kind === 'study-opened' ? undefined
+      : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
+    const decisionPolicy = record.kind === 'study-opened' ? record.decisionPolicy : existingStudy?.opened.decisionPolicy
+    if (this.#guidanceActivationQuarantine && (decisionPolicy === 'dev-paired-any-case.v1' || decisionPolicy === 'dev-conclusive-pair.v1')
+      && record.kind !== 'guidance-rolled-back' && record.kind !== 'study-stopped') {
+      throw new LedgerIntegrityError('DEV guidance decision policy mutations are quarantined')
+    }
+    if (record.kind === 'guidance-activated' && this.#guidanceActivationQuarantine && clearedStudyId !== record.studyId) {
       throw new LedgerIntegrityError('conversation guidance activation is quarantined')
     }
     // This gate is intentionally mutation-only: replay must retain the exact
     // original meaning of pre-contract studies, decisions and activations.
     if (record.kind === 'study-opened' || record.kind === 'guidance-activated') {
       const opened = record.kind === 'study-opened' ? record : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)?.opened
-      if (!hasCurrentConversationQuality(opened?.qualityContract)) throw new LedgerIntegrityError('new natural studies and activation require the current quality contract')
+      this.#validateNewConversationGuidanceStudy(opened)
       this.retireIncompatibleConversationGuidance(opened!.scopeKey)
     }
-    const existingStudy = record.kind === 'study-opened' ? undefined
-      : this.#conversationGuidance.listStudies().find(study => study.opened.studyId === record.studyId)
+    if (record.kind === 'study-opened') {
+      for (const sourceCase of record.cases) {
+        if (!('feedbackAssessmentId' in sourceCase) || sourceCase.feedbackAssessmentId === undefined) continue
+        const assessment = this.#conversationFeedback.list().find(item => item.started.assessmentId === sourceCase.feedbackAssessmentId)
+        if (assessment?.result === undefined || !hasVerifiedContinuingPreference(assessment.result)) {
+          throw new LedgerIntegrityError('new study requires verified continuing feedback scope')
+        }
+      }
+      for (const clue of record.proposalClues ?? []) {
+        const assessment = this.#conversationFeedback.list().find(item => item.started.assessmentId === clue.assessmentId)
+        if (assessment?.result === undefined || !hasVerifiedContinuingPreference(assessment.result)) {
+          throw new LedgerIntegrityError('new proposal clue requires verified continuing feedback scope')
+        }
+      }
+    }
+    if (record.kind === 'guidance-rolled-back' && record.reason === 'regression' && !['request-content.v1','native-goal-task-input.v1'].includes(record.evidenceInputPolicy ?? '')) {
+      throw new LedgerIntegrityError('new regression requires request content input policy')
+    }
     const exploredMutation = record.kind === 'exploration-requested' || record.kind === 'exploration-arm-recorded'
       || (record.kind === 'candidate-recorded' && existingStudy?.exploration !== undefined)
     const sourceMutation = record.kind === 'source-reference-read'
@@ -3078,12 +3373,40 @@ export class EvolutionLedger {
   }
 
   #validateConversationGuidanceSupport(study: GuidanceStudyOpened): void {
+    if (study.nativeGoalSources !== undefined) { this.#validateNativeGoalGuidanceSupport(study); return }
     const tasks = this.#conversationLearning.list()
+    if (tasks.find(task => task.source.taskId === study.counterexampleTaskId)?.externalCheckInvalidated !== undefined) {
+      throw new LedgerIntegrityError('study counterevidence check was invalidated')
+    }
+    if (study.resultChecks !== undefined) {
+      for (const item of study.cases.slice(0, 3)) {
+        const task = 'sourceTaskId' in item ? tasks.find(task => task.source.taskId === item.sourceTaskId) : undefined
+        const check = study.resultChecks.find(check => check.caseId === item.id)
+        try {
+          if (task === undefined || check === undefined || (check.inputKind === 'text-material.v1'
+            ? conversationTaskInputDigest(task) === undefined || check.inputsDigest !== item.materialDigest
+            : conversationTaskFileInputs(task) === undefined || conversationExternalInputsDigest(conversationTaskFileInputs(task)!) !== (check.fileInputsDigest ?? check.inputsDigest)
+              || check.inputKind === 'file-chat-material.v1' && check.inputsDigest !== item.materialDigest)) {
+            throw new Error('unavailable or changed source input')
+          }
+        } catch { throw new LedgerIntegrityError('study result check requires exact original frozen task inputs') }
+      }
+    }
+    if (study.checkedFailureSources !== undefined) {
+      if (study.family !== 'code' || study.evaluationMode !== 'local-files' || study.fileOutputKind !== 'files' || study.failureCategory !== 'instruction-following'
+        || study.cases.slice(0, 2).some(item => 'feedbackAssessmentId' in item)) throw new LedgerIntegrityError('checked failure study requires its explicit bounded code source branch')
+      this.#validateCheckedFailureSources(study.sourceTaskIds, study.counterexampleTaskId, study.checkedFailureSources)
+    }
+    const sourcePolicy = tasks.find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
     for (const taskId of [...study.sourceTaskIds, study.counterexampleTaskId]) {
       const task = tasks.find(item => item.source.taskId === taskId)
       if (task?.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
         || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
-        || task.admission?.decision?.family !== study.family || task.admission.decision.evaluationMode !== 'text') throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
+        || effectiveConversationFamily(task) !== study.family || task.admission?.decision?.evaluationMode !== (study.evaluationMode ?? 'text')
+        || task.source.admissionPolicy !== sourcePolicy
+        || task.admission.decision.fileOutputKind !== study.fileOutputKind
+        || (study.evaluationMode === 'local-files' && (task.fileUnavailable !== undefined || task.completion.files === undefined || !task.fileInputs?.length
+          || task.completion.files.outputKind !== study.fileOutputKind))) throw new LedgerIntegrityError('natural learning requires exact compatible task support and counterevidence')
       if (sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)) throw new LedgerIntegrityError('natural learning sources and counterexample require the same frozen quality contract')
       if (task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) throw new LedgerIntegrityError('natural learning requires the same frozen native model configuration for every source task')
       const sourceCase = study.cases.find(item => 'sourceTaskId' in item && item.sourceTaskId === taskId)
@@ -3101,9 +3424,98 @@ export class EvolutionLedger {
         const assessment = assessments.find(item => item.started.assessmentId === assessmentId)
         if (assessment?.result?.proof == null || !['attributable-problem', 'preference'].includes(assessment.result.classification)
           || assessment.result.category !== study.failureCategory || assessment.result.supplementalCriteria.length === 0) throw new LedgerIntegrityError('natural learning feedback support is absent or retracted')
-      } else if (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory)) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
+      } else if (!(study.checkedFailureSources !== undefined && !isCounterexample)
+        && (task.review?.proof == null || (isCounterexample ? task.review.verdict !== 'met' : task.review.verdict !== 'not-met' || task.review.category !== study.failureCategory))) throw new LedgerIntegrityError('natural learning requires failed source reviews and a successful counterexample')
     }
-    if (new Set(study.sourceTaskIds.map(id => tasks.find(task => task.source.taskId === id)!.source.requestDigest)).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
+    for (const clue of study.proposalClues ?? []) {
+      const task = tasks.find(item => item.source.taskId === clue.taskId)
+      const decision = task?.admission?.decision
+      const external = task?.source.proposalCluePolicy === 'feedback.v2' && decision?.evaluationMode === 'external'
+      const incompleteFile = decision?.evaluationMode === 'local-files' && study.evaluationMode === 'local-files'
+        && decision.fileOutputKind === study.fileOutputKind
+        && (task?.fileUnavailable !== undefined || task?.completion?.files === undefined || (task?.fileInputs?.length ?? 0) === 0)
+      if (task === undefined || !['feedback.v1', 'feedback.v2'].includes(task.source.proposalCluePolicy ?? '') || !(external || incompleteFile)
+        || task.source.scopeKey !== study.scopeKey || task.source.behaviorVersion !== study.parentVersion
+        || task.source.consentRevision !== study.consentRevision || task.completion?.status !== 'completed'
+        || effectiveConversationFamily(task) !== study.family
+        || task.source.admissionPolicy !== sourcePolicy
+        || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
+        || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)) {
+        throw new LedgerIntegrityError('proposal clue requires a marked compatible completed task with eligible feedback evidence')
+      }
+      const all = this.#conversationFeedback.list(task.source.taskId)
+      if (all.some(item => item.result === undefined && this.isConversationFeedbackAssessmentActive(item.started.assessmentId))) throw new LedgerIntegrityError('proposal clue has a pending replacement assessment')
+      const active = all.filter(item => item.result?.proof !== null && item.result?.proof !== undefined
+        && this.isConversationFeedbackAssessmentActive(item.started.assessmentId))
+      const latest = [...active].reverse().find(item => ['attributable-problem', 'preference', 'positive'].includes(item.result!.classification))
+      if (latest === undefined || latest.started.assessmentId !== clue.assessmentId || latest.result!.classification === 'positive'
+        || latest.result!.category !== study.failureCategory || latest.result!.supplementalCriteria.length === 0
+        || sha256(latest.result) !== clue.assessmentDigest || latest.started.materialDigest !== clue.materialDigest) {
+        throw new LedgerIntegrityError('proposal clue feedback assessment is absent, changed, or no longer eligible')
+      }
+    }
+    if (new Set(study.sourceTaskIds.map(id => {
+      const task = tasks.find(task => task.source.taskId === id)!
+      return study.evaluationMode === 'local-files' ? sha256({ requestDigest: task.source.requestDigest, inputs: conversationTaskFileInputs(task), outputKind: task.completion!.files!.outputKind, outputPaths: task.completion!.files!.outputPaths }) : task.source.requestDigest
+    })).size !== 2) throw new LedgerIntegrityError('repeated natural learning requires distinct requests')
+  }
+
+  #validateNativeGoalGuidanceSupport(binding: ConversationCaseDesignAttempt | GuidanceStudyOpened): void {
+    const references = binding.nativeGoalSources
+    if (references === undefined) throw new LedgerIntegrityError('native Goal study references unavailable')
+    const all = this.listGoalTaskResearchSources()
+    const sources = references.map((reference, index) => {
+      const source = all.find(item => item.sourceId === reference.sourceId)
+      if (source === undefined || source.inputDigest !== reference.inputDigest
+        || reference.sourceId !== [...binding.sourceTaskIds, binding.counterexampleTaskId][index]) throw new LedgerIntegrityError('native Goal study source changed or unavailable')
+      return source
+    })
+    const first = sources[0]!, second = sources[1]!, counter = sources[2]!
+    if (sources.some((source, index) => goalTaskResearchFeedbackContradicts(source,
+      this.listLearningIntakeStatuses(source.outcome.input.childSessionId), index === 2))) {
+      throw new LedgerIntegrityError('native Goal learning support or counterevidence has contradictory active feedback')
+    }
+    const compatible = (source: GoalTaskResearchSource) => source.input.scopeKey === binding.scopeKey
+      && source.input.behaviorVersion === binding.parentVersion && source.outcome.input.consentRevision === binding.consentRevision
+      && source.outcome.input.modelConfigDigest === binding.modelConfigDigest && source.input.family === first.input.family
+      && source.input.evaluationMode === first.input.evaluationMode && source.input.fileOutputKind === first.input.fileOutputKind
+      && sha256(source.input.qualityContract) === sha256(first.input.qualityContract)
+    const firstProblem = goalTaskResearchProblem(first), secondProblem = goalTaskResearchProblem(second)
+    const sharedCategory = goalTaskResearchCommonCategory(first, second, 'cases' in binding ? binding.failureCategory : undefined)
+    if (!sources.every(compatible) || firstProblem === undefined || secondProblem === undefined
+      || sharedCategory === undefined || firstProblem.checkedFailure !== secondProblem.checkedFailure
+      || sameGoalTaskResearchInput(first,second) || !goalTaskResearchSuccess(counter)) {
+      throw new LedgerIntegrityError('native Goal learning requires two distinct compatible original problems and a verified independent counterexample')
+    }
+    if (firstProblem.checkedFailure) {
+      const checkIdentity = (source: GoalTaskResearchSource) => {
+        const b = source.outcome.input
+        // Original per-Task contracts remain bound by the source/outcome digest.
+        return sha256({ checkerId: b.checkerId, checkerDigest: b.checkerDigest, requiredConditionDigest: b.requiredConditionDigest })
+      }
+      if (sources.some(source => checkIdentity(source) !== checkIdentity(first) || !goalTaskResearchCheckInputsMatch(source))) {
+        throw new LedgerIntegrityError('native Goal checked failure requires the same original checker and condition with exact frozen inputs')
+      }
+    }
+    if (!('cases' in binding)) return
+    if (binding.family !== first.input.family || (binding.evaluationMode ?? 'text') !== first.input.evaluationMode
+      || binding.fileOutputKind !== first.input.fileOutputKind || binding.failureCategory !== sharedCategory
+      || sha256(binding.qualityContract) !== sha256(first.input.qualityContract)) throw new LedgerIntegrityError('native Goal study scope or original quality contract changed')
+    for (const [index, source] of sources.entries()) {
+      const item = binding.cases[index]
+      if (item === undefined || !('sourceTaskId' in item) || item.sourceTaskId !== source.sourceId
+        || item.inputDigest !== source.input.inputDigest || item.materialDigest !== source.input.materialDigest) throw new LedgerIntegrityError('native Goal study requires exact original material and actual input identity')
+      if (binding.resultChecks !== undefined) {
+        const check = binding.resultChecks.find(check => check.caseId === item.id)
+        if (check === undefined || (check.inputKind === 'text-material.v1'
+          ? check.inputsDigest !== source.input.materialDigest
+          : (check.fileInputsDigest ?? check.inputsDigest) !== source.input.fileInputsDigest
+            || check.inputKind === 'file-chat-material.v1' && check.inputsDigest !== source.input.materialDigest)) {
+          throw new LedgerIntegrityError('native Goal study program check inputs differ from original frozen material')
+        }
+      }
+    }
+    if (firstProblem.checkedFailure && binding.resultChecks === undefined) throw new LedgerIntegrityError('native Goal program failure study requires independent prepared program checks')
   }
 
   #validateConversationGuidance(record: ConversationGuidanceRecord): void {
@@ -3117,11 +3529,12 @@ export class EvolutionLedger {
       || (record.kind === 'candidate-recorded' && full?.exploration !== undefined)
     const sourceMutation = record.kind === 'source-reference-read'
       || (record.kind === 'candidate-recorded' && full?.sourceReference !== undefined)
-    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation || sourceMutation) {
+    const fileMutation = study.evaluationMode === 'local-files' && ['study-file-trial-captured', 'candidate-recorded', 'arm-recorded', 'exploration-arm-recorded'].includes(record.kind)
+    if (record.kind === 'study-opened' || record.kind === 'guidance-activated' || exploredMutation || sourceMutation || fileMutation) {
       if (consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3' || consent.revision !== study.consentRevision) throw new LedgerIntegrityError('natural learning requires current v3 consent')
       this.#validateConversationGuidanceSupport(study)
     }
-    if (exploredMutation || sourceMutation) {
+    if (exploredMutation || sourceMutation || fileMutation) {
       if (guidanceVersion(this.#conversationGuidance.snapshot(study.scopeKey)) !== study.parentVersion) throw new LedgerIntegrityError('natural exploration or source reference requires the current frozen parent guidance')
     }
     if (record.kind === 'guidance-activated') {
@@ -3130,17 +3543,40 @@ export class EvolutionLedger {
       if (!this.#events.some(event => event.type === 'evaluation-recorded' && event.evaluation.artifactId === artifactId && event.evaluation.receiptDigest === record.decisionDigest && event.evaluation.verdict === 'met')) throw new LedgerIntegrityError('natural guidance activation requires its exact shared evaluation receipt')
     }
     if (record.kind === 'guidance-rolled-back') {
+      if (record.reason === 'ancestor-invalidated') {
+        const ancestor = this.#conversationGuidance.activeStudyChain(study.scopeKey).slice(1).find(item => item.opened.studyId === record.ancestorStudyId)
+        const disabled = consent?.enabled !== true || consent.policyVersion !== 'tianwen-auto-analysis.v3'
+        if (ancestor === undefined || (!disabled && this.isConversationGuidanceSupported(ancestor.opened.studyId))) throw new LedgerIntegrityError('ancestor rollback requires actually invalidated ancestor support or consent')
+      }
       if (record.reason === 'quality-contract-changed' && hasCurrentConversationQuality(study.qualityContract)) throw new LedgerIntegrityError('quality contract rollback requires an incompatible historical contract')
       if (record.reason === 'consent-disabled' && consent?.enabled === true && consent.policyVersion === 'tianwen-auto-analysis.v3') throw new LedgerIntegrityError('enabled natural learning cannot claim disabled consent')
       if (record.reason === 'regression') {
         const full = this.#conversationGuidance.listStudies().find(item => item.opened.studyId === record.studyId)!
+        if (record.nativeGoalEvidence !== undefined) {
+          const all = this.listGoalTaskResearchSources()
+          const failures = record.nativeGoalEvidence.map(reference=>all.find(source=>source.sourceId === reference.sourceId && source.inputDigest === reference.inputDigest))
+          if (failures.length < 2 || failures.some(source=>source === undefined || !isGoalTaskGuidanceRegression(source,{
+            ...study,expectedVersion:record.expectedCurrentVersion,activatedAt:full.activatedAt!}))
+            || new Set(failures.map(source=>source?.input.inputIdentityDigest)).size !== failures.length) {
+            throw new LedgerIntegrityError('native Goal regression requires distinct later original failed tasks using the active version')
+          }
+        } else {
+        const sourcePolicy = this.#conversationLearning.list().find(task => task.source.taskId === study.sourceTaskIds[0])?.source.admissionPolicy
         const failures = record.evidenceTaskIds.map(id => this.#conversationLearning.list().find(task => task.source.taskId === id))
+        const identities = failures.map(task => task === undefined ? undefined : record.evidenceInputPolicy === 'request-content.v1'
+          ? conversationTaskInputDigest(task) : record.evidenceInputPolicy === 'captured-files.v1'
+            ? conversationFileTaskInputDigest(task, task.source.requestDigest) : task.source.requestDigest)
         if (failures.length < 2 || failures.some(task => task === undefined || task.source.scopeKey !== study.scopeKey
-          || task.source.behaviorVersion !== record.expectedCurrentVersion || task.admission?.decision?.family !== study.family
-          || sha256(task.admission.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
+          || task.source.behaviorVersion !== record.expectedCurrentVersion || effectiveConversationFamily(task) !== study.family
+          || task.source.admissionPolicy !== sourcePolicy
+          || task.admission?.decision?.evaluationMode !== (study.evaluationMode ?? 'text') || task.admission?.decision?.fileOutputKind !== study.fileOutputKind
+          || sha256(task.admission?.qualityContract ?? null) !== sha256(study.qualityContract ?? null)
           || task.models === undefined || task.models.length === 0 || task.models.some(model => model.modelConfigDigest !== study.modelConfigDigest)
-          || task.review?.verdict !== 'not-met' || task.recordedAt <= full.activatedAt!)
-          || new Set(failures.map(task => task!.source.requestDigest)).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
+          || !(task.review?.verdict === 'not-met' || record.evidenceFailurePolicy === 'model-or-code-check.v1' && hasRejectedConversationCodeCheck(task)) || task.recordedAt <= full.activatedAt!)
+          || (record.evidenceInputPolicy === 'captured-files.v1' && study.evaluationMode !== 'local-files')
+          || identities.some(identity => identity === undefined)
+          || new Set(identities).size !== failures.length) throw new LedgerIntegrityError('guidance regression requires distinct later failed tasks using the active version')
+        }
       }
       if (record.reason === 'support-retracted' && this.isConversationGuidanceSupported(study.studyId)) throw new LedgerIntegrityError('support rollback requires actually invalidated source or counterevidence')
     }
@@ -5692,6 +6128,9 @@ export class EvolutionLedger {
   listLearningIntakeStatuses(
     sessionId: string,
   ): readonly LearningIntakeStatus[] {
+    if (typeof sessionId !== 'string' || sessionId.trim().length === 0) {
+      throw new TypeError('sessionId is required to list learning intake statuses')
+    }
     return [...(this.#learningIntakeStatuses.get(sessionId)?.values() ?? [])]
       .map(clone)
   }
@@ -7141,7 +7580,10 @@ export class EvolutionLedger {
     if (commitError !== undefined) {
       if (
         parsed.type === 'conversation-learning-recorded'
+        || parsed.type === 'goal-task-research-source-recorded'
         || parsed.type === 'conversation-guidance-recorded'
+        || parsed.type === 'conversation-guidance-clearance-recorded'
+        || parsed.type === 'conversation-case-design-attempted'
         || parsed.type === 'conversation-feedback-recorded'
         || parsed.type === 'initial-run-skill-binding-recorded'
         || parsed.type === 'learning-intake-recorded'
@@ -7223,12 +7665,25 @@ export class EvolutionLedger {
   }
 
   #validateAgainstState(event: LedgerEvent): void {
+    if (event.type === 'goal-task-research-source-recorded') {
+      const outcome = this.#goalTaskOutcomes.get(event.sourceId)
+      if (outcome === undefined || outcome.inputDigest !== event.input.outcomeInputDigest
+        || this.#goalTaskResearchSources.has(event.sourceId)) throw new LedgerIntegrityError('Goal research source requires its exact immutable original result')
+      this.#requireConversationConsent(outcome.input.consentRevision)
+      return
+    }
+    if (event.type === 'goal-task-outcome-recorded') {
+      this.#requireConversationConsent(event.input.consentRevision)
+      if (this.#goalTaskOutcomes.has(event.sourceId)) throw new LedgerIntegrityError('duplicate Goal Task outcome event')
+      return
+    }
     if (event.type === 'conversation-learning-recorded') {
       this.#conversationLearning.validate(event.record)
       if (event.record.kind === 'task-started') {
         this.#requireConversationConsent(event.record.consentRevision)
         if (event.record.behaviorVersion !== guidanceVersion(this.#conversationGuidance.snapshot(event.record.scopeKey))) throw new LedgerIntegrityError('replayed task guidance does not match its start-time version')
-      } else if ((event.record.kind === 'task-admitted' || event.record.kind === 'task-reviewed') && event.record.proof !== null) {
+      } else if (event.record.kind === 'task-external-check-prepared' || event.record.kind === 'task-external-check-finished'
+        || (event.record.kind === 'task-admitted' || event.record.kind === 'task-reviewed') && event.record.proof !== null) {
         const taskId = event.record.taskId
         this.#requireConversationConsent(this.#conversationLearning.list().find(task => task.source.taskId === taskId)!.source.consentRevision)
       }
@@ -7236,6 +7691,15 @@ export class EvolutionLedger {
     }
     if (event.type === 'conversation-guidance-recorded') {
       this.#validateConversationGuidance(event.record)
+      return
+    }
+    if (event.type === 'conversation-guidance-clearance-recorded') {
+      if (this.listConversationGuidanceClearances().some(record => record.studyId === event.clearance.studyId)) throw new LedgerIntegrityError('duplicate conversation guidance clearance event')
+      this.#validateConversationGuidanceClearance(event.clearance)
+      return
+    }
+    if (event.type === 'conversation-case-design-attempted') {
+      this.#validateConversationCaseDesignAttempt(event.attempt)
       return
     }
     if (event.type === 'conversation-feedback-recorded') {
@@ -8782,6 +9246,14 @@ export class EvolutionLedger {
 
   #apply(event: LedgerEvent): void {
     this.#events.push(event)
+    if (event.type === 'goal-task-research-source-recorded') {
+      this.#goalTaskResearchSources.set(event.sourceId, event)
+      return
+    }
+    if (event.type === 'goal-task-outcome-recorded') {
+      this.#goalTaskOutcomes.set(event.sourceId, event)
+      return
+    }
     if (event.type === 'conversation-learning-recorded') {
       this.#conversationLearning.apply(event.record, event.at)
       return
@@ -8790,6 +9262,7 @@ export class EvolutionLedger {
       this.#conversationGuidance.apply(event.record, event.at)
       return
     }
+    if (event.type === 'conversation-guidance-clearance-recorded') return
     if (event.type === 'conversation-feedback-recorded') {
       this.#conversationFeedback.apply(event.record, event.at)
       return

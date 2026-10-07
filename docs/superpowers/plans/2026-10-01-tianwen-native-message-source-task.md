@@ -1,0 +1,25 @@
+# Native Message Source Task Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Proceed under the owner's continuing authorization; no repeated permission request.
+
+**Goal:** Complete one real pending native-material fixture repair via the persistent formal DEV runtime, with frozen independent requirements and truthful ordinary outcome attribution.
+
+**Architecture:** Reuse the existing frozen TypeScript checker and formal observer. One task-local AST constraint permits only the original answer-1 message's source and its event step:1 fields; no generalized checker or study interface. The first source-only control exposed the hidden missing-step obligation before any real model attempt.
+
+**Tech Stack:** Existing TypeScript, DSH, formal runtime, current real model provider and Vitest. No new dependency.
+
+**Files:** Native candidate may change only tests/dsh-migration/conversation-task-material.spec.ts. Task-local controller/checks/records live at D:/DevData/tianwen-next-result-basis-20261001; spec above defines exact fixture provenance and original behavior preservation.
+
+- [x] Read current state and full roadmap; establish no live study or eligible five-case contract set, no old task retry.
+- [x] Read upstream source type and reproduce actual missing-source diagnostic without modifying the target; obtain read-only next-action review.
+- [x] Freeze complete finite source/AST/comment/type contract, test nonconforming controls, capture original diagnostics and hash.
+- [x] Preflight the continuous formal bundle with0 model calls, correct tool exposure and exact old task/ledger preservation; preparation must occur before first actual root forwarding.
+- [x] Make one new native attempt with fixed budgets/0 retries. Preserve exact candidate/program/model outcome separately; stop and restore any failed attempt only after writes terminate.
+- [x] Verify the unchanged native candidate with relevant existing tests, strict0 and independent read-only review before adoption; do not write a replacement candidate.
+- [x] Cold-read the persistent task/ledger without models, record study/feedback/quarantine state, commit and push any verified native result, normally clean owned generated remnants and record D free space.
+
+**Stopping boundary:** This completes at most one ordinary development task, not C—F or complete automatic learning. A failure is retained without retry. No artificial user feedback, imported/regraded sources, baseline changes or release.
+
+Pre-answer evidence: D:/DevData/tianwen-next-result-basis-20261001/contract-controls.json13/13, original-target untouched; preflight.json0 calls, same original2 tasks/raw ledger digest, facts tool absent (six tools include three separate learning controls), quarantine true. Initial source-only and metadata preflight failures retained. Read-only review closed P2 by actual successful-read-before-edit snapshot checking; no important findings remain. No real attempt has been made at this checkpoint.
+
+Execution result: one attempt at8f3c812,7 real requests/root3,2 successful read/edit,0 retries; native completion, program verified and original model met. Exact native bytes3/3 and strict0; final read-only review no important findings. Cold-read0 models/task and material exact/ledger unchanged, readiness awaiting-compatible-sources, studies0/quarantine true. See docs/operations/tianwen-native-message-source-20261001.md. Closure receipt is D:/DevData/tianwen-next-result-basis-20261001/finish.json; no release or complete-goal claim.

@@ -85,7 +85,7 @@ function parseV2(value: Value, verdict: 'met' | 'not-met' | 'inconclusive'): Cla
 export function parseClaimAudit(value: unknown, verdict: 'met' | 'not-met' | 'inconclusive'): ClaimAudit {
   let bytes: number
   try { bytes = Buffer.byteLength(JSON.stringify(value), 'utf8') } catch { throw new TypeError('claim audit is invalid') }
-  if (bytes > 32 * 1024 || !record(value) || !exact(value, ['schemaVersion', 'evidenceDigest', 'units'])
+  if (bytes > 128 * 1024 || !record(value) || !exact(value, ['schemaVersion', 'evidenceDigest', 'units'])
     || typeof value.evidenceDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/u.test(value.evidenceDigest)) throw new TypeError('claim audit is invalid')
   if (value.schemaVersion === 'tianwen.claim-audit.v1') return parseV1(value, verdict)
   if (value.schemaVersion === 'tianwen.claim-audit.v2') return parseV2(value, verdict)

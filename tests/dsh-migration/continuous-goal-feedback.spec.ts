@@ -56,6 +56,15 @@ function contentOf(message: ReturnType<typeof buildContinuousGoalSettlementNotic
 }
 
 describe('continuous Goal terminal settlement notice', () => {
+  it('reports the stored rejection separately when the native Task has completed', () => {
+    const projection = status({ goalPhase: 'complete', tasks: [{ id: TASK_IDS[0], objective: 'Original requirement', phase: 'complete' }] })
+    const withAcceptance: LongGoalStatusProjectionV3 = { ...projection, tasks: projection.tasks.map(task => ({ ...task,
+      acceptance: { epoch: 1, checkerId: 'trusted-check', requiredCondition: 'Original required field', status: 'rejected', detail: `Required field absent in ${TASK_SESSION_ID}.` } })) }
+    const message = buildContinuousGoalSettlementNotice({ status: withAcceptance, settledTaskResults: new Map([[TASK_IDS[0], 'Task complete.']]) })
+    expect(contentOf(message)).toContain('Acceptance: rejected')
+    expect(contentOf(message)).toContain('Required field absent')
+    expect(contentOf(message)).not.toContain(TASK_SESSION_ID)
+  })
   it('renders a completed multi-Task Goal in plan order without internal identities', () => {
     const message = buildContinuousGoalSettlementNotice({
       status: status({

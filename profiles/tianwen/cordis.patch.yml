@@ -15,6 +15,9 @@
     learningLoop:
       enabled: true
       workspaceRoot: 'D:/DevData/tianwen/state/learning-loop'
+    guidanceIndependentReview:
+      mode: native
+      reviewerId: tianwen-native-guidance-review
 
 - insert:
     - id: cordis-host-runner

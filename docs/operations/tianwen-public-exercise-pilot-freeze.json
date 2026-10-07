@@ -1,0 +1,143 @@
+{
+  "nature": "controlled public exercise batch frozen before first native answer",
+  "at": "2026-10-02T14:15:48.467Z",
+  "upstreamCommit": "9943fd751b684ba1a6a8673c3700a6e79c10a808",
+  "files": [
+    {
+      "path": "D:/DevData/OfferGo-first-use-20260926-59811d1/stage/1.3.2/runtime/node/node.exe",
+      "sha256": "f8d162c0641dcee512132f3bcf8a68169c7ecb852efd8e1a46c9fec5a0f469ed"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/A/case-provenance.json",
+      "sha256": "2a72494538732cc07f9ee13b157fdefdf9b34ef3db4b3b6d742d2eb0b903a673"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/A/cases.json",
+      "sha256": "5ef45748d2c6e7dc32488aba22ceb2e78add37eaef41c3eb081f8ca20c6047f1"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/A/definition.json",
+      "sha256": "dfa870ec537baee4af2e9c43f3319cdffe9558a884d4ff682bfac8274b823272"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/B/case-provenance.json",
+      "sha256": "33cf63613ea476f284a0478d217cb70b2457bce861c9d6eac5a82b0c56d47df4"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/B/cases.json",
+      "sha256": "d70ff46df87a3e247a1f406915621b22f038e0e5992fc0d07875a2980046e374"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/B/definition.json",
+      "sha256": "f6095629e60c55c029b2d0362c52ac314acca9ade7286fcb1b021e7464558a87"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/C/case-provenance.json",
+      "sha256": "bf5f07b7094a81ab27bc1c21b4e273f1e3604d737a5402947a0d562b3f99083b"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/C/cases.json",
+      "sha256": "02b46fd7799817292af3421d20085b474ab9941f26a4ed03f95373c37ba9db8c"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/C/definition.json",
+      "sha256": "501ea300b66948b77b44dab4d8406f8e862df65dcfbed9f9c0ed902cfba86d06"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/D/case-provenance.json",
+      "sha256": "a276f06f6981bee14a6c53d5baf77e20e1603fd43af0c9c1562fd312af2ffe99"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/D/cases.json",
+      "sha256": "8e4e7c053dea193a92c4c68ca00cead42c5a1c509e651017547580a8b1f6c096"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/D/definition.json",
+      "sha256": "78873d17ef98b77a4f0177fb840875b0e2604c005ceccf5fb4baa7ce0c7080a5"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/E/case-provenance.json",
+      "sha256": "f8572d368e8a6b2c791c546acff6faddbd5e1ba06124458ce45dc79816c5261e"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/E/cases.json",
+      "sha256": "42e50bc35f74c4bf388cb876a3a696745412303568db695c892ee2f9af64a60d"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/E/definition.json",
+      "sha256": "3bdbff1ca82e0e3d4fd08003f5f7665daa72787179c148e7232030f7ab092cde"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/build-packs.mjs",
+      "sha256": "3a5bfe7c8fd13220ef7106bdffe925677f99ca0e04daa6b4359a9048de171224"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/freeze-pack.mjs",
+      "sha256": "9be9adeaaf55f79d688c7880bfeaade4a6f7f57a6e302c9081f04356188b82fa"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/manifest.json",
+      "sha256": "3c8f61326b947152873a61be9e9a1f1e352a80016f3dcf3f4f3db3ce3e07ddcd"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/runner.mjs",
+      "sha256": "801c2d65c825f3bd115c8b21e6b7ebc116ee73b8f8fd72b14a37734fb5e972ef"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/seal-pack.mjs",
+      "sha256": "226663995a9b54f98c6d07ff6b7aab76d608976774c1927ccbea37c063a183c5"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/study-check.mjs",
+      "sha256": "31ea7fd4c68c27654dc051fcd8eccd336b78170f0cf60665fb539ce5a83ad1ab"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/LICENSE",
+      "sha256": "564d81b4e8fa0a816529287256d25d477106e540682003a718140eb7cf913601"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/bob-canonical-data.json",
+      "sha256": "02b79f535d7613c6faba88cb909462892b101dc799b2df68dd9ffb5ec1d1284d"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/bob-instructions.md",
+      "sha256": "810f3d27ac3122cd83de440217a7dbb5f93bf490879b8888f450614cdaebdca5"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/grep-canonical-data.json",
+      "sha256": "b6eed026aeca970f29c2d5a2881475de0500eddd23f8d207dbe2b7f0c4bcf88a"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/grep-instructions.md",
+      "sha256": "c68254de5f7f8eb68527d638595ce53dedfec499cd52cca0ad5bff8b3065e980"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/matching-brackets-canonical-data.json",
+      "sha256": "02e422009e4ee8fc7622c6d2dfa505fa8760d64230433d761ecb1f32a0dc1a3a"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/matching-brackets-instructions.md",
+      "sha256": "931a9807a9dc1060a4f64e9cf47f031fe05d726a5c55374cc272ebcf572b4adf"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/transpose-canonical-data.json",
+      "sha256": "23a61ac36c7c8c643b6294d539d67f3b8b2dcafcb690ceff061de17bc18509fd"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/transpose-description.md",
+      "sha256": "4107fc3ed25cb2106df05774f9e6328663bf96777712df14ab5c3090438c6c66"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/word-count-canonical-data.json",
+      "sha256": "896f79beea5c9d327f812ab5196e1d791576185d4eb64ae19c1e2a94b9d7dccb"
+    },
+    {
+      "path": "D:/DevData/tianwen-public-exercise-pilot-20261002/upstream/word-count-instructions.md",
+      "sha256": "65364f9d1f4a86b65c802ef54b4b7c0700430fab364b088a32c7affdf6d9070b"
+    },
+    {
+      "path": "D:/DevData/tianwen-worktrees/tianwen-architecture-overview-v2-merge/docs/operations/tianwen-public-exercise-contract.md",
+      "sha256": "f46a338815b030d6f6fdc4a360987eb4dbe2c80517978a6f20226bdf5ddad8e3"
+    }
+  ]
+}

@@ -10,6 +10,7 @@ import {
   type LearningAnalysisStatus,
   type LearningSkillAdmission,
   type ConversationSkillAdmission,
+  type ConversationReadDenialProducer,
 } from '@tianwen/evolution'
 import {
   RESEARCH_SUMMARY_TOOL_NAME,
@@ -43,17 +44,48 @@ import {
 import { TianwenMessageFeedbackBridgeService } from './message-feedback-bridge.js'
 import { TianwenResearchSummaryAdmissionService } from './research-summary-admission.js'
 import { TianwenConversationObserverService } from './conversation-observer.js'
+import { TianwenConversationFileObserverService } from './conversation-file-observer.js'
+import type { ConversationExternalCodeCheck } from './conversation-external-check.js'
+import type { ConversationStudyResultCheck, ConversationAnswerStudyResultCheck } from './conversation-study-result-check.js'
+import { TianwenNativeToolObservationService } from './native-tool-observation.js'
 import { TianwenConversationGuidanceLoopService } from './conversation-guidance-loop.js'
+import type { GuidanceIndependentReviewConfig } from './guidance-independent-review.js'
+export { createNativeGuidanceIndependentReview } from './guidance-independent-review.js'
+export type { GuidanceIndependentReviewConfig, NativeGuidanceIndependentReviewDescriptor, GuidanceIndependentReview, GuidanceIndependentReviewInput, GuidanceIndependentReviewBody, GuidanceIndependentReviewMaterial } from './guidance-independent-review.js'
 import { TianwenConversationFeedbackService } from './conversation-feedback-assessment.js'
 import * as controlledSessionArchive from './controlled-session-archive.js'
+import { developmentRuntimeConfig, type TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
+export type { TianwenDevelopmentRuntimeConfig } from './development-runtime-boundary.js'
+export { resolveDevelopmentRuntimeRoot } from './development-runtime-boundary.js'
 
 export { inject, name, SUPPORTED_DSH_VERSION }
+// DEV hosts consume the exact published cancellation boundary, without
+// importing source-only observer classes or supplying their own implementation.
+export { withConversationObservationCancellation } from './observation-cancellation.js'
 
 export interface TianwenRuntimeBundleConfig extends TianwenLongGoalHostConfig {
   readonly evolutionRoot?: string
+  /** Trusted first-blind permission for one formal study; absent keeps accepted guidance pending. */
+  readonly guidanceIndependentReview?: GuidanceIndependentReviewConfig
+  /** Experimental prospective admission policy; old sessions retain their original family. */
+  readonly familyVerification?: boolean
+  /** Default-off capture of external code task file artifacts; no effect verdict or learning permission. */
+  readonly captureExternalCodeArtifacts?: boolean
+  /** False omits the host-owned initial-file facts tool in capability-limited hosts; file capture is unchanged. */
+  readonly exposeCapturedFileFacts?: boolean
+  /** Trusted programmatic pre-answer check; no model-supplied checker or automatic learning permission. */
+  readonly externalCodeCheck?: ConversationExternalCodeCheck
+  /** Trusted pre-proposal code study checks; does not lift formal activation quarantine. */
+  readonly studyResultCheck?: ConversationStudyResultCheck
+  /** Trusted complete text/file-to-chat contracts, fixed before proposal; no default oracle or permission. */
+  readonly answerStudyResultCheck?: ConversationAnswerStudyResultCheck
   /** Exact host-reviewed self-contained sources; omitted means no discovery tool. */
   readonly learningSkillSources?: readonly LearningSkillAdmission[]
   readonly conversationSkillSources?: readonly ConversationSkillAdmission[]
+  /** Exact reviewed guard source admissions, required for native read-denial cold verification. */
+  readonly conversationReadDenialSources?: readonly ConversationReadDenialProducer[]
+  /** Separately admitted original write/edit guards; never grants mutation permission. */
+  readonly conversationFileMutationDenialSources?: readonly ConversationReadDenialProducer[]
   /** Test/programmatic seam; desktop profiles use learningLoop instead. */
   readonly learningLoopExecutor?: LearningLoopControlledExecutor
   /** Serializable desktop activation for the sole audited explicit-correction protocol. */
@@ -472,19 +504,43 @@ export async function apply(
   ctx: Context,
   config: TianwenRuntimeBundleConfig = {},
 ): Promise<void> {
-  await applyCore(ctx, { ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }), guidanceActivationQuarantine: true })
+  if (Object.hasOwn(config, 'guidanceDecisionPolicy')) throw new Error('DEV guidance decision policy requires applyDevelopment')
+  await applyConfigured(ctx, config, true)
+}
+/** Explicit trusted DEV host opt-in; ordinary apply and installed Profiles stay quarantined. */
+export async function applyDevelopment(ctx: Context, config: TianwenDevelopmentRuntimeConfig): Promise<void> {
+  if (ctx.get('tianwenEvolution') !== undefined) throw new Error('Development Runtime requires a fresh Context without an existing Evolution service')
+  await applyConfigured(ctx, developmentRuntimeConfig(ctx.baseUrl, config, ctx.get('sessionPersistence')), false, config.guidanceDecisionPolicy)
+}
+async function applyConfigured(ctx: Context, config: TianwenRuntimeBundleConfig, guidanceActivationQuarantine: boolean, guidanceDecisionPolicy?: TianwenDevelopmentRuntimeConfig['guidanceDecisionPolicy']): Promise<void> {
+  const evolutionRoot = config.evolutionRoot ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state', 'evolution'))
+  await applyCore(ctx, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }), guidanceActivationQuarantine })
   ctx.plugin(controlledSessionArchive)
   ctx.plugin(TianwenResearchSummaryAdmissionService)
   ctx.plugin(TianwenLearningConsentAgentService, config.learningSkillSources === undefined
     ? {}
     : { learningSkillSources: config.learningSkillSources })
-  ctx.plugin(TianwenMessageFeedbackBridgeService)
-  ctx.plugin(TianwenConversationObserverService)
-  ctx.plugin(TianwenConversationFeedbackService)
-  ctx.plugin(TianwenConversationGuidanceLoopService, {
-    ...(config.evolutionRoot === undefined ? {} : { evolutionRoot: config.evolutionRoot }),
+  const feedbackBridge = ctx.plugin(TianwenMessageFeedbackBridgeService)
+  ctx.plugin(TianwenNativeToolObservationService)
+  ctx.plugin(TianwenConversationFileObserverService, { ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
+    externalCodeArtifacts: config.captureExternalCodeArtifacts === true,
+    ...(config.exposeCapturedFileFacts === false ? { exposeCapturedFileFacts: false } : {}),
     ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
-    guidanceActivationQuarantine: true,
+    ...(config.conversationReadDenialSources === undefined ? {} : { readDenialSources: config.conversationReadDenialSources }),
+    ...(config.conversationFileMutationDenialSources === undefined ? {} : { mutationDenialSources: config.conversationFileMutationDenialSources }) })
+  ctx.plugin(TianwenConversationObserverService, { familyVerification: config.familyVerification === true,
+    ...(config.captureExternalCodeArtifacts === true && config.externalCodeCheck !== undefined ? { externalCodeCheck: config.externalCodeCheck } : {}) })
+  ctx.plugin(TianwenConversationFeedbackService)
+  const goalStateRoot = config.stateRoot ?? (ctx.baseUrl === undefined ? undefined : resolve(fileURLToPath(ctx.baseUrl), 'state'))
+  ctx.plugin(TianwenConversationGuidanceLoopService, {
+    ...(evolutionRoot === undefined ? {} : { evolutionRoot }),
+    ...(goalStateRoot === undefined ? {} : { goalStateRoot }),
+    ...(config.conversationSkillSources === undefined ? {} : { skillSources: config.conversationSkillSources }),
+    ...(config.studyResultCheck === undefined ? {} : { studyResultCheck: config.studyResultCheck }),
+    ...(config.answerStudyResultCheck === undefined ? {} : { answerStudyResultCheck: config.answerStudyResultCheck }),
+    ...(config.guidanceIndependentReview === undefined ? {} : { guidanceIndependentReview: config.guidanceIndependentReview }),
+    guidanceActivationQuarantine,
+    ...(guidanceDecisionPolicy === undefined ? {} : { guidanceDecisionPolicy }),
   })
   ctx.plugin(TianwenLearningExplorationService)
   ctx.plugin(TianwenLearningAnalysisChildService, config)
@@ -493,4 +549,9 @@ export async function apply(
     ? {}
     : { executor })
   mountTianwenLongGoalHost(ctx, config)
+  // A full Profile must finish disk reconciliation before Loader checks its
+  // consumers. Partial hosts without feedback storage keep deferred mounting.
+  if (ctx.get('messageFeedback') !== undefined && ctx.get('sessionPersistence') !== undefined) await feedbackBridge
 }
+export { readGoalTaskOutcomeMaterial } from './goal-task-material.js'
+export type { GoalTaskOutcomeMaterial } from './goal-task-material.js'

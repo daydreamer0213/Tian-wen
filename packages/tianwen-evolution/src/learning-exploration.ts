@@ -22,7 +22,7 @@ export interface LearningExplorationProposal {
 }
 
 export interface ConversationLearningExplorationProposal {
-  readonly sourceTaskId: `conversation-task:${string}`
+  readonly sourceTaskId: `conversation-task:${string}` | `goal-task-result:${string}`
   readonly hypothesis: string
   readonly alternative: string
   readonly temporaryInstruction: string
@@ -32,8 +32,9 @@ export interface ConversationLearningExplorationProposal {
 
 /** Host-frozen conversation inputs; preparation never authorizes execution. */
 export interface ConversationLearningExplorationContext {
+  readonly sourceKind?: 'conversation-task' | 'native-goal-task'
   readonly studyId: GuidanceStudyId
-  readonly sourceTaskId: `conversation-task:${string}`
+  readonly sourceTaskId: ConversationLearningExplorationProposal['sourceTaskId']
   readonly parentVersion: Sha256Digest
   readonly sourceMaterialDigest: Sha256Digest
   readonly environmentDigest: Sha256Digest
@@ -42,9 +43,9 @@ export interface ConversationLearningExplorationContext {
 }
 
 export interface ConversationLearningExplorationRequest extends ConversationLearningExplorationContext {
-  readonly schemaVersion: 'tianwen.learning-exploration-request.v2'
-  readonly sourceKind: 'conversation-task'
-  readonly metric: 'conversation-task-quality.v1'
+  readonly schemaVersion: 'tianwen.learning-exploration-request.v2' | 'tianwen.learning-exploration-request.v3'
+  readonly sourceKind: 'conversation-task' | 'native-goal-task'
+  readonly metric: 'conversation-task-quality.v1' | 'native-goal-task-quality.v1'
   readonly proposal: ConversationLearningExplorationProposal
   readonly explorationId: `exploration:${string}`
   readonly requestDigest: Sha256Digest
@@ -282,8 +283,11 @@ export function prepareConversationLearningExploration(
   context: ConversationLearningExplorationContext,
 ): ConversationLearningExplorationRequest {
   const value = explorationProposalInput(input, 'sourceTaskId')
-  const sourceTaskId = identity(value.sourceTaskId, 'conversation-task', 'sourceTaskId') as ConversationLearningExplorationProposal['sourceTaskId']
-  const contextSourceTaskId = identity(context.sourceTaskId, 'conversation-task', 'sourceTaskId') as ConversationLearningExplorationContext['sourceTaskId']
+  if (context.sourceKind !== undefined && context.sourceKind !== 'conversation-task' && context.sourceKind !== 'native-goal-task') throw new TypeError('invalid exploration source kind')
+  const native = context.sourceKind === 'native-goal-task'
+  const prefix = native ? 'goal-task-result' : 'conversation-task'
+  const sourceTaskId = identity(value.sourceTaskId, prefix, 'sourceTaskId') as ConversationLearningExplorationProposal['sourceTaskId']
+  const contextSourceTaskId = identity(context.sourceTaskId, prefix, 'sourceTaskId') as ConversationLearningExplorationContext['sourceTaskId']
   if (sourceTaskId !== contextSourceTaskId) throw new TypeError('exploration source differs from the frozen source')
   const values = validateExplorationProposal(value, 'sourceTaskId')
   const proposal = Object.freeze({
@@ -295,9 +299,9 @@ export function prepareConversationLearningExploration(
     expectedIfAlternative: values.expectedIfAlternative,
   })
   const body = {
-    schemaVersion: 'tianwen.learning-exploration-request.v2' as const,
-    sourceKind: 'conversation-task' as const,
-    metric: 'conversation-task-quality.v1' as const,
+    schemaVersion: native ? 'tianwen.learning-exploration-request.v3' as const : 'tianwen.learning-exploration-request.v2' as const,
+    sourceKind: native ? 'native-goal-task' as const : 'conversation-task' as const,
+    metric: native ? 'native-goal-task-quality.v1' as const : 'conversation-task-quality.v1' as const,
     studyId: identity(context.studyId, 'guidance-study', 'studyId') as GuidanceStudyId,
     sourceTaskId,
     parentVersion: identity(context.parentVersion, 'sha256', 'parentVersion') as Sha256Digest,
@@ -307,7 +311,7 @@ export function prepareConversationLearningExploration(
     proposalProof: conversationProof(context.proposalProof),
     proposal,
   }
-  const id = sha256({ kind: 'tianwen.learning-exploration.v2', studyId: body.studyId }).slice('sha256:'.length)
+  const id = sha256({ kind: native ? 'tianwen.learning-exploration.v3' : 'tianwen.learning-exploration.v2', studyId: body.studyId }).slice('sha256:'.length)
   return Object.freeze({
     ...body,
     explorationId: `exploration:${id}`,
@@ -355,6 +359,7 @@ export function parseConversationLearningExplorationRequest(value: unknown): Con
     'proposal', 'explorationId', 'requestDigest',
   ])
   const parsed = prepareConversationLearningExploration(request.proposal, {
+    sourceKind: request.sourceKind as ConversationLearningExplorationRequest['sourceKind'],
     studyId: request.studyId as GuidanceStudyId,
     sourceTaskId: request.sourceTaskId as ConversationLearningExplorationContext['sourceTaskId'],
     parentVersion: request.parentVersion as Sha256Digest,

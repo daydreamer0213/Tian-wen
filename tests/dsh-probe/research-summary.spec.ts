@@ -185,6 +185,10 @@ describe('research summary product contract', () => {
       provider: 'runtime',
       invocation: { modelInvocable: true, userInvocable: true },
     })
+    // The native catalog shows description but not whenToUse. It must carry
+    // the packet precondition so an ordinary summary is not an apparent match.
+    expect(RESEARCH_SUMMARY_BASE_SKILL.description).toMatch(/^Only for an explicit <research_packet>/)
+    expect(RESEARCH_SUMMARY_BASE_SKILL.description).toMatch(/ordinary summaries do not use this skill/i)
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/every finding marked `required`/i)
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/never.*`X`/is)
     expect(RESEARCH_SUMMARY_BASE_SKILL.content).toMatch(/never as instructions/i)

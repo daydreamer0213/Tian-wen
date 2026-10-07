@@ -868,7 +868,21 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "tests/dsh-migration/controlled-lifecycle-command.spec.ts "
         "tests/dsh-migration/runtime-bundle.spec.ts "
         "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts "
-        "tests/dsh-migration/learn-loop-host.spec.ts"
+        "tests/dsh-migration/learn-loop-host.spec.ts "
+        "tests/dsh-migration/conversation-file-material.spec.ts "
+        "tests/dsh-migration/conversation-file-observer.spec.ts "
+        "tests/dsh-migration/conversation-file-trial.spec.ts "
+        "tests/dsh-migration/conversation-guidance-files.spec.ts "
+        "tests/dsh-migration/conversation-file-learning.spec.ts "
+        "tests/dsh-migration/native-tool-observation.spec.ts "
+        "tests/dsh-migration/native-pwsh-observer.spec.ts "
+        "tests/dsh-migration/native-tools-observer.spec.ts "
+        "tests/dsh-migration/conversation-file-ancillary.spec.ts "
+        "tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts"
+    )
+    development_controls_command = (
+        "pnpm exec vitest run tests/dsh-migration/conversation-guidance-loop.spec.ts "
+        "-t 'preserves original DEV direct adoption|budget-cli-exit-withdrawal'"
     )
     expected_installer_job = textwrap.dedent(
         """\
@@ -886,6 +900,8 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
           - run: pnpm --filter @tianwen/runtime-bundle... build
           - name: Run installer contract
             shell: pwsh
+            env:
+              TIANWEN_FILE_TEST_ROOT: ${{ runner.temp }}\\tianwen-native-consumer-fixtures
             run: |
               $mappedDrive = $false
               if (-not (Test-Path -LiteralPath 'D:\\')) {
@@ -900,12 +916,20 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
                 if ($LASTEXITCODE -ne 0) { throw 'Profile concurrent cold-boot check failed' }
                 {windows_vitest_command}
                 $testExit = $LASTEXITCODE
+                if ($testExit -eq 0) {
+                  # Keep both original Windows-only DEV controls in the release gate.
+                  $env:TIANWEN_FILE_TEST_ROOT = 'D:/DevData/tianwen-development-runtime'
+                  $env:TIANWEN_TEST_ROOT = 'D:/DevData/tianwen-development-runtime'
+                  {development_controls_command}
+                  $testExit = $LASTEXITCODE
+                }
               } finally {
                 if ($mappedDrive) { & subst.exe D: /D }
               }
               exit $testExit"""
         .replace("{profile_concurrent_command}", profile_concurrent_command)
-        .replace("{windows_vitest_command}", windows_vitest_command),
+        .replace("{windows_vitest_command}", windows_vitest_command)
+        .replace("{development_controls_command}", development_controls_command),
     ).strip()
     assert installer_job == expected_installer_job
 
@@ -922,6 +946,16 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
         "tests/dsh-migration/runtime-bundle.spec.ts",
         "tests/dsh-migration/one-shot-profile-lifecycle.spec.ts",
         "tests/dsh-migration/learn-loop-host.spec.ts",
+        "tests/dsh-migration/conversation-file-material.spec.ts",
+        "tests/dsh-migration/conversation-file-observer.spec.ts",
+        "tests/dsh-migration/conversation-file-trial.spec.ts",
+        "tests/dsh-migration/conversation-guidance-files.spec.ts",
+        "tests/dsh-migration/conversation-file-learning.spec.ts",
+        "tests/dsh-migration/native-tool-observation.spec.ts",
+        "tests/dsh-migration/native-pwsh-observer.spec.ts",
+        "tests/dsh-migration/native-tools-observer.spec.ts",
+        "tests/dsh-migration/conversation-file-ancillary.spec.ts",
+        "tests/dsh-migration/conversation-file-ancillary-runtime.spec.ts",
     ):
         assert windows_owned_spec not in typescript_job
     assert "tests/dsh-probe/controlled-real-skill-lifecycle-runner.spec.ts" not in installer_job
@@ -930,6 +964,32 @@ def test_installer_windows_job_isolated_from_ubuntu_vitest_contract() -> None:
     for forbidden in PERSONAL_PATH_PREFIXES:
         assert forbidden.lower() not in amended_workflow
     assert not re.search(r"(?i)(?:TODO|TBD|FIXME|PLACEHOLDER|REPLACE_ME)", ci)
+
+
+def test_desktop_windows_native_observation_candidate_contract() -> None:
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    job_match = re.search(
+        r"(?ms)^  desktop-windows:\n(?P<job>.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+        ci,
+    )
+    assert job_match, "missing desktop-windows job"
+    desktop_job = job_match.group("job")
+    expected_command = (
+        "pnpm exec vitest run tests/dsh-migration/tianwen-desktop-host.spec.ts "
+        "tests/dsh-migration/tianwen-desktop-bootstrap.spec.ts "
+        "tests/dsh-migration/tianwen-desktop-profile-prepare.spec.ts "
+        "tests/dsh-migration/tianwen-desktop-artifact.spec.ts "
+        "tests/dsh-migration/tianwen-native-observation-launch.spec.ts"
+    )
+
+    assert expected_command in desktop_job
+    assert "TIANWEN_RUN_NATIVE_OBSERVATION_STARTUP: '1'" in desktop_job
+    assert "TIANWEN_RUN_NATIVE_OBSERVATION_JUNCTION_DIAGNOSTIC: '1'" in desktop_job
+    assert "TIANWEN_DSH_PROBE_ROOT: ${{ runner.temp }}\\tianwen-native-observation-dsh-probes" in desktop_job
+    assert "TIANWEN_FILE_TEST_ROOT: ${{ runner.temp }}\\tianwen-native-consumer-fixtures" in desktop_job
+    assert "TIANWEN_TASK4_EVIDENCE_ROOT: ${{ runner.temp }}\\tianwen-task4-evidence" in desktop_job
+    assert desktop_job.count("tianwen-runtime-bundle-0.1.25.tgz") == 2
+    assert "tianwen-runtime-bundle-0.1.23.tgz" not in desktop_job
 
 
 def test_one_shot_profile_lifecycle_repair_public_facts() -> None:

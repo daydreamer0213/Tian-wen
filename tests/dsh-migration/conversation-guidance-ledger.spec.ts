@@ -1,17 +1,21 @@
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { afterEach, expect, it, vi } from 'vitest'
-import { EvolutionLedger, isPublicLedgerEvent, type ArtifactId } from '../../packages/tianwen-evolution/src/ledger.js'
+import { EvolutionLedger, isPublicLedgerEvent, LedgerCommitUnknownError, type ArtifactId } from '../../packages/tianwen-evolution/src/ledger.js'
 import { canonicalJson, sha256 } from '../../packages/tianwen-evolution/src/learning-intake.js'
-import { conversationQualityContract, conversationTaskId, conversationReviewConsensus, parseConversationAuditedReviewChecks, parseConversationReviewChecks, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
+import { conversationGuidanceClearanceEnvironmentDigest, conversationGuidanceClearanceStudyEvidenceDigest, parseConversationGuidanceClearance, type ConversationGuidanceClearance } from '../../packages/tianwen-evolution/src/conversation-guidance-clearance.js'
+import { conversationQualityContract, conversationTaskId, conversationReviewConsensus, conversationTaskInputDigest, conversationRequestContentDigest, parseConversationAuditedReviewChecks, parseConversationReviewChecks, type ConversationLearningRecord, type ConversationQualityContract, type ConversationTask, type ConversationTaskAdmission } from '../../packages/tianwen-evolution/src/conversation-learning.js'
 import {
-  ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion,
+  ConversationGuidanceState, baselineGuidanceSnapshot, guidanceInputDigest, guidanceStudyId, guidanceVersion, caseDesignAttemptId, parseConversationCaseDesignAttempt, parseConversationGuidanceRecord,
   type ConversationGuidanceRecord, type GuidanceStudyBody, type GuidanceStudyOpened, type GuidanceCandidateRecord, type GuidanceArmRecord,
   type GuidanceExplorationIntentRecord, type GuidanceExplorationArmRecord, type GuidanceSourceReferenceReadRecord,
 } from '../../packages/tianwen-evolution/src/conversation-guidance.js'
 import { prepareConversationLearningExploration } from '../../packages/tianwen-evolution/src/learning-exploration.js'
+import { conversationFileTaskInputDigest } from '../../packages/tianwen-evolution/src/conversation-files.js'
+import { conversationExternalInputsDigest } from '../../packages/tianwen-evolution/src/conversation-external-check.js'
+import * as taskMaterial from '../../packages/tianwen-runtime-bundle/src/conversation-task-material.js'
 import { conversationFeedbackAssessmentId, type ConversationFeedbackSource, type ConversationFeedbackStarted } from '../../packages/tianwen-evolution/src/conversation-feedback.js'
 import SubagentRuntime from '@deepseek-ai/dsh-subagent'
 import { SessionId, createUserMessage, mountPersistentHarness, textResponse, toolCallResponse } from '@tianwen/dsh-compat'
@@ -21,6 +25,20 @@ import { auditedEvidenceResponse } from './conversation-audited-response.js'
 import { TianwenConversationGuidanceLoopService } from '../../packages/tianwen-runtime-bundle/src/conversation-guidance-loop.js'
 
 const roots: string[] = []
+const clearanceAppendFault = vi.hoisted(() => ({ sync: 0, read: 0 }))
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return { ...actual,
+    fsyncSync(descriptor: number) {
+      actual.fsyncSync(descriptor)
+      if (clearanceAppendFault.sync > 0) { clearanceAppendFault.sync--; throw new Error('scripted clearance post-sync uncertainty') }
+    },
+    readFileSync: ((...args: Parameters<typeof actual.readFileSync>) => {
+      if (clearanceAppendFault.read > 0 && String(args[0]).endsWith('ledger.jsonl')) { clearanceAppendFault.read--; throw new Error('scripted clearance recovery read unavailable') }
+      return actual.readFileSync(...args)
+    }) as typeof actual.readFileSync,
+  }
+})
 const scope = 'workspace:guidance-ledger'
 const proof = (id: string) => ({ sessionId: id, sessionDigest: sha256(id), requestDigest: sha256(`request:${id}`) })
 const exactV1Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v1', source: 'host', criterion: 'Be faithful to user-supplied or source facts and their uncertainty, and to actual verified tool evidence. Do not invent or contradict source-dependent facts, decisions, status or completed actions. Prior assistant claims, user silence or continuation do not verify such facts. Clearly distinguish inferences, assumptions and advice from confirmed facts. Relevant general knowledge, reasonable labeled inference and advice, and user-requested fiction are allowed; this contract does not require additional tool calls.' }
@@ -36,36 +54,42 @@ const auditedChecks = (id: string, verdict: 'met' | 'not-met' | 'inconclusive', 
 const exactV2Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v2', source: 'host', criterion: `${exactV1Quality.criterion} The original direct-user instructions remain authoritative even if extracted criteria omit or weaken an explicit requirement. Preserve output-only restrictions, exclusions, conditions, uncertainty and who may decide or act. Distinguish the user's instructions from quoted source content. Evaluate the complete answer, including introductions, alternatives and closing offers. Two independent native checks must agree before a conclusive review; neither check may see the other's result.` }
 const exactV3Quality: ConversationQualityContract = { schemaVersion: 'tianwen.conversation-quality.v3', source: 'host', criterion: `${exactV2Quality.criterion} Original-result reviews use only requirements applicable when that task ran. For newly generated method-study answers, separately identified host-frozen feedback standards apply prospectively; they do not regrade the old answer or override an explicit instruction in the evaluated user request.` }
 const exactV4Quality: ConversationQualityContract = { ...exactV3Quality, schemaVersion: 'tianwen.conversation-quality.v4' }
-afterEach(() => { vi.restoreAllMocks(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
+afterEach(() => { vi.restoreAllMocks(); clearanceAppendFault.sync = 0; clearanceAppendFault.read = 0; for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 function ledgerRoot() {
-  const base = process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests'
+  const base = process.env.TIANWEN_FILE_TEST_ROOT ?? (process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests' : '/tmp/tianwen-conversation-tests')
   mkdirSync(base, { recursive: true })
   const root = mkdtempSync(join(base, 'guidance-ledger-')); roots.push(root)
+  if (process.env.TIANWEN_FILE_TEST_ROOT !== undefined) expect(root.replaceAll('\\', '/').startsWith(`${base.replaceAll('\\', '/')}/`)).toBe(true)
   return root
 }
 
 // Synthetic native receipts exercise real ledger gates and disk replay; no model is run here.
-function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string): ConversationTask {
+function task(ledger: EvolutionLedger, turn: number, verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', scopeKey = scope, request = `pilot request ${turn}`, models = [sha256('scripted ledger model configuration')], qualityContract: ConversationQualityContract | null = conversationQualityContract(), legacyRoot?: string, fileMode?: 'files' | 'chat', proposalCluePolicy: boolean | 'feedback.v2' = false, completeFiles = true, mode?: 'external' | 'subjective', family: 'summarization' | 'writing' | 'code' = 'summarization', fileInputs = [{ path: 'pilot.txt', content: request }], nativeRequest = false, captureContent = true): ConversationTask {
   const identity = { sessionId: 'ordinary-guidance', sessionLifecycleFingerprint: sha256('ordinary-guidance-lifecycle'), turn }
   const taskId = conversationTaskId(identity)
+  const message = nativeRequest ? createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: request }] }) : undefined
   const source = { kind: 'task-started' as const, taskId, ...identity, startSeq: turn * 10,
-    userMessageIds: [`request-${turn}`], requestDigest: sha256(request), contextDigest: sha256([]),
-    scopeKey, consentRevision: 1, behaviorVersion: guidanceVersion(ledger.getConversationGuidance(scopeKey)) }
+    userMessageIds: message === undefined ? [`request-${turn}`] : [String(message.id)], requestDigest: message === undefined ? sha256(request) : sha256([message]), contextDigest: sha256([]),
+    ...(captureContent && qualityContract?.schemaVersion === conversationQualityContract().schemaVersion ? { requestContentDigest: sha256([[{ type: 'text', text: request }]]) } : {}),
+    scopeKey, consentRevision: 1, behaviorVersion: guidanceVersion(ledger.getConversationGuidance(scopeKey)),
+    ...(proposalCluePolicy ? { proposalCluePolicy: proposalCluePolicy === true ? 'feedback.v1' as const : proposalCluePolicy } : {}) }
   const admission: ConversationTaskAdmission = { kind: 'task-admitted', taskId, proof: proof(`admission:${turn}`), unavailableReason: null,
     ...(qualityContract === null ? {} : { qualityContract }),
     decision: { kind: 'task', objective: 'Summarize the supplied pilot result.', criteria: ['Preserve the supplied duration.'],
-      family: 'summarization', evaluationMode: 'text', relatedTaskId: null, feedback: null } }
+      family, evaluationMode: mode ?? (fileMode === undefined ? 'text' : 'local-files'), ...(fileMode === undefined ? {} : { fileOutputKind: fileMode }), relatedTaskId: null, feedback: null } }
   const resultDigest = sha256(`answer ${turn}`)
-  const reviewChecks = ['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(qualityContract?.schemaVersion ?? '') ? auditedChecks(`review:${turn}`, verdict) : qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' ? auditedChecks(`review:${turn}`, verdict, 'v1') : checks(`review:${turn}`, verdict)
+  const reviewChecks = ['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(qualityContract?.schemaVersion ?? '') ? auditedChecks(`review:${turn}`, verdict) : qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4' ? auditedChecks(`review:${turn}`, verdict, 'v1') : checks(`review:${turn}`, verdict)
   const records: ConversationLearningRecord[] = [source, admission,
     ...models.map((modelConfigDigest, index) => ({ kind: 'task-model-observed' as const, taskId, headerSeq: turn * 10 + index, modelConfigDigest })),
-    { kind: 'task-finished', taskId, endSeq: turn * 10 + 8, status: 'completed', assistantMessageIds: [`answer-${turn}`], resultDigest, evidenceIds: [] },
+    ...(fileMode === undefined || !completeFiles ? [] : fileInputs.map((input, index) => ({ kind: 'task-file-input-captured' as const, taskId, ...input, callSeq: turn * 10 + 2 + index, callId: index === 0 ? `read:${turn}` : `read:${turn}:${index}` }))),
+    { kind: 'task-finished', taskId, endSeq: turn * 10 + 8, status: 'completed', assistantMessageIds: [`answer-${turn}`], resultDigest, evidenceIds: [],
+      ...(fileMode === undefined || !completeFiles ? {} : { files: { schemaVersion: 'tianwen.conversation-file-result.v1' as const, outputKind: fileMode, inputsDigest: sha256(fileInputs), captureSeq: turn * 10 + 7, entries: fileInputs.map(input => ({ path: input.path, content: 'pilot result' })), outputPaths: fileMode === 'files' ? fileInputs.map(input => input.path) : [] } }) },
     { kind: 'task-reviewed', taskId, admissionDigest: sha256(admission), resultDigest,
     verdict, category: verdict === 'not-met' ? 'source-fidelity' : null, explanation: 'Original review against frozen duration criteria.',
     evidenceQuotes: verdict === 'not-met' ? ['pilot'] : [], proof: proof(`review:${turn}`), unavailableReason: null,
-    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(qualityContract?.schemaVersion ?? '') ? { ...conversationReviewConsensus(reviewChecks), reviewChecks } : {}) }]
-  if (qualityContract === null || !['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(qualityContract.schemaVersion)) {
+    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(qualityContract?.schemaVersion ?? '') ? { ...conversationReviewConsensus(reviewChecks), reviewChecks } : {}) }]
+  if (qualityContract === null || !['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(qualityContract.schemaVersion)) {
     if (legacyRoot === undefined) throw new Error('legacy fixture requires an explicit historical ledger path')
     appendFileSync(join(legacyRoot, 'ledger.jsonl'), records.map(record => `${canonicalJson({ type: 'conversation-learning-recorded', schemaVersion: 'tianwen.conversation-learning.v1', at: '2026-09-07T00:00:00.000Z', record })}\n`).join(''))
     ledger = new EvolutionLedger(legacyRoot)
@@ -78,8 +102,97 @@ function seeded(verdict: 'met' | 'not-met' | 'inconclusive' = 'not-met', secondS
   const ledger = new EvolutionLedger(root)
   ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
   const tasks = [task(ledger, 1, verdict, firstScope, undefined, undefined, qualityContract, root), task(ledger, 2, verdict, secondScope, repeatRequest ? 'pilot request 1' : 'pilot request 2', secondModels, qualityContract, root), task(ledger, 3, 'met', firstScope, undefined, undefined, qualityContract, root)] as const
-  return { root, ledger: qualityContract === null || !['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(qualityContract.schemaVersion) ? new EvolutionLedger(root) : ledger, tasks }
+  return { root, ledger: qualityContract === null || !['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(qualityContract.schemaVersion) ? new EvolutionLedger(root) : ledger, tasks }
 }
+
+function resultCheckOpening() {
+  const { root, ledger } = seeded()
+  const sources = [4, 5, 6].map(turn => task(ledger, turn, turn === 6 ? 'met' : 'not-met', scope, undefined, undefined,
+    undefined, undefined, 'files', false, true, undefined, 'code')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const { kind: _kind, studyId: _id, ...prior } = fileOpening(sources)
+  const resultChecks = prior.cases.map(item => {
+    const inputs = 'prompt' in item ? item.files!.entries : sources.find(task => task.source.taskId === item.sourceTaskId)!.fileInputs!.map(({ path, content }) => ({ path, content }))
+    return { caseId: item.id, checkerId: 'controlled-frozen-file-check', checkerDigest: sha256('trusted checker'),
+      contractDigest: sha256(`condition:${item.id}`), inputsDigest: conversationExternalInputsDigest(inputs), requiredCondition: `Preserve original ${item.id} value.` }
+  })
+  const body: GuidanceStudyBody = { ...prior, family: 'code', resultChecks }
+  return { root, ledger, body, opened: { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body } }
+}
+for (const missing of [3, 4]) it(`rejects missing study result check slot ${missing} before writing durable history`, () => {
+  const { root, ledger, body } = resultCheckOpening()
+  const checks = [...body.resultChecks!]
+  delete checks[missing]
+  const changed = { ...body, resultChecks: checks }
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(changed), ...changed })).toThrow(/result check/)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  expect(new EvolutionLedger(root).hasRecoveryFailure()).toBe(false)
+})
+
+it('binds study result check preparation to exact original task file inputs', () => {
+  const { ledger, body } = resultCheckOpening()
+  const changed = { ...body, resultChecks: body.resultChecks!.map((check, index) => index === 0 ? { ...check, inputsDigest: sha256('different preimage') } : check) }
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(changed), ...changed })).toThrow(/result check/)
+  expect(ledger.listConversationGuidanceStudies()).toHaveLength(0)
+})
+it('persists study result check preparation and cold restores exact metadata without rewriting the ledger', () => {
+  const { root, ledger, opened } = resultCheckOpening()
+  ledger.recordConversationGuidance(opened)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8'), cold = new EvolutionLedger(root)
+  expect(cold.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+  expect(cold.recordConversationGuidance(opened)).toEqual({ duplicate: true })
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it('persists consumed case-design pairs without inventing studies, and permits genuinely new source pairs', () => {
+  const { root, ledger, tasks } = seeded()
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toEqual([])
+  const body = { scopeKey: scope, consentRevision: 1, parentVersion: tasks[0].source.behaviorVersion,
+    sourceTaskIds: [tasks[0].source.taskId, tasks[1].source.taskId] as const, counterexampleTaskId: tasks[2].source.taskId,
+    modelConfigDigest: sha256('scripted ledger model configuration'), materialDigest: sha256('frozen design material') }
+  const attempt = { attemptId: caseDesignAttemptId(body), ...body }
+  expect(ledger.recordConversationCaseDesignAttempt(attempt)).toEqual({ duplicate: false })
+  expect(ledger.recordConversationCaseDesignAttempt(attempt)).toEqual({ duplicate: true })
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationCaseDesignAttempts(scope)).toEqual([attempt])
+  expect(replay.listConversationGuidanceStudies()).toEqual([])
+  expect(replay.listEvents().filter(isPublicLedgerEvent).some(event => String(event.type) === 'conversation-case-design-attempted')).toBe(false)
+  const returned = replay.listConversationCaseDesignAttempts()[0]!
+  ;(returned.sourceTaskIds as string[])[0] = 'changed caller copy'
+  expect(replay.listConversationCaseDesignAttempts()).toEqual([attempt])
+  for (const changed of [ { ...body, materialDigest: sha256('changed') }, { ...body, sourceTaskIds: [...body.sourceTaskIds].reverse() as [string, string] } ]) {
+    expect(() => replay.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(changed), ...changed })).toThrow(/already attempted/)
+  }
+  const newSource = task(replay, 4)
+  const next = { ...body, sourceTaskIds: [tasks[1].source.taskId, newSource.source.taskId] as const }
+  expect(replay.recordConversationCaseDesignAttempt({ attemptId: caseDesignAttemptId(next), ...next })).toEqual({ duplicate: false })
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toHaveLength(2)
+})
+
+it('preserves historical attempt contracts on replay without allowing new writes under an obsolete contract', () => {
+  const { root, ledger, tasks } = seeded('not-met', scope, false, undefined, exactV3Quality)
+  const body = { scopeKey: scope, consentRevision: 1, parentVersion: tasks[0].source.behaviorVersion,
+    sourceTaskIds: [tasks[0].source.taskId, tasks[1].source.taskId] as const, counterexampleTaskId: tasks[2].source.taskId,
+    modelConfigDigest: sha256('scripted ledger model configuration'), materialDigest: sha256('historical frozen design material') }
+  const attempt = { attemptId: caseDesignAttemptId(body), ...body }
+  expect(() => ledger.recordConversationCaseDesignAttempt(attempt)).toThrow()
+  appendFileSync(join(root, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-case-design-attempted', schemaVersion: 'tianwen.conversation-case-design-attempt.v1', at: new Date().toISOString(), attempt })}\n`)
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toEqual([attempt])
+})
+
+it.each(['scope', 'parent', 'model', 'consent', 'disabled', 'source', 'counter', 'extra', 'identity'] as const)('rejects invalid case-design attempt %s before a durable write', scenario => {
+  const { root, ledger, tasks } = seeded()
+  if (scenario === 'disabled') ledger.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  const body = { scopeKey: scenario === 'scope' ? 'other-scope' : scope, consentRevision: scenario === 'consent' ? 2 : 1,
+    parentVersion: scenario === 'parent' ? sha256('other version') : tasks[0].source.behaviorVersion,
+    sourceTaskIds: [tasks[0].source.taskId, scenario === 'source' ? 'missing task' : tasks[1].source.taskId] as const,
+    counterexampleTaskId: scenario === 'counter' ? tasks[0].source.taskId : tasks[2].source.taskId,
+    modelConfigDigest: sha256(scenario === 'model' ? 'other model' : 'scripted ledger model configuration'), materialDigest: sha256('frozen design material') }
+  const attempt = { attemptId: scenario === 'identity' ? 'changed' : caseDesignAttemptId(body), ...body, ...(scenario === 'extra' ? { extra: true } : {}) }
+  expect(() => ledger.recordConversationCaseDesignAttempt(attempt)).toThrow()
+  expect(new EvolutionLedger(root).listConversationCaseDesignAttempts()).toEqual([])
+  expect(() => parseConversationCaseDesignAttempt({ ...attempt, consentRevision: 1.5 })).toThrow()
+})
 
 function opening(tasks: readonly [ConversationTask, ConversationTask, ConversationTask], label = 'first', assessments: readonly (string | undefined)[] = []): GuidanceStudyOpened {
   const parentSnapshot = baselineGuidanceSnapshot(tasks[0].source.scopeKey)
@@ -105,6 +218,476 @@ function opening(tasks: readonly [ConversationTask, ConversationTask, Conversati
   return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
 }
 
+function fileOpening(tasks: readonly [ConversationTask, ConversationTask, ConversationTask], assessments: readonly (string | undefined)[] = [], fileMode: 'files' | 'chat' = 'files'): GuidanceStudyOpened {
+  const { kind: _kind, studyId: _id, ...base } = opening(tasks, 'first', assessments)
+  const body: GuidanceStudyBody = { ...base, evaluationMode: 'local-files', fileOutputKind: fileMode, cases: base.cases.map(item => {
+    if (!('prompt' in item)) return item
+    const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: fileMode, cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-tests/frozen' : '/tmp/tianwen-conversation-tests/frozen', entries: [{ path: 'pilot.txt', content: 'pilot source' }], outputPaths: fileMode === 'files' ? ['pilot.txt'] : [] }
+    const material = { prompt: item.prompt, criteria: item.criteria, qualityContract: item.qualityContract!, files }
+    return { id: item.id, kind: item.kind, ...material, inputDigest: guidanceInputDigest(item.prompt, files), materialDigest: sha256(material) }
+  }) }
+  return { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }
+}
+
+it.each(['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const)('quarantines new %s mutations while retaining frozen DEV history on main replay', decisionPolicy => {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, decisionPolicy }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  const main = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => main.recordConversationGuidance(opened)).toThrow(/DEV.*policy|policy.*quarantined/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  ledger.recordConversationGuidance(opened)
+  const cold = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(cold.hasRecoveryFailure()).toBe(false)
+  expect(cold.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+  expect(cold.recordConversationGuidance(opened)).toEqual({ duplicate: true })
+  const planned = proposalPlan(opened), proposed = planned.candidate
+  expect(() => cold.recordConversationGuidance(proposed)).toThrow(/DEV.*policy|policy.*quarantined/i)
+  expect(ledger.recordConversationGuidance(proposed)).toEqual({ duplicate: false })
+  for (const arm of planned.arms.slice(0, -1)) ledger.recordConversationGuidance(arm)
+  const pendingArm = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(() => pendingArm.recordConversationGuidance(planned.arms.at(-1)!)).toThrow(/policy.*quarantined/i)
+  ledger.recordConversationGuidance(planned.arms.at(-1)!)
+  const decision = ledger.conversationGuidanceDecision(opened.studyId)
+  const pendingDecision = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(() => pendingDecision.recordConversationGuidance(decision)).toThrow(/policy.*quarantined/i)
+  ledger.recordConversationGuidance(decision)
+  const pendingActivation = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  expect(() => pendingActivation.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })).toThrow(/policy.*quarantined/i)
+  expect(pendingActivation.recordConversationGuidance(decision)).toEqual({ duplicate: true })
+})
+
+it.each((['dev-paired-any-case.v1', 'dev-conclusive-pair.v1'] as const).flatMap(decisionPolicy => (['rollback', 'stop'] as const).map(safety => ({ decisionPolicy, safety }))))('permits strictly validated main safety $safety of frozen $decisionPolicy history', ({ decisionPolicy, safety }) => {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, decisionPolicy }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  if (safety === 'stop') ledger.recordConversationGuidance(opened)
+  else { const value = evaluated(ledger, opened); ledger.recordConversationGuidance(activation(value)) }
+  const main = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  const history = main.listEvents().map(sha256)
+  if (safety === 'stop') {
+    const record = { kind: 'study-stopped' as const, studyId: opened.studyId, reason: 'cancelled' as const }
+    expect(() => main.recordConversationGuidance({ ...record, reason: 'unknown' } as never)).toThrow()
+    expect(main.recordConversationGuidance(record)).toEqual({ duplicate: false })
+    expect(main.listConversationGuidanceStudies()[0]!.stopped).toEqual(record)
+  } else {
+    main.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+    const record = { kind: 'guidance-rolled-back' as const, studyId: opened.studyId, expectedCurrentVersion: sha256('wrong parent'), reason: 'consent-disabled' as const, evidenceTaskIds: [] }
+    expect(() => main.recordConversationGuidance(record)).toThrow()
+    expect(() => main.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: 'cancelled' })).toThrow(/decided|terminal/i)
+    main.retireIncompatibleConversationGuidance(scope)
+    expect(main.listConversationGuidanceStudies()[0]!.rollback?.reason).toBe('consent-disabled')
+  }
+  expect(main.getConversationGuidance(scope)).toEqual(opened.parentSnapshot)
+  expect(main.listEvents().slice(0, history.length).map(sha256)).toEqual(history)
+  const { kind: _futureKind, studyId: _futureId, ...future } = opening(tasks, 'future-DEV')
+  const next = { ...future, decisionPolicy }
+  expect(() => main.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(next), ...next })).toThrow(/policy.*quarantined/i)
+  expect(new EvolutionLedger(root, { guidanceActivationQuarantine: true }).listConversationGuidanceStudies()).toEqual(main.listConversationGuidanceStudies())
+})
+
+function aliasedGeneratedFileOpening(ledger: EvolutionLedger, scenario: 'read-order' | 'path-case' | 'output-order' | 'different-content' = 'read-order') {
+  const mode = scenario === 'output-order' ? 'files' : 'chat'
+  const tasks = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, mode)) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const { kind: _kind, studyId: _id, ...original } = fileOpening(tasks, [], mode)
+  const body: GuidanceStudyBody = { ...original, cases: original.cases.map(item => {
+    if (!('prompt' in item)) return item
+    const holdout = item.kind === 'holdout'
+    let entries = [{ path: 'a.txt', content: 'pilot alpha' }, { path: 'b.txt', content: 'pilot beta' }]
+    if (holdout && scenario === 'read-order') entries = [...entries].reverse()
+    if (holdout && scenario === 'path-case') entries = entries.map(entry => ({ ...entry, path: entry.path.toUpperCase() }))
+    if (holdout && scenario === 'different-content') entries = entries.map(entry => ({ ...entry, content: `${entry.content} new measurements` }))
+    const paths = mode === 'files' ? ['a.txt', 'b.txt'] : []
+    const files = { ...item.files!, entries, outputPaths: holdout && scenario === 'output-order' ? [...paths].reverse() : paths }
+    const material = { prompt: 'Summarize these pilot files.', criteria: item.criteria, qualityContract: item.qualityContract!, files }
+    return { id: item.id, kind: item.kind, ...material, inputDigest: guidanceInputDigest(material.prompt, files), materialDigest: sha256(material) }
+  }) }
+  return { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+}
+
+it.each(['read-order', 'path-case', 'output-order'] as const)('rejects new generated file input aliases: %s', scenario => {
+  const root = ledgerRoot(), ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const opened = aliasedGeneratedFileOpening(ledger, scenario)
+  expect(opened.cases[3]!.inputDigest).not.toBe(opened.cases[4]!.inputDigest)
+  expect(parseConversationGuidanceRecord(opened)).toEqual(opened)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance(opened)).toThrow(/duplicate.*file.*input/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it('preserves genuinely different generated file contents and exact original digests', () => {
+  const root = ledgerRoot(), ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const opened = aliasedGeneratedFileOpening(ledger, 'different-content')
+  expect(ledger.recordConversationGuidance(opened)).toEqual({ duplicate: false })
+  expect(new EvolutionLedger(root).listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+})
+
+it('cold-replays historical generated file aliases unchanged but blocks a new activation', () => {
+  const root = ledgerRoot(), ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const opened = aliasedGeneratedFileOpening(ledger)
+  appendFileSync(join(root, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-09-30T00:00:00.000Z', record: opened })}\n`)
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationGuidanceStudies()[0]!.opened).toEqual(opened)
+  expect(replay.recordConversationGuidance(opened)).toEqual({ duplicate: true })
+  const { decision } = evaluateFileStudy(replay, opened, 'chat')
+  expect(decision.verdict).toBe('accepted')
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => replay.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId,
+    expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })).toThrow(/duplicate.*file.*input/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  expect(new EvolutionLedger(root).listConversationGuidanceStudies()[0]!.decision).toEqual(decision)
+  const activation = { kind: 'guidance-activated' as const, studyId: opened.studyId,
+    expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) }
+  appendFileSync(join(root, 'ledger.jsonl'), `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: new Date().toISOString(), record: activation })}\n`)
+  const historicalBytes = readFileSync(join(root, 'ledger.jsonl'), 'utf8'), historical = new EvolutionLedger(root)
+  expect(historical.listConversationGuidanceStudies()[0]!.activation).toEqual(activation)
+  expect(historical.recordConversationGuidance(activation)).toEqual({ duplicate: true })
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(historicalBytes)
+})
+
+// Controlled receipts verify the real rollback and replay, not natural efficacy.
+function evaluateFileStudy(ledger: EvolutionLedger, opened: GuidanceStudyOpened, fileMode: 'files' | 'chat') {
+  const planned = proposalPlan(opened)
+  const candidate = { ...planned.candidate, candidateSnapshot: { ...opened.parentSnapshot, fileRules: { summarization: { [fileMode]: 'Preserve pilot file scope.' } } } }
+  ledger.recordConversationGuidance(candidate)
+  for (const arm of planned.arms) {
+    const item = opened.cases.find(item => item.id === arm.caseId)!
+    const output = { answer: 'pilot', files: fileMode === 'files' ? [{ path: 'pilot.txt', content: 'pilot result' }] : [] }
+    ledger.recordConversationGuidance({ kind: 'study-file-trial-captured', studyId: opened.studyId, materialDigest: item.materialDigest,
+      target: { kind: 'formal', caseId: item.id, role: arm.role }, receipt: { schemaVersion: 'tianwen.conversation-file-trial-receipt.v1', outputKind: fileMode, ...output, outputDigest: sha256(output),
+        workerMaterialDigest: 'prompt' in item ? sha256({ prompt: item.prompt, files: item.files }) : sha256(item.id), executionProof: arm.executionProof } })
+    ledger.recordConversationGuidance({ ...arm, outputDigest: sha256(output), behaviorVersion: arm.role === 'baseline' ? opened.parentVersion : guidanceVersion(candidate.candidateSnapshot) })
+  }
+  const decision = ledger.conversationGuidanceDecision(opened.studyId); ledger.recordConversationGuidance(decision)
+  return { candidate, decision }
+}
+
+function fileRegressionScene(fileMode: 'files' | 'chat' = 'files') {
+  const root = ledgerRoot(); let tick = 0
+  const ledger = new EvolutionLedger(root, { clock: () => new Date(Date.UTC(2026, 9, 1) + tick++ * 1000).toISOString() })
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const sources = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, fileMode)) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const opened = fileOpening(sources, [], fileMode); ledger.recordConversationGuidance(opened)
+  const { candidate, decision } = evaluateFileStudy(ledger, opened, fileMode)
+  ledger.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
+  const later = (turn: number, inputs = [{ path: 'pilot.txt', content: `different input ${turn}` }], request = 'Summarize these files.', verdict: 'met' | 'not-met' = 'not-met', captureContent = true) =>
+    task(ledger, turn, verdict, scope, request, undefined, undefined, undefined, fileMode, false, true, undefined, 'summarization', inputs, true, captureContent)
+  const rollback = (failures: readonly ConversationTask[]) => ({ kind: 'guidance-rolled-back' as const, studyId: opened.studyId,
+    expectedCurrentVersion: guidanceVersion(candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: failures.map(task => task.source.taskId), evidenceInputPolicy: 'request-content.v1' as const })
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service, { ctx: { tianwenEvolution: ledger } })
+  const reconcile = () => (service as unknown as { rollbackIfNeeded(scopeKey: string): void }).rollbackIfNeeded(scope)
+  return { root, ledger, opened, candidate, later, rollback, reconcile }
+}
+
+it('rolls back file regression with the same request and two different captured preimages, then cold replays', () => {
+  const f = fileRegressionScene(), failures = [f.later(4), f.later(5)], record = f.rollback(failures)
+  expect(failures[0]!.source.requestDigest).not.toBe(failures[1]!.source.requestDigest)
+  expect(failures[0]!.source.requestContentDigest).toBe(failures[1]!.source.requestContentDigest)
+  f.ledger.recordConversationGuidance(record)
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  const before = readFileSync(join(f.root, 'ledger.jsonl'), 'utf8'), replay = new EvolutionLedger(f.root)
+  expect(replay.listConversationGuidanceStudies()[0]?.rollback).toEqual(record)
+  expect(replay.recordConversationGuidance(record)).toEqual({ duplicate: true })
+  expect(readFileSync(join(f.root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it('automatically reconciles two different file inputs without counting one failure twice', () => {
+  const f = fileRegressionScene(); const first = f.later(4)
+  f.reconcile(); f.reconcile()
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.candidate.candidateSnapshot)
+  const second = f.later(5); f.reconcile()
+  expect(f.ledger.listConversationGuidanceStudies()[0]?.rollback).toEqual(f.rollback([first, second]))
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+})
+
+it('automatically rolls back a file-to-chat method with distinct captured inputs and preserves cold recovery', () => {
+  const f = fileRegressionScene('chat'), failures = [f.later(4), f.later(5)]
+  f.reconcile()
+  expect(f.ledger.listConversationGuidanceStudies()[0]?.rollback).toEqual(f.rollback(failures))
+  const replay = new EvolutionLedger(f.root)
+  expect(replay.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  expect(replay.listConversationGuidanceStudies()[0]?.rollback).toEqual(f.rollback(failures))
+})
+
+it.each(['identical', 'read-order', 'path-case'] as const)('does not manufacture distinct file regression from %s inputs', scenario => {
+  const f = fileRegressionScene(), firstInputs = [{ path: 'a.txt', content: 'first source' }, { path: 'b.txt', content: 'second source' }]
+  const secondInputs = scenario === 'read-order' ? [...firstInputs].reverse() : scenario === 'path-case' ? firstInputs.map(input => ({ ...input, path: input.path.toUpperCase() })) : firstInputs
+  const failures = [f.later(4, firstInputs), f.later(5, secondInputs)]
+  f.reconcile()
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.candidate.candidateSnapshot)
+  expect(() => f.ledger.recordConversationGuidance(f.rollback(failures))).toThrow(/distinct|regression|input/)
+})
+
+it('retains old untagged file regression replay and idempotence without migrating its bytes', () => {
+  const f = fileRegressionScene(), failures = [f.later(4, undefined, 'First request'), f.later(5, undefined, 'Second request')]
+  const { evidenceInputPolicy: _policy, ...legacy } = f.rollback(failures)
+  const path = join(f.root, 'ledger.jsonl')
+  appendFileSync(path, `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-10-01T01:00:00.000Z', record: legacy })}\n`)
+  const before = readFileSync(path, 'utf8'), replay = new EvolutionLedger(f.root)
+  expect(replay.listConversationGuidanceStudies()[0]?.rollback).toEqual(legacy)
+  expect(replay.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  expect(replay.recordConversationGuidance(legacy)).toEqual({ duplicate: true })
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+it('requires the new file regression policy on new writes even for different request strings', () => {
+  const f = fileRegressionScene(), failures = [f.later(4, undefined, 'First request'), f.later(5, undefined, 'Second request')]
+  const { evidenceInputPolicy: _policy, ...legacy } = f.rollback(failures)
+  expect(() => f.ledger.recordConversationGuidance(legacy)).toThrow(/policy|input/)
+  expect(f.ledger.listConversationGuidanceStudies()[0]?.rollback).toBeUndefined()
+})
+
+it.each(['missing-inputs', 'empty-inputs', 'missing-result', 'wrong-digest', 'unavailable', 'failed', 'wrong-kind'] as const)('excludes %s from captured file regression identity and automatic rollback', scenario => {
+  const f = fileRegressionScene(), first = f.later(4), second = f.later(5)
+  const modified: ConversationTask = structuredClone(second)
+  const invalid: ConversationTask = scenario === 'missing-inputs' ? (() => { const { fileInputs: _inputs, ...rest } = modified; return rest })()
+    : scenario === 'empty-inputs' ? { ...modified, fileInputs: [] }
+    : scenario === 'missing-result' ? { ...modified, completion: (() => { const { files: _files, ...rest } = modified.completion!; return rest })() }
+    : scenario === 'wrong-digest' ? { ...modified, completion: { ...modified.completion!, files: { ...modified.completion!.files!, inputsDigest: sha256('wrong') } } }
+    : scenario === 'unavailable' ? { ...modified, fileUnavailable: { kind: 'task-file-evidence-unavailable', taskId: modified.source.taskId, reason: 'material-unavailable' } }
+    : scenario === 'failed' ? { ...modified, completion: { ...modified.completion!, status: 'failed' } }
+    : { ...modified, completion: { ...modified.completion!, files: { ...modified.completion!.files!, outputKind: 'chat' } } }
+  expect(conversationFileTaskInputDigest(invalid)).toBeUndefined()
+  // The valid ledger refuses these inconsistent records earlier. A read-side
+  // projection must still not silently fall back to the request string.
+  const stored = f.ledger.listConversationTasks()
+  vi.spyOn(f.ledger, 'listConversationTasks').mockReturnValue(stored.map(task => task.source.taskId === second.source.taskId ? invalid : task))
+  f.reconcile()
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.candidate.candidateSnapshot)
+  expect(conversationFileTaskInputDigest(first)).toMatch(/^sha256:/)
+})
+
+it('does not use candidate outputs, answer IDs or output path order as file regression inputs', () => {
+  const f = fileRegressionScene(), value = f.later(4, [{ path: 'a.txt', content: 'original A' }, { path: 'b.txt', content: 'original B' }])
+  const changed: ConversationTask = { ...value, completion: { ...value.completion!, assistantMessageIds: ['different-answer'], resultDigest: sha256('different-answer'),
+    files: { ...value.completion!.files!, entries: value.completion!.files!.entries.map(entry => ({ ...entry, content: 'different candidate output' })), outputPaths: [...value.completion!.files!.outputPaths].reverse() } } }
+  expect(conversationFileTaskInputDigest(changed)).toBe(conversationFileTaskInputDigest(value))
+})
+
+it('does not manufacture distinct file input from two real native message identities with identical content', () => {
+  const f = fileRegressionScene(), first = f.later(4), second = f.later(5, first.fileInputs!.map(({ path, content }) => ({ path, content: content! })))
+  const one = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize these files.' }] })
+  const two = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Summarize these files.' }] })
+  const withNativeSource = (task: ConversationTask, message: typeof one) => ({ ...task, source: { ...task.source,
+    requestDigest: sha256([message]), requestContentDigest: sha256([message.content]) } })
+  const a = withNativeSource(first, one), b = withNativeSource(second, two)
+  expect(a.source.requestDigest).not.toBe(b.source.requestDigest)
+  expect(a.source.requestContentDigest).toBe(b.source.requestContentDigest)
+  expect(conversationFileTaskInputDigest(a)).toBe(conversationFileTaskInputDigest(b))
+})
+
+it('distinguishes absent input from empty captured file input', () => {
+  const f = fileRegressionScene(), value = f.later(4)
+  const variant = (content: string | null): ConversationTask => {
+    const fileInputs = value.fileInputs!.map(input => ({ ...input, content }))
+    return { ...value, fileInputs,
+      completion: { ...value.completion!, files: { ...value.completion!.files!, inputsDigest: sha256(fileInputs.map(({ path, content }) => ({ path, content }))) } } }
+  }
+  expect(conversationFileTaskInputDigest(variant(null))).toMatch(/^sha256:/)
+  expect(conversationFileTaskInputDigest(variant(null))).not.toBe(conversationFileTaskInputDigest(variant('')))
+})
+
+it('does not treat a successful later file task as a second regression', () => {
+  const f = fileRegressionScene(), failures = [f.later(4), f.later(5, undefined, undefined, 'met')]
+  f.reconcile()
+  expect(f.ledger.getConversationGuidance(scope)).toEqual(f.candidate.candidateSnapshot)
+  expect(() => f.ledger.recordConversationGuidance(f.rollback(failures))).toThrow(/failed tasks/)
+})
+
+it('keeps text regression request identity and forbids borrowing a file policy', () => {
+  const f = seeded(), value = evaluated(f.ledger, opening(f.tasks)); f.ledger.recordConversationGuidance(activation(value))
+  // Explicit later clock avoids relying on the wall-clock millisecond tick.
+  const laterLedger = new EvolutionLedger(f.root, { clock: () => '2099-01-01T00:00:00.000Z' })
+  const failures = [task(laterLedger, 4), task(laterLedger, 5)]
+  const record = { kind: 'guidance-rolled-back' as const, studyId: value.opened.studyId, expectedCurrentVersion: guidanceVersion(value.candidate.candidateSnapshot), reason: 'regression' as const, evidenceTaskIds: failures.map(task => task.source.taskId), evidenceInputPolicy: 'request-content.v1' as const }
+  expect(() => laterLedger.recordConversationGuidance({ ...record, evidenceInputPolicy: 'captured-files.v1' })).toThrow(/regression/)
+  laterLedger.recordConversationGuidance(record)
+  expect(new EvolutionLedger(f.root).getConversationGuidance(scope)).toEqual(value.opened.parentSnapshot)
+})
+
+it.each(['unknown-policy', 'wrong-reason', 'explicit-undefined'] as const)('rejects %s file regression policy records', scenario => {
+  const f = fileRegressionScene(), record = f.rollback([f.later(4), f.later(5)])
+  expect(() => parseConversationGuidanceRecord(scenario === 'wrong-reason' ? { ...record, reason: 'consent-disabled' }
+    : { ...record, evidenceInputPolicy: scenario === 'unknown-policy' ? 'other.v1' : undefined })).toThrow(/policy/)
+})
+
+function contentSourceScene(scenario: 'text' | 'message-id' | 'read-order' | 'path-case' | 'different-content' | 'different-files' | 'legacy') {
+  const directory = ledgerRoot(), ledger = new EvolutionLedger(directory)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const inputs = [{ path: 'a.txt', content: 'first fact' }, { path: 'b.txt', content: 'second fact' }]
+  const secondInputs = scenario === 'read-order' ? [...inputs].reverse() : scenario === 'path-case' ? inputs.map(input => ({ ...input, path: input.path.toUpperCase() }))
+    : scenario === 'different-files' ? inputs.map(input => ({ ...input, content: `new ${input.content}` })) : inputs
+  const captureContent = scenario !== 'legacy'
+  const make = (turn: number, request: string, entries = inputs) => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, request,
+    undefined, undefined, undefined, scenario === 'text' ? undefined : 'files', false, true, undefined, 'summarization', entries, true, captureContent)
+  const tasks = [make(1, 'Summarize the supplied facts.'), make(2, scenario === 'different-content' ? 'Write a different summary of the supplied facts.' : 'Summarize the supplied facts.', secondInputs), make(3, 'Independent successful task.')] as const
+  const opened = scenario === 'text' ? opening(tasks) : fileOpening(tasks)
+  const body = { scopeKey: scope, consentRevision: 1, parentVersion: opened.parentVersion, sourceTaskIds: opened.sourceTaskIds, counterexampleTaskId: opened.counterexampleTaskId,
+    modelConfigDigest: opened.modelConfigDigest, materialDigest: sha256('controlled case-design material') }
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service, { ctx: { tianwenEvolution: ledger } })
+  vi.spyOn(taskMaterial, 'recoverConversationTaskMaterial').mockImplementation(async (_ctx, task) => ({ request: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: task.source.taskId === tasks[2].source.taskId ? 'Independent successful task.' : task.source.taskId === tasks[1].source.taskId && scenario === 'different-content' ? 'Write a different summary of the supplied facts.' : 'Summarize the supplied facts.' }] })], context: [], objective: 'Summarize.', criteria: ['Preserve facts.'], files: {
+    schemaVersion: 'tianwen.conversation-file-material.v1', cwd: directory, outputKind: 'files', entries: task.fileInputs!.map(({ path, content }) => ({ path, content })), outputPaths: task.completion!.files!.outputPaths } }))
+  return { directory, ledger, tasks, opened, service, attempt: { attemptId: caseDesignAttemptId(body), ...body } }
+}
+
+it.each(['text', 'message-id', 'read-order', 'path-case'] as const)('rejects duplicate %s source contents before selection, case design and study writes', async scenario => {
+  const f = contentSourceScene(scenario)
+  expect(f.tasks[0].source.requestDigest).not.toBe(f.tasks[1].source.requestDigest)
+  expect(conversationTaskInputDigest(f.tasks[0])).toBe(conversationTaskInputDigest(f.tasks[1]))
+  expect(await f.service.readiness(scope)).toEqual({ state: 'awaiting-compatible-sources' })
+  expect(() => f.ledger.recordConversationCaseDesignAttempt(f.attempt)).toThrow(/distinct task contents/)
+  expect(() => f.ledger.recordConversationGuidance(f.opened)).toThrow(/distinct task contents/)
+  expect(f.ledger.listConversationCaseDesignAttempts()).toEqual([])
+  expect(f.ledger.listConversationGuidanceStudies()).toEqual([])
+})
+
+it.each(['different-content', 'different-files'] as const)('retains two source inputs with %s', async scenario => {
+  const f = contentSourceScene(scenario)
+  expect(await f.service.readiness(scope)).toEqual({ state: 'ready-to-schedule' })
+  f.ledger.recordConversationCaseDesignAttempt(f.attempt)
+  f.ledger.recordConversationGuidance(f.opened)
+  expect(new EvolutionLedger(f.directory).listConversationGuidanceStudies()[0]?.opened).toEqual(f.opened)
+})
+
+it('deduplicates accurately recovered legacy file source content without backfilling the ledger', async () => {
+  const f = contentSourceScene('legacy'), before = readFileSync(join(f.directory, 'ledger.jsonl'), 'utf8')
+  expect(f.tasks.every(task => task.source.requestContentDigest === undefined)).toBe(true)
+  expect(await f.service.readiness(scope)).toEqual({ state: 'awaiting-compatible-sources' })
+  expect(readFileSync(join(f.directory, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it('preserves a recorded duplicate-source study and decision without allowing new activation', () => {
+  const f = contentSourceScene('message-id'), path = join(f.directory, 'ledger.jsonl')
+  // A controlled old-rule opening uses distinct source identities; it is not
+  // a newly allowed study or a regraded historical natural result.
+  appendFileSync(path, `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-10-01T01:00:00.000Z', record: f.opened })}\n`)
+  const ledger = new EvolutionLedger(f.directory), value = evaluateFileStudy(ledger, f.opened, 'files')
+  expect(value.decision.verdict).toBe('accepted')
+  const before = readFileSync(path, 'utf8'), replay = new EvolutionLedger(f.directory)
+  expect(replay.isConversationGuidanceSupported(f.opened.studyId)).toBe(true)
+  expect(replay.recordConversationGuidance(f.opened)).toEqual({ duplicate: true })
+  expect(() => replay.recordConversationGuidance({ kind: 'guidance-activated', studyId: f.opened.studyId, expectedParentVersion: f.opened.parentVersion, decisionDigest: sha256(value.decision) })).toThrow(/distinct task contents/)
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+it.each([undefined, 'captured-files.v1'] as const)('retains %s regression meaning despite optional new source content fields', policy => {
+  const f = fileRegressionScene(), inputs = [{ path: 'pilot.txt', content: 'same captured fact' }], failures = [f.later(4, inputs), f.later(5, inputs)]
+  expect(failures[0]!.source.requestDigest).not.toBe(failures[1]!.source.requestDigest)
+  expect(conversationTaskInputDigest(failures[0]!)).toBe(conversationTaskInputDigest(failures[1]!))
+  const { evidenceInputPolicy: _current, ...base } = f.rollback(failures), record = { ...base, ...(policy === undefined ? {} : { evidenceInputPolicy: policy }) }
+  const path = join(f.root, 'ledger.jsonl')
+  appendFileSync(path, `${canonicalJson({ type: 'conversation-guidance-recorded', schemaVersion: 'tianwen.conversation-guidance-record.v1', at: '2026-10-01T01:00:00.000Z', record })}\n`)
+  const before = readFileSync(path, 'utf8'), replay = new EvolutionLedger(f.root)
+  expect(replay.getConversationGuidance(scope)).toEqual(f.opened.parentSnapshot)
+  expect(replay.listConversationGuidanceStudies()[0]?.rollback).toEqual(record)
+  expect(replay.recordConversationGuidance(record)).toEqual({ duplicate: true })
+  expect(readFileSync(path, 'utf8')).toBe(before)
+})
+
+it('requires new complete content evidence for regression without borrowing missing historical identities', () => {
+  const f = fileRegressionScene(), failures = [f.later(4, undefined, undefined, undefined, false), f.later(5)]
+  expect(conversationTaskInputDigest(failures[0]!)).toBeUndefined()
+  f.reconcile()
+  expect(f.ledger.listConversationGuidanceStudies()[0]?.rollback).toBeUndefined()
+  expect(() => f.ledger.recordConversationGuidance(f.rollback(failures))).toThrow(/distinct later failed tasks/)
+})
+
+it('deduplicates identical text contents with real message IDs before rolling back on a genuinely different later input', () => {
+  const f = seeded(), value = evaluated(f.ledger, opening(f.tasks)); f.ledger.recordConversationGuidance(activation(value))
+  const ledger = new EvolutionLedger(f.root, { clock: () => '2099-01-01T00:00:00.000Z' })
+  const later = (turn: number, request = 'Same summary task.') => task(ledger, turn, 'not-met', scope, request, undefined, undefined, undefined, undefined, false, true, undefined, 'summarization', undefined, true)
+  const first = later(4), repeated = later(5)
+  expect(first.source.requestDigest).not.toBe(repeated.source.requestDigest)
+  const service = Object.create(TianwenConversationGuidanceLoopService.prototype) as TianwenConversationGuidanceLoopService
+  Object.assign(service, { ctx: { tianwenEvolution: ledger } })
+  const reconcile = () => (service as unknown as { rollbackIfNeeded(scopeKey: string): void }).rollbackIfNeeded(scope)
+  reconcile()
+  expect(ledger.getConversationGuidance(scope)).toEqual(value.candidate.candidateSnapshot)
+  const distinct = later(6, 'Different summary task.'); reconcile()
+  expect(ledger.listConversationGuidanceStudies()[0]?.rollback).toMatchObject({ evidenceInputPolicy: 'request-content.v1', evidenceTaskIds: [first.source.taskId, distinct.source.taskId] })
+  expect(new EvolutionLedger(f.root).getConversationGuidance(scope)).toEqual(value.opened.parentSnapshot)
+})
+
+it('retains complete content blocks and message boundaries rather than folding them to plain text', () => {
+  const one = [{ content: [{ type: 'text', text: 'ab' }] }]
+  expect(conversationRequestContentDigest(one)).not.toBe(conversationRequestContentDigest([{ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }]))
+  expect(conversationRequestContentDigest(one)).not.toBe(conversationRequestContentDigest([{ content: [{ type: 'text', text: 'a' }] }, { content: [{ type: 'text', text: 'b' }] }]))
+  expect(conversationRequestContentDigest(one)).not.toBe(conversationRequestContentDigest([{ content: [{ type: 'text', text: 'ab ' }] }]))
+})
+
+it('selects compatible file sources through the ledger and cold replays private target-bound receipts', () => {
+  const root = ledgerRoot(); const ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const tasks = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, 'files')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const opened = fileOpening(tasks)
+  ledger.recordConversationGuidance(opened)
+  const candidate = { ...proposalPlan(opened).candidate, candidateSnapshot: { ...opened.parentSnapshot, fileRules: { summarization: { files: 'Preserve the pilot duration in files.' } } } }
+  ledger.recordConversationGuidance(candidate)
+  const output = { answer: 'pilot', files: [{ path: 'pilot.txt', content: 'pilot result' }] }
+  const receipt = { kind: 'study-file-trial-captured' as const, studyId: opened.studyId, materialDigest: opened.cases[0]!.materialDigest,
+    target: { kind: 'formal' as const, caseId: opened.cases[0]!.id, role: 'baseline' as const }, receipt: { schemaVersion: 'tianwen.conversation-file-trial-receipt.v1' as const, outputKind: 'files' as const, ...output, outputDigest: sha256(output), workerMaterialDigest: sha256('original worker'), executionProof: proof('native-file-execution') } }
+  ledger.recordConversationGuidance(receipt)
+  const replay = new EvolutionLedger(root)
+  expect(replay.listConversationGuidanceStudies()[0]!.fileTrials).toEqual([receipt])
+  expect(replay.listConversationGuidanceStudies()[0]!.arms).toEqual([])
+  expect(replay.recordConversationGuidance(receipt)).toEqual({ duplicate: true })
+  expect(replay.listEvents().filter(isPublicLedgerEvent).some(event => event.type === 'conversation-guidance-recorded')).toBe(false)
+  const arm = { ...proposalPlan(opened).arms[0]!, executionProof: receipt.receipt.executionProof, outputDigest: receipt.receipt.outputDigest }
+  replay.recordConversationGuidance(arm)
+  expect(new EvolutionLedger(root).listConversationGuidanceStudies()[0]!.arms).toEqual([arm])
+  const mixed = task(replay, 4, 'not-met', scope, undefined, undefined, undefined, undefined, 'chat')
+  expect(() => replay.recordConversationGuidance(fileOpening([tasks[0], mixed, tasks[2]]))).toThrow(/compatible/)
+  replay.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  expect(() => replay.recordConversationGuidance({ ...receipt, target: { ...receipt.target, role: 'candidate' }, receipt: { ...receipt.receipt, executionProof: proof('new-session') } })).toThrow(/consent/)
+})
+
+it('withdraws inherited file guidance through the actual later text head with verified ancestor invalidation', () => {
+  const root = ledgerRoot(); const ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const initialTextTasks = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const initialText = evaluated(ledger, opening(initialTextTasks, 'initial-text')); ledger.recordConversationGuidance(activation(initialText))
+  const tasks = [4, 5, 6].map(turn => task(ledger, turn, 'met', scope, undefined, undefined, undefined, undefined, 'files')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const assessments = [nativeFeedback(ledger, tasks[0]), nativeFeedback(ledger, tasks[1])]
+  const { kind: _fileKind, studyId: _fileId, ...fileBody } = fileOpening(tasks, assessments.map(item => item.started.assessmentId))
+  const fileIdentity = { ...fileBody, parentSnapshot: ledger.getConversationGuidance(scope), parentVersion: guidanceVersion(ledger.getConversationGuidance(scope)) }
+  const opened: GuidanceStudyOpened = { kind: 'study-opened', studyId: guidanceStudyId(fileIdentity), ...fileIdentity }
+  ledger.recordConversationGuidance(opened)
+  const planned = proposalPlan(opened)
+  const candidate = { ...planned.candidate, candidateSnapshot: { ...opened.parentSnapshot, fileRules: { summarization: { files: 'Preserve pilot file scope.' } } } }
+  ledger.recordConversationGuidance(candidate)
+  for (const arm of planned.arms) {
+    const item = opened.cases.find(item => item.id === arm.caseId)!
+    const output = { answer: 'pilot', files: [{ path: 'pilot.txt', content: 'pilot result' }] }
+    ledger.recordConversationGuidance({ kind: 'study-file-trial-captured', studyId: opened.studyId, materialDigest: item.materialDigest,
+      target: { kind: 'formal', caseId: item.id, role: arm.role }, receipt: { schemaVersion: 'tianwen.conversation-file-trial-receipt.v1', outputKind: 'files', ...output, outputDigest: sha256(output),
+        workerMaterialDigest: 'prompt' in item ? sha256({ prompt: item.prompt, files: item.files }) : sha256(item.id), executionProof: arm.executionProof } })
+    ledger.recordConversationGuidance({ ...arm, outputDigest: sha256(output), behaviorVersion: arm.role === 'baseline' ? opened.parentVersion : guidanceVersion(candidate.candidateSnapshot) })
+  }
+  const decision = ledger.conversationGuidanceDecision(opened.studyId); ledger.recordConversationGuidance(decision)
+  ledger.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })
+  expect(ledger.getConversationGuidance(scope).rules).toEqual(initialText.candidate.candidateSnapshot.rules)
+  const textTasks = [7, 8, 9].map(turn => task(ledger, turn, turn === 9 ? 'met' : 'not-met')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  expect(() => ledger.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: opened.studyId, expectedCurrentVersion: guidanceVersion(candidate.candidateSnapshot), reason: 'regression', evidenceTaskIds: textTasks.slice(0, 2).map(task => task.source.taskId) })).toThrow(/regression/)
+  const { kind: _kind, studyId: _id, ...textBody } = opening(textTasks, 'text')
+  const body = { ...textBody, parentSnapshot: ledger.getConversationGuidance(scope), parentVersion: guidanceVersion(ledger.getConversationGuidance(scope)) }
+  const text = evaluated(ledger, { kind: 'study-opened', studyId: guidanceStudyId(body), ...body }); ledger.recordConversationGuidance(activation(text))
+  expect(ledger.getConversationGuidance(scope).fileRules?.summarization?.files).toBe('Preserve pilot file scope.')
+  expect(() => ledger.recordConversationGuidance({ kind: 'guidance-rolled-back', studyId: text.opened.studyId, expectedCurrentVersion: guidanceVersion(text.candidate.candidateSnapshot), reason: 'ancestor-invalidated', ancestorStudyId: opened.studyId, evidenceTaskIds: [] })).toThrow(/actually invalidated/)
+  retract(ledger, assessments[0]!)
+  ledger.retireIncompatibleConversationGuidance(scope)
+  expect(ledger.getConversationGuidance(scope)).toEqual(initialText.candidate.candidateSnapshot)
+  expect(ledger.listConversationGuidanceStudies().map(study => study.rollback?.reason)).toEqual([undefined, 'support-retracted', 'ancestor-invalidated'])
+  expect(new EvolutionLedger(root).getConversationGuidance(scope)).toEqual(initialText.candidate.candidateSnapshot)
+})
+
 function proposalPlan(opened: GuidanceStudyOpened) {
   const candidate: GuidanceCandidateRecord = { kind: 'candidate-recorded', studyId: opened.studyId,
     candidateSnapshot: { ...opened.parentSnapshot, rules: { summarization: `Preserve the pilot qualification for ${opened.cases[0]!.id}.` } },
@@ -114,10 +697,10 @@ function proposalPlan(opened: GuidanceStudyOpened) {
     behaviorVersion: guidanceVersion(role === 'baseline' ? opened.parentSnapshot : candidate.candidateSnapshot),
     executionProof: proof(`${opened.studyId}:${item.id}:${role}:execute`), judgeProof: proof(`${opened.studyId}:${item.id}:${role}:judge`),
     outputDigest: sha256(`${item.id}:${role}:actual output`), verdict: role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met',
-    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(opened.qualityContract?.schemaVersion ?? '') ? {
+    ...(['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(opened.qualityContract?.schemaVersion ?? '') ? {
       reviewChecks: opened.qualityContract?.schemaVersion === 'tianwen.conversation-quality.v4'
         ? auditedChecks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met', 'v1')
-        : ['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(opened.qualityContract?.schemaVersion ?? '')
+        : ['tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(opened.qualityContract?.schemaVersion ?? '')
           ? auditedChecks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met')
         : checks(`${opened.studyId}:${item.id}:${role}:judge`, role === 'baseline' && item.kind === 'source1' ? 'not-met' : 'met'),
       judgeProof: proof(`${opened.studyId}:${item.id}:${role}:judge:requirements`),
@@ -125,6 +708,67 @@ function proposalPlan(opened: GuidanceStudyOpened) {
   })))
   return { opened, candidate, arms }
 }
+
+type ArmVerdict = GuidanceArmRecord['verdict']
+function conclusivePairStudy(decisionPolicy: GuidanceStudyBody['decisionPolicy'], baselines: readonly ArmVerdict[], candidates: readonly ArmVerdict[] = ['met', 'met', 'met', 'met', 'met'], count = 10) {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, ...(decisionPolicy === undefined ? {} : { decisionPolicy }) }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  const planned = proposalPlan(opened)
+  ledger.recordConversationGuidance(opened); ledger.recordConversationGuidance(planned.candidate)
+  for (const [index, original] of planned.arms.slice(0, count).entries()) {
+    const verdict = (original.role === 'baseline' ? baselines : candidates)[Math.floor(index / 2)]!
+    ledger.recordConversationGuidance({ ...original, verdict, reviewChecks: auditedChecks(`${opened.studyId}:${original.caseId}:${original.role}:judge`, verdict) })
+  }
+  return { root, ledger, opened }
+}
+
+it.each(['dev-conclusive-pair.v1', 'dev-paired-any-case.v1', undefined] as const)('derives prospective conclusive-pair eligibility and preserves unknown baselines for policy %s', decisionPolicy => {
+  const { root, ledger, opened } = conclusivePairStudy(decisionPolicy, ['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'])
+  const decision = ledger.conversationGuidanceDecision(opened.studyId)
+  expect(decision.verdict).toBe(decisionPolicy === 'dev-conclusive-pair.v1' ? 'accepted' : 'inconclusive')
+  ledger.recordConversationGuidance(decision)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  const cold = new EvolutionLedger(root, { guidanceActivationQuarantine: true })
+  const study = cold.listConversationGuidanceStudies()[0]!
+  expect(cold.hasRecoveryFailure()).toBe(false)
+  expect(study.opened).toEqual(opened); expect(study.decision).toEqual(decision)
+  expect(study.arms.filter(arm => arm.role === 'baseline').map(arm => arm.verdict)).toEqual(['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'])
+  expect(cold.recordConversationGuidance(decision)).toEqual({ duplicate: true })
+  if (decisionPolicy !== undefined) expect(() => cold.recordConversationGuidance({ kind: 'guidance-activated', studyId: opened.studyId, expectedParentVersion: opened.parentVersion, decisionDigest: sha256(decision) })).toThrow(/quarantined/i)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it.each([0, 1, 2, 3, 4].flatMap(position => (['not-met', 'inconclusive'] as const).map(verdict => ({ position, verdict }))))('never accepts conclusive-pair candidate $position with $verdict', ({ position, verdict }) => {
+  const candidates: ArmVerdict[] = ['met', 'met', 'met', 'met', 'met']; candidates[position] = verdict
+  const { ledger, opened } = conclusivePairStudy('dev-conclusive-pair.v1', ['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'], candidates)
+  expect(ledger.conversationGuidanceDecision(opened.studyId).verdict).toBe(verdict === 'inconclusive' ? 'inconclusive' : 'rejected')
+})
+
+it.each([
+  { baselines: ['met', 'met', 'met', 'met', 'met'], expected: 'rejected' },
+  { baselines: ['met', 'met', 'met', 'inconclusive', 'inconclusive'], expected: 'inconclusive' },
+  { baselines: ['inconclusive', 'inconclusive', 'inconclusive', 'inconclusive', 'inconclusive'], expected: 'inconclusive' },
+  { baselines: ['met', 'met', 'met', 'met', 'not-met'], expected: 'accepted' },
+] as const)('requires a same-case conclusive improvement: $baselines -> $expected', ({ baselines, expected }) => {
+  const { ledger, opened } = conclusivePairStudy('dev-conclusive-pair.v1', baselines)
+  expect(ledger.conversationGuidanceDecision(opened.studyId).verdict).toBe(expected)
+})
+
+it('still requires ten complete arms for conclusive-pair decisions', () => {
+  const { ledger, opened } = conclusivePairStudy('dev-conclusive-pair.v1', ['not-met', 'met', 'not-met', 'inconclusive', 'inconclusive'], undefined, 9)
+  expect(() => ledger.conversationGuidanceDecision(opened.studyId)).toThrow(/ten completed arms/)
+})
+
+it.each(['dev-conclusive-pair.v2', 'dev-conclusive-pair', 'unknown.v1', undefined])('rejects an explicitly invalid frozen policy %s before writing history', decisionPolicy => {
+  const { root, ledger, tasks } = seeded()
+  const { kind: _kind, studyId: _id, ...body } = opening(tasks)
+  const frozen = { ...body, decisionPolicy } as GuidanceStudyBody
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-opened', studyId: guidanceStudyId(frozen), ...frozen })).toThrow()
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
 
 function explorationIntent(opened: GuidanceStudyOpened): GuidanceExplorationIntentRecord {
   const source = opened.cases[0]!
@@ -163,6 +807,40 @@ function proposed(ledger: EvolutionLedger, opened: GuidanceStudyOpened) {
   ledger.recordConversationGuidance(value.candidate)
   return value
 }
+
+it('persists a grounded early candidate failure without inventing a complete decision', () => {
+  const { root, ledger, tasks } = seeded(), opened = opening(tasks, 'early-candidate-failure')
+  const plan = proposed(ledger, opened)
+  ledger.recordConversationGuidance(plan.arms[0]!)
+  const arm = plan.arms[1]!, id = `${opened.studyId}:${arm.caseId}:candidate:judge`
+  const failed = { ...arm, verdict: 'not-met' as const, reviewChecks: auditedChecks(id, 'not-met') }
+  ledger.recordConversationGuidance(failed)
+  const stopped = { kind: 'study-stopped' as const, studyId: opened.studyId, reason: 'candidate-failed' as const }
+  ledger.recordConversationGuidance(stopped)
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8'), replay = new EvolutionLedger(root)
+  const study = replay.listConversationGuidanceStudies()[0]!
+  expect(study.arms).toEqual([plan.arms[0], failed]); expect(study.stopped).toEqual(stopped)
+  expect(study.decision).toBeUndefined(); expect(study.activation).toBeUndefined()
+  expect(replay.recordConversationGuidance(stopped)).toEqual({ duplicate: true })
+  expect(() => replay.conversationGuidanceDecision(opened.studyId)).toThrow(/stopped/)
+  expect(() => replay.recordConversationGuidance(plan.arms[2]!)).toThrow(/stopped/)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+})
+
+it.each(['empty', 'baseline-only', 'candidate-met', 'candidate-inconclusive', 'complete'] as const)('rejects ungrounded early stop: %s', scenario => {
+  const { root, ledger, tasks } = seeded(), opened = opening(tasks, `invalid-early-${scenario}`)
+  const plan = proposed(ledger, opened)
+  const count = scenario === 'empty' ? 0 : scenario === 'baseline-only' ? 1 : scenario === 'complete' ? 10 : 2
+  for (let i = 0; i < count; i++) {
+    const arm = plan.arms[i]!
+    ledger.recordConversationGuidance(scenario === 'candidate-inconclusive' && i === 1
+      ? { ...arm, verdict: 'inconclusive', reviewChecks: auditedChecks(`${opened.studyId}:${arm.caseId}:candidate:judge`, 'inconclusive') } : arm)
+  }
+  const before = readFileSync(join(root, 'ledger.jsonl'), 'utf8')
+  expect(() => ledger.recordConversationGuidance({ kind: 'study-stopped', studyId: opened.studyId, reason: 'candidate-failed' })).toThrow(/candidate|incomplete/)
+  expect(readFileSync(join(root, 'ledger.jsonl'), 'utf8')).toBe(before)
+  expect(new EvolutionLedger(root).hasRecoveryFailure()).toBe(false)
+})
 
 /** Frozen old-writer fixture: emit historical records, then exercise current
  * disk replay. Never ask the current mutation API to authorize old policy. */
@@ -212,6 +890,219 @@ function activation(value: ReturnType<typeof evaluated>) {
   return { kind: 'guidance-activated' as const, studyId: value.opened.studyId, expectedParentVersion: value.opened.parentVersion, decisionDigest: sha256(value.decision) }
 }
 
+// Scripted ledger receipts verify persistence and guards only, not AI semantic efficacy.
+function clearanceFixture(root: string, value: ReturnType<typeof evaluated>, verdict: 'clear' | 'reject' | 'insufficient' = 'clear'): ConversationGuidanceClearance {
+  return { studyId: value.opened.studyId, scopeKey: scope,
+    environmentDigest: conversationGuidanceClearanceEnvironmentDigest(root),
+    parentVersion: value.opened.parentVersion, candidateVersion: guidanceVersion(value.candidate.candidateSnapshot),
+    decisionDigest: sha256(value.decision), armsDigest: value.decision.armsDigest,
+    studyEvidenceDigest: conversationGuidanceClearanceStudyEvidenceDigest({ ...value, openedAt: 'fixture' }),
+    packetDigest: sha256('host-saved complete static review packet'), consentRevision: 1,
+    reviewer: { authority: 'independent-ai' as const, id: 'scripted-independent-review', model: 'explicit-scripted-fixture', promptDigest: sha256('blind source and answer boundary review') }, verdict,
+    sourceChecks: value.opened.cases.slice(0, 3).map(item => ({ caseId: item.id, kind: item.kind as 'source1' | 'source2' | 'counterexample', verdict: 'clear' as const, reason: 'The supplied duration criterion faithfully preserves the original pilot request.' })),
+    armChecks: value.arms.map(arm => ({ caseId: arm.caseId, role: arm.role,
+      verdict: arm.role === 'candidate' ? verdict : arm.verdict === 'not-met' ? 'reject' as const : 'clear' as const,
+      boundary: 'No new status, actor, necessary condition or promise is asserted.',
+      reason: arm.verdict === 'not-met' ? 'The baseline omitted the requested duration; its original failure is retained.' : 'The fixture answer preserves the supplied duration and applicable output form.' })) }
+}
+type ClearanceFixture = ReturnType<typeof clearanceFixture>
+type ClearanceLedger = EvolutionLedger
+function clearanceStudy() {
+  const f = seeded(), value = evaluated(f.ledger, opening(f.tasks, 'study-clearance'))
+  const held = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  return { ...f, value, held, clearance: clearanceFixture(f.root, value) }
+}
+
+it('study clearance persists before reviewed activation and resumes from cold replay without opening ordinary activation', () => {
+  const f = clearanceStudy()
+  expect(() => f.held.recordConversationGuidance(activation(f.value))).toThrow(/quarantin/i)
+  expect(() => f.held.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/clearance/i)
+  expect(f.held.recordConversationGuidanceClearance(f.clearance)).toEqual({ duplicate: false })
+  expect(f.held.recordConversationGuidanceClearance(f.clearance)).toEqual({ duplicate: true })
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  expect(cold.listConversationGuidanceClearances(scope)).toEqual([f.clearance])
+  const copied = cold.listConversationGuidanceClearances()[0]!
+  ;(copied as { packetDigest: string }).packetDigest = sha256('mutated caller copy')
+  expect(cold.listConversationGuidanceClearances()[0]).toEqual(f.clearance)
+  expect(cold.listConversationGuidanceClearances('different scope')).toEqual([])
+  expect(() => cold.recordConversationGuidance(activation(f.value))).toThrow(/quarantin/i)
+  expect(cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: false })
+  expect(cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: true })
+  expect(cold.getConversationGuidance(scope)).toEqual(f.value.candidate.candidateSnapshot)
+  const final = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  expect(final.listConversationGuidanceClearances()[0]).toEqual(f.clearance)
+  expect(final.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: true })
+  expect(final.listEvents().filter(e => e.type === ('conversation-guidance-clearance-recorded' as string))).toHaveLength(1)
+  expect(final.listEvents().filter(e => e.type === 'approval-recorded')).toHaveLength(0)
+})
+
+it.each(['reject', 'insufficient'] as const)('study clearance retains first %s and forbids replacement or activation', verdict => {
+  const f = clearanceStudy(), record = clearanceFixture(f.root, f.value, verdict)
+  expect(f.held.recordConversationGuidanceClearance(record)).toEqual({ duplicate: false })
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true }) as ClearanceLedger
+  expect(cold.recordConversationGuidanceClearance(record)).toEqual({ duplicate: true })
+  expect(() => cold.recordConversationGuidanceClearance(f.clearance)).toThrow(/freeze|conflict|immutable/i)
+  expect(() => cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/clearance/i)
+  expect(cold.listConversationGuidanceStudies()[0]!.decision).toEqual(f.value.decision)
+})
+
+it.each(['studyId','scopeKey','environmentDigest','parentVersion','candidateVersion','decisionDigest','armsDigest','studyEvidenceDigest','consentRevision'] as const)('study clearance rejects changed %s binding', field => {
+  const f = clearanceStudy()
+  const changed = { ...f.clearance, [field]: field === 'consentRevision' ? 2 : field === 'scopeKey' ? 'different-scope' : field === 'studyId' ? `guidance-study:${sha256('other').slice(7)}` : sha256('changed binding') }
+  expect(() => f.held.recordConversationGuidanceClearance(changed as ClearanceFixture)).toThrow()
+  expect(f.held.listConversationGuidanceClearances()).toEqual([])
+})
+
+it('study clearance requires exact source3/arm10 and rejects clear with candidate boundary failure or source distortion', () => {
+  const f = clearanceStudy()
+  for (const changed of [
+    { ...f.clearance, sourceChecks: f.clearance.sourceChecks.slice(0, 2) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.slice(0, 9) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map((c, i) => i === 1 ? f.clearance.armChecks[0]! : c) },
+    { ...f.clearance, sourceChecks: f.clearance.sourceChecks.map((c, i) => ({ ...c, kind: f.clearance.sourceChecks[(i + 1) % 3]!.kind })) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map(c => c.caseId === f.value.opened.cases[4]!.id ? { ...c, caseId: 'not-original-holdout' } : c) },
+    { ...f.clearance, sourceChecks: f.clearance.sourceChecks.map((c, i) => i === 0 ? { ...c, verdict: 'reject', reason: 'The extracted criterion omitted an explicit original exclusion.' } : c) },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map(c => c.role === 'candidate' ? { ...c, verdict: 'reject', boundary: 'The answer invented a confirmed return date.', reason: 'No supplied record confirms that date.' } : c) },
+    { ...f.clearance, reviewer: { ...f.clearance.reviewer, model: '' } },
+    { ...f.clearance, reviewer: { ...f.clearance.reviewer, authority: 'human' } },
+    { ...f.clearance, packetDigest: 'invalid' },
+    { ...f.clearance, armChecks: f.clearance.armChecks.map((c, i) => i === 0 ? { ...c, boundary: '' } : c) },
+    { ...f.clearance, globalQuarantine: false },
+  ]) expect(() => f.held.recordConversationGuidanceClearance(changed as ClearanceFixture)).toThrow()
+  expect(f.held.listConversationGuidanceClearances()).toEqual([])
+})
+
+it('study clearance rechecks consent and support between permission and activation', () => {
+  const f = clearanceStudy()
+  f.held.recordConversationGuidanceClearance(f.clearance)
+  f.held.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  expect(() => f.held.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/consent/i)
+  const supported = clearanceStudy()
+  supported.held.recordConversationGuidanceClearance(supported.clearance)
+  const target = supported.tasks[0]
+  supported.held.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId: target.completion!.assistantMessageIds[0]!,
+    feedbackVersion: 'clearance-contradictory-v1', rating: 'positive', note: 'Original result is correct.', scopeKey: scope,
+    sessionDigest: sha256('clearance contradictory feedback'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  expect(() => supported.held.recordReviewedConversationGuidanceActivation(activation(supported.value))).toThrow(/support|feedback/i)
+})
+
+it('study clearance preserves static identity across activation and refuses changed first review packet or reviewer', () => {
+  const f = clearanceStudy(), study = f.held.listConversationGuidanceStudies()[0]!
+  expect(conversationGuidanceClearanceEnvironmentDigest(join(f.root, 'unused', '..'))).toBe(f.clearance.environmentDigest)
+  expect(conversationGuidanceClearanceStudyEvidenceDigest(study)).toBe(f.clearance.studyEvidenceDigest)
+  f.held.recordConversationGuidanceClearance(f.clearance)
+  for (const changed of [{ ...f.clearance, packetDigest: sha256('different saved packet') },
+    { ...f.clearance, reviewer: { ...f.clearance.reviewer, promptDigest: sha256('different reviewer instruction') } }]) {
+    expect(() => f.held.recordConversationGuidanceClearance(changed)).toThrow(/immutable|freeze/i)
+  }
+  f.held.recordReviewedConversationGuidanceActivation(activation(f.value))
+  expect(conversationGuidanceClearanceStudyEvidenceDigest(f.held.listConversationGuidanceStudies()[0]!)).toBe(f.clearance.studyEvidenceDigest)
+  expect(f.held.listConversationTasks()).toEqual(f.tasks)
+})
+
+it('study clearance replays moved historical evidence but refuses new activation in a different root', () => {
+  const f = clearanceStudy(); f.held.recordConversationGuidanceClearance(f.clearance)
+  const copy = ledgerRoot(); cpSync(f.root, copy, { recursive: true })
+  const moved = new EvolutionLedger(copy, { guidanceActivationQuarantine: true })
+  expect(moved.listConversationGuidanceClearances()).toEqual([f.clearance])
+  expect(() => moved.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/environment/i)
+  expect(() => moved.recordConversationGuidanceClearance({ ...f.clearance, environmentDigest: conversationGuidanceClearanceEnvironmentDigest(copy) })).toThrow(/immutable|freeze/i)
+  expect(moved.getConversationGuidance(scope)).toEqual(f.value.opened.parentSnapshot)
+})
+
+it('study clearance cannot grant a DEV, incomplete, rejected, old-quality or already activated study permission', () => {
+  const f = clearanceStudy()
+  const dev = conclusivePairStudy('dev-conclusive-pair.v1', ['not-met','met','met','met','met'])
+  const devDecision = dev.ledger.conversationGuidanceDecision(dev.opened.studyId); dev.ledger.recordConversationGuidance(devDecision)
+  const devValue = { ...proposalPlan(dev.opened), decision: devDecision }
+  expect(() => dev.ledger.recordConversationGuidanceClearance(clearanceFixture(dev.root, devValue))).toThrow(/formal/i)
+  const partial = seeded(), partialValue = proposed(partial.ledger, opening(partial.tasks, 'partial'))
+  for (const arm of partialValue.arms.slice(0, 9)) partial.ledger.recordConversationGuidance(arm)
+  expect(() => partial.ledger.recordConversationGuidanceClearance({ ...f.clearance, studyId: partialValue.opened.studyId })).toThrow(/complete|accepted/i)
+  const rejected = conclusivePairStudy(undefined, ['not-met','met','met','met','met'], ['not-met','met','met','met','met'])
+  const rejectDecision = rejected.ledger.conversationGuidanceDecision(rejected.opened.studyId); rejected.ledger.recordConversationGuidance(rejectDecision)
+  expect(rejectDecision.verdict).toBe('rejected')
+  expect(() => rejected.ledger.recordConversationGuidanceClearance(clearanceFixture(rejected.root, { ...proposalPlan(rejected.opened), decision: rejectDecision }, 'reject'))).toThrow(/accepted/i)
+  const old = seeded('not-met', scope, false, undefined, exactV4Quality)
+  const oldValue = historicalStudy(old.root, old.ledger, opening(old.tasks, 'old-clearance'), false)
+  expect(() => oldValue.ledger.recordConversationGuidanceClearance(clearanceFixture(old.root, oldValue))).toThrow(/quality/i)
+  const active = clearanceStudy(), writer = new EvolutionLedger(active.root)
+  writer.recordConversationGuidance(activation(active.value))
+  expect(() => writer.recordConversationGuidanceClearance(active.clearance)).toThrow(/unactivated/i)
+  expect(writer.recordReviewedConversationGuidanceActivation(activation(active.value))).toEqual({ duplicate: true })
+  expect(writer.listConversationGuidanceClearances()).toEqual([])
+})
+
+it('study clearance rechecks the current parent and leaves rolled-back activation duplicates inactive', () => {
+  const f = clearanceStudy(); f.held.recordConversationGuidanceClearance(f.clearance)
+  const writer = new EvolutionLedger(f.root)
+  const other = evaluated(writer, opening(f.tasks, 'competing-parent')); writer.recordConversationGuidance(activation(other))
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true })
+  expect(() => cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toThrow(/parent/i)
+  const active = clearanceStudy(); active.held.recordConversationGuidanceClearance(active.clearance)
+  active.held.recordReviewedConversationGuidanceActivation(activation(active.value))
+  active.held.recordLearningAnalysisConsent({ revision: 2, enabled: false, policyVersion: 'tianwen-auto-analysis.v3' })
+  active.held.retireIncompatibleConversationGuidance(scope)
+  expect(active.held.listConversationGuidanceStudies()[0]!.rollback?.reason).toBe('consent-disabled')
+  expect(active.held.recordReviewedConversationGuidanceActivation(activation(active.value))).toEqual({ duplicate: true })
+  expect(active.held.getConversationGuidance(scope)).toEqual(active.value.opened.parentSnapshot)
+})
+
+it('study clearance refuses missing exact shared evaluation and permits repair through the original decision receipt', () => {
+  const f = seeded(), value = proposed(f.ledger, opening(f.tasks, 'missing-evaluation'))
+  for (const arm of value.arms) f.ledger.recordConversationGuidance(arm)
+  const decision = f.ledger.conversationGuidanceDecision(value.opened.studyId)
+  const fault = vi.spyOn(f.ledger, 'recordEvaluation').mockImplementationOnce(() => { throw new Error('scripted missing evaluation') })
+  expect(() => f.ledger.recordConversationGuidance(decision)).toThrow('scripted missing evaluation'); fault.mockRestore()
+  const full = { ...value, decision }, held = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true })
+  const clearance = clearanceFixture(f.root, full)
+  expect(() => held.recordConversationGuidanceClearance(clearance)).toThrow(/shared evaluation/i)
+  expect(held.recordConversationGuidance(decision)).toEqual({ duplicate: true })
+  expect(held.recordConversationGuidanceClearance(clearance)).toEqual({ duplicate: false })
+})
+
+it.each(['clearance', 'activation'] as const)('study clearance preserves append-unknown blocking and cold recovery for %s', stage => {
+  const f = clearanceStudy()
+  if (stage === 'activation') f.held.recordConversationGuidanceClearance(f.clearance)
+  clearanceAppendFault.sync = 1; clearanceAppendFault.read = 1
+  const write = () => stage === 'clearance' ? f.held.recordConversationGuidanceClearance(f.clearance) : f.held.recordReviewedConversationGuidanceActivation(activation(f.value))
+  expect(write).toThrow(LedgerCommitUnknownError)
+  expect(write).toThrow(LedgerCommitUnknownError)
+  const cold = new EvolutionLedger(f.root, { guidanceActivationQuarantine: true })
+  expect(cold.listConversationGuidanceClearances()).toEqual([f.clearance])
+  expect(cold.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: stage === 'activation' })
+  expect(cold.getConversationGuidance(scope)).toEqual(f.value.candidate.candidateSnapshot)
+})
+
+it('study clearance parses human authority separately and rejects tampered or repeated persisted events', () => {
+  const f = clearanceStudy()
+  const human = { ...f.clearance, reviewer: { authority: 'human' as const, id: 'explicit-human-reviewer', promptDigest: sha256('human review instructions') } }
+  expect(parseConversationGuidanceClearance(human)).toEqual(human)
+  f.held.recordConversationGuidanceClearance(human)
+  const ledgerPath = join(f.root, 'ledger.jsonl'), before = readFileSync(ledgerPath, 'utf8')
+  const line = before.trimEnd().split('\n').at(-1)!
+  const event = JSON.parse(line)
+  expect(event.type).toBe('conversation-guidance-clearance-recorded')
+  event.clearance.armChecks[0].caseId = 'not-original-case'
+  writeFileSync(ledgerPath, before.slice(0, before.length - line.length - 1) + canonicalJson(event) + '\n')
+  expect(() => new EvolutionLedger(f.root)).toThrow(/clearance/i)
+  writeFileSync(ledgerPath, before + line + '\n')
+  expect(() => new EvolutionLedger(f.root)).toThrow(/duplicate.*clearance/i)
+  writeFileSync(ledgerPath, before)
+  expect(new EvolutionLedger(f.root).listConversationGuidanceClearances()).toEqual([human])
+})
+
+it('study clearance records sourced actors, commitments and optional advice without a blanket language ban', () => {
+  const f = clearanceStudy()
+  const clearance = { ...f.clearance, armChecks: f.clearance.armChecks.map(check => ({ ...check,
+    boundary: 'The pilot facts remain faithful. Sourced actors and commitments or labeled optional advice would be allowed; those words alone are not a boundary failure.',
+    reason: check.reason })) }
+  expect(f.held.recordConversationGuidanceClearance(clearance)).toEqual({ duplicate: false })
+  expect(f.held.recordReviewedConversationGuidanceActivation(activation(f.value))).toEqual({ duplicate: false })
+  expect(f.held.listConversationGuidanceClearances()).toEqual([clearance])
+})
+
 it('quarantines new activation writes while retaining accepted decisions and historical active replay', () => {
   const { root, ledger, tasks } = seeded()
   const value = evaluated(ledger, opening(tasks, 'quarantine'))
@@ -228,12 +1119,13 @@ it('quarantines new activation writes while retaining accepted decisions and his
   expect(replay.recordConversationGuidance(activation(value))).toEqual({ duplicate: true })
 })
 
-function nativeFeedback(ledger: EvolutionLedger, target: ConversationTask) {
+function nativeFeedback(ledger: EvolutionLedger, target: ConversationTask, supersedesFeedbackVersion?: string) {
   const messageId = target.completion!.assistantMessageIds[0]!
   ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'feedback-v1',
     rating: 'negative', note: 'You omitted the pilot-only qualification.', scopeKey: target.source.scopeKey,
     sessionDigest: sha256(`feedback session:${target.source.taskId}`), evidenceIds: [target.completion!.resultDigest] },
-    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1,
+    ...(supersedesFeedbackVersion === undefined ? {} : { supersedesFeedbackVersion }) })
   const status = ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
   const source: ConversationFeedbackSource = { kind: 'native', sessionId: target.source.sessionId, messageId,
     sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, feedbackVersion: 'feedback-v1', feedbackFingerprint: status.feedbackFingerprint }
@@ -260,6 +1152,100 @@ function retract(ledger: EvolutionLedger, assessment: ReturnType<typeof nativeFe
   return ledger.recordLearningFeedbackRetraction({ sessionId: source.sessionId, messageId: source.messageId,
     retractedFeedbackVersion: source.feedbackVersion, sessionLifecycleFingerprint: source.sessionLifecycleFingerprint })
 }
+
+it('rejects a new study that cites a historical preference without a continuing-scope proof', () => {
+  const { ledger, tasks } = seeded()
+  const target = tasks[0]
+  ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId,
+    messageId: target.completion!.assistantMessageIds[0]!, feedbackVersion: 'future-v1', rating: 'negative',
+    note: 'For future summaries, use two sentences.', scopeKey: target.source.scopeKey,
+    sessionDigest: sha256('future session'), evidenceIds: [target.completion!.resultDigest] },
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1 })
+  const status = ledger.getLearningIntakeStatus(target.source.sessionId, target.completion!.assistantMessageIds[0]!)!
+  const source: ConversationFeedbackSource = { kind: 'native', sessionId: target.source.sessionId,
+    sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, messageId: target.completion!.assistantMessageIds[0]!,
+    feedbackVersion: 'future-v1', feedbackFingerprint: status.feedbackFingerprint }
+  const started: ConversationFeedbackStarted = { kind: 'feedback-assessment-started', taskId: target.source.taskId,
+    assessmentId: conversationFeedbackAssessmentId({ taskId: target.source.taskId, source }), source,
+    admissionDigest: sha256(target.admission), resultDigest: target.completion!.resultDigest,
+    materialDigest: sha256('frozen preference'), consentRevision: 1 }
+  ledger.recordConversationFeedback(started)
+  ledger.recordConversationFeedback({ kind: 'feedback-assessed', assessmentId: started.assessmentId, taskId: started.taskId,
+    classification: 'preference', category: 'user-preference', supplementalCriteria: ['Use two sentences for future summaries.'],
+    explanation: 'The user asks for a future style.', evidenceQuotes: ['future summaries'],
+    proof: proof('preference-judge'), unavailableReason: null })
+  expect(() => ledger.recordConversationGuidance(opening(tasks, 'unverified-scope', [started.assessmentId])))
+    .toThrow(/verified continuing feedback scope/)
+})
+
+it('requires a current marked incomplete local-file task and its exact active feedback assessment for a proposal clue', () => {
+  const root = ledgerRoot(); const ledger = new EvolutionLedger(root)
+  ledger.recordLearningAnalysisConsent({ revision: 1, enabled: true, policyVersion: 'tianwen-auto-analysis.v3' })
+  const sources = [1, 2, 3].map(turn => task(ledger, turn, turn === 3 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, 'files')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask]
+  const unmarked = task(ledger, 4, 'inconclusive', scope, 'incomplete clue request', undefined, undefined, undefined, 'files', false, false)
+  const marked = task(ledger, 5, 'inconclusive', scope, 'marked incomplete clue request', undefined, undefined, undefined, 'files', true, false)
+  const unmarkedAssessment = nativeFeedback(ledger, unmarked)
+  const markedAssessment = nativeFeedback(ledger, marked)
+  const withClue = (target: ConversationTask, assessment: ReturnType<typeof nativeFeedback>) => {
+    const { kind: _kind, studyId: _studyId, ...base } = fileOpening(sources)
+    const proposalClues = [{ taskId: target.source.taskId, assessmentId: assessment.started.assessmentId,
+      assessmentDigest: sha256(assessment.result), materialDigest: assessment.started.materialDigest }]
+    const body = { ...base, proposalClues }
+    return { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+  }
+  expect(() => ledger.recordConversationGuidance(withClue(unmarked, unmarkedAssessment))).toThrow(/clue|marker|support/i)
+  const opened = withClue(marked, markedAssessment)
+  expect(ledger.recordConversationGuidance(opened)).toEqual({ duplicate: false })
+  expect(ledger.isConversationGuidanceSupported(opened.studyId)).toBe(true)
+  retract(ledger, markedAssessment)
+  expect(ledger.isConversationGuidanceSupported(opened.studyId)).toBe(false)
+})
+
+it.each(['text-study', 'file-study', 'v1-external', 'unmarked', 'complete-text', 'complete-file', 'subjective', 'family', 'scope', 'model', 'category', 'consent', 'pending', 'positive', 'stale-pending-retracted', 'stale-pending-superseded'] as const)('validates v2 external clue compatibility on disk replay: %s', scenario => {
+  const { root, ledger, tasks } = seeded()
+  const fileStudy = scenario === 'file-study'
+  const sources = fileStudy ? [10, 11, 12].map(turn => task(ledger, turn, turn === 12 ? 'met' : 'not-met', scope, undefined, undefined, undefined, undefined, 'files')) as unknown as readonly [ConversationTask, ConversationTask, ConversationTask] : tasks
+  const target = task(ledger, 20, 'inconclusive', scenario === 'scope' ? 'other-scope' : scope, 'external feedback clue', scenario === 'model' ? [sha256('different model')] : undefined, undefined, undefined,
+    scenario === 'complete-file' ? 'files' : undefined, scenario === 'unmarked' ? false : scenario === 'v1-external' ? true : 'feedback.v2', true,
+    scenario === 'complete-file' || scenario === 'complete-text' ? undefined : scenario === 'subjective' ? 'subjective' : 'external', scenario === 'family' ? 'writing' : 'summarization')
+  const stale = scenario.startsWith('stale-pending-')
+  let unfinishedId: string | undefined
+  if (stale) {
+    const messageId=target.completion!.assistantMessageIds[0]!
+    ledger.recordLearningFeedbackRevision({intake:{sessionId:target.source.sessionId,messageId,feedbackVersion:'pending-clue-v0',rating:'negative',
+      note:'Engineering interrupted clue fixture, not actual user feedback.',scopeKey:scope,sessionDigest:sha256('old pending clue'),evidenceIds:[target.completion!.resultDigest]},
+      sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,analysisConsentRevision:1})
+    const status=ledger.getLearningIntakeStatus(target.source.sessionId,messageId)!
+    const source={kind:'native' as const,sessionId:target.source.sessionId,messageId,sessionLifecycleFingerprint:target.source.sessionLifecycleFingerprint,
+      feedbackVersion:status.feedbackVersion,feedbackFingerprint:status.feedbackFingerprint}
+    unfinishedId=conversationFeedbackAssessmentId({taskId:target.source.taskId,source})
+    ledger.recordConversationFeedback({kind:'feedback-assessment-started',assessmentId:unfinishedId,taskId:target.source.taskId,source,
+      admissionDigest:sha256(target.admission),resultDigest:target.completion!.resultDigest,materialDigest:sha256('old pending clue material'),consentRevision:1})
+    if(scenario==='stale-pending-retracted')ledger.recordLearningFeedbackRetraction({sessionId:source.sessionId,messageId,
+      retractedFeedbackVersion:source.feedbackVersion,sessionLifecycleFingerprint:source.sessionLifecycleFingerprint})
+  }
+  const assessment = nativeFeedback(ledger, target, scenario === 'stale-pending-superseded' ? 'pending-clue-v0' : undefined)
+  const { kind: _kind, studyId: _id, ...base } = fileStudy ? fileOpening(sources) : opening(sources)
+  const body = { ...base, ...(scenario === 'category' ? { failureCategory: 'user-preference' as const } : {}), ...(scenario === 'consent' ? { consentRevision: 2 } : {}), proposalClues: [{ taskId: target.source.taskId, assessmentId: assessment.started.assessmentId, assessmentDigest: sha256(assessment.result), materialDigest: assessment.started.materialDigest }] }
+  if (scenario === 'pending' || scenario === 'positive') {
+    const messageId = target.completion!.assistantMessageIds[0]!
+    ledger.recordLearningFeedbackRevision({ intake: { sessionId: target.source.sessionId, messageId, feedbackVersion: 'feedback-v2', rating: scenario === 'positive' ? 'positive' : 'negative', note: 'Replacement feedback.', scopeKey: scope, sessionDigest: sha256('replacement'), evidenceIds: [target.completion!.resultDigest] }, sessionLifecycleFingerprint: target.source.sessionLifecycleFingerprint, analysisConsentRevision: 1, supersedesFeedbackVersion: 'feedback-v1' })
+    const status = ledger.getLearningIntakeStatus(target.source.sessionId, messageId)!
+    const source = { ...assessment.started.source, feedbackVersion: 'feedback-v2', feedbackFingerprint: status.feedbackFingerprint }
+    const started = { ...assessment.started, source, assessmentId: conversationFeedbackAssessmentId({ taskId: target.source.taskId, source }) }
+    ledger.recordConversationFeedback(started)
+    if (scenario === 'positive') ledger.recordConversationFeedback({ ...assessment.result, assessmentId: started.assessmentId, classification: 'positive', category: null, supplementalCriteria: [], proof: proof('replacement-positive') })
+  }
+  const opened = { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+  if (scenario === 'text-study' || fileStudy || stale) {
+    expect(ledger.recordConversationGuidance(opened)).toEqual({ duplicate: false })
+    expect(new EvolutionLedger(root).isConversationGuidanceSupported(opened.studyId)).toBe(true)
+    if(stale) {
+      expect(ledger.isConversationFeedbackAssessmentActive(unfinishedId!)).toBe(false)
+      expect(ledger.listConversationFeedbackAssessments(target.source.taskId)[0]?.result).toBeUndefined()
+    }
+  } else expect(() => new EvolutionLedger(root).recordConversationGuidance(opened)).toThrow()
+})
 
 it('rejects an old met counterexample in a new-contract study and leaves its original proof untouched', () => {
   const { root, ledger, tasks } = seeded()
@@ -559,7 +1545,7 @@ it.each(['active', 'active-loop', 'accepted', 'mixed-counter'] as const)('keeps 
   const harness = await mountPersistentHarness(join(root, 'native-sessions'), [
     () => {
       expect(harness.ctx.tianwenEvolution.getConversationGuidance(scopeKey).rules).toEqual({})
-      return toolCallResponse('new-admission', 'structured_output', tasks[0].admission!.decision!)
+      return toolCallResponse('new-admission', 'structured_output', { decision: tasks[0].admission!.decision! })
     },
     () => {
       // Disk, not merely in-memory state, already has the pre-answer contract

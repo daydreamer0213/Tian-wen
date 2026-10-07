@@ -1,0 +1,17 @@
+# Current-version automatic learning first result — 2026-10-06
+
+Source e8a533c43c131648a7272fff44708be020fc1391, original public build from de3953af. Isolated original DEV runtime with dev-conclusive-pair.v1, no production policy change. Main/Daily remains NO-GO; the overall goal is active.
+
+The batch completed 100 actual provider requests, zero scripted model responses, normal exit and zero-model cold recovery. Four new ordinary tasks, including source-explicit adoption and notification commitments, received eight valid original checks and met consensus. The explicitly next-task-only feedback had no supplemental criteria and did not support learning. A new continuing feedback supplied three verified continuing criteria.
+
+The original loop autonomously conducted two new complete studies (20 arms, 40 original review checks). Both decisions were inconclusive. No method was activated, so the pre-frozen future effect comparison and unrelated control were not executed. Withdrawal disabled consent at revision2; the final new ordinary request used one actual provider response without analysis or method injection.
+
+The first study's source2 baseline and candidate produced exactly the same answer despite the full candidate method appearing in both native guidance and actual provider input. Requirements rejected the punctuation/ordering, while grounding treated separated clauses as sufficient, yielding inconclusive. The second study again produced semicolon-separated pending items despite a separate-sentence method. This demonstrates unstable execution and interpretation of sentence boundaries; it does not demonstrate missing method transport or justify changing old votes.
+
+The operator's oneOff diagnostic continuingEligible field was incorrectly computed from the scope-only predicate, which is true for an empty criteria list. The original product's whole eligibility correctly rejected that feedback. The derived terminal audit preserves and discloses this diagnostic error and verifies classification, category, nonempty criteria and scope together. No original record was revised.
+
+Original terminal audit verified all 100 requests against SDK steps, eight primary checks, 40 study checks, case design/proposal/trial recovery, 110 referenced native files and 1,766 frozen paths. Independent terminal review approved lifting the source freeze. All inherited Tasks, feedback, stopped study/attempt, prefix, Daily installation and original verdicts remained unchanged. Initial zero-model setup failures and both unexecuted configuration revisions are retained.
+
+Evidence: D:/DevData/tianwen-shared-future-learning-controller-20261006/terminal-audit.json; source-freeze-end.json; method-execution-readonly-investigation.json; D:/DevData/tianwen-shared-future-learning-prospective-20261006/r1. Independent review: .superpowers/sdd/2026-10-06-tianwen-shared-future-scope-plan/task-3-terminal-review.md. D free at freeze release: 17,747,857,408 bytes (16.53GiB); no runtime, dependencies or full-history copies.
+
+Next: fresh isolated DEV profile with two new useful summaries and explicitly simulated operational feedback: each pending item ends with a full stop; one paragraph can contain several sentences. Keep the same original gates, model, quality contract and unused future task/effect criteria. Old failed studies are retained; no replay, regrade, manual activation or new release threshold. All responses remain actual and unforced.

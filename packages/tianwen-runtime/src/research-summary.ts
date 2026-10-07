@@ -85,7 +85,7 @@ const ROW = /^\[(F|U|X):([A-Za-z0-9][A-Za-z0-9._-]{0,63})\|(required|optional|de
 
 export const RESEARCH_SUMMARY_BASE_SKILL: SkillRegistration = Object.freeze({
   name: RESEARCH_SUMMARY_SKILL_NAME,
-  description: 'Summarize a bounded research packet without promoting unsupported material.',
+  description: 'Only for an explicit <research_packet> with identified findings and uncertainties; ordinary summaries do not use this skill.',
   whenToUse: 'Use for a <research_packet> containing identified findings and uncertainties.',
   invocation: Object.freeze({
     modelInvocable: true,

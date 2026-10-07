@@ -14,9 +14,10 @@ import { auditDesktopArtifact } from '../../scripts/audit-desktop-artifact.mjs'
 import { stageDesktopRuntime } from '../../scripts/stage-desktop-runtime.mjs'
 
 const testRoots: string[] = []
-const fixtureParent = process.platform === 'win32'
-  ? 'D:\\DevData\\tianwen-desktop-artifact-tests'
-  : join(tmpdir(), 'tianwen-desktop-artifact-tests')
+const fixtureParent = resolve(
+  process.env.TIANWEN_FILE_TEST_ROOT ?? join(tmpdir(), 'tianwen-file-tests'),
+  'desktop-artifact',
+)
 
 function createTestRoot(): string {
   mkdirSync(fixtureParent, { recursive: true })
@@ -38,9 +39,10 @@ function createUnpackedRoot(runtime?: Buffer): string {
   ]
   if (runtime !== undefined) {
     files.push('resources/app/dist/profile-prepare.js')
+    files.push('resources/app/dist/native-observation-launch.js')
     writeFixture(
       root,
-      'resources/runtime/tianwen-runtime-bundle-0.1.24.tgz',
+      'resources/runtime/tianwen-runtime-bundle-0.1.25.tgz',
       runtime,
     )
   }
@@ -50,7 +52,7 @@ function createUnpackedRoot(runtime?: Buffer): string {
 
 function createRuntimeSource(contents: Buffer): string {
   const root = createTestRoot()
-  const source = join(root, 'tianwen-runtime-bundle-0.1.24.tgz')
+  const source = join(root, 'tianwen-runtime-bundle-0.1.25.tgz')
   writeFileSync(source, contents)
   return source
 }
@@ -69,7 +71,7 @@ function createRuntimeArchive(
   if (indexSource !== undefined) {
     writeFixture(contents, 'package/dist/index.js', indexSource)
   }
-  const source = join(root, 'tianwen-runtime-bundle-0.1.24.tgz')
+  const source = join(root, 'tianwen-runtime-bundle-0.1.25.tgz')
   const executable = process.platform === 'win32'
     ? join(process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows', 'System32', 'tar.exe')
     : 'tar'
@@ -131,23 +133,24 @@ describe('Tianwen Desktop B1 artifact audit', () => {
 })
 
 describe('Tianwen Desktop Runtime distribution', () => {
-  it('pins preview.25 to the exact embedded Runtime 0.1.24 resource', () => {
+  it('pins preview.26 to the exact embedded Runtime 0.1.25 resource', () => {
     const desktopManifest = JSON.parse(readFileSync(resolve(
       'packages/tianwen-desktop-host/package.json',
     ), 'utf8')) as {
       version: string
-      build: { extraResources: Array<{ from: string, to: string }> }
+      build: { files: string[], extraResources: Array<{ from: string, to: string }> }
     }
     const desktopRuntimeArchive = desktopManifest.build.extraResources
       .find(({ to }) => to.startsWith('runtime/'))
       ?.to.split('/').at(-1)
 
-    expect(desktopManifest.version).toBe('0.1.0-preview.25')
-    expect(desktopRuntimeArchive).toBe('tianwen-runtime-bundle-0.1.24.tgz')
+    expect(desktopManifest.version).toBe('0.1.0-preview.26')
+    expect(desktopRuntimeArchive).toBe('tianwen-runtime-bundle-0.1.25.tgz')
     expect(desktopManifest.build.extraResources).toContainEqual({
-      from: 'dist/runtime/tianwen-runtime-bundle-0.1.24.tgz',
-      to: 'runtime/tianwen-runtime-bundle-0.1.24.tgz',
+      from: 'dist/runtime/tianwen-runtime-bundle-0.1.25.tgz',
+      to: 'runtime/tianwen-runtime-bundle-0.1.25.tgz',
     })
+    expect(desktopManifest.build.files).toContain('dist/native-observation-launch.js')
   })
 
   it('rejects a non-absolute, wrongly named, missing, or non-file Runtime source', () => {
@@ -156,15 +159,15 @@ describe('Tianwen Desktop Runtime distribution', () => {
     const wrongName = join(sourceRoot, 'runtime.tgz')
     writeFixture(sourceRoot, 'runtime.tgz', 'wrong name')
 
-    expect(() => stageDesktopRuntime('tianwen-runtime-bundle-0.1.24.tgz', packageRoot))
+    expect(() => stageDesktopRuntime('tianwen-runtime-bundle-0.1.25.tgz', packageRoot))
       .toThrow(/absolute/iu)
     expect(() => stageDesktopRuntime(wrongName, packageRoot)).toThrow(/basename|name/iu)
     expect(() => stageDesktopRuntime(
-      join(sourceRoot, 'missing', 'tianwen-runtime-bundle-0.1.24.tgz'),
+      join(sourceRoot, 'missing', 'tianwen-runtime-bundle-0.1.25.tgz'),
       packageRoot,
     )).toThrow(/missing|file/iu)
 
-    const directorySource = join(sourceRoot, 'directory', 'tianwen-runtime-bundle-0.1.24.tgz')
+    const directorySource = join(sourceRoot, 'directory', 'tianwen-runtime-bundle-0.1.25.tgz')
     mkdirSync(directorySource, { recursive: true })
     expect(() => stageDesktopRuntime(directorySource, packageRoot)).toThrow(/file/iu)
   })
@@ -180,7 +183,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
       packageRoot,
       'dist',
       'runtime',
-      'tianwen-runtime-bundle-0.1.24.tgz',
+      'tianwen-runtime-bundle-0.1.25.tgz',
     ))
     expect(readFileSync(staged)).toEqual(bytes)
   })
@@ -200,6 +203,10 @@ describe('Tianwen Desktop Runtime distribution', () => {
     rmSync(join(unpackedRoot, 'resources/vendor'), { recursive: true })
 
     rmSync(join(unpackedRoot, 'resources/app/dist/profile-prepare.js'))
+    expect(() => auditDesktopArtifact(unpackedRoot, source)).toThrow(/missing|allowlist/iu)
+
+    writeFixture(unpackedRoot, 'resources/app/dist/profile-prepare.js', 'fixture')
+    rmSync(join(unpackedRoot, 'resources/app/dist/native-observation-launch.js'))
     expect(() => auditDesktopArtifact(unpackedRoot, source)).toThrow(/missing|allowlist/iu)
   })
 
@@ -242,7 +249,7 @@ describe('Tianwen Desktop Runtime distribution', () => {
       unpackedRoot,
       'resources',
       'runtime',
-      'tianwen-runtime-bundle-0.1.24.tgz',
+      'tianwen-runtime-bundle-0.1.25.tgz',
     )
     appendFileSync(packaged, 'changed')
 

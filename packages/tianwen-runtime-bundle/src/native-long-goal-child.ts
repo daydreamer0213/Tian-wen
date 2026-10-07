@@ -37,9 +37,11 @@ export class NativeLongGoalChild {
 
   // Coordinator recovery is not a human/Goal-driver turn. Give only this Task
   // an explicit completion capability; keep native attribution and revision checks.
-  async followupTask(parent: Agent, childId: SessionId, prompt: ContentBlock[], signal: AbortSignal) {
+  async followupTask(parent: Agent, childId: SessionId, prompt: ContentBlock[], signal: AbortSignal, assertAuthority?: () => void) {
     const goals = this.ctx.goals
     const install = (agent: Agent) => {
+      signal.throwIfAborted()
+      assertAuthority?.()
       if (agent.session.header.parentSession !== parent.session.id) {
         throw new Error('Recovered Task parent changed')
       }
@@ -75,6 +77,8 @@ export class NativeLongGoalChild {
     if (live !== undefined) install(live)
     const offSetup = this.ctx.subagents.registerContinuableSetup(prepare)
     try {
+      signal.throwIfAborted()
+      assertAuthority?.()
       return await this.followup(parent, childId, prompt, signal)
     } finally {
       offSetup()

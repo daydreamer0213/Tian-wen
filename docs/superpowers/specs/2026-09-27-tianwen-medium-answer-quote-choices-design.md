@@ -1,0 +1,7 @@
+# Keep exact quote choices for medium-length audited answers
+
+E047 reached both original-result reviewers with complete native file evidence, but the second reviewer submitted three quotes that were not exact substrings of their declared answer units. The host rejected the result as `invalid-judgment`. The 94-unit answer needed 70,820 UTF-8 bytes of repeated quote choices. The existing all-or-nothing 65,536-byte budget made every quote field free text, so the native structured tool could not prevent those three errors.
+
+Raise only the repeated quote-choice budget to 98,304 bytes. Keep the same unit-local exact candidates, 128-unit and 512-claim limits, host validation, recovery validation, and free-text fallback above the budget. This covers the observed 70,820-byte case without enumerating the near-limit 128-unit case, whose schema would otherwise grow too large. The test must show that a 94-unit answer receives exact quote enums in both claim positions while its complete schema stays below 400,000 bytes, and that the near-limit case still falls back. It first fails on the previous budget, then passes on this change.
+
+This is a prospective engineering repair, not a regrade of E047. Freeze a new exact commit and run a fresh isolated real task to learn whether both native reviewers now submit valid audits and whether the answer itself meets its request. Keep main/Daily NO-GO pending that evidence and the separate natural file-query evidence path.

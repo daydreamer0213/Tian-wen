@@ -2,16 +2,52 @@ import { sha256 } from './learning-intake.js'
 import { CONVERSATION_FAMILIES, CONVERSATION_FAILURES, parseConversationQualityContract, parseConversationQualityReviewChecks, parseStoredConversationReviewChecks, conversationReviewConsensus, type ConversationStoredReviewChecks, type ConversationQualityContract, type ConversationFamily, type ConversationFailure, type ConversationJudgmentProof } from './conversation-learning.js'
 import { classifyLearningExploration, parseConversationLearningExplorationRequest, type ConversationLearningExplorationRequest, type LearningExplorationResult } from './learning-exploration.js'
 import type { Sha256Digest } from './ledger.js'
+import { canonicalConversationFileEntries, parseConversationFileMaterial, parseConversationFileTrialReceipt, type ConversationFileMaterial, type ConversationFileTrialReceipt } from './conversation-files.js'
 import { parseConversationSkillAdmission, parseConversationSkillDefinition, parseGuidanceSourceUse, type ConversationSkillAdmission, type GuidanceSourceUse } from './conversation-skill-source.js'
+import { parseConversationCheckedFailureSources, type ConversationCheckedFailureSources } from './conversation-external-check.js'
+import { parseGuidanceCaseResultChecks, parseGuidanceArmResultCheck, validateGuidanceArmResultCheck, hasSatisfiedGuidanceResultChecks, type GuidanceCaseResultCheck, type GuidanceArmResultCheck } from './guidance-result-check.js'
+import { parseGuidanceNativeGoalSources, parseGoalTaskRegressionEvidence, type GuidanceNativeGoalSources, type GoalTaskResearchReference } from './goal-task-research.js'
 
 /** Data only: the host reads these strings as guidance, never as executable source. */
 export interface GuidanceSnapshot {
   readonly schemaVersion: 'tianwen.conversation-guidance.v1'
   readonly scopeKey: string
   readonly rules: Partial<Record<ConversationFamily, string>>
+  readonly fileRules?: Partial<Record<ConversationFamily, Partial<Record<'files' | 'chat', string>>>>
 }
 export type GuidanceStudyId = `guidance-study:${string}`
 export type GuidanceProof = ConversationJudgmentProof
+/** A consumed generation opportunity, not a completed study or a model verdict. */
+export interface ConversationCaseDesignAttemptBody {
+  readonly nativeGoalSources?: GuidanceNativeGoalSources
+  readonly scopeKey: string
+  readonly consentRevision: number
+  readonly parentVersion: Sha256Digest
+  readonly sourceTaskIds: readonly [string, string]
+  readonly counterexampleTaskId: string
+  readonly modelConfigDigest: Sha256Digest
+  readonly materialDigest: Sha256Digest
+  readonly checkedFailureSources?: ConversationCheckedFailureSources
+}
+export interface ConversationCaseDesignAttempt extends ConversationCaseDesignAttemptBody {
+  readonly attemptId: string
+}
+export function caseDesignAttemptId(body: ConversationCaseDesignAttemptBody): string { return `case-design-attempt:${sha256(body).slice(7)}` }
+export function parseConversationCaseDesignAttempt(value: unknown): ConversationCaseDesignAttempt {
+  const optional = Object.hasOwn(value as object, 'checkedFailureSources')
+  const native = Object.hasOwn(value as object, 'nativeGoalSources')
+  if (native && optional) throw new TypeError('Goal sources cannot claim ConversationTask check identities')
+  const input = object(value, ['attemptId', 'scopeKey', 'consentRevision', 'parentVersion', 'sourceTaskIds', 'counterexampleTaskId', 'modelConfigDigest', 'materialDigest', ...(optional ? ['checkedFailureSources'] : []), ...(native ? ['nativeGoalSources'] : [])])
+  const ids = uniqueIds(input.sourceTaskIds, 2)
+  if (ids.length !== 2 || !Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('invalid case design attempt sources or consent')
+  const body: ConversationCaseDesignAttemptBody = { scopeKey: text(input.scopeKey, 512), consentRevision: input.consentRevision as number,
+    parentVersion: digest(input.parentVersion), sourceTaskIds: [ids[0]!, ids[1]!], counterexampleTaskId: text(input.counterexampleTaskId, 512),
+    modelConfigDigest: digest(input.modelConfigDigest), materialDigest: digest(input.materialDigest),
+    ...(optional ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [ids[0]!, ids[1]!]) } : {}),
+    ...(native ? { nativeGoalSources: parseGuidanceNativeGoalSources(input.nativeGoalSources, [...ids, input.counterexampleTaskId as string]) } : {}) }
+  if (ids.includes(body.counterexampleTaskId) || input.attemptId !== caseDesignAttemptId(body)) throw new TypeError('invalid case design attempt identity')
+  return { attemptId: input.attemptId as string, ...body }
+}
 export type GuidanceCaseKind = 'source1' | 'source2' | 'counterexample' | 'adjacent' | 'holdout'
 export interface GuidanceSourceCase {
   readonly id: string
@@ -31,9 +67,22 @@ export interface GuidanceGeneratedCase {
   readonly materialDigest: Sha256Digest
   readonly inputDigest: Sha256Digest
   readonly qualityContract?: ConversationQualityContract
+  readonly files?: ConversationFileMaterial
 }
 export type GuidanceCase = GuidanceSourceCase | GuidanceGeneratedCase
+export interface GuidanceProposalClue {
+  readonly taskId: string
+  readonly assessmentId: string
+  readonly assessmentDigest: Sha256Digest
+  readonly materialDigest: Sha256Digest
+}
 export interface GuidanceStudyBody {
+  readonly decisionPolicy?: 'dev-paired-any-case.v1' | 'dev-conclusive-pair.v1'
+  readonly nativeGoalSources?: GuidanceNativeGoalSources
+  readonly resultChecks?: readonly GuidanceCaseResultCheck[]
+  readonly checkedFailureSources?: ConversationCheckedFailureSources
+  readonly evaluationMode?: 'local-files'
+  readonly fileOutputKind?: 'files' | 'chat'
   readonly scopeKey: string
   readonly family: ConversationFamily
   readonly failureCategory: ConversationFailure
@@ -44,8 +93,12 @@ export interface GuidanceStudyBody {
   readonly counterexampleTaskId: string
   readonly cases: readonly GuidanceCase[]
   readonly modelConfigDigest: Sha256Digest
+  /** Native generation identity; absent only on older recorded studies. Not a semantic independence verdict. */
+  readonly caseDesignProof?: GuidanceProof
   /** Absent only in historical studies; frozen before proposing a method. */
   readonly qualityContract?: ConversationQualityContract
+  /** Bounded feedback hypotheses for the proposer only; never study sources. */
+  readonly proposalClues?: readonly GuidanceProposalClue[]
 }
 export interface GuidanceStudyOpened extends GuidanceStudyBody {
   readonly kind: 'study-opened'
@@ -66,6 +119,7 @@ export interface GuidanceSourceReferenceReadRecord {
   readonly selectionProof: GuidanceProof
 }
 export interface GuidanceArmRecord {
+  readonly resultCheck?: GuidanceArmResultCheck
   readonly kind: 'arm-recorded'
   readonly studyId: GuidanceStudyId
   readonly caseId: string
@@ -77,6 +131,15 @@ export interface GuidanceArmRecord {
   readonly outputDigest: Sha256Digest
   readonly verdict: 'met' | 'not-met' | 'inconclusive'
   readonly reviewChecks?: ConversationStoredReviewChecks
+}
+export type GuidanceFileTrialTarget = { readonly kind: 'formal', readonly caseId: string, readonly role: 'baseline' | 'candidate' }
+  | { readonly kind: 'exploration', readonly requestDigest: Sha256Digest, readonly arm: 'control' | 'treatment' }
+export interface GuidanceFileTrialRecord {
+  readonly kind: 'study-file-trial-captured'
+  readonly studyId: GuidanceStudyId
+  readonly materialDigest: Sha256Digest
+  readonly target: GuidanceFileTrialTarget
+  readonly receipt: ConversationFileTrialReceipt
 }
 export interface GuidanceExplorationIntentRecord {
   readonly kind: 'exploration-requested'
@@ -109,8 +172,14 @@ export interface GuidanceRollbackRecord {
   readonly kind: 'guidance-rolled-back'
   readonly studyId: GuidanceStudyId
   readonly expectedCurrentVersion: Sha256Digest
-  readonly reason: 'support-retracted' | 'consent-disabled' | 'regression' | 'quality-contract-changed'
+  readonly reason: 'support-retracted' | 'consent-disabled' | 'regression' | 'quality-contract-changed' | 'ancestor-invalidated'
+  readonly ancestorStudyId?: GuidanceStudyId
   readonly evidenceTaskIds: readonly string[]
+  /** Absence and captured-files.v1 retain their exact historical rules. */
+  readonly evidenceInputPolicy?: 'captured-files.v1' | 'request-content.v1' | 'native-goal-task-input.v1'
+  readonly nativeGoalEvidence?: readonly GoalTaskResearchReference[]
+  /** Absence retains model-only failure evidence in every historical record. */
+  readonly evidenceFailurePolicy?: 'model-or-code-check.v1'
 }
 export interface GuidanceHistoricalStoppedRecord {
   readonly kind: 'study-stopped'
@@ -123,8 +192,13 @@ export interface GuidanceInsufficientEvidenceStoppedRecord {
   readonly reason: 'insufficient-evidence'
   readonly proposalProof: GuidanceProof
 }
-export type GuidanceStoppedRecord = GuidanceHistoricalStoppedRecord | GuidanceInsufficientEvidenceStoppedRecord
-export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceSourceReferenceReadRecord | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceExplorationIntentRecord | GuidanceExplorationArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
+export interface GuidanceCandidateFailedStoppedRecord {
+  readonly kind: 'study-stopped'
+  readonly studyId: GuidanceStudyId
+  readonly reason: 'candidate-failed'
+}
+export type GuidanceStoppedRecord = GuidanceHistoricalStoppedRecord | GuidanceInsufficientEvidenceStoppedRecord | GuidanceCandidateFailedStoppedRecord
+export type ConversationGuidanceRecord = GuidanceStudyOpened | GuidanceSourceReferenceReadRecord | GuidanceCandidateRecord | GuidanceArmRecord | GuidanceFileTrialRecord | GuidanceExplorationIntentRecord | GuidanceExplorationArmRecord | GuidanceDecisionRecord | GuidanceActivationRecord | GuidanceRollbackRecord | GuidanceStoppedRecord
 export interface GuidanceExploration {
   readonly intent: GuidanceExplorationIntentRecord
   readonly arms: readonly GuidanceExplorationArmRecord[]
@@ -136,6 +210,7 @@ export interface GuidanceStudy {
   readonly sourceReference?: GuidanceSourceReferenceReadRecord
   readonly candidate?: GuidanceCandidateRecord
   readonly arms: readonly GuidanceArmRecord[]
+  readonly fileTrials?: readonly GuidanceFileTrialRecord[]
   readonly exploration?: GuidanceExploration
   readonly decision?: GuidanceDecisionRecord
   readonly activation?: GuidanceActivationRecord
@@ -150,7 +225,21 @@ export function baselineGuidanceSnapshot(scopeKey: string): GuidanceSnapshot {
   return { schemaVersion: 'tianwen.conversation-guidance.v1', scopeKey: text(scopeKey, 512), rules: {} }
 }
 export function guidanceVersion(snapshot: GuidanceSnapshot): Sha256Digest { return sha256(parseGuidanceSnapshot(snapshot)) }
-export function guidanceInputDigest(text: string): Sha256Digest { return sha256(text.normalize('NFKC').trim().replace(/\s+/gu, ' ')) }
+export function guidanceInputDigest(text: string, files?: ConversationFileMaterial): Sha256Digest {
+  const request = text.normalize('NFKC').trim().replace(/\s+/gu, ' ')
+  return sha256(files === undefined ? request : { request, files: parseConversationFileMaterial(files) })
+}
+/** A prospective duplicate check only. Never replaces frozen evidence hashes
+ * or claims that different identities establish semantic independence. */
+export function guidanceFileInputIdentity(text: string, files: ConversationFileMaterial): Sha256Digest {
+  const material = parseConversationFileMaterial(files)
+  return guidanceInputDigest(text, { ...material, entries: canonicalConversationFileEntries(material.entries),
+    outputPaths: material.outputPaths.map(path => path.toLowerCase()).sort() })
+}
+export function guidanceRule(snapshot: GuidanceSnapshot, family: ConversationFamily, evaluationMode: string = 'text', fileOutputKind?: 'files' | 'chat'): string | undefined {
+  return evaluationMode === 'text' ? snapshot.rules[family]
+    : evaluationMode === 'local-files' && fileOutputKind !== undefined ? snapshot.fileRules?.[family]?.[fileOutputKind] : undefined
+}
 export function guidanceStudyId(body: GuidanceStudyBody): GuidanceStudyId { return `guidance-study:${sha256(body).slice(7)}` }
 
 function object(value: unknown, keys?: readonly string[]): Record<string, unknown> {
@@ -188,11 +277,18 @@ function proof(value: unknown): GuidanceProof {
   return { sessionId: text(input.sessionId, 512), sessionDigest: digest(input.sessionDigest), requestDigest: digest(input.requestDigest) }
 }
 export function parseGuidanceSnapshot(value: unknown): GuidanceSnapshot {
-  const input = object(value, ['schemaVersion', 'scopeKey', 'rules'])
+  const input = object(value)
+  object(input, ['schemaVersion', 'scopeKey', 'rules', ...(Object.hasOwn(input, 'fileRules') ? ['fileRules'] : [])])
   if (input.schemaVersion !== 'tianwen.conversation-guidance.v1') throw new TypeError('guidance snapshot schema is invalid')
   const rules: GuidanceSnapshot['rules'] = {}
   for (const [key, value] of Object.entries(object(input.rules))) rules[oneOf(key, CONVERSATION_FAMILIES)] = text(value)
-  return { schemaVersion: input.schemaVersion, scopeKey: text(input.scopeKey, 512), rules }
+  const fileRules: NonNullable<GuidanceSnapshot['fileRules']> = {}
+  if (Object.hasOwn(input, 'fileRules')) for (const [family, values] of Object.entries(object(input.fileRules))) {
+    const outputs: Partial<Record<'files' | 'chat', string>> = {}
+    for (const [outputKind, rule] of Object.entries(object(values))) outputs[oneOf(outputKind, ['files', 'chat'])] = text(rule)
+    fileRules[oneOf(family, CONVERSATION_FAMILIES)] = outputs
+  }
+  return { schemaVersion: input.schemaVersion, scopeKey: text(input.scopeKey, 512), rules, ...(Object.hasOwn(input, 'fileRules') ? { fileRules } : {}) }
 }
 const CASE_KINDS = ['source1', 'source2', 'counterexample', 'adjacent', 'holdout'] as const
 function parseCase(value: unknown): GuidanceCase {
@@ -200,22 +296,38 @@ function parseCase(value: unknown): GuidanceCase {
   const kind = oneOf(input.kind, CASE_KINDS)
   const generated = kind === 'adjacent' || kind === 'holdout'
   const assessed = !generated && kind !== 'counterexample' && Object.hasOwn(input, 'feedbackAssessmentId')
-  object(input, ['id', 'kind', 'materialDigest', 'inputDigest', ...(generated ? ['prompt', 'criteria'] : ['sourceTaskId']), ...(assessed ? ['feedbackAssessmentId'] : []), ...(generated && Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : [])])
+  object(input, ['id', 'kind', 'materialDigest', 'inputDigest', ...(generated ? ['prompt', 'criteria'] : ['sourceTaskId']), ...(assessed ? ['feedbackAssessmentId'] : []), ...(generated && Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(generated && Object.hasOwn(input, 'files') ? ['files'] : [])])
   const common = { id: text(input.id, 512), materialDigest: digest(input.materialDigest), inputDigest: digest(input.inputDigest) }
   if (!generated) return { ...common, kind, sourceTaskId: text(input.sourceTaskId, 512), ...(assessed ? { feedbackAssessmentId: text(input.feedbackAssessmentId, 512) } : {}) }
   const material = { prompt: text(input.prompt, 16384), criteria: list(input.criteria, item => text(item, 2048), 12),
-    ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}) }
+    ...(Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}),
+    ...(Object.hasOwn(input, 'files') ? { files: parseConversationFileMaterial(input.files) } : {}) }
   if (material.criteria.length === 0 || sha256(material) !== common.materialDigest) throw new TypeError('guidance generated material digest or criteria is invalid')
-  if (guidanceInputDigest(material.prompt) !== common.inputDigest) throw new TypeError('guidance generated input digest is invalid')
+  if (guidanceInputDigest(material.prompt, material.files) !== common.inputDigest) throw new TypeError('guidance generated input digest is invalid')
   return { ...common, kind, ...material }
 }
+function parseProposalClue(value: unknown): GuidanceProposalClue {
+  const input = object(value, ['taskId', 'assessmentId', 'assessmentDigest', 'materialDigest'])
+  return { taskId: text(input.taskId, 512), assessmentId: text(input.assessmentId, 512),
+    assessmentDigest: digest(input.assessmentDigest), materialDigest: digest(input.materialDigest) }
+}
 function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId): GuidanceStudyOpened {
-  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : [])])
+  object(input, ['kind', 'studyId', 'scopeKey', 'family', 'failureCategory', 'consentRevision', 'parentVersion', 'parentSnapshot', 'sourceTaskIds', 'counterexampleTaskId', 'cases', 'modelConfigDigest', ...(Object.hasOwn(input, 'decisionPolicy') ? ['decisionPolicy'] : []), ...(Object.hasOwn(input, 'caseDesignProof') ? ['caseDesignProof'] : []), ...(Object.hasOwn(input, 'qualityContract') ? ['qualityContract'] : []), ...(Object.hasOwn(input, 'evaluationMode') ? ['evaluationMode', 'fileOutputKind'] : []), ...(Object.hasOwn(input, 'proposalClues') ? ['proposalClues'] : []), ...(Object.hasOwn(input, 'checkedFailureSources') ? ['checkedFailureSources'] : []), ...(Object.hasOwn(input, 'resultChecks') ? ['resultChecks'] : []), ...(Object.hasOwn(input, 'nativeGoalSources') ? ['nativeGoalSources'] : [])])
+  const mode = Object.hasOwn(input, 'evaluationMode') ? { evaluationMode: oneOf(input.evaluationMode, ['local-files']), fileOutputKind: oneOf(input.fileOutputKind, ['files', 'chat']) } : {}
   const sourceTaskIds = uniqueIds(input.sourceTaskIds, 2)
   const counterexampleTaskId = text(input.counterexampleTaskId, 512)
   if (sourceTaskIds.length !== 2 || sourceTaskIds.includes(counterexampleTaskId)) throw new TypeError('guidance requires two distinct failure sources and a separate counterexample')
   const cases = list(input.cases, parseCase, 5)
+  if (Object.hasOwn(input, 'nativeGoalSources') && (Object.hasOwn(input, 'checkedFailureSources') || Object.hasOwn(input, 'proposalClues')
+    || cases.some(item => 'feedbackAssessmentId' in item))) throw new TypeError('Goal study preserves its explicit native source branch')
+  if (cases.some(item => !('sourceTaskId' in item) && (mode.evaluationMode === 'local-files'
+    ? item.files?.outputKind !== mode.fileOutputKind : item.files !== undefined))) throw new TypeError('guidance cases require the frozen file mode and output kind')
   const quality = Object.hasOwn(input, 'qualityContract') ? { qualityContract: parseConversationQualityContract(input.qualityContract) } : {}
+  const proposalClues = Object.hasOwn(input, 'proposalClues') ? list(input.proposalClues, parseProposalClue, 2) : []
+  if (Object.hasOwn(input, 'proposalClues') && proposalClues.length === 0) throw new TypeError('proposal clues must be nonempty when present')
+  if (proposalClues.length > 0 && (new Set(proposalClues.map(item => item.taskId)).size !== proposalClues.length
+    || new Set(proposalClues.map(item => item.assessmentId)).size !== proposalClues.length
+    || proposalClues.some(item => sourceTaskIds.includes(item.taskId) || item.taskId === counterexampleTaskId))) throw new TypeError('proposal clues must be unique and disjoint from actual sources')
   if (cases.some(item => !('sourceTaskId' in item) && sha256(item.qualityContract ?? null) !== sha256(quality.qualityContract ?? null))) throw new TypeError('guidance generated cases must freeze the same quality contract as the study')
   if (cases.length !== 5 || cases.some((item, index) => item.kind !== CASE_KINDS[index])
     || new Set(cases.map(item => item.id)).size !== 5
@@ -225,10 +337,16 @@ function parseOpening(input: Record<string, unknown>, studyId: GuidanceStudyId):
   }
   if (!Number.isSafeInteger(input.consentRevision) || (input.consentRevision as number) < 1) throw new TypeError('guidance consent revision is invalid')
   const body: GuidanceStudyBody = {
+    ...(Object.hasOwn(input, 'decisionPolicy') ? { decisionPolicy: oneOf(input.decisionPolicy, ['dev-paired-any-case.v1', 'dev-conclusive-pair.v1']) } : {}),
     scopeKey: text(input.scopeKey, 512), family: oneOf(input.family, CONVERSATION_FAMILIES),
     failureCategory: oneOf(input.failureCategory, CONVERSATION_FAILURES), consentRevision: input.consentRevision as number,
     parentVersion: digest(input.parentVersion), parentSnapshot: parseGuidanceSnapshot(input.parentSnapshot),
-    sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest), ...quality,
+    sourceTaskIds: sourceTaskIds as [string, string], counterexampleTaskId, cases, modelConfigDigest: digest(input.modelConfigDigest), ...quality, ...mode,
+    ...(Object.hasOwn(input, 'caseDesignProof') ? { caseDesignProof: proof(input.caseDesignProof) } : {}),
+    ...(Object.hasOwn(input, 'proposalClues') ? { proposalClues } : {}),
+    ...(Object.hasOwn(input, 'checkedFailureSources') ? { checkedFailureSources: parseConversationCheckedFailureSources(input.checkedFailureSources, [sourceTaskIds[0]!, sourceTaskIds[1]!]) } : {}),
+    ...(Object.hasOwn(input, 'nativeGoalSources') ? { nativeGoalSources: parseGuidanceNativeGoalSources(input.nativeGoalSources, [...sourceTaskIds, counterexampleTaskId]) } : {}),
+    ...(Object.hasOwn(input, 'resultChecks') ? { resultChecks: parseGuidanceCaseResultChecks(input.resultChecks, { cases, family: input.family as GuidanceStudyBody['family'], ...mode }) } : {}),
   }
   if (body.parentSnapshot.scopeKey !== body.scopeKey || guidanceVersion(body.parentSnapshot) !== body.parentVersion) throw new TypeError('guidance parent snapshot version or scope is invalid')
   if (guidanceStudyId(body) !== studyId) throw new TypeError('guidance study identity does not match its frozen body')
@@ -239,6 +357,15 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
   if (typeof input.studyId !== 'string' || !/^guidance-study:[a-f0-9]{64}$/u.test(input.studyId)) throw new TypeError('guidance study identity is invalid')
   const studyId = input.studyId as GuidanceStudyId
   if (input.kind === 'study-opened') return parseOpening(input, studyId)
+  if (input.kind === 'study-file-trial-captured') {
+    object(input, ['kind', 'studyId', 'materialDigest', 'target', 'receipt'])
+    const target = object(input.target)
+    const kind = oneOf(target.kind, ['formal', 'exploration'])
+    object(target, kind === 'formal' ? ['kind', 'caseId', 'role'] : ['kind', 'requestDigest', 'arm'])
+    return { kind: input.kind, studyId, materialDigest: digest(input.materialDigest), receipt: parseConversationFileTrialReceipt(input.receipt),
+      target: kind === 'formal' ? { kind, caseId: text(target.caseId, 512), role: oneOf(target.role, ['baseline', 'candidate']) }
+        : { kind, requestDigest: digest(target.requestDigest), arm: oneOf(target.arm, ['control', 'treatment']) } }
+  }
   if (input.kind === 'source-reference-read') {
     object(input, ['kind', 'studyId', 'reference', 'definition', 'selectionProof'])
     const reference = parseConversationSkillAdmission(input.reference)
@@ -250,11 +377,12 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
       ...(Object.hasOwn(input, 'sourceUse') ? { sourceUse: parseGuidanceSourceUse(input.sourceUse) } : {}) }
   }
   if (input.kind === 'arm-recorded') {
-    object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict', ...(Object.hasOwn(input, 'reviewChecks') ? ['reviewChecks'] : [])])
+    object(input, ['kind', 'studyId', 'caseId', 'role', 'materialDigest', 'behaviorVersion', 'executionProof', 'judgeProof', 'outputDigest', 'verdict', ...(Object.hasOwn(input, 'reviewChecks') ? ['reviewChecks'] : []), ...(Object.hasOwn(input, 'resultCheck') ? ['resultCheck'] : [])])
     return { kind: input.kind, studyId, caseId: text(input.caseId, 512), role: oneOf(input.role, ['baseline', 'candidate']),
       materialDigest: digest(input.materialDigest), behaviorVersion: digest(input.behaviorVersion), executionProof: proof(input.executionProof),
       judgeProof: proof(input.judgeProof), outputDigest: digest(input.outputDigest), verdict: oneOf(input.verdict, ['met', 'not-met', 'inconclusive']),
-      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}) }
+      ...(Object.hasOwn(input, 'reviewChecks') ? { reviewChecks: parseStoredConversationReviewChecks(input.reviewChecks) } : {}),
+      ...(Object.hasOwn(input, 'resultCheck') ? { resultCheck: parseGuidanceArmResultCheck(input.resultCheck) } : {}) }
   }
   if (input.kind === 'exploration-requested') {
     object(input, ['kind', 'studyId', 'request'])
@@ -275,12 +403,24 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
     return { kind: input.kind, studyId, expectedParentVersion: digest(input.expectedParentVersion), decisionDigest: digest(input.decisionDigest) }
   }
   if (input.kind === 'guidance-rolled-back') {
-    object(input, ['kind', 'studyId', 'expectedCurrentVersion', 'reason', 'evidenceTaskIds'])
-    const reason = oneOf(input.reason, ['support-retracted', 'consent-disabled', 'regression', 'quality-contract-changed'])
+    object(input, ['kind', 'studyId', 'expectedCurrentVersion', 'reason', 'evidenceTaskIds', ...(input.reason === 'ancestor-invalidated' ? ['ancestorStudyId'] : []), ...(Object.hasOwn(input, 'evidenceInputPolicy') ? ['evidenceInputPolicy'] : []), ...(Object.hasOwn(input, 'evidenceFailurePolicy') ? ['evidenceFailurePolicy'] : []), ...(Object.hasOwn(input,'nativeGoalEvidence') ? ['nativeGoalEvidence'] : [])])
+    const reason = oneOf(input.reason, ['support-retracted', 'consent-disabled', 'regression', 'quality-contract-changed', 'ancestor-invalidated'])
     const evidenceTaskIds = uniqueIds(input.evidenceTaskIds, 64)
+    const filePolicy = Object.hasOwn(input, 'evidenceInputPolicy')
+    if (filePolicy && (reason !== 'regression' || !['captured-files.v1', 'request-content.v1', 'native-goal-task-input.v1'].includes(input.evidenceInputPolicy as string))) throw new TypeError('invalid guidance regression input policy')
+    const native = input.evidenceInputPolicy === 'native-goal-task-input.v1'
+    if (Object.hasOwn(input,'nativeGoalEvidence') !== native) throw new TypeError('native Goal regression requires its explicit source references and input policy')
+    const nativeGoalEvidence = native ? parseGoalTaskRegressionEvidence(input.nativeGoalEvidence,evidenceTaskIds) : undefined
+    const failurePolicy = Object.hasOwn(input, 'evidenceFailurePolicy')
+    if (failurePolicy && (reason !== 'regression' || input.evidenceInputPolicy !== 'request-content.v1' || input.evidenceFailurePolicy !== 'model-or-code-check.v1')) throw new TypeError('invalid guidance regression failure policy')
     if (reason === 'regression' && evidenceTaskIds.length === 0) throw new TypeError('guidance regression rollback requires task evidence')
     if (reason === 'quality-contract-changed' && evidenceTaskIds.length !== 0) throw new TypeError('quality contract rollback must not claim task regression evidence')
-    return { kind: input.kind, studyId, expectedCurrentVersion: digest(input.expectedCurrentVersion), reason, evidenceTaskIds }
+    if (reason === 'ancestor-invalidated' && (typeof input.ancestorStudyId !== 'string' || !/^guidance-study:[a-f0-9]{64}$/u.test(input.ancestorStudyId) || evidenceTaskIds.length !== 0)) throw new TypeError('guidance ancestor rollback requires an exact ancestor study and no regression evidence')
+    return { kind: input.kind, studyId, expectedCurrentVersion: digest(input.expectedCurrentVersion), reason, evidenceTaskIds,
+      ...(filePolicy ? { evidenceInputPolicy: input.evidenceInputPolicy as GuidanceRollbackRecord['evidenceInputPolicy'] & string } : {}),
+      ...(nativeGoalEvidence === undefined ? {} : {nativeGoalEvidence}),
+      ...(failurePolicy ? { evidenceFailurePolicy: 'model-or-code-check.v1' as const } : {}),
+      ...(reason === 'ancestor-invalidated' ? { ancestorStudyId: input.ancestorStudyId as GuidanceStudyId } : {}) }
   }
   if (input.kind === 'study-stopped') {
     if (input.reason === 'insufficient-evidence') {
@@ -288,7 +428,7 @@ export function parseConversationGuidanceRecord(value: unknown): ConversationGui
       return { kind: input.kind, studyId, reason: input.reason, proposalProof: proof(input.proposalProof) }
     }
     object(input, ['kind', 'studyId', 'reason'])
-    return { kind: input.kind, studyId, reason: oneOf(input.reason, ['cancelled', 'invalid-judgment', 'model-unavailable', 'source-unavailable', 'scope-changed']) }
+    return { kind: input.kind, studyId, reason: oneOf(input.reason, ['cancelled', 'invalid-judgment', 'model-unavailable', 'source-unavailable', 'scope-changed', 'candidate-failed']) }
   }
   throw new TypeError('unknown guidance record kind')
 }
@@ -315,6 +455,14 @@ export class ConversationGuidanceState {
     const id = this.activeStudies.get(scopeKey)
     return id === undefined ? undefined : structuredClone(this.studies.get(id))
   }
+  activeStudyChain(scopeKey: string): readonly GuidanceStudy[] {
+    const chain: GuidanceStudy[] = []
+    for (let id = this.activeStudies.get(scopeKey); id !== undefined; id = this.previousActiveStudies.get(id)) {
+      const study = this.studies.get(id)!
+      chain.push(study)
+    }
+    return structuredClone(chain)
+  }
   listStudies(scopeKey?: string, limit?: number): readonly GuidanceStudy[] {
     if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000)) throw new TypeError('guidance study list limit must be between 1 and 1000')
     const studies = [...this.studies.values()].filter(study => scopeKey === undefined || study.opened.scopeKey === scopeKey)
@@ -326,6 +474,7 @@ export class ConversationGuidanceState {
       : record.kind === 'source-reference-read' ? study?.sourceReference
       : record.kind === 'candidate-recorded' ? study?.candidate
       : record.kind === 'arm-recorded' ? study?.arms.find(arm => arm.caseId === record.caseId && arm.role === record.role)
+      : record.kind === 'study-file-trial-captured' ? study?.fileTrials?.find(item => sha256(item.target) === sha256(record.target))
       : record.kind === 'exploration-requested' ? study?.exploration?.intent
       : record.kind === 'exploration-arm-recorded' ? study?.exploration?.arms.find(arm => arm.arm === record.arm)
       : record.kind === 'study-decided' ? study?.decision
@@ -342,7 +491,20 @@ export class ConversationGuidanceState {
       if (arm === undefined) throw new Error('guidance decision requires the complete arm set')
       return arm
     }))
+    if (study.opened.decisionPolicy === 'dev-conclusive-pair.v1') {
+      const candidates = arms.filter(arm => arm.role === 'candidate')
+      const baselines = arms.filter(arm => arm.role === 'baseline')
+      const verdict = candidates.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
+        : candidates.some(arm => arm.verdict !== 'met') ? 'rejected'
+        : baselines.some(arm => arm.verdict === 'not-met') ? 'accepted'
+        : baselines.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
+        : 'rejected'
+      return { kind: 'study-decided', studyId: study.opened.studyId, armsDigest: sha256(arms), verdict }
+    }
     const verdict = arms.some(arm => arm.verdict === 'inconclusive') ? 'inconclusive'
+      : study.opened.decisionPolicy === 'dev-paired-any-case.v1'
+        ? arms.filter(arm => arm.role === 'candidate').every(arm => arm.verdict === 'met')
+          && arms.some(arm => arm.role === 'baseline' && arm.verdict === 'not-met') ? 'accepted' : 'rejected'
       : arms.filter(arm => arm.role === 'candidate').every(arm => arm.verdict === 'met')
         && (arms[0]!.verdict === 'not-met' || arms[2]!.verdict === 'not-met')
         && arms[4]!.verdict === 'met' ? 'accepted' : 'rejected'
@@ -363,9 +525,30 @@ export class ConversationGuidanceState {
       if (record.reason === 'insufficient-evidence') {
         if (study.candidate !== undefined || this.nativeSessions.has(record.proposalProof.sessionId)) throw new Error('insufficient evidence requires an independent native proposal Session before any candidate')
       }
+      if (record.reason === 'candidate-failed' && (study.arms.length >= study.opened.cases.length * 2
+        || !study.arms.some(arm => arm.role === 'candidate' && (arm.verdict === 'not-met' || arm.resultCheck?.status === 'rejected')))) {
+        throw new Error('candidate failure stop requires an incomplete study with a recorded failed candidate arm')
+      }
       return
     }
     const opened = study.opened
+    if (record.kind === 'arm-recorded') validateGuidanceArmResultCheck(opened, record)
+    if (record.kind === 'study-file-trial-captured') {
+      if (opened.evaluationMode !== 'local-files' || record.receipt.outputKind !== opened.fileOutputKind) throw new Error('guidance file receipt mode disagrees with its study')
+      if (study.decision !== undefined) throw new Error('guidance file receipt cannot follow a decision')
+      const target = record.target
+      if (target.kind === 'formal') {
+        const item = opened.cases.find(item => item.id === target.caseId)
+        if (study.candidate === undefined || item?.materialDigest !== record.materialDigest
+          || study.arms.some(arm => arm.caseId === target.caseId && arm.role === target.role)) throw new Error('guidance file receipt disagrees with its formal target')
+        if ('prompt' in item && record.receipt.workerMaterialDigest !== sha256({ prompt: item.prompt, files: item.files })) throw new Error('guidance file receipt worker material disagrees with its frozen case')
+      } else if (study.candidate !== undefined || study.exploration === undefined
+        || target.requestDigest !== sha256(study.exploration.intent.request)
+        || record.materialDigest !== study.exploration.intent.request.sourceMaterialDigest
+        || study.exploration.arms.some(arm => arm.arm === target.arm)) throw new Error('guidance file receipt disagrees with its exploration target')
+      if (this.nativeSessions.has(record.receipt.executionProof.sessionId)) throw new Error('guidance file receipt requires an independent native Session')
+      return
+    }
     if (record.kind === 'source-reference-read') {
       if ((study.exploration !== undefined && study.exploration.result === undefined)
         || study.candidate !== undefined || study.decision !== undefined) throw new Error('guidance source must be read before candidate and decision, outside incomplete exploration')
@@ -383,6 +566,9 @@ export class ConversationGuidanceState {
         || request.qualityContractDigest !== sha256(opened.qualityContract ?? null)) {
         throw new Error('guidance exploration request disagrees with its frozen opened study')
       }
+      if (request.sourceKind !== (opened.nativeGoalSources === undefined ? 'conversation-task' : 'native-goal-task')) {
+        throw new Error('guidance exploration source kind disagrees with its frozen opened study')
+      }
       if (this.nativeSessions.has(request.proposalProof.sessionId)) throw new Error('guidance exploration proposal must use an independent native Session')
       return
     }
@@ -393,7 +579,8 @@ export class ConversationGuidanceState {
         || record.parentVersion !== opened.parentVersion) throw new Error('guidance exploration arm disagrees with its frozen intent')
       parseConversationQualityReviewChecks(record.reviewChecks, opened.qualityContract)
       const sessions = [record.executionProof.sessionId, ...record.reviewChecks.map(check => check.proof.sessionId)]
-      if (new Set(sessions).size !== sessions.length || sessions.some(id => this.nativeSessions.has(id))) throw new Error('guidance exploration execution and reviews require distinct independent native Sessions')
+      const reserved = this.fileExecution(study, record, { kind: 'exploration', requestDigest: sha256(exploration.intent.request), arm: record.arm })
+      if (new Set(sessions).size !== sessions.length || sessions.some(id => id !== reserved && this.nativeSessions.has(id))) throw new Error('guidance exploration execution and reviews require distinct independent native Sessions')
       return
     }
     if (record.kind === 'candidate-recorded') {
@@ -401,8 +588,12 @@ export class ConversationGuidanceState {
         : record.sourceUse?.readDigest !== sha256(study.sourceReference)) throw new Error('guidance candidate source use must bind its exact source read')
       if (study.exploration !== undefined && study.exploration.result === undefined) throw new Error('guidance candidate requires both exploration arms when exploration was initiated')
       const next = record.candidateSnapshot
-      if (next.scopeKey !== opened.scopeKey || CONVERSATION_FAMILIES.some(family => family !== opened.family && next.rules[family] !== opened.parentSnapshot.rules[family])) throw new Error('guidance candidate changed another family or scope')
-      if (next.rules[opened.family] === undefined || next.rules[opened.family] === opened.parentSnapshot.rules[opened.family]) throw new Error('guidance candidate requires a different nonempty family rule')
+      const rule = guidanceRule(next, opened.family, opened.evaluationMode, opened.fileOutputKind)
+      if (rule === undefined || rule === guidanceRule(opened.parentSnapshot, opened.family, opened.evaluationMode, opened.fileOutputKind)) throw new Error('guidance candidate requires a different nonempty family rule')
+      const expected = opened.evaluationMode === 'local-files'
+        ? { ...opened.parentSnapshot, fileRules: { ...opened.parentSnapshot.fileRules, [opened.family]: { ...opened.parentSnapshot.fileRules?.[opened.family], [opened.fileOutputKind!]: rule } } }
+        : { ...opened.parentSnapshot, rules: { ...opened.parentSnapshot.rules, [opened.family]: rule } }
+      if (sha256(next) !== sha256(expected)) throw new Error('guidance candidate changed another family, mode, map or scope')
       if (this.nativeSessions.has(record.proposalProof.sessionId)) throw new Error('guidance proposal must use an independent native Session')
       return
     }
@@ -413,14 +604,15 @@ export class ConversationGuidanceState {
       if (item === undefined || item.materialDigest !== record.materialDigest) throw new Error('guidance arm does not match its frozen case material')
       const expected = record.role === 'baseline' ? opened.parentVersion : guidanceVersion(study.candidate.candidateSnapshot)
       if (record.behaviorVersion !== expected) throw new Error('guidance arm behavior version disagrees with its frozen role')
-      if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6'].includes(opened.qualityContract?.schemaVersion ?? '') && record.reviewChecks === undefined) throw new Error('versioned guidance arms require two independent review checks')
+      if (['tianwen.conversation-quality.v2', 'tianwen.conversation-quality.v3', 'tianwen.conversation-quality.v4', 'tianwen.conversation-quality.v5', 'tianwen.conversation-quality.v6', 'tianwen.conversation-quality.v7', 'tianwen.conversation-quality.v8', 'tianwen.conversation-quality.v9', 'tianwen.conversation-quality.v10', 'tianwen.conversation-quality.v11', 'tianwen.conversation-quality.v12'].includes(opened.qualityContract?.schemaVersion ?? '') && record.reviewChecks === undefined) throw new Error('versioned guidance arms require two independent review checks')
       if (record.reviewChecks !== undefined) {
         parseConversationQualityReviewChecks(record.reviewChecks, opened.qualityContract)
         const expected = conversationReviewConsensus(record.reviewChecks)
         if (record.verdict !== expected.verdict || sha256(record.judgeProof) !== sha256(expected.proof)) throw new Error('guidance arm disagrees with its independent check consensus')
       }
       const sessions = [record.executionProof.sessionId, ...(record.reviewChecks?.map(check => check.proof.sessionId) ?? [record.judgeProof.sessionId])]
-      if (new Set(sessions).size !== sessions.length || sessions.some(id => this.nativeSessions.has(id))) throw new Error('guidance execution and judge require distinct independent native Sessions')
+      const reserved = this.fileExecution(study, record, { kind: 'formal', caseId: record.caseId, role: record.role })
+      if (new Set(sessions).size !== sessions.length || sessions.some(id => id !== reserved && this.nativeSessions.has(id))) throw new Error('guidance execution and judge require distinct independent native Sessions')
       return
     }
     if (record.kind === 'study-decided') {
@@ -430,12 +622,21 @@ export class ConversationGuidanceState {
     const currentVersion = guidanceVersion(this.snapshot(opened.scopeKey))
     if (record.kind === 'guidance-activated') {
       if (study.decision?.verdict !== 'accepted' || sha256(study.decision) !== record.decisionDigest) throw new Error('guidance activation requires its exact accepted decision')
+      if (!hasSatisfiedGuidanceResultChecks(study)) throw new Error('guidance activation requires complete satisfied independent result checks')
       if (record.expectedParentVersion !== opened.parentVersion || currentVersion !== opened.parentVersion) throw new Error('guidance activation has a stale current parent version')
       return
     }
     if (study.activation === undefined || this.activeStudies.get(opened.scopeKey) !== record.studyId
       || currentVersion !== record.expectedCurrentVersion || currentVersion !== guidanceVersion(study.candidate.candidateSnapshot)) throw new Error('guidance rollback does not own the current active version')
+    if (record.reason === 'ancestor-invalidated' && !this.activeStudyChain(opened.scopeKey).slice(1).some(item => item.opened.studyId === record.ancestorStudyId)) throw new Error('guidance rollback requires an actual active ancestor')
     if (record.reason === 'regression' && record.evidenceTaskIds.some(id => [...opened.sourceTaskIds, opened.counterexampleTaskId].includes(id))) throw new Error('guidance regression must reference new post-activation tasks, not source tasks')
+  }
+  private fileExecution(study: GuidanceStudy, record: GuidanceArmRecord | GuidanceExplorationArmRecord, target: GuidanceFileTrialTarget): string | undefined {
+    if (study.opened.evaluationMode !== 'local-files') return
+    const retained = study.fileTrials?.find(item => sha256(item.target) === sha256(target))
+    if (retained === undefined || retained.materialDigest !== record.materialDigest || retained.receipt.outputDigest !== record.outputDigest
+      || sha256(retained.receipt.executionProof) !== sha256(record.executionProof)) throw new Error('guidance file arm requires its exact retained receipt')
+    return record.executionProof.sessionId
   }
   /** Called only after ledger validation and a durable append (also on replay). */
   apply(input: ConversationGuidanceRecord, at: string): void {
@@ -449,7 +650,10 @@ export class ConversationGuidanceState {
       if (record.reason === 'insufficient-evidence') this.nativeSessions.add(record.proposalProof.sessionId)
       this.studies.set(record.studyId, { ...study, stopped: record, stoppedAt: at })
     }
-    else if (record.kind === 'source-reference-read') {
+    else if (record.kind === 'study-file-trial-captured') {
+      this.nativeSessions.add(record.receipt.executionProof.sessionId)
+      this.studies.set(record.studyId, { ...study, fileTrials: [...study.fileTrials ?? [], record] })
+    } else if (record.kind === 'source-reference-read') {
       this.nativeSessions.add(record.selectionProof.sessionId)
       this.studies.set(record.studyId, { ...study, sourceReference: record })
     } else if (record.kind === 'candidate-recorded') {

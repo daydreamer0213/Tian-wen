@@ -1036,8 +1036,12 @@ def test_windows_system_aliases_are_one_acl_principal(runtime_account: str) -> N
 
 
 
+@pytest.mark.parametrize("summary", [
+    "Successfully processed 1 files; Failed processing 0 files",
+    "已成功处理 1 个文件; 处理 0 个文件时失败",
+])
 def test_windows_acl_validation_rejects_isolation_attacks_and_accepts_explicit_evaluator_access(
-    tmp_path: Path,
+    tmp_path: Path, summary: str,
 ) -> None:
     module = _evaluator_module()
     dataset = tmp_path / "sealed"
@@ -1087,7 +1091,7 @@ def test_windows_acl_validation_rejects_isolation_attacks_and_accepts_explicit_e
             cases: (
                 f"{cases} EVALUATOR\\agent:(OA)(R)\n"
                 "NT AUTHORITY\\SYSTEM:(F)\n"
-                "Successfully processed 1 files; Failed processing 0 files\n"
+                f"{summary}\n"
             )
         },
     )
@@ -1095,6 +1099,8 @@ def test_windows_acl_validation_rejects_isolation_attacks_and_accepts_explicit_e
         validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(ZZ)(R)\n"})
     with pytest.raises(ValueError, match="could not safely parse"):
         validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(R)\nSuccessfully processed 1 files\n"})
+    with pytest.raises(ValueError, match="could not safely parse"):
+        validate("runtime", {cases: f"{cases} EVALUATOR\\agent:(R)\n已成功处理 1 个文件\n"})
     with pytest.raises(ValueError, match="unexpected principal"):
         validate("runtime", {cases: f"{cases} BUILTIN\\Administrators:(F)\n"})
     with pytest.raises(ValueError, match="current evaluator"):

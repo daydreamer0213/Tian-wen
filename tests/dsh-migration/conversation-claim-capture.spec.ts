@@ -46,11 +46,13 @@ it('captures the actual fixed-unit v2 schema and corrects one rejected tool call
     const noFirst = structuredClone(audit); noFirst.units['answer-1'] = { additionalClaims: [] } as never
     const blankObject = structuredClone(audit); blankObject.units['answer-2'] = { firstClaim: claim('\n'), additionalClaims: [] }
     const wrongSource = structuredClone(audit); wrongSource.units['answer-1']!.firstClaim.sourceIds = ['answer-1']
-    for (const invalid of [missing.audit, extra, nonblankNull, noFirst, blankObject, wrongSource]) {
+    for (const invalid of [missing.audit, extra, nonblankNull, noFirst, blankObject]) {
       expect(validateJsonSchemaValue(auditSchema, invalid)).not.toEqual([])
     }
+    expect(validateJsonSchemaValue(auditSchema, wrongSource)).not.toEqual([])
+    expect(() => validateClaimAudit(wrongSource, evidence, 'met')).toThrow('invalid-judgment')
     const nonexact = structuredClone(audit); nonexact.units['answer-1']!.firstClaim.quote = '不存在'
-    expect(validateJsonSchemaValue(auditSchema, nonexact)).toEqual([])
+    expect(validateJsonSchemaValue(auditSchema, nonexact)).not.toEqual([])
     expect(() => validateClaimAudit(nonexact, evidence, 'met')).toThrow('invalid-judgment')
   }
   const respond = (callId: string, response: typeof value) => (request: GenerateOptions) => {

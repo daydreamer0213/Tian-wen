@@ -224,7 +224,11 @@ def _windows_acl_entries(path: Path, output: str) -> tuple[tuple[str, frozenset[
         if not stripped:
             continue
         if "(" not in stripped:
-            if re.fullmatch(r"Successfully processed \d+ files; Failed processing \d+ files", stripped):
+            if re.fullmatch(
+                r"Successfully processed \d+ files; Failed processing \d+ files|"
+                r"已成功处理 \d+ 个文件; 处理 \d+ 个文件时失败",
+                stripped,
+            ):
                 continue
             raise ValueError(f"could not safely parse ACL for {path.name}")
         prefix, separator, suffix = stripped.rpartition(":")

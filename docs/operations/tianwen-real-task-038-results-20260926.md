@@ -1,0 +1,17 @@
+# E038 真实项目排查任务：反馈评估成立，完整学习链路未成立
+
+**结论：**在全新隔离的天问桌面配置档中，真实 DeepSeek-V4-Flash / High 完成了一次实际项目故障排查，收到同会话的一次事实纠正；产品将该纠正独立评为 `attributable-problem / verification`，原生证明可恢复。这是“任务 → 反馈评估”两段的实证，不是“研究 → 方法采用 → 未来任务改善”的实证。首答结果复核为 `inconclusive`，研究与方法激活均为零；main/Daily 继续 **NO-GO**。
+
+本轮沿用 E037 已打包并逐文件核对的准确候选 `7064967af0d82c9583b5f4d15964891e7bd49ed0`，归档 SHA-256 `adcbb7e801deaf5500b54223b14bc73b96a01049f37508bc0d514d3b38d18346`；当前分支此后只改文档，产品包与测试源码未变。E038 新配置档起始账本为空。第一次模型调用前冻结三份实际材料、一个项目排查请求、模型、反馈规则和停止条件，见 `D:/DevData/tianwen-acceptance-control/038-real-task/pre-input-freeze.json` 与 `requests-038.json`。工作材料是 E037 的 17 条账本副本以及 `conversation-observer.ts`、`learning-consent-agent.ts` 两份源码副本。任务要求实际读取文件、说明 E037 关学习后两条取消复核能证明什么，并只给一个后续核验；没有要求改文件。
+
+主会话实际调用 `pwsh`、`glob`、`read` 读取材料，任务只提交一次。首答正确列出两条复核的 `proof:null` 和 `unavailableReason:cancelled`，但把账本中的 `task-review-started` 扩大为模型请求已发出，又建议复查同一账本以证明关闭后没有新的模型请求。按输入前规则，控制者看过首答后只发一次针对这两处的事实纠正，没有重做任务。天问随后在同一会话把“关闭后有无新模型请求”改为未证明，并指出需要原生子会话或请求时间记录。
+
+产品账本有 27 条记录、三条任务。原排查任务的请求材料与模型配置可从原生会话恢复，结果复核有证明但结论为 `inconclusive`。两份独立审核一份因缺少可引用的文件证据判 `inconclusive`，另一份指出首答“B 完全没有关闭后模型分析”的证据越界而判 `not-met`；汇总没有把分歧误报为通过。进一步检查发现，后一份审核自称“自行检查了工作区文件”，但其原生子会话只有 `structured_output` 调用，没有文件读取调用；这句自述不能当成已核验来源。事实纠正作为下一条任务，其结果复核也为 `inconclusive`，原因 `invalid-judgment`。另有关闭学习的管理会话任务，取消复核的 `proof` 为 null。只有一条反馈评估，针对原排查任务，分类 `attributable-problem`、类别 `verification`、`proof` 非空，三条未来核验标准与纠正内容对应；使用冻结源码编译的恢复函数对原生子会话重新验证通过。没有研究或方法激活。学习同意最终为关闭、修订号 2，自有 host 已停止。
+
+文件证据缺口已有具体根因。三次原生 `read` 都成功，文件分别为 13,972、23,866、41,350 字节；独立的全文件证据捕获单文件上限为 32,768 字节，总量上限为 65,536 字节。第三份文件超过单文件上限，账本仅保留第一份的 `task-file-input-captured`，并记录 `task-file-evidence-unavailable / material-unavailable`；`local-files` 复核在没有完整文件材料时不把普通工具回显当作有来源的证据。这是现有失败关闭规则起作用，不是原生 `read` 失败。原生调用与账本的只读对应收据为 `D:/DevData/tianwen-acceptance-runs/038-real-task/native-use/evidence/file-evidence-diagnosis-038.json`；现有文件观察测试 11/11 通过，包含超限材料不可用的用例。
+
+只读审计核对了冻结输入与安装文件哈希、主会话的一次请求和一次反馈、九份原生会话导出、模型配置、反馈结构化证明及账本在审计期间未漂移，结果为 `completed`：`D:/DevData/tianwen-acceptance-runs/038-real-task/native-use/evidence/audit-038-final.json`。测试环境与原生导出同在 `D:/DevData/tianwen-acceptance-runs/038-real-task/native-use/`。这是控制者在真实项目材料上使用产品的受控任务；它证明产品能接住这次明确纠正，不能代替外部用户的长期工作反馈，也不能把模型自己修正一句话算作方法已经学会。
+
+对 E037 问题的独立后续核验也已完成：关闭同意的账本时间是 `2026-09-26T11:41:46.001Z`；三份已导出的原生分析子会话各有一条 `request/header`，时间分别为 `11:41:16.238Z`、`11:41:26.610Z`、`11:41:41.875Z`，均早于关闭。关闭后两条 `task-reviewed` 为取消收尾，均无证明。在**这四份保存的原生会话导出**里，没有关闭后新建的分析子会话请求头；这不等于网络层保证绝无未持久化的请求，也不能由账本启动记录单独推出请求已发送。只读补充收据：`D:/DevData/tianwen-acceptance-runs/037-readiness/native-use/evidence/request-time-addendum-038.json`。
+
+下一阶段保持超限文件不能自动通过的失败关闭规则。对这种没有完整文件材料的任务，后续工程候选先明确记录证据不可用并跳过无来源的模型复核，见[候选设计](../superpowers/specs/2026-09-26-tianwen-incomplete-file-review-design.md)；历史 E038 不回填。要真正扩大支持范围，还需分别解决有界文件容量和复杂 PowerShell 命令的原生来源证明，不能只提高字节上限便宣布问题解决。随后用新的实际文件任务前瞻验收证据是否完整、两份复核是否能作出可靠结论，并单独检查此前已知的来源事实误放行。再让真实相容的项目任务与自然反馈逐步积累，分别验收来源资格、研究试验答案、采用决定和采用后一次未来任务。已有 E038 反馈不能拿来补写第二条同族支持或成功对照。隔离测试与状态可见性不构成 Daily 上线依据。

@@ -1,0 +1,13 @@
+# Preserve original continuous Goal requirements in native Task execution
+
+The owner authorizes autonomous implementation and controlled failures/future tasks. At d2015dac the actual real-model beta Task twice returned four record fields rather than the original Goal's required project/status object. Independent checks rejected both; the ordinary native Task prompt carried only the Planner's delegated objective, while original review/study material retained the complete Goal. This input loss must be addressed before claiming method effects. Old answers/checks remain unchanged.
+
+The existing native Task prompt will include the original continuous Goal objective, context and successCriteria as an exact JSON reference. It will explicitly restrict execution to the delegated Task, preserve applicable original content/output requirements, describe context and Planner wording as requirements metadata rather than verified facts, and forbid expanding work or permissions from the reference. It will not expose verifier code, synthesize requirements, replace the delegated native Goal or change completion/consent/method/proof rules.
+
+Use the same prompt builder for initial start, adoption of an already accepted child, cold continuation and disarmed continuation. Pass the current v3 record already available at each site. Preserve the existing completion/recovery controls. Legacy v1/v2 behavior and all historical bindings remain unchanged; there is no new persistence schema or executor.
+
+Requiring the Planner to copy every condition into each Task leaves the demonstrated loss unresolved. Injecting checker-derived conditions would conflate original user requirements with host verification rules. Passing original stored Goal fields through the existing execution prompt supplies the missing requirements at their source and keeps ordinary execution aligned with research visibility.
+
+Acceptance is finite: meaningful first-red native admission/continuation tests, related regression and original package build, independent review, then a newly frozen real-model native Goal through the actual standard DEV entry. That run independently checks the original answer and lets main delivery settle before teardown. It is a requirement-propagation result, not proof of natural learning, future method benefit or main/Daily release. No natural waiting, new sample threshold, old answer regrading or owner task request.
+
+Generated data stays D:/DevData, D free >=15GiB/prefer20, shared installed dependencies only. Original three ledger digests, 77 protected roots and the additionally rejected controlled-pending-GLh8yC root are preserved. Full goal stays active.

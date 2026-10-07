@@ -1,0 +1,10 @@
+# Native research uses shared original review categories
+
+New DEV batch: seven original Goals/Tasks complete, four future baselines verified, two disclosed failures rejected, normal control verified;150 real/full traces and15 scripted training calls preserved. No study: source1 negative labels[source-fidelity,task-understanding], source2[task-understanding,source-fidelity]. Consensus retains the first label; incidental order blocked the shared problem.
+
+Do not change consensus, primary labels, past answers, eligibility or records. Add one pure helper returning only a category actually present in a conclusive negative review in both sources. Checked-failure contributes only instruction-following. Keep distinct-input, scope, version, consent, quality, model, checker/condition, failure-branch and successful-counterexample rules. Use it in native Loop selection and ledger attempt/study support. The declared study category must belong to both original negative category sets; disjoint categories remain refused. Existing supported history remains byte-identical. Main/Daily NO-GO and release requirements remain.
+
+1. Test mixed-order actual negative categories: unchanged consensus, Loop readiness, ledger support and cold replay; disjoint and absent-category controls. Observe selection/ledger RED.
+2. Implement in goal-task-research.ts, conversation-guidance-loop.ts and ledger.ts. Related source/type checks, original Evolution/Runtime15 build, published controls/profile and limited review.
+3. Continue the same original settled profile with new frozen consumers: only unexecuted study/activation and method/withdrawal futures. Do not repeat four baselines/three training Tasks or rejudge their results. Old failed batch stays failed.
+4. Baseline4/4 has no score headroom. Separate pipeline execution, study benefit and future non-regression from increased future score; do not add tasks or criteria to manufacture lift.84 full identities and three old ledgers preserved, owned Docker stopped; seven exact duplicate phases removed4,093,660bytes, D17GiB>=15/prefer20. Full goal active, no user input needed.

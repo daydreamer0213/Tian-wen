@@ -227,7 +227,7 @@ afterEach(() => {
 })
 
 describe('@tianwen/runtime', () => {
-  it('preserves an ordinary DSH flow while adding only the main-chat learning controls', async () => {
+  it('preserves an ordinary DSH flow while adding bounded Tianwen tools', async () => {
     const disabled = await runOrdinaryDshSession(false)
     const enabled = await runOrdinaryDshSession(true)
 
@@ -240,8 +240,11 @@ describe('@tianwen/runtime', () => {
       request.tools = request.tools.filter(tool =>
         tool.name !== 'tianwen_learning_consent'
         && tool.name !== 'tianwen_learning_status'
-        && tool.name !== 'tianwen_learning_continue')
+        && tool.name !== 'tianwen_learning_continue'
+        && tool.name !== 'tianwen_captured_file_facts')
     }
+    expect((enabled.behavior.requests as Array<{ tools: Array<{ readonly name: string }> }>)
+      .every(request => request.tools.some(tool => tool.name === 'tianwen_captured_file_facts'))).toBe(true)
     expect(ordinaryEnabled).toEqual(disabled.behavior)
     expect(enabled.behavior).toMatchObject({
       requests: [

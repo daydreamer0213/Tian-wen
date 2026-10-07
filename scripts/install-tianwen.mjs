@@ -22,7 +22,7 @@ const PREDECESSOR_DSH_VERSION = '0.1.0-rc.7'
 const PNPM_VERSION = '11.20.0'
 const PROFILE = 'tianwen'
 const RUNTIME_PACKAGE = '@tianwen/runtime-bundle'
-const RUNTIME_VERSION = '0.1.24'
+const RUNTIME_VERSION = '0.1.25'
 const RUNTIME_ARCHIVE_BASENAME = `tianwen-runtime-bundle-${RUNTIME_VERSION}.tgz`
 const INSTALLER_FAILURE_SCHEMA_VERSION = 'tianwen.install-failure.v1'
 const INSTALLER_FAILURE_STAGE = Object.freeze({
@@ -211,6 +211,9 @@ export function renderProfilePatch(paths) {
     learningLoop:
       enabled: true
       workspaceRoot: '${portable(paths.learningLoopRoot)}'
+    guidanceIndependentReview:
+      mode: native
+      reviewerId: tianwen-native-guidance-review
 
 - id: attachment-local
   disabled: true
@@ -305,7 +308,7 @@ function renderRuntimePredecessorProfilePatch(paths) {
 `
 }
 
-// Frozen Runtime 0.1.11 through 0.1.23 managed configuration, including the enabled learning loop.
+// Frozen Runtime 0.1.11 through 0.1.24 managed configuration, including the enabled learning loop.
 // Never validate an installed predecessor against the evolving current patch.
 function renderRuntimeLearningLoopPredecessorProfilePatch(paths) {
   return `- id: agent-default-model
@@ -537,6 +540,7 @@ export function classifyManagedInstallation(paths) {
     }
     if (existsSync(paths.archivePath)) return 'incompatible'
     const archivePath = predecessorArchivePath(paths)
+    const runtime024ArchivePath = runtimePredecessorArchivePath(paths, '0.1.24')
     const runtime023ArchivePath = runtimePredecessorArchivePath(paths, '0.1.23')
     const runtime022ArchivePath = runtimePredecessorArchivePath(paths, '0.1.22')
     const runtime021ArchivePath = runtimePredecessorArchivePath(paths, '0.1.21')
@@ -552,7 +556,11 @@ export function classifyManagedInstallation(paths) {
     const runtime011ArchivePath = runtimePredecessorArchivePath(paths, '0.1.11')
     const runtime010ArchivePath = runtimePredecessorArchivePath(paths, '0.1.10')
     if (host.version === DSH_VERSION) {
-      return (existsSync(runtime023ArchivePath)
+      return (existsSync(runtime024ArchivePath)
+        && statSync(runtime024ArchivePath).isFile()
+        && matchesProfile(profile, DSH_VERSION, '0.1.24', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
+        && matchesPredecessorReceipt(paths, runtime024ArchivePath, DSH_VERSION))
+        || (existsSync(runtime023ArchivePath)
         && statSync(runtime023ArchivePath).isFile()
         && matchesProfile(profile, DSH_VERSION, '0.1.23', renderRuntimeLearningLoopPredecessorProfilePatch(paths))
         && matchesPredecessorReceipt(paths, runtime023ArchivePath, DSH_VERSION))

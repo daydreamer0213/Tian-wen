@@ -280,6 +280,31 @@ describe('continuous Goal Agent controls', () => {
     })
   })
 
+  it('retains original host acceptance for settled Tasks after current Task is cleared', async () => {
+    const subject = controlsAgent()
+    const ops = operations()
+    const acceptance = { epoch: 1, checkerId: 'original-checker', status: 'rejected',
+      requiredCondition: 'Only project and status fields.', detail: 'Extra build and tests fields.',
+      contentReview: { status: 'met', detail: 'Original model review.' } } as const
+    ops.control.mockResolvedValue({ action: 'status', status: {
+      goal: { objective: 'Return the required object', phase: 'complete', completedTasks: 1, totalTasks: 1 },
+      tasks: [{ id: 'original-task', objective: 'Produce the object', phase: 'complete', acceptance }],
+      currentTaskId: null, control: { autoProgress: 'running' },
+    } })
+    installBoundContinuousGoalControls(subject.agent, ops)
+    const output = JSON.parse(await subject.tools[0]!.execute({ action: 'status' }, { agent: subject.agent }))
+    expect(output.goal.currentTask).toBeNull()
+    expect(output.goal.phase).toBe('complete')
+    expect(output.goal.taskAcceptances).toEqual([
+      { id: 'original-task', objective: 'Produce the object', phase: 'complete', acceptance },
+    ])
+    await expect(ops.control.mock.results[0]!.value).resolves.toMatchObject({ status: { tasks: [{ acceptance }] } })
+    const prompt = subject.sections[0]!.text()
+    expect(prompt).toContain('Task phase complete and completedTasks describe execution only')
+    expect(prompt).toContain('taskAcceptances preserve the original host verdicts')
+    expect(prompt).toContain('Do not use guidance to override those verdicts')
+  })
+
   it.each([
     ['permission-limited', 'workspace-write', 'workspace-write', true],
     ['running', 'workspace-write', 'workspace-write', false],
@@ -342,7 +367,11 @@ describe('continuous Goal Agent controls', () => {
     expect(prompt).toContain('Do not read from or write to the workspace before calling it')
     expect(prompt).toContain('Do not execute the continuous Goal Task in this control chat')
     expect(prompt).toContain('Treat Planner and Task subagent reports as progress only')
-    expect(prompt).toContain('After status returns, give one brief user-facing update')
+    expect(prompt).toContain('Honor the original user\'s applicable overall Goal deliverable and output-form requirements in this control chat')
+    expect(prompt).toContain('including JSON-only or no-commentary restrictions')
+    expect(prompt).toContain('Do not reinterpret an explicit overall Goal requirement as applying only to the Task executor')
+    expect(prompt).toContain('When the applicable user request permits progress commentary, give one brief user-facing update')
+    expect(prompt).not.toContain('After status returns, give one brief user-facing update')
     expect(prompt).toContain('requiredUserAction')
     expect(prompt).toContain('Do not use request_user_input to invent an approval')
     expect(prompt).toContain('Unrelated conversation should proceed normally')

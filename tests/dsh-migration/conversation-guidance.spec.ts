@@ -251,6 +251,57 @@ describe('natural source reference state binding', () => {
   })
 })
 
+describe('proposal-only feedback clues', () => {
+  const ref = { taskId: 'clue-task', assessmentId: 'clue-assessment',
+    assessmentDigest: `sha256:${'a'.repeat(64)}`, materialDigest: `sha256:${'b'.repeat(64)}` }
+  const validFileOpening = (label: string) => {
+    const { kind: _kind, studyId: _studyId, ...base } = opening(label)
+    const cases = base.cases.map(item => {
+      if ('sourceTaskId' in item) return item
+      const files = { schemaVersion: 'tianwen.conversation-file-material.v1' as const, outputKind: 'files' as const,
+        cwd: process.platform === 'win32' ? 'D:/DevData/tianwen-conversation-guidance-tests/frozen' : '/tmp/tianwen-conversation-guidance-tests/frozen', entries: [{ path: 'input.txt', content: 'frozen input' }, { path: 'output.txt', content: null }], outputPaths: ['output.txt'] }
+      const material = { prompt: item.prompt, criteria: item.criteria, files }
+      return { id: item.id, kind: item.kind, ...material, materialDigest: sha256(material), inputDigest: guidanceInputDigest(item.prompt, files) }
+    })
+    const body = { ...base, evaluationMode: 'local-files' as const, fileOutputKind: 'files' as const, cases }
+    return { kind: 'study-opened' as const, studyId: guidanceStudyId(body), ...body }
+  }
+
+  it('retains up to two frozen proposal clues in a local-file study identity without changing old openings', () => {
+    const old = opening('proposal-clue-old')
+    expect(parseConversationGuidanceRecord(old)).toEqual(old)
+    const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-file')
+    const body = { ...base, proposalClues: [ref] }
+    expect(parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) }))
+      .toMatchObject({ proposalClues: [ref] })
+  })
+
+  it.each([
+    { ...ref, assessmentDigest: 'not-a-digest' },
+    { ...ref, materialDigest: 'sha256:BAD' },
+  ])('rejects malformed proposal clue digests', clue => {
+    const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-digest')
+    const body = { ...base, proposalClues: [clue] }
+    expect(() => parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) })).toThrow(/digest|clue/i)
+  })
+
+  it('rejects duplicate, third, overlapping, and non-file proposal clues', () => {
+    const file = () => {
+      const { kind, studyId: _studyId, ...base } = validFileOpening('proposal-clue-invalid')
+      return { kind, base }
+    }
+    for (const clues of [[], [ref, ref], [ref, { ...ref, assessmentId: 'clue-assessment-2' }], [ref, { ...ref, taskId: 'clue-task-2' }], [ref, { ...ref, taskId: 'clue-task-2', assessmentId: 'clue-assessment-2' }, { ...ref, taskId: 'clue-task-3', assessmentId: 'clue-assessment-3' }]]) {
+      const { kind, base } = file(); const body = { ...base, proposalClues: clues }
+      expect(() => parseConversationGuidanceRecord({ kind, ...body, studyId: guidanceStudyId(body) })).toThrow(/clue|distinct|length/i)
+    }
+    const { kind, base } = file(); const overlap = { ...base, proposalClues: [{ ...ref, taskId: base.sourceTaskIds[0] }] }
+    expect(() => parseConversationGuidanceRecord({ kind, ...overlap, studyId: guidanceStudyId(overlap) })).toThrow(/clue|source/i)
+    const text = opening('proposal-clue-text'); const { kind: textKind, studyId: _textId, ...textBase } = text
+    const textBody = { ...textBase, proposalClues: [ref] }
+    expect(parseConversationGuidanceRecord({ kind: textKind, ...textBody, studyId: guidanceStudyId(textBody) })).toMatchObject({ proposalClues: [ref] })
+  })
+})
+
 function evaluated(state: ConversationGuidanceState, opened = opening(), change?: (records: GuidanceArmRecord[]) => void) {
   append(state, opened)
   const proposed = candidate(opened)
@@ -267,6 +318,46 @@ function activate(state: ConversationGuidanceState, value: ReturnType<typeof eva
   return append(state, { kind: 'guidance-activated', studyId: value.opened.studyId,
     expectedParentVersion: value.opened.parentVersion, decisionDigest: sha256(value.decision) })
 }
+
+describe('explicit DEV paired-any-case decision policy', () => {
+  function configured(dev: boolean) {
+    const { kind: _kind, studyId: _id, ...body } = opening('paired-policy')
+    const frozen = { ...body, ...(dev ? { decisionPolicy: 'dev-paired-any-case.v1' as const } : {}) }
+    return { kind: 'study-opened' as const, studyId: guidanceStudyId(frozen), ...frozen }
+  }
+  it.each([false, true])('keeps adjacent and holdout gains prospective: DEV=%s', dev => {
+    const state = new ConversationGuidanceState(), opened = configured(dev)
+    const value = evaluated(state, opened, records => {
+      for (let i = 0; i < records.length; i++) records[i] = { ...records[i]!, verdict: records[i]!.role === 'baseline' && i >= 6 ? 'not-met' : 'met' }
+    })
+    expect(value.decision.verdict).toBe(dev ? 'accepted' : 'rejected')
+    const cold = new ConversationGuidanceState()
+    for (const record of [opened, value.proposed, ...value.records, value.decision]) append(cold, record)
+    expect(cold.decision(opened.studyId)).toEqual(value.decision)
+    expect(Object.hasOwn(cold.listStudies()[0]!.opened, 'decisionPolicy')).toBe(dev)
+    if (!dev) expect(parseConversationGuidanceRecord(opened)).toEqual(opened)
+    expect(configured(true).studyId).not.toBe(configured(false).studyId)
+  })
+  it.each([0, 2, 4, 6, 8])('accepts genuine gain in any DEV role, baseline index %s', gain => {
+    const value = evaluated(new ConversationGuidanceState(), configured(true), records => {
+      for (let i = 0; i < records.length; i++) records[i] = { ...records[i]!, verdict: i === gain ? 'not-met' : 'met' }
+    })
+    expect(value.decision.verdict).toBe('accepted')
+  })
+  it.each(['no-gain', 'candidate-regression', 'inconclusive'] as const)('does not accept DEV %s', scenario => {
+    const value = evaluated(new ConversationGuidanceState(), configured(true), records => {
+      for (let i = 0; i < records.length; i++) records[i] = { ...records[i]!, verdict: scenario !== 'no-gain' && i === 6 ? 'not-met' : 'met' }
+      if (scenario !== 'no-gain') records[9] = { ...records[9]!, verdict: scenario === 'inconclusive' ? 'inconclusive' : 'not-met' }
+    })
+    expect(value.decision.verdict).toBe(scenario === 'inconclusive' ? 'inconclusive' : 'rejected')
+  })
+  it('rejects unknown or explicit undefined policy without changing legacy shapes', () => {
+    const original = configured(false)
+    expect(Object.hasOwn(original, 'decisionPolicy')).toBe(false)
+    expect(sha256(parseConversationGuidanceRecord(original))).toBe(sha256(original))
+    for (const decisionPolicy of ['unknown.v1', undefined]) expect(() => parseConversationGuidanceRecord({ ...original, decisionPolicy })).toThrow()
+  })
+})
 
 describe('natural guidance domain governance', () => {
   it('derives a bounded exploration observation only from two independent frozen review receipts', () => {
