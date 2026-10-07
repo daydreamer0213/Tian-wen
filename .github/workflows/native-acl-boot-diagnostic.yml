@@ -1,7 +1,7 @@
 name: Temporary native ACL boot diagnostic
 on:
   push:
-    branches: [codex/conversation-claim-evidence]
+    branches: [codex/tianwen-acl-diagnostic]
     paths:
       - .github/workflows/native-acl-boot-diagnostic.yml
       - tests/dsh-migration/native-acl-boot-diagnostic.mjs

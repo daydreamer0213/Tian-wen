@@ -369,7 +369,7 @@ afterEach(() => {
 })
 
 describe('Tianwen native observation launch preparation', () => {
-  it('keeps Windows startup paths without forwarding provider credentials or arbitrary environment', async () => {
+  it('keeps the original minimal Windows environment without credentials or user module paths', async () => {
     const launch = await loadLaunchModule()
     expect(launch?.nativeObservationWindowsEnvironment).toBeTypeOf('function')
     const source = {
@@ -382,7 +382,6 @@ describe('Tianwen native observation launch preparation', () => {
     const path = 'D:/DevData/owned-launch'
     expect(launch!.nativeObservationWindowsEnvironment(source, path)).toEqual({
       SystemRoot: source.SystemRoot, windir: source.windir, TIANWEN_OBSERVATION_ACL_PATH: path,
-      TEMP: source.TEMP, TMP: source.TMP, USERPROFILE: source.USERPROFILE, APPDATA: source.APPDATA, LOCALAPPDATA: source.LOCALAPPDATA,
     })
     expect(launch!.nativeObservationWindowsEnvironment({}, path)).toEqual({
       SystemRoot: 'C:\\Windows', windir: 'C:\\Windows', TIANWEN_OBSERVATION_ACL_PATH: path,

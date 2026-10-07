@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 assert.equal(process.platform, 'win32')
 const source = readFileSync('packages/tianwen-desktop-host/src/native-observation-launch.ts', 'utf8')
 const script = /const windowsAclScript = `([\s\S]*?)`/u.exec(source)?.[1]
-const currentKeys = /for \(const key of \[(.*?)\] as const\)/u.exec(source)?.[1].match(/'([^']+)'/gu)?.map(s => s.slice(1, -1))
+const currentKeys = /for \(const key of \[(.*?)\] as const\)/u.exec(source)?.[1].match(/'([^']+)'/gu)?.map(s => s.slice(1, -1)) ?? []
 assert(script && currentKeys)
 const root = mkdtempSync(join(tmpdir(), 'tianwen-acl-boot-diagnostic-'))
 const systemRoot = process.env.SystemRoot ?? 'C:\\Windows'

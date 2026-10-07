@@ -1,3 +1,13 @@
+## 2026-10-07 当前：定位 Desktop 权限脚本的云端超时，修复待云端确认
+
+Task39 原四项 CI37550791826 已结束：Python、TypeScript、installer-windows 成功，Desktop 12失败/217通过；补五个环境路径没有解决超时，旧失败保留。Task40 短诊断37551738408只表示诊断运行结束，不是发布通过；同一云端主机九种启动的原始结果显示：原三/八变量最小环境在首个 Select-Object -Unique 管道处停住，完整标准环境下同一权限脚本完成。系统组件自动加载是解释，未把某个变量单独认定为原因。
+
+Task41 将两处去重管道改为 PowerShell 语言原生数组，当前用户与 SYSTEM 相同则只保留一次；恢复原三环境变量，原10秒预算、owner 条件修复和全部严格 ACL 检查保留。本机 native 原套29/29、启动及隔离专项2/2、类型检查0，0模型。下一先在临时诊断分支验证同一修复，再移除临时诊断并运行原四项发布 CI；不新增学习门槛。Task31/33 原自动学习证据保持，不重开模型研究。
+
+目标 active，main/Daily仍 NO-GO；实际Daily Runtime0.1.24/Desktoppreview.25未安装升级，原47项数据保护仍要求验收。D约15.38GiB（16,512,679,936字节），高于15GiB但尚未20GiB。三次旧残余删除被自动审批 blocked by policy，均未执行、不绕过、不称清理完成。详情见[tianwen-desktop-acl-startup-result-20261007.md](tianwen-desktop-acl-startup-result-20261007.md)。
+
+以下保留历史记录，以本节为当前状态。
+
 ## 2026-10-07 最新：原CI三项已绿，修复剩余Desktop ACL超时
 
 原Task38 CI37549195023：Python/TypeScript/installer-windows成功，Desktop12失败已捕获ETIMEDOUT。Task39保留原预算/完整ACL/stock，补5标准Windows启动路径、只在owner实际不符时修正；隔离RED1→GREEN1、类型0、原5Desktop本地229/229含实际native启动。只读审查诊断旧env的P2已改同产品helper，待最新专项/原四CI；尚不报云端绿。E程序127文件及保护数据45文件5.6MB均逐hash/后者private ACL；原Daily47hash/024/preview25未改。D15.4GiB>=15未20。目标active，main/Daily暂NO-GO；仅余原发布CI及实际受管交付，不重开Task31/33，不增标准。见[tianwen-desktop-acl-startup-result-20261007.md](tianwen-desktop-acl-startup-result-20261007.md)。

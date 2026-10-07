@@ -19,3 +19,13 @@ Task39修复只传Windows运行所需TEMP/TMP/USERPROFILE/APPDATA/LOCALAPPDATA�
 main/Daily仍NO-GO，goal active。Task31/33已有原学习闭环，不重评旧答案、第三票或等待自然事件；剩原CI与实际受管升级/运行/数据保护收口。两个旧递归删除目标被自动审批blocked by policy，未执行未绕过，D未达20GiB不冒称全清理。
 
 最新补验：P2修后环境隔离+首launch 2/2实际0，产品source未改；独立终审规格PASS/代码质量PASS/P2关闭，报告task39-final-review.md SHA256 3090cbde98d24c33ea255a148d26495f915a11ffddbf9535e3194c5615adb40a。接下来提交原四CI、重建同一owned候选Desktop，不在云端成功前安装Daily。
+
+## Task40/41：推翻五路径假设，消除模块发现依赖
+
+Task39 原四项 CI37550791826 已结束：Python、TypeScript、installer-windows 成功，Desktop 12失败/217通过；补五个环境路径没有解决超时，旧失败保留。Task40 短诊断37551738408只表示诊断运行结束，不是发布通过；同一云端主机九种启动的原始结果显示：原三/八变量最小环境在首个 Select-Object -Unique 管道处停住，完整标准环境下同一权限脚本完成。系统组件自动加载是解释，未把某个变量单独认定为原因。
+
+Task41 将两处去重管道改为 PowerShell 语言原生数组，当前用户与 SYSTEM 相同则只保留一次；恢复原三环境变量，原10秒预算、owner 条件修复和全部严格 ACL 检查保留。本机 native 原套29/29、启动及隔离专项2/2、类型检查0，0模型。下一先在临时诊断分支验证同一修复，再移除临时诊断并运行原四项发布 CI；不新增学习门槛。Task31/33 原自动学习证据保持，不重开模型研究。
+
+目标 active，main/Daily仍 NO-GO；实际Daily Runtime0.1.24/Desktoppreview.25未安装升级，原47项数据保护仍要求验收。D约15.38GiB（16,512,679,936字节），高于15GiB但尚未20GiB。三次旧残余删除被自动审批 blocked by policy，均未执行、不绕过、不称清理完成。详情见[tianwen-desktop-acl-startup-result-20261007.md](tianwen-desktop-acl-startup-result-20261007.md)。
+
+以下保留历史记录，以本节为当前状态。

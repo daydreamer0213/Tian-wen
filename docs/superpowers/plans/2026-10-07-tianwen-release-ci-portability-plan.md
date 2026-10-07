@@ -30,3 +30,14 @@ Task38原云端Desktop仍12失败；另自有目录精确脚本/minimalenv已捕
 修复仅允许PS继承Windows运行必需TEMP/TMP/USERPROFILE/APPDATA/LOCALAPPDATA，不整体透传环境或模型密钥，保持NoProfile/原10s/fallback/完整ACL验证。先应用原私有DACL，再仅实际owner非当前时单独设当前owner；不无条件写owner，避免无必要WRITE_OWNER请求。原hostile ACL/启动28套保持覆盖，原4CI验证真实云端差异。
 
 E保护数据45files5,632,873B已严格current/SYSTEM ACL复制/逐hash，无共享SDK、不移动原件；首次备份ACL无条件SetOwner当前（原owner已是当前）在WRITE_OWNER失败、0文件复制；v2只设DACL并原owner核验成功，失败收据保留。D旧managed树184,030,074逻辑字节，25973硬链接，1787junction；当前15.4GiB、按完整旧树额外copy后尚约247MB余量，实际安装仍需逐阶段空间核验。
+
+## Task41 有限收口步骤
+
+- [x] 保留 Task39 原 CI 三绿/桌面失败及 Task40 九臂原结果，不把诊断退出0当发布。
+- [x] 两处 Select-Object -Unique 改语言原生去重，原3环境/10秒/ACL/owner要求保持；本机29/29、专项2/2及类型0。
+- [ ] 临时诊断分支云端验证修复；独立源码审查。
+- [ ] 移除临时诊断工作流/驱动，推送最终产品源码，原四CI全部成功。
+- [ ] 同一候选Desktop重建、成品审计和实际窗口；Runtime输入未变则复用原实际构建并核绑定。
+- [ ] 沿原发布流程实际受管升级、Web更新、Desktop切换，验47数据保护/真实运行/原main CI，给出发布结论。
+
+不另开学习研究、第三票或新验收标准。生成物仅D，保留E回滚副本及自动审批拒绝，不重试拒绝删除目标。

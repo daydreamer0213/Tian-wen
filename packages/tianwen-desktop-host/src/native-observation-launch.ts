@@ -110,7 +110,10 @@ $allow = [System.Security.AccessControl.AccessControlType]::Allow
 $full = [System.Security.AccessControl.FileSystemRights]::FullControl
 $acl = [System.Security.AccessControl.DirectorySecurity]::new()
 $acl.SetAccessRuleProtection($true, $false)
-foreach ($sid in @($current, $system) | Select-Object -Unique) {
+# Use language primitives; minimal-environment startup must not discover modules.
+$sids = @($current)
+if ($system.Value -ne $current.Value) { $sids += $system }
+foreach ($sid in $sids) {
   [void]$acl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new($sid, $full, $inherit, $none, $allow))
 }
 $info.SetAccessControl($acl)
@@ -124,7 +127,8 @@ if ($owner -ne $current.Value) {
   $actual = $info.GetAccessControl()
   $owner = $actual.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
 }
-$expected = @($current.Value, $system.Value) | Select-Object -Unique
+$expected = @($current.Value)
+if ($system.Value -ne $current.Value) { $expected += $system.Value }
 $rules = @($actual.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
 if (!$actual.AreAccessRulesProtected -or $owner -ne $current.Value -or $rules.Count -ne $expected.Count) {
   throw 'private launch directory ACL verification failed'
@@ -142,16 +146,13 @@ foreach ($rule in $rules) {
 }
 `
 
-/** Required Windows startup paths only; never forward provider credentials. */
+/** Original minimal ACL subprocess environment; never forward credentials. */
 export function nativeObservationWindowsEnvironment(source: NodeJS.ProcessEnv, path: string): NodeJS.ProcessEnv {
   const systemRoot = source.SystemRoot ?? 'C:\\Windows'
   const environment: NodeJS.ProcessEnv = {
     SystemRoot: systemRoot,
     windir: source.windir ?? systemRoot,
     TIANWEN_OBSERVATION_ACL_PATH: path,
-  }
-  for (const key of ['TEMP', 'TMP', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA'] as const) {
-    if (source[key] !== undefined) environment[key] = source[key]
   }
   return environment
 }
